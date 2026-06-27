@@ -4,8 +4,11 @@
 
 当前版本不下载模型权重，模型保持占位状态。App 已完成 UI、数据流、本地 artifact 导入/扫描/校验、电脑接管规划器、Claw Gateway envelope、事件流 reducer、WebSocket transport 边界、Shortcuts 入口和 smoke 测试。
 
+后续 Codex/agent 接力开发必须先读 `agent.md`。该文件是项目级系统提示词和规范：明确 Claw 继续朝 OpenClaw 式电脑接管智能体迭代，不回到法律/法务方向；每次代码或协议改动都要同步更新测试规范、README 完成情况和相关协议文档。
+
 ## 内容
 
+- `agent.md`：后续 Codex 的项目级系统提示词、工程规范、测试矩阵、README 更新要求和交接总结。
 - `Claw.xcodeproj`：可用 Xcode 打开的 iOS 工程，target 名暂未重命名。
 - `Claw/Core/ClawModels.swift`：Agent 能力、模型 manifest、artifact 校验、自动化通道、Claw action schema 和聊天数据模型。
 - `Claw/Services/ClawStore.swift`：App 状态、能力库、策略上下文、电脑接管规划器、Claw envelope、live gateway 请求和事件流。
@@ -120,3 +123,7 @@ node Tools/claw-gateway-smoke.mjs
 
 .build/claw-logic-smoke
 ```
+
+## 完成情况
+
+- 2026-06-27：新增 `agent.md`，固化后续 Codex 开发规范、测试矩阵、README/协议文档更新要求和项目方向约束。验证：读取 README、协议文档、git 基线和当前源码状态；本次为文档规范改动，未运行 Gateway/Swift smoke。
