@@ -4,11 +4,16 @@
 
 当前版本不下载模型权重，模型保持占位状态。App 已完成 UI、数据流、本地 artifact 导入/扫描/校验、电脑接管规划器、Claw Gateway envelope、事件流 reducer、WebSocket transport 边界、Shortcuts 入口和 smoke 测试。
 
-后续 Codex/agent 接力开发必须先读 `agent.md`。该文件是项目级系统提示词和规范：明确 Claw 继续朝 OpenClaw 式电脑接管智能体迭代，不回到法律/法务方向；每次代码或协议改动都要同步更新测试规范、README 完成情况和相关协议文档。
+后续 Codex/Agent 接力开发必须先读 `AGENTS.md`。项目已建立“人工目标 -> Agent A 设计提示词 -> Agent B 实现测试 -> Agent C 验收并更新核心逻辑文档 -> 人工复核 -> 下一轮”的迭代工作流。核心记忆和规范分布在 `AGENTS.md`、`update_log.md`、`md/test/test.md`、`md/flow/flow.md`、`md/flow/flowchart.md` 和 `md/prompt/`。
 
 ## 内容
 
-- `agent.md`：后续 Codex 的项目级系统提示词、工程规范、测试矩阵、README 更新要求和交接总结。
+- `AGENTS.md`：项目入口记忆、基本规则、Agent A/B/C 工作流和交付要求。
+- `update_log.md`：版本更新记录、关键决策、完成事项和遗留问题。
+- `md/prompt/`：Agent A 每轮写给 Agent B 的版本化实现提示词。
+- `md/test/test.md`：测试规范、测试分层、命令、触发条件和当前基线。
+- `md/flow/flow.md`：项目当前核心逻辑、数据流、执行流和架构边界。
+- `md/flow/flowchart.md`：核心逻辑和 Agent 迭代流程的 Mermaid 图。
 - `Claw.xcodeproj`：可用 Xcode 打开的 iOS 工程，target 名暂未重命名。
 - `Claw/Core/ClawModels.swift`：Agent 能力、模型 manifest、artifact 校验、自动化通道、Claw action schema 和聊天数据模型。
 - `Claw/Services/ClawStore.swift`：App 状态、能力库、策略上下文、电脑接管规划器、Claw envelope、live gateway 请求和事件流。
@@ -126,4 +131,5 @@ node Tools/claw-gateway-smoke.mjs
 
 ## 完成情况
 
-- 2026-06-27：新增 `agent.md`，固化后续 Codex 开发规范、测试矩阵、README/协议文档更新要求和项目方向约束。验证：读取 README、协议文档、git 基线和当前源码状态；本次为文档规范改动，未运行 Gateway/Swift smoke。
+- 2026-06-28：建立多 Agent 协作系统和项目记忆目录，统一入口为 `AGENTS.md`，新增 `update_log.md`、`md/prompt/README.md`、`md/prompt/v0（项目初始化）/v0.1（建立多Agent迭代文档）.md`、`md/test/test.md`、`md/flow/flow.md`、`md/flow/flowchart.md`。验证：文档-only 改动，按 `md/test/test.md` 运行静态检查；未运行 Gateway/Swift smoke。
+- 2026-06-27：新增项目级开发规范草案，固化后续 Codex 开发规范、测试矩阵、README/协议文档更新要求和项目方向约束。后续已迁移为标准入口 `AGENTS.md`。
