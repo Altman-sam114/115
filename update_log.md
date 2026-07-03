@@ -22,6 +22,38 @@
 
 ## 历史记录
 
+### v0.5 / 引入 Agent X 循环迭代文档基线
+
+日期：2026-07-04
+
+核心变更：
+
+- 新增 Agent X 召唤、职责、循环判断和停止条件。
+- 将现有 Agent A/B/C 云端验证流程扩展为可被 Agent X 多轮调度。
+- 更新 flow、flowchart、test、prompt README 和 README 中的协作说明。
+- 明确本轮只做文档准备，不启动真实自动循环。
+
+关键文件：
+
+- `AGENTS.md`
+- `README.md`
+- `md/flow/flow.md`
+- `md/flow/flowchart.md`
+- `md/test/test.md`
+- `md/prompt/README.md`
+- `md/prompt/v0（协作自动化）/v0.5（引入AgentX循环迭代）.md`
+- `update_log.md`
+
+验证结果：
+
+- `git diff --check` 通过。
+- `ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci-results.yml"); puts "yaml ok"'` 通过。
+
+遗留事项：
+
+- 后续人工可用 `agentx:` 提供总目标 X，启动 Agent X 主控循环。
+- Agent X 真正执行循环时，仍必须经过 Agent A 提示词、Agent B 实现 push、Agent C 云端 artifact 验收。
+
 ### v0.2 / 任务回合化游戏体验
 
 日期：2026-07-03

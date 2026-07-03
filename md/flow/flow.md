@@ -41,6 +41,26 @@ Claw 的当前主链路是：用户在 iPhone 输入电脑任务，App 生成可
 
 当前制度固定使用 `main` 作为唯一上传、提交、推送和云端验证分支；不默认使用 `smalldata_test`、`develop`、`codeb/...`、候选分支或 PR 合并流。
 
+### 2.1 Agent X 主控循环准备态
+
+Agent X 是未来可由 `agentx:`、`x:` 或 `X:` 召唤的主控调度角色。Agent X 不替代 Agent A/B/C，不直接绕过实现或验收；它只接收人工总目标 X，将总目标拆成多个小轮次，并在每轮结束后基于 Agent C 的云端 artifact 验收结论决定下一步。
+
+```text
+人工给 Agent X 总目标 X
+  -> Agent X 拆分当前轮次目标、非目标、验收标准和停止条件
+  -> Agent A 阅读上下文并写当前轮次版本化提示词
+  -> Agent B 按提示词实现、轻量检查、commit 并 push origin/main
+  -> GitHub Actions 生成最新 run 的未加密 ci-results artifact
+  -> Agent C 下载 artifact 并核对 manifest / JUnit / 日志 / 关键结果文件
+  -> Agent X 判断：
+      -> 通过且总目标未完成：继续下一轮
+      -> 不通过且可修：退回 Agent B 在 main 追加修复 commit
+      -> 需要人工决策、权限或方向变化：暂停
+      -> 通过且总目标完成：宣布完成
+```
+
+Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮遇到同一阻塞、连续 2 轮没有有效 diff、CI 连续同因失败、需要账号/权限/密钥/付费服务/人工决策、工作区存在无法判断归属的冲突，或用户要求停止/改变方向。Agent X 禁止无条件无限循环，禁止跳过 Agent C 结果包复判，禁止把旧 run、旧 artifact 或本地输出冒充最新云端结果。
+
 ## 3. 当前核心执行流
 
 1. 用户在 App 输入任务，或通过 Shortcuts/App Intents 传入任务。
@@ -247,6 +267,7 @@ Claw 的当前主链路是：用户在 iPhone 输入电脑任务，App 生成可
 - 新协议字段必须同步测试和文档。
 - Agent C 验收必须基于 `origin/main` 最新 run 的未加密结果包，不能只看 Agent B 文字汇报。
 - 云端失败默认用 main 追加修复 commit 处理，不默认回滚或引入候选分支。
+- Agent X 只能调度 A/B/C 多轮迭代，不能代替 Agent C 宣布云端 artifact 验收通过。
 
 ## 9. 测试映射
 
@@ -265,6 +286,7 @@ Claw 的当前主链路是：用户在 iPhone 输入电脑任务，App 生成可
 - 增加 live Gateway 心跳、重连、配对和审计日志持久化。
 - UI 上继续增强 Mission Run 内的 artifact 预览、审批队列和回滚提示。
 - 配置真实 `origin` 后持续执行 main 直推和 Agent C 下载结果包复判。
+- 后续可由 `agentx:` 启动主控循环，但每轮仍必须经过 Agent A 提示词、Agent B main push 和 Agent C artifact 验收。
 
 ## 11. 不允许破坏的行为
 

@@ -22,6 +22,16 @@
 - 文档-only 修改仍需本地跑 `git diff --check` 和 workflow/YAML 语法检查；业务测试可不跑，但必须说明原因。
 - Swift / Xcode / Gateway / 协议相关改动完成后，默认进入 main push -> CI 结果包 -> Agent C 下载复判闭环。
 - 云端失败时，Agent B 根据结果包中的 failure summary、manifest 和日志路径，在 `main` 上追加修复 commit 后重新 push。
+- push、CI 查询和 artifact 验收必须使用仓库授权的 GitHub 账号 `Altman-sam114`；不得使用其他账号伪装完成。
+
+## Agent X 循环下的验证规则
+
+- Agent X 只负责主控调度和轮次判断，不替代 Agent A/B/C 的职责。
+- 每一轮仍以 Agent B 本地轻量检查、`origin/main` push 后 GitHub Actions artifact、Agent C 下载复判为准。
+- Agent X 不得跳过 Agent C artifact 验收，不得只凭 Agent B 的文字说明进入下一轮。
+- Agent C 判定失败时，Agent X 只能选择退回 Agent B 修复、暂停等待人工确认或停止，不能继续下一轮伪装成功。
+- Agent X 宣布总目标完成前，最后一轮必须有 Agent C 对最新 `origin/main` run 的 manifest、JUnit/摘要、日志和关键结果文件复判通过结论。
+- 连续 3 轮同一阻塞、连续 2 轮无有效 diff、CI 连续同因失败、权限/账号/密钥/付费服务缺失、工作区冲突无法判断归属或用户要求停止时，Agent X 必须暂停或停止。
 
 ## Agent B 本地轻量检查
 
@@ -184,6 +194,26 @@ gh run download <run_id> --dir /private/tmp/claw-c-review-<run_id>
 - 打开 `ci-failure-summary.md`、`junit.xml`、`xcodebuild.log` 和项目专属日志。
 - CI 失败时，指出失败 step、日志路径、需要 Agent B 修复的文件/行为/测试。
 - CI 通过时，输出版本号、commit hash、run id、artifact 名称、测试结果、未跑测试和残余风险。
+
+## 测试数据与下载容量限制
+
+本项目默认采用小数据量验证策略，避免下载过大 artifact、模型、数据集、缓存或结果包，把本机、CI runner 或临时目录容量撑爆。
+
+规则：
+
+- 测试数据必须尽量小，只覆盖必要边界。
+- CI artifact 只上传必要文件：manifest、JUnit 或测试摘要、关键日志、失败摘要、必要结果包。
+- 不上传大体积 DerivedData、完整 build cache、无关截图、视频、模型文件、历史 artifact 或重复压缩包。
+- Agent C 下载 artifact 前优先确认只下载最新 run 对应的必要结果包。
+- 下载缓存默认放在 `/private/tmp/<project>-review-<run_id>/`，Claw 当前使用 `/private/tmp/claw-c-review-<run_id>/`。
+- 下载后应检查目录大小：
+
+```sh
+du -sh /private/tmp/<project>-review-<run_id>/
+```
+
+- 禁止使用非 `Altman-sam114` 的 GitHub 账号伪装完成 push、CI 或 artifact 验收。
+- 禁止默认下载大体积测试数据、模型、历史 artifact 或无关产物。
 
 ## 人工明确要求时的本机构建
 

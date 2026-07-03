@@ -4,17 +4,17 @@
 
 当前版本不下载模型权重，模型保持占位状态。App 已完成 UI、数据流、本地 artifact 导入/扫描/校验、电脑接管规划器、Claw Gateway envelope、事件流 reducer、Mission Run 任务回合面板、WebSocket transport 边界、Shortcuts 入口和 smoke 测试。
 
-后续 Codex/Agent 接力开发必须先读 `AGENTS.md`。项目已建立“人工目标 -> Agent A 设计提示词 -> Agent B 在 main 上实现并推送 -> GitHub Actions 云端验证 -> Agent C 下载结果包复判 -> 人工复核 -> 下一轮”的迭代工作流。核心记忆和规范分布在 `AGENTS.md`、`update_log.md`、`md/test/test.md`、`md/flow/flow.md`、`md/flow/flowchart.md` 和 `md/prompt/`。
+后续 Codex/Agent 接力开发必须先读 `AGENTS.md`。项目已建立“人工目标 -> Agent A 设计提示词 -> Agent B 在 main 上实现并推送 -> GitHub Actions 云端验证 -> Agent C 下载结果包复判 -> 人工复核 -> 下一轮”的迭代工作流，并准备支持未来由 Agent X 主控多轮调度 A/B/C。核心记忆和规范分布在 `AGENTS.md`、`update_log.md`、`md/test/test.md`、`md/flow/flow.md`、`md/flow/flowchart.md` 和 `md/prompt/`。
 
 ## 协作与云端验证
 
 当前协作制度固定以 `main` 作为上传、提交、推送和云端验证分支。Agent B 默认在本地跑轻量检查后提交并 push 到 `origin/main`，由 `.github/workflows/ci-results.yml` 运行 Claw build、Swift logic smoke、Gateway smoke 和静态检查，并上传未加密 `ci-results` 结果包。Agent C 必须用 GitHub CLI 下载结果包，核对 manifest、JUnit/摘要、主日志和关键结果文件后再验收。
 
-角色召唤约定：`agenta`/`a:`/`A:` 召唤 Agent A，`agentb`/`b:`/`B:` 召唤 Agent B，`agentc`/`c:`/`C:` 召唤 Agent C。没有角色前缀时按普通 Codex 任务处理。
+角色召唤约定：`agenta`/`a:`/`A:` 召唤 Agent A，`agentb`/`b:`/`B:` 召唤 Agent B，`agentc`/`c:`/`C:` 召唤 Agent C，`agentx`/`x:`/`X:` 召唤 Agent X。Agent X 用于围绕总目标主控多轮迭代，不直接替代 A/B/C，而是调度 A -> B -> C 并根据 Agent C artifact 验收结论决定继续、退回、暂停或完成。没有角色前缀时按普通 Codex 任务处理。
 
 ## 内容
 
-- `AGENTS.md`：项目入口记忆、基本规则、Agent A/B/C 工作流和交付要求。
+- `AGENTS.md`：项目入口记忆、基本规则、Agent A/B/C/X 工作流和交付要求。
 - `update_log.md`：版本更新记录、关键决策、完成事项和遗留问题。
 - `md/prompt/`：Agent A 每轮写给 Agent B 的版本化实现提示词。
 - `md/test/test.md`：测试规范、测试分层、命令、触发条件和当前基线。
@@ -138,6 +138,7 @@ node Tools/claw-gateway-smoke.mjs
 
 ## 完成情况
 
+- 2026-07-04：新增 v0.5 Agent X 循环迭代文档基线。补充 `agentx`/`x:`/`X:` 召唤规则、Agent X 主控调度职责、停止条件、flow/flowchart/test/prompt README 协作说明和小数据量 artifact 下载限制；本轮只做文档准备，不启动真实 Agent X 自动循环。
 - 2026-07-03：新增 v0.2 任务回合化体验。电脑接管页首屏增加 Mission Run 面板，把现有计划、审批、自治循环、Gateway session、artifact 和 retry 状态整理成目标、阶段、主动作、风险、证据和结果摘要；本轮不改变 `claw.computer.control.v1` schema，也不扩展 Gateway 权限。
 - 2026-07-03：升级协作制度为 main 直推、GitHub Actions 云端重验证和 Agent C 下载未加密结果包复判；新增 `ci-results` workflow。验证：本轮至少需运行 `git diff --check` 和 workflow YAML 语法检查；真实云端试跑依赖仓库配置 `origin`。
 - 2026-06-28：建立多 Agent 协作系统和项目记忆目录，统一入口为 `AGENTS.md`，新增 `update_log.md`、`md/prompt/README.md`、`md/prompt/v0（项目初始化）/v0.1（建立多Agent迭代文档）.md`、`md/test/test.md`、`md/flow/flow.md`、`md/flow/flowchart.md`。验证：文档-only 改动，按 `md/test/test.md` 运行静态检查；未运行 Gateway/Swift smoke。

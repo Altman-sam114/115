@@ -61,30 +61,28 @@ flowchart TD
   CTX --> OUT["artifactStored + action result<br/>回传 file:// 引用、状态、retryable"]
 ```
 
-## 3. Agent 迭代与云端验证流程图
+## 3. Agent X 主控循环与云端验证流程图
 
-读图说明：以后新功能不直接开写。人工先提出目标，Agent A 负责分析和写实现提示词，Agent B 在 `main` 上实现、轻量检查、提交并直推 `origin/main`，GitHub Actions 生成未加密结果包，Agent C 下载结果包复判；不通过就退回 Agent B 在 `main` 上追加修复 commit，最终通过后交回人工复核。
+读图说明：未来人工可用 `agentx:` 给出总目标 X。Agent X 只做主控调度，把总目标拆成小轮次；每轮仍必须经过 Agent A 写提示词、Agent B 在 `main` 上实现并 push、GitHub Actions 生成未加密结果包、Agent C 下载 artifact 复判。Agent X 只能基于 Agent C 结论决定继续、退回、暂停或完成，不能跳过云端 artifact 验收。
 
 ```mermaid
 flowchart TD
-  H["人工提出目标<br/>功能、禁止项、验收标准、测试要求"] --> A0["Agent A 阅读入口文档<br/>AGENTS、update_log、flow、flowchart、test"]
-  A0 --> A1["Agent A 分析目标<br/>明确目标、非目标、风险、边界"]
-  A1 --> PFILE["写入版本化提示词<br/>包含 CI、main push、artifact 要求"]
-  PFILE --> B0["Agent B 同步 origin/main<br/>确认当前分支 main、无无关改动"]
+  H["人工给 Agent X 总目标 X<br/>目标、禁止项、验收标准、停止偏好"] --> X0["Agent X 读取入口文档和当前状态<br/>确认总目标、边界、风险"]
+  X0 --> X1["Agent X 拆分当前轮次<br/>小目标、非目标、验收标准、停止条件"]
+  X1 --> A0["Agent A 阅读上下文<br/>AGENTS、update_log、flow、flowchart、test、相关文档"]
+  A0 --> A1["Agent A 写版本化提示词<br/>本轮目标、非目标、验证、CI、artifact、Agent C 要求"]
+  A1 --> B0["Agent B 同步 origin/main<br/>确认 main、无无关改动"]
   B0 --> B1["Agent B 小步实现<br/>代码、测试、必要文档"]
   B1 --> B2["Agent B 本地轻量检查<br/>git diff --check、语法检查、必要 smoke"]
-  B2 --> B3["Agent B commit<br/>vX.Y: 简要概括本轮工作"]
-  B3 --> PUSH["git push origin main<br/>触发 GitHub Actions"]
-  PUSH --> CI["GitHub Actions ci-results<br/>build、smoke、静态检查"]
-  CI --> ART["未加密 CI 结果包<br/>manifest、JUnit、日志、xcresult、报告"]
-  ART --> C0["Agent C 下载结果包<br/>gh auth login + /private/tmp/claw-c-review-run"]
-  C0 --> C2["核对 origin/main 最新 commit<br/>commitSha、runId、runAttempt、artifact 名称"]
-  C2 --> C1{"验收结论"}
-  C1 -->|不通过| FIX["问题清单<br/>要求 Agent B 在 main 追加修复 commit"]
-  FIX --> B0
-  C1 -->|通过且无需再改| REPORT["输出版本汇报<br/>版本、commit、run、artifact、测试、风险"]
-  C1 -->|通过但需补文档| DOC["补齐核心文档<br/>仅本轮相关文件"]
-  DOC --> B3
-  REPORT --> HR["人工复核<br/>确认进入下一轮"]
-  HR --> H
+  B2 --> B3["Agent B commit 并 push<br/>vX.Y: 简要概括本轮工作 -> origin/main"]
+  B3 --> CI["GitHub Actions ci-results<br/>build、smoke、静态检查"]
+  CI --> ART["未加密 CI artifact<br/>manifest、JUnit/摘要、日志、关键结果文件"]
+  ART --> C0["Agent C 下载最新结果包<br/>/private/tmp/claw-c-review-run_id"]
+  C0 --> C1["Agent C 复判<br/>commitSha、runId、runAttempt、artifact 名称、日志和结果"]
+  C1 --> X2["Agent X 读取 Agent C 结论<br/>不得只看 Agent B 文字说明"]
+  X2 --> J{"Agent X 判断"}
+  J -->|继续下一轮| X1
+  J -->|退回修复| B0
+  J -->|暂停等待人工| WAIT["暂停<br/>权限、密钥、账号、冲突、方向或人工决策"]
+  J -->|总目标完成| REPORT["最终汇报<br/>版本、commit、run、artifact、测试、风险"]
 ```
