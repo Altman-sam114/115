@@ -1258,6 +1258,46 @@ struct ClawAutonomousLoopState: Identifiable, Equatable, Codable, Sendable {
     }
 }
 
+enum ClawMissionRunPrimaryActionKind: String, Codable, Sendable {
+    case start
+    case approveAndContinue
+    case continueAfterReview
+    case waitForGateway
+    case inspectBlocked
+}
+
+struct ClawMissionRunStage: Identifiable, Equatable, Codable, Sendable {
+    var id: String { title }
+    var title: String
+    var icon: String
+    var isComplete: Bool
+    var isActive: Bool
+    var isBlocked: Bool
+}
+
+struct ClawMissionRunSummary: Equatable, Codable, Sendable {
+    var command: String
+    var phaseTitle: String
+    var phaseIcon: String
+    var progressCurrent: Int
+    var progressTotal: Int
+    var riskScore: Int
+    var approvalCount: Int
+    var blockedCount: Int
+    var succeededCount: Int
+    var failedCount: Int
+    var retryableCount: Int
+    var artifactCount: Int
+    var artifactKinds: [ClawGatewayArtifactKind]
+    var primaryActionTitle: String
+    var primaryActionIcon: String
+    var primaryActionKind: ClawMissionRunPrimaryActionKind
+    var isPrimaryActionEnabled: Bool
+    var requiresUserApproval: Bool
+    var statusLine: String
+    var stageTrack: [ClawMissionRunStage]
+}
+
 struct ClawGatewayLiveRequest: Identifiable, Equatable, Codable, Sendable {
     let id: UUID
     var endpoint: String

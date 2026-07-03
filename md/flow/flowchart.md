@@ -25,7 +25,8 @@ flowchart TD
   EVT --> R["ClawGatewayEventStream.apply<br/>把事件 reduce 到 session"]
   ART --> R
   R --> SES["ClawGatewaySession<br/>results、artifacts、auditTrail、retryable"]
-  SES --> UI["SwiftUI 面板<br/>展示计划、风险、事件、artifact、审批点"]
+  SES --> RUN["ClawMissionRunSummary<br/>派生目标、阶段、主动作、风险、证据"]
+  RUN --> UI["SwiftUI Mission Run 面板<br/>展示计划、风险、事件、artifact、审批点"]
   UI --> LOOP{"用户审批或继续循环"}
   LOOP -->|"批准发送/重试"| M
   LOOP -->|"人工修改目标"| U

@@ -444,7 +444,7 @@ struct PhoneAgentView: View {
             VStack(alignment: .leading, spacing: 16) {
                 PhoneAgentCommandPanel(examples: examples)
 
-                ClawAutonomousLoopPanel()
+                ClawMissionRunPanel()
 
                 PhoneAgentPlanPanel()
 
@@ -537,109 +537,218 @@ struct PhoneAgentCommandPanel: View {
     }
 }
 
-struct ClawAutonomousLoopPanel: View {
+struct ClawMissionRunPanel: View {
     @EnvironmentObject private var store: ClawStore
 
-    private var tint: Color {
-        switch store.autonomousLoop.phase {
-        case .idle:
-            return .secondary
-        case .planning, .dispatching, .observingGateway:
-            return .blue
-        case .waitingForUserApproval, .needsAttention:
+    var body: some View {
+        let summary = store.missionRunSummary
+        VStack(alignment: .leading, spacing: 14) {
+            SectionHeader(title: "Mission Run", icon: "flag.checkered")
+
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: summary.phaseIcon)
+                    .font(.title3.bold())
+                    .frame(width: 44, height: 44)
+                    .background(phaseTint(for: summary).opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+                    .foregroundStyle(phaseTint(for: summary))
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(summary.command)
+                        .font(.headline)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.82)
+                    Text("手机审批，桌面 Gateway 执行")
+                        .font(.subheadline.bold())
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 0)
+            }
+
+            HStack(spacing: 8) {
+                PhoneAgentTag(text: summary.phaseTitle, icon: summary.phaseIcon, tint: phaseTint(for: summary))
+                PhoneAgentTag(
+                    text: summary.requiresUserApproval ? "需手机确认" : "安全路径",
+                    icon: summary.requiresUserApproval ? "person.crop.circle.badge.exclamationmark.fill" : "shield.checkered",
+                    tint: summary.requiresUserApproval ? .orange : .green
+                )
+                PhoneAgentTag(text: store.gatewayDispatchMode.title, icon: "switch.2", tint: .blue)
+            }
+
+            ClawMissionStageTrack(stages: summary.stageTrack)
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("回合 \(summary.progressCurrent)/\(summary.progressTotal)")
+                        .font(.subheadline.bold())
+                    Spacer()
+                    Text(summary.phaseTitle)
+                        .font(.footnote.bold())
+                        .foregroundStyle(phaseTint(for: summary))
+                }
+                ProgressView(value: Double(summary.progressCurrent), total: Double(summary.progressTotal))
+                    .tint(phaseTint(for: summary))
+            }
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                ClawMissionMetric(value: "\(summary.riskScore)", label: "风险分", icon: "gauge.with.dots.needle.67percent", tint: riskTint(summary.riskScore))
+                ClawMissionMetric(value: "\(summary.approvalCount)", label: "审批点", icon: "checkmark.seal.fill", tint: .orange)
+                ClawMissionMetric(value: "\(summary.blockedCount)", label: "阻断", icon: "nosign", tint: summary.blockedCount > 0 ? .red : .secondary)
+                ClawMissionMetric(value: "\(summary.artifactCount)", label: "Artifact", icon: "paperclip", tint: .purple)
+            }
+
+            HStack(spacing: 8) {
+                PhoneAgentTag(text: "\(summary.succeededCount) 成功", icon: "checkmark.circle.fill", tint: .green)
+                PhoneAgentTag(text: "\(summary.failedCount) 失败", icon: "xmark.circle.fill", tint: summary.failedCount > 0 ? .red : .secondary)
+                PhoneAgentTag(text: "\(summary.retryableCount) 可重试", icon: "arrow.clockwise.circle.fill", tint: summary.retryableCount > 0 ? .orange : .secondary)
+            }
+
+            if summary.artifactKinds.isEmpty {
+                Label("尚无 Gateway artifact；发送后会显示截图、浏览轨迹、文件变更、命令输出或智能体轨迹。", systemImage: "tray")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(Array(summary.artifactKinds.prefix(5)), id: \.self) { kind in
+                            PhoneAgentTag(text: kind.title, icon: "paperclip", tint: .purple)
+                        }
+                    }
+                }
+            }
+
+            Text(summary.statusLine)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button(summary.primaryActionTitle, systemImage: summary.primaryActionIcon) {
+                performPrimaryAction(summary.primaryActionKind)
+            }
+            .frame(maxWidth: .infinity)
+            .buttonStyle(PrimaryActionButtonStyle())
+            .disabled(summary.isPrimaryActionEnabled == false)
+            .opacity(summary.isPrimaryActionEnabled ? 1 : 0.55)
+        }
+        .panelCard()
+    }
+
+    private func phaseTint(for summary: ClawMissionRunSummary) -> Color {
+        switch summary.primaryActionKind {
+        case .start:
+            return summary.phaseTitle == ClawAutonomousLoopPhase.completed.title ? .green : .blue
+        case .approveAndContinue, .continueAfterReview:
             return .orange
-        case .completed:
-            return .green
-        case .blocked:
+        case .waitForGateway:
+            return .blue
+        case .inspectBlocked:
             return .red
         }
     }
 
+    private func riskTint(_ risk: Int) -> Color {
+        if risk >= 70 {
+            return .red
+        }
+        if risk >= 40 {
+            return .orange
+        }
+        return .green
+    }
+
+    private func performPrimaryAction(_ action: ClawMissionRunPrimaryActionKind) {
+        switch action {
+        case .start:
+            store.startAutonomousComputerTakeover()
+        case .approveAndContinue:
+            store.approveAndContinueAutonomousLoop()
+        case .continueAfterReview:
+            store.continueAutonomousLoopAfterReview()
+        case .waitForGateway, .inspectBlocked:
+            break
+        }
+    }
+}
+
+struct ClawMissionStageTrack: View {
+    let stages: [ClawMissionRunStage]
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            SectionHeader(title: "自治循环", icon: "arrow.triangle.2.circlepath")
+        HStack(spacing: 6) {
+            ForEach(Array(stages.enumerated()), id: \.element.id) { index, stage in
+                ClawMissionStageNode(stage: stage)
 
-            VStack(alignment: .leading, spacing: 11) {
-                HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: store.autonomousLoop.phase.icon)
-                        .font(.system(size: 20, weight: .bold))
-                        .frame(width: 40, height: 40)
-                        .background(tint.opacity(0.12), in: Circle())
-                        .foregroundStyle(tint)
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(store.autonomousLoopStatusText)
-                            .font(.system(size: 15, weight: .heavy))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.75)
-                        Text(store.autonomousLoop.statusLine)
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    Spacer()
-                }
-
-                HStack(spacing: 8) {
-                    PhoneAgentTag(text: store.autonomousLoop.phase.title, icon: store.autonomousLoop.phase.icon, tint: tint)
-                    PhoneAgentTag(text: store.gatewayDispatchMode.title, icon: "switch.2", tint: .blue)
-                    PhoneAgentTag(
-                        text: store.autonomousLoop.requiresUserApproval ? "需用户确认" : "自动推进",
-                        icon: store.autonomousLoop.requiresUserApproval ? "person.crop.circle.badge.exclamationmark.fill" : "bolt.fill",
-                        tint: store.autonomousLoop.requiresUserApproval ? .orange : .green
-                    )
-                }
-
-                Text(store.autonomousLoop.lastDecision)
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
-                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-
-                if store.autonomousLoop.checkpoints.isEmpty == false {
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(store.autonomousLoop.checkpoints.suffix(4), id: \.self) { checkpoint in
-                            Label(checkpoint, systemImage: "smallcircle.filled.circle")
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.7)
-                        }
-                    }
-                }
-
-                Button {
-                    store.startAutonomousComputerTakeover()
-                } label: {
-                    Label("启动自治接管", systemImage: "play.fill")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(PrimaryActionButtonStyle())
-
-                HStack(spacing: 10) {
-                    Button {
-                        store.approveAndContinueAutonomousLoop()
-                    } label: {
-                        Label("审批并继续", systemImage: "checkmark.seal.fill")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(SecondaryActionButtonStyle())
-                    .disabled(store.autonomousLoop.phase != .waitingForUserApproval)
-
-                    Button {
-                        store.continueAutonomousLoopAfterReview()
-                    } label: {
-                        Label("复核后重试", systemImage: "arrow.clockwise.circle.fill")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(SecondaryActionButtonStyle())
-                    .disabled(store.autonomousLoop.phase != .needsAttention)
+                if index < stages.count - 1 {
+                    Capsule()
+                        .fill(stage.isComplete ? Color.green.opacity(0.65) : Color.secondary.opacity(0.2))
+                        .frame(height: 3)
                 }
             }
-            .panelCard()
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(stages.map(\.title).joined(separator: "，"))
+    }
+}
+
+struct ClawMissionStageNode: View {
+    let stage: ClawMissionRunStage
+
+    private var tint: Color {
+        if stage.isBlocked {
+            return .red
+        }
+        if stage.isActive {
+            return .orange
+        }
+        if stage.isComplete {
+            return .green
+        }
+        return .secondary
+    }
+
+    var body: some View {
+        VStack(spacing: 4) {
+            Image(systemName: stage.icon)
+                .font(.caption.bold())
+                .frame(width: 28, height: 28)
+                .background(tint.opacity(0.12), in: Circle())
+                .foregroundStyle(tint)
+            Text(stage.title)
+                .font(.caption.bold())
+                .foregroundStyle(tint)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+struct ClawMissionMetric: View {
+    let value: String
+    let label: String
+    let icon: String
+    let tint: Color
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.subheadline.bold())
+                .foregroundStyle(tint)
+                .frame(width: 24)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(value)
+                    .font(.headline.monospacedDigit().bold())
+                    .lineLimit(1)
+                Text(label)
+                    .font(.caption.bold())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(10)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
     }
 }
 

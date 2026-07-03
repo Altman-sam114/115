@@ -322,6 +322,91 @@ final class ClawTests: XCTestCase {
         XCTAssertTrue(store.autonomousLoop.checkpoints.contains { $0.contains("loop.waiting_approval") })
     }
 
+    func testMissionRunSummaryStartsIdle() {
+        let store = ClawStore(autoScanLocalArtifacts: false)
+
+        let summary = store.missionRunSummary
+
+        XCTAssertEqual(summary.phaseTitle, ClawAutonomousLoopPhase.idle.title)
+        XCTAssertEqual(summary.primaryActionKind, .start)
+        XCTAssertTrue(summary.isPrimaryActionEnabled)
+        XCTAssertEqual(summary.progressCurrent, 0)
+        XCTAssertEqual(summary.progressTotal, 3)
+        XCTAssertEqual(summary.artifactCount, 0)
+        XCTAssertTrue(summary.statusLine.contains("桌面 Gateway"))
+    }
+
+    func testMissionRunSummaryShowsWaitingApprovalState() {
+        let store = ClawStore(autoScanLocalArtifacts: false)
+
+        store.phoneAgentCommand = "接管我的电脑，打开浏览器搜索竞品信息，整理成表格后发到 Slack"
+        store.startAutonomousComputerTakeover()
+        let summary = store.missionRunSummary
+
+        XCTAssertEqual(summary.phaseTitle, ClawAutonomousLoopPhase.waitingForUserApproval.title)
+        XCTAssertEqual(summary.primaryActionKind, .approveAndContinue)
+        XCTAssertTrue(summary.requiresUserApproval)
+        XCTAssertGreaterThan(summary.riskScore, 0)
+        XCTAssertGreaterThan(summary.approvalCount, 0)
+        XCTAssertEqual(summary.artifactCount, 0)
+        XCTAssertTrue(summary.stageTrack.contains { $0.title == "审批" && $0.isActive })
+    }
+
+    func testMissionRunSummaryShowsNeedsAttentionArtifacts() {
+        let store = ClawStore(autoScanLocalArtifacts: false)
+
+        store.phoneAgentCommand = "打开浏览器搜索资料并发到 Slack"
+        store.startAutonomousComputerTakeover()
+        store.approveAndContinueAutonomousLoop()
+        let summary = store.missionRunSummary
+
+        XCTAssertEqual(summary.phaseTitle, ClawAutonomousLoopPhase.needsAttention.title)
+        XCTAssertEqual(summary.primaryActionKind, .continueAfterReview)
+        XCTAssertTrue(summary.requiresUserApproval)
+        XCTAssertGreaterThan(summary.succeededCount, 0)
+        XCTAssertGreaterThan(summary.artifactCount, 0)
+        XCTAssertTrue(summary.artifactKinds.contains(.browserTrace))
+        XCTAssertTrue(summary.artifactKinds.contains(.screenshot))
+        XCTAssertTrue(summary.statusLine.contains("待确认"))
+    }
+
+    func testMissionRunSummaryShowsCompletedRetryState() {
+        let store = ClawStore(autoScanLocalArtifacts: false)
+
+        store.phoneAgentCommand = "在项目目录运行测试，失败时导出日志文件"
+        store.startAutonomousComputerTakeover()
+        store.approveAndContinueAutonomousLoop()
+        XCTAssertEqual(store.missionRunSummary.phaseTitle, ClawAutonomousLoopPhase.needsAttention.title)
+        XCTAssertGreaterThan(store.missionRunSummary.retryableCount, 0)
+
+        store.continueAutonomousLoopAfterReview()
+        let summary = store.missionRunSummary
+
+        XCTAssertEqual(summary.phaseTitle, ClawAutonomousLoopPhase.completed.title)
+        XCTAssertEqual(summary.primaryActionKind, .start)
+        XCTAssertTrue(summary.isPrimaryActionEnabled)
+        XCTAssertEqual(summary.progressCurrent, 2)
+        XCTAssertEqual(summary.retryableCount, 0)
+        XCTAssertGreaterThan(summary.succeededCount, 0)
+        XCTAssertTrue(summary.artifactKinds.contains(.commandOutput))
+        XCTAssertTrue(summary.stageTrack.contains { $0.title == "交付" && $0.isActive })
+    }
+
+    func testMissionRunSummaryShowsBlockedState() {
+        let store = ClawStore(autoScanLocalArtifacts: false)
+
+        store.phoneAgentCommand = "读取微信新消息并自动回复客户"
+        store.startAutonomousComputerTakeover()
+        let summary = store.missionRunSummary
+
+        XCTAssertEqual(summary.phaseTitle, ClawAutonomousLoopPhase.blocked.title)
+        XCTAssertEqual(summary.primaryActionKind, .inspectBlocked)
+        XCTAssertFalse(summary.isPrimaryActionEnabled)
+        XCTAssertGreaterThan(summary.blockedCount, 0)
+        XCTAssertTrue(summary.statusLine.contains("安全策略"))
+        XCTAssertTrue(summary.stageTrack.contains { $0.isBlocked })
+    }
+
     func testAutonomousLoopApprovalDispatchesThroughGatewayEvents() {
         let store = ClawStore(autoScanLocalArtifacts: false)
 

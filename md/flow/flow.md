@@ -19,7 +19,8 @@ Claw 的当前主链路是：用户在 iPhone 输入电脑任务，App 生成可
   -> ClawGatewayEvent
   -> ClawGatewayEventStream.apply
   -> ClawGatewaySession.results/artifacts/auditTrail
-  -> SwiftUI 展示、审批、重试或下一轮
+  -> ClawMissionRunSummary 派生任务回合摘要
+  -> SwiftUI Mission Run 展示、审批、重试或下一轮
 ```
 
 ## 2. 当前协作验证流
@@ -63,6 +64,7 @@ Claw 的当前主链路是：用户在 iPhone 输入电脑任务，App 生成可
 
 - 展示连接、聊天、电脑接管、能力和榜单。
 - 让用户输入任务、配置 Gateway URL/token、切换发送模式、查看 envelope 和事件。
+- 在电脑接管首屏用 Mission Run 面板汇总任务目标、阶段、下一步主动作、风险、审批点、Gateway 结果和 artifact 证据。
 
 输入：
 
@@ -73,6 +75,7 @@ Claw 的当前主链路是：用户在 iPhone 输入电脑任务，App 生成可
 输出：
 
 - UI 状态。
+- `ClawMissionRunSummary` 派生展示状态。
 - `ClawMobileEnvelope`。
 - 审批/发送/重试动作。
 
@@ -214,10 +217,11 @@ Claw 的当前主链路是：用户在 iPhone 输入电脑任务，App 生成可
 - `ClawGatewayEvent`：Gateway 推送事件。
 - `ClawGatewaySession`：手机端会话视图模型。
 - `ClawAutonomousLoopState`：自治循环状态。
+- `ClawMissionRunSummary`：手机端 presentation layer 摘要，只从 loop/task/session 派生，不进入 envelope 或 Gateway 协议。
 
 ## 6. 用户入口
 
-- App UI：`ContentView` 内连接、聊天、电脑接管相关面板。
+- App UI：`ContentView` 内连接、聊天、电脑接管 Mission Run 面板和相关详情面板。
 - Shortcuts/App Intents：`ClawShortcuts.swift`。
 - Gateway CLI：`node Tools/claw-gateway-server.mjs` 或 `--emit-events`。
 - Smoke：`Tools/claw-gateway-direct-smoke.mjs`、`Tools/claw-gateway-smoke.mjs`、`Tools/LogicSmoke.swift`。
@@ -227,6 +231,7 @@ Claw 的当前主链路是：用户在 iPhone 输入电脑任务，App 生成可
 - 前端层：SwiftUI views 只展示和触发 `ClawStore` 方法。
 - 状态层：`ClawStore` 是主要 ObservableObject。
 - 模型层：`ClawModels.swift` 定义跨 UI、Gateway、测试共享的 schema。
+- 展示派生层：`ClawMissionRunSummary` 从现有状态组合首屏任务回合视图，不作为新的 source of truth。
 - 执行层：桌面 Gateway Node 原型负责真实或 dry-run 工具动作。
 - 文档层：README 面向开发者，`Docs/*` 面向协议，`md/flow/*` 面向当前真实逻辑和协作闭环，`AGENTS.md` 面向 Agent 工作规则。
 - 测试层：本地轻量检查、GitHub Actions 云端重验证、XCTest/Swift logic smoke、Gateway JS smoke。
@@ -248,6 +253,7 @@ Claw 的当前主链路是：用户在 iPhone 输入电脑任务，App 生成可
 - Planner/bridge/schema 变更：本地 Swift logic smoke（需要时）+ 云端 xcodebuild/logic smoke/结果包验收。
 - Gateway handler 变更：本地 `node --check Tools/*.mjs` + 云端 direct smoke/WebSocket smoke/结果包验收。
 - Event reducer 变更：Swift logic smoke、XCTest 或等价云端 build 结果。
+- Mission Run 派生摘要或首屏任务回合 UI 变更：XCTest/Swift logic smoke 覆盖 idle、待审批、需处理、完成、阻断摘要；云端 xcodebuild 覆盖 SwiftUI 编译。
 - 文档-only 变更：本地 `git diff --check`、workflow YAML 语法检查；云端由 `main` push 触发结果包。
 
 ## 10. 未来扩展点
@@ -257,7 +263,7 @@ Claw 的当前主链路是：用户在 iPhone 输入电脑任务，App 生成可
 - 增加 Playwright/browser-use 兼容浏览器控制器。
 - 强化 `runAgentLoop` 多轮状态机、失败恢复和下一步策略。
 - 增加 live Gateway 心跳、重连、配对和审计日志持久化。
-- UI 上增强 artifact 预览、审批队列和回滚提示。
+- UI 上继续增强 Mission Run 内的 artifact 预览、审批队列和回滚提示。
 - 配置真实 `origin` 后持续执行 main 直推和 Agent C 下载结果包复判。
 
 ## 11. 不允许破坏的行为

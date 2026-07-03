@@ -124,6 +124,188 @@ final class ClawStore: ObservableObject {
         "\(autonomousLoop.phase.title) / \(autonomousLoop.iteration)-\(autonomousLoop.maxIterations) / \(autonomousLoop.runMode.title)"
     }
 
+    var missionRunSummary: ClawMissionRunSummary {
+        let task = clawMobileTasks.first
+        let session = clawGatewaySessions.first
+        let phase = missionRunPhase(task: task, session: session)
+        let primaryAction = missionRunPrimaryAction(for: phase, session: session)
+        let command = missionRunCommand(task: task, session: session)
+        let progressTotal = max(autonomousLoop.maxIterations, 1)
+        let progressCurrent = phase == .idle ? 0 : min(max(autonomousLoop.iteration, 1), progressTotal)
+
+        return ClawMissionRunSummary(
+            command: command,
+            phaseTitle: phase.title,
+            phaseIcon: phase.icon,
+            progressCurrent: progressCurrent,
+            progressTotal: progressTotal,
+            riskScore: task?.riskScore ?? 0,
+            approvalCount: task?.approvalCount ?? phoneAgentPlan.confirmationCount,
+            blockedCount: task?.blockedCount ?? phoneAgentPlan.blockedCount,
+            succeededCount: session?.succeededCount ?? 0,
+            failedCount: session?.failedCount ?? 0,
+            retryableCount: session?.retryableCount ?? 0,
+            artifactCount: session?.artifactCount ?? 0,
+            artifactKinds: missionRunArtifactKinds(from: session),
+            primaryActionTitle: primaryAction.title,
+            primaryActionIcon: primaryAction.icon,
+            primaryActionKind: primaryAction.kind,
+            isPrimaryActionEnabled: primaryAction.isEnabled,
+            requiresUserApproval: autonomousLoop.requiresUserApproval || task?.status == .waitingForApproval || session?.status == .needsAttention,
+            statusLine: missionRunStatusLine(phase: phase, task: task, session: session),
+            stageTrack: missionRunStageTrack(phase: phase, session: session)
+        )
+    }
+
+    private func missionRunCommand(task: ClawMobileTask?, session: ClawGatewaySession?) -> String {
+        let candidates = [
+            session?.command,
+            task?.command,
+            autonomousLoop.command,
+            phoneAgentCommand
+        ]
+        for candidate in candidates {
+            let trimmed = candidate?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if trimmed.isEmpty == false {
+                return trimmed
+            }
+        }
+        return "描述要让桌面 Gateway 完成的电脑任务"
+    }
+
+    private func missionRunPhase(task: ClawMobileTask?, session: ClawGatewaySession?) -> ClawAutonomousLoopPhase {
+        if autonomousLoop.phase != .idle {
+            return autonomousLoop.phase
+        }
+        if let session {
+            switch session.status {
+            case .prepared, .running:
+                return .observingGateway
+            case .completed:
+                return .completed
+            case .needsAttention:
+                return .needsAttention
+            case .blocked:
+                return .blocked
+            }
+        }
+        if let task {
+            switch task.status {
+            case .queued:
+                return .planning
+            case .waitingForApproval:
+                return .waitingForUserApproval
+            case .readyToSend:
+                return .dispatching
+            case .sent:
+                return .observingGateway
+            case .blocked:
+                return .blocked
+            }
+        }
+        return .idle
+    }
+
+    private func missionRunPrimaryAction(
+        for phase: ClawAutonomousLoopPhase,
+        session: ClawGatewaySession?
+    ) -> (title: String, icon: String, kind: ClawMissionRunPrimaryActionKind, isEnabled: Bool) {
+        switch phase {
+        case .idle:
+            return ("启动任务回合", "play.fill", .start, true)
+        case .planning:
+            return ("生成计划中", "list.bullet.rectangle.portrait.fill", .waitForGateway, false)
+        case .waitingForUserApproval:
+            return ("审批并继续", "checkmark.seal.fill", .approveAndContinue, true)
+        case .dispatching, .observingGateway:
+            return ("等待桌面 Gateway 事件", "hourglass", .waitForGateway, false)
+        case .needsAttention:
+            if (session?.retryableCount ?? 0) > 0 {
+                return ("复核后重试", "arrow.clockwise.circle.fill", .continueAfterReview, true)
+            }
+            return ("查看处理要求", "exclamationmark.magnifyingglass", .continueAfterReview, true)
+        case .completed:
+            return ("重新启动当前任务", "play.circle.fill", .start, true)
+        case .blocked:
+            return ("修改任务或白名单", "lock.trianglebadge.exclamationmark.fill", .inspectBlocked, false)
+        }
+    }
+
+    private func missionRunStatusLine(
+        phase: ClawAutonomousLoopPhase,
+        task: ClawMobileTask?,
+        session: ClawGatewaySession?
+    ) -> String {
+        switch phase {
+        case .idle:
+            return "手机端只负责计划、审批和查看证据；真实电脑动作由用户授权的桌面 Gateway 执行。"
+        case .waitingForUserApproval:
+            return "计划已生成，\(task?.approvalCount ?? phoneAgentPlan.confirmationCount) 个审批点需要手机端确认后才会发送。"
+        case .needsAttention:
+            let waiting = session?.results.filter { $0.status == .waitingForApproval }.count ?? 0
+            return "Gateway 需要复核：失败 \(session?.failedCount ?? 0) 个，可重试 \(session?.retryableCount ?? 0) 个，待确认 \(waiting) 个。"
+        case .completed:
+            return "任务回合完成：成功 \(session?.succeededCount ?? 0) 个动作，收集 \(session?.artifactCount ?? 0) 个 artifact。"
+        case .blocked:
+            return "任务被安全策略阻断：\(task?.blockedCount ?? phoneAgentPlan.blockedCount) 个动作不能自动发送，请修改任务或网关白名单。"
+        default:
+            return autonomousLoop.statusLine
+        }
+    }
+
+    private func missionRunArtifactKinds(from session: ClawGatewaySession?) -> [ClawGatewayArtifactKind] {
+        guard let session else {
+            return []
+        }
+        var seen: Set<ClawGatewayArtifactKind> = []
+        var kinds: [ClawGatewayArtifactKind] = []
+        for artifact in session.results.flatMap(\.artifacts) {
+            if seen.insert(artifact.kind).inserted {
+                kinds.append(artifact.kind)
+            }
+        }
+        return kinds
+    }
+
+    private func missionRunStageTrack(
+        phase: ClawAutonomousLoopPhase,
+        session: ClawGatewaySession?
+    ) -> [ClawMissionRunStage] {
+        let activeIndex: Int
+        switch phase {
+        case .idle, .planning:
+            activeIndex = 0
+        case .waitingForUserApproval:
+            activeIndex = 1
+        case .dispatching:
+            activeIndex = 2
+        case .observingGateway, .needsAttention:
+            activeIndex = 3
+        case .completed:
+            activeIndex = 4
+        case .blocked:
+            activeIndex = session == nil ? 1 : 3
+        }
+
+        let stages: [(title: String, icon: String)] = [
+            ("计划", "list.bullet.rectangle.portrait.fill"),
+            ("审批", "checkmark.seal.fill"),
+            ("发送", "paperplane.fill"),
+            ("观察", "waveform.path.ecg.rectangle.fill"),
+            ("交付", "shippingbox.fill")
+        ]
+
+        return stages.enumerated().map { index, stage in
+            ClawMissionRunStage(
+                title: stage.title,
+                icon: stage.icon,
+                isComplete: phase == .completed || index < activeIndex,
+                isActive: index == activeIndex,
+                isBlocked: phase == .blocked && index == activeIndex
+            )
+        }
+    }
+
     func selectSkill(_ skill: ClawSkill) {
         selectedSkill = skill
         if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

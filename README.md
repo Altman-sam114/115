@@ -2,7 +2,7 @@
 
 这是一个 SwiftUI iPhone 原型 App，用手机作为 Claw 控制台：用户用自然语言描述电脑任务，App 生成可审批的执行计划和 JSON envelope，真正的浏览器、文件、Shell、桌面 App 操作交给用户自托管的 Claw Gateway 在电脑上执行。
 
-当前版本不下载模型权重，模型保持占位状态。App 已完成 UI、数据流、本地 artifact 导入/扫描/校验、电脑接管规划器、Claw Gateway envelope、事件流 reducer、WebSocket transport 边界、Shortcuts 入口和 smoke 测试。
+当前版本不下载模型权重，模型保持占位状态。App 已完成 UI、数据流、本地 artifact 导入/扫描/校验、电脑接管规划器、Claw Gateway envelope、事件流 reducer、Mission Run 任务回合面板、WebSocket transport 边界、Shortcuts 入口和 smoke 测试。
 
 后续 Codex/Agent 接力开发必须先读 `AGENTS.md`。项目已建立“人工目标 -> Agent A 设计提示词 -> Agent B 在 main 上实现并推送 -> GitHub Actions 云端验证 -> Agent C 下载结果包复判 -> 人工复核 -> 下一轮”的迭代工作流。核心记忆和规范分布在 `AGENTS.md`、`update_log.md`、`md/test/test.md`、`md/flow/flow.md`、`md/flow/flowchart.md` 和 `md/prompt/`。
 
@@ -36,7 +36,7 @@
 
 这个原型朝 OpenClaw 式电脑智能体迭代：
 
-- 手机端：输入任务、生成计划、展示风险、审批高风险动作、查看 envelope 和审计摘要。
+- 手机端：输入任务、生成计划、用 Mission Run 面板展示当前阶段/下一步/风险/证据、审批高风险动作、查看 envelope 和审计摘要。
 - 桌面网关：观察屏幕、控制浏览器、操作桌面 App、管理文件、运行受控 Shell、提取数据，并把事件、artifact 和审批请求推回手机端。
 - 安全策略：token 只保留短 SHA-256 指纹；动作走白名单；敏感动作提升审批；Shell/文件/桌面接管默认需要网关确认。
 - 边界：iOS 普通 App 不能静默控制电脑或读取其他 App 私有数据，电脑接管必须发生在用户授权的桌面/自托管网关。
@@ -138,6 +138,7 @@ node Tools/claw-gateway-smoke.mjs
 
 ## 完成情况
 
+- 2026-07-03：新增 v0.2 任务回合化体验。电脑接管页首屏增加 Mission Run 面板，把现有计划、审批、自治循环、Gateway session、artifact 和 retry 状态整理成目标、阶段、主动作、风险、证据和结果摘要；本轮不改变 `claw.computer.control.v1` schema，也不扩展 Gateway 权限。
 - 2026-07-03：升级协作制度为 main 直推、GitHub Actions 云端重验证和 Agent C 下载未加密结果包复判；新增 `ci-results` workflow。验证：本轮至少需运行 `git diff --check` 和 workflow YAML 语法检查；真实云端试跑依赖仓库配置 `origin`。
 - 2026-06-28：建立多 Agent 协作系统和项目记忆目录，统一入口为 `AGENTS.md`，新增 `update_log.md`、`md/prompt/README.md`、`md/prompt/v0（项目初始化）/v0.1（建立多Agent迭代文档）.md`、`md/test/test.md`、`md/flow/flow.md`、`md/flow/flowchart.md`。验证：文档-only 改动，按 `md/test/test.md` 运行静态检查；未运行 Gateway/Swift smoke。
 - 2026-06-27：新增项目级开发规范草案，固化后续 Codex 开发规范、测试矩阵、README/协议文档更新要求和项目方向约束。后续已迁移为标准入口 `AGENTS.md`。

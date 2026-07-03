@@ -101,6 +101,28 @@ enum LogicSmoke {
         expect(store.clawGatewaySessions[0].artifactCount > 0, "gateway session should include artifacts")
         expect(store.gatewayEvents.contains { $0.kind == .sessionCompleted }, "gateway event stream should complete")
 
+        let missionStore = ClawStore(autoScanLocalArtifacts: false)
+        expect(missionStore.missionRunSummary.primaryActionKind == .start, "mission summary should start with a launch action")
+        missionStore.phoneAgentCommand = "打开浏览器搜索资料并发到 Slack"
+        missionStore.startAutonomousComputerTakeover()
+        var missionSummary = missionStore.missionRunSummary
+        expect(missionSummary.primaryActionKind == .approveAndContinue, "mission summary should stop at approval gate")
+        expect(missionSummary.requiresUserApproval, "mission summary should surface approval requirements")
+        expect(missionSummary.riskScore > 0, "mission summary should include task risk")
+        missionStore.approveAndContinueAutonomousLoop()
+        missionSummary = missionStore.missionRunSummary
+        expect(missionSummary.primaryActionKind == .continueAfterReview, "mission summary should expose review action")
+        expect(missionSummary.artifactCount > 0, "mission summary should count gateway artifacts")
+        expect(missionSummary.artifactKinds.contains(.browserTrace), "mission summary should summarize artifact kinds")
+
+        let retryMissionStore = ClawStore(autoScanLocalArtifacts: false)
+        retryMissionStore.phoneAgentCommand = "在项目目录运行测试，失败时导出日志文件"
+        retryMissionStore.startAutonomousComputerTakeover()
+        retryMissionStore.approveAndContinueAutonomousLoop()
+        expect(retryMissionStore.missionRunSummary.retryableCount > 0, "mission summary should expose retryable failures")
+        retryMissionStore.continueAutonomousLoopAfterReview()
+        expect(retryMissionStore.missionRunSummary.phaseTitle == ClawAutonomousLoopPhase.completed.title, "mission summary should complete after retry")
+
         store.setGateway(url: "ws://127.0.0.1:18789", token: "")
         store.gatewayDispatchMode = .liveGateway
         store.queueClawMobileTaskFromCurrentPlan()

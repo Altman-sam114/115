@@ -22,6 +22,43 @@
 
 ## 历史记录
 
+### v0.2 / 任务回合化游戏体验
+
+日期：2026-07-03
+
+核心变更：
+
+- 增加 `ClawMissionRunSummary`、阶段轨道和主动作派生模型，把现有 loop/task/session 状态整理为任务目标、阶段、回合进度、下一步动作、风险、审批、阻断、结果和 artifact 摘要。
+- 将电脑接管页首屏更新为 Mission Run 面板，主按钮只调用已有安全路径：启动任务回合、审批并继续、复核后重试；阻断和等待状态不绕过审批或策略。
+- 补充 XCTest 和 Swift logic smoke，覆盖 idle、待审批、需处理、完成重试和阻断状态。
+- 同步 README、协议和 flow 文档，明确本轮是手机端 presentation layer 优化，不改变 `claw.computer.control.v1` schema，不新增 Gateway action/artifact/event。
+
+关键文件：
+
+- `Claw/Core/ClawModels.swift`
+- `Claw/Services/ClawStore.swift`
+- `Claw/Views/ContentView.swift`
+- `ClawTests/ClawTests.swift`
+- `Tools/LogicSmoke.swift`
+- `README.md`
+- `Docs/claw-mobile-gateway-protocol.md`
+- `md/flow/flow.md`
+- `md/flow/flowchart.md`
+
+验证结果：
+
+- Swift logic smoke 已通过，输出 `Claw logic smoke passed`。
+- 无签名 iOS build 已通过，输出 `BUILD SUCCEEDED`。
+- `git diff --check` 已通过，无输出。
+- workflow YAML 语法检查已通过，输出 `yaml ok`。
+- `plutil -lint Claw.xcodeproj/project.pbxproj` 已通过，输出 `OK`。
+- push `origin/main` 后仍需等待 GitHub Actions `ci-results` 结果包供 Agent C 复判。
+
+遗留事项：
+
+- Mission Run 目前只显示 artifact kind 和计数；后续可继续增强手机端 artifact 预览、审批队列和回滚提示。
+- Gateway smoke 由 GitHub Actions 云端重验证覆盖。
+
 ### v0.1 / 项目骨架与电脑接管原型
 
 日期：2026-06-25 至 2026-06-27
