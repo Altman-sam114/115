@@ -74,6 +74,19 @@ expect(agentTrace?.sourceArtifacts?.browserTraceCount >= 1, "websocket agent loo
 expect(agentTrace?.sourceArtifacts?.fileDiffCount >= 1, "websocket agent loop did not consume file diff");
 expect(agentTrace?.sourceArtifacts?.commandOutputCount >= 1, "websocket agent loop did not consume command output");
 expect(agentTrace?.nextActions?.some((action) => action.kind === "composeMessage"), "websocket agent loop should propose a delivery draft");
+expect(typeof agentTrace?.readiness?.score === "number", "websocket agent loop readiness score should be numeric");
+expect(agentTrace?.readiness?.satisfiedSignals?.includes("browserTrace"), "websocket agent loop should satisfy browser trace signal");
+expect(agentTrace?.readiness?.satisfiedSignals?.includes("fileDiff"), "websocket agent loop should satisfy file diff signal");
+expect(agentTrace?.readiness?.satisfiedSignals?.includes("commandOutput"), "websocket agent loop should satisfy command output signal");
+expect(agentTrace?.readiness?.missingSignals?.includes("messageDraft"), "websocket agent loop should flag missing draft signal");
+expect(agentTrace?.decisionChecklist?.some((item) => item.signal === "browserTrace" && item.status === "satisfied"), "websocket agent loop checklist missing browser trace");
+expect(agentTrace?.decisionChecklist?.some((item) => item.signal === "fileDiff" && item.status === "satisfied"), "websocket agent loop checklist missing file diff");
+expect(agentTrace?.decisionChecklist?.some((item) => item.signal === "commandOutput" && item.status === "satisfied"), "websocket agent loop checklist missing command output");
+expect(agentTrace?.decisionChecklist?.some((item) => item.signal === "messageDraft" && item.status === "missing"), "websocket agent loop checklist missing draft gap");
+expect(agentTrace?.nextActions?.some((action) => action.kind === agentTrace?.selectedNextAction?.kind), "websocket selected action should come from nextActions");
+expect(agentTrace?.riskTags?.includes("approval-required"), "websocket agent loop should tag approval-gated actions");
+expect(agentTrace?.riskTags?.includes("final-submit-gate") || agentTrace?.stopReason === "final-submit", "websocket agent loop should stop before final delivery");
+expect(typeof agentTrace?.handoffSummary === "string" && agentTrace.handoffSummary.includes(agentTrace.selectedNextAction.kind), "websocket agent loop handoff summary should name selected action");
 
 console.log(`Claw Gateway smoke passed (${events.length} events)`);
 
@@ -183,7 +196,7 @@ function makeEnvelope(rawToken) {
             objective: "finish websocket smoke task with artifact-backed decisions",
             loopMode: "observe-plan-act-verify",
             maxIterations: "3",
-            inputSources: "browserTrace,fileDiff,commandOutput",
+            inputSources: "browserTrace,fileDiff,commandOutput,messageDraft",
             allowedNextActions: "controlBrowser,manageFiles,extractData,composeMessage",
             approvalRequiredFor: "externalNetwork,destructiveFileChange",
             stopBeforeDestructiveAction: "true",

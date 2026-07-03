@@ -16,11 +16,49 @@
 - 项目方向：OpenClaw 式电脑接管智能体，iPhone 作为控制台，桌面 Claw Gateway 作为执行端。
 - 当前 schema：`claw.computer.control.v1`。
 - 当前核心闭环：用户自然语言任务 -> `PhoneAgentPlanner` -> `ClawMobileTask` -> `ClawMobileEnvelope` -> 模拟事件流或 WebSocket Gateway -> `ClawGatewayEvent` -> session reducer -> UI 展示和审批。
-- 当前 Gateway 能力：屏幕观察 dry-run/截图策略、浏览器 HTML/URL trace、浏览器打开/搜索计划、workspace 文件写入、Shell dry-run/allowlist 执行、结构化提取、桌面 App 审批闸门、`runAgentLoop`/`agentTrace`。
+- 当前 Gateway 能力：屏幕观察 dry-run/截图策略、浏览器 HTML/URL trace、浏览器打开/搜索计划、workspace 文件写入、Shell dry-run/allowlist 执行、结构化提取、桌面 App 审批闸门、带 readiness/checklist/risk/stop/handoff 的 `runAgentLoop`/`agentTrace`。
 - 当前协作闭环：默认 `main` 直推，GitHub Actions 生成未加密 `ci-results` 结果包，Agent C 下载并核对 manifest/JUnit/日志后验收。
 - 当前主要遗留：完整 macOS Accessibility tree、Playwright/browser-use 兼容控制器、真实多轮 agent loop、live Gateway 心跳和重连、UI 级 artifact 复核体验。
 
 ## 历史记录
+
+### v0.6 / 增强 AgentTrace 证据策略
+
+日期：2026-07-04
+
+核心变更：
+
+- Gateway `runAgentLoop` 的 `agentTrace` artifact 保留旧字段，并新增 `readiness`、`decisionChecklist`、`selectedNextAction`、`riskTags`、`stopReason` 和 `handoffSummary`。
+- 新增证据策略只基于结构化 `toolArguments`、同 session 既有 artifact context、候选下一步和安全闸门推导，不扩大真实浏览器、Shell、AppleScript 或桌面 App 权限。
+- direct smoke 和 WebSocket smoke 增加对证据分数、browser/file/command 满足信号、messageDraft 缺口、下一步选择、审批风险标签和停止原因的断言。
+- 同步 README、协议和 flow 文档，明确本轮是 `agentTrace` artifact 智能化扩展，不改变 `claw.computer.control.v1` schema。
+
+关键文件：
+
+- `Tools/claw-gateway-server.mjs`
+- `Tools/claw-gateway-direct-smoke.mjs`
+- `Tools/claw-gateway-smoke.mjs`
+- `README.md`
+- `Docs/claw-mobile-gateway-protocol.md`
+- `md/flow/flow.md`
+- `md/flow/flowchart.md`
+- `md/prompt/v0（核心智能能力）/v0.6（增强AgentTrace证据策略）.md`
+- `update_log.md`
+
+验证结果：
+
+- `node --check Tools/claw-gateway-server.mjs` 通过。
+- `node --check Tools/claw-gateway-direct-smoke.mjs` 通过。
+- `node --check Tools/claw-gateway-smoke.mjs` 通过。
+- `git diff --check` 通过。
+- `ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci-results.yml"); puts "yaml ok"'` 通过，输出 `yaml ok`。
+- `node Tools/claw-gateway-direct-smoke.mjs` 通过，输出 `Claw Gateway direct smoke passed (104 events)`。
+- `node Tools/claw-gateway-smoke.mjs` 在普通沙箱内因 `listen EPERM 127.0.0.1:18879` 被阻断，升级权限后通过，输出 `Claw Gateway smoke passed (17 events)`。
+- push `origin/main` 后仍需等待 GitHub Actions `ci-results` 结果包供 Agent C 复判。
+
+遗留事项：
+
+- `agentTrace` 仍是单轮 artifact 证据策略；真实多轮 agent loop、手机端详细 trace 预览和 Agent C 云端 artifact 复判由后续闭环继续推进。
 
 ### v0.5 / 引入 Agent X 循环迭代文档基线
 

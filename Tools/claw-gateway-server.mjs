@@ -1513,9 +1513,29 @@ async function agentLoopAction(action, index, config) {
   const inputSources = parseCSV(args.inputSources || "screenObservation,accessibilityTree,browserTrace,fileDiff,commandOutput,messageDraft");
   const allowedNextActions = parseCSV(args.allowedNextActions || "observeScreen,controlBrowser,manageFiles,extractData,operateDesktopApp,composeMessage");
   const approvalRequiredFor = parseCSV(args.approvalRequiredFor || "runShellCommand,operateDesktopAppFinalSubmit,externalNetwork,destructiveFileChange");
+  const stopBeforeDestructiveAction = args.stopBeforeDestructiveAction !== "false";
   const contextSummary = summarizeArtifactContext(config.sessionContext);
   const evidenceRows = buildExtractionRows(config.sessionContext, inputSources, action).slice(0, 12);
   const proposedActions = proposeAgentNextActions(contextSummary, allowedNextActions);
+  const safetyGates = makeAgentSafetyGates(proposedActions, approvalRequiredFor);
+  const decisionChecklist = makeAgentDecisionChecklist(contextSummary, inputSources);
+  const readiness = makeAgentReadiness(decisionChecklist, evidenceRows);
+  const selectedNextAction = selectAgentNextAction(proposedActions, readiness);
+  const riskTags = makeAgentRiskTags({
+    readiness,
+    decisionChecklist,
+    proposedActions,
+    safetyGates,
+    approvalRequiredFor,
+    stopBeforeDestructiveAction,
+  });
+  const stopReason = makeAgentStopReason({
+    readiness,
+    selectedNextAction,
+    riskTags,
+    stopBeforeDestructiveAction,
+  });
+  const handoffSummary = makeAgentHandoffSummary(readiness, selectedNextAction, stopReason);
   const iterations = [];
 
   for (let iteration = 1; iteration <= maxIterations; iteration += 1) {
@@ -1540,12 +1560,18 @@ async function agentLoopAction(action, index, config) {
     inputSources,
     allowedNextActions,
     approvalRequiredFor,
-    stopBeforeDestructiveAction: args.stopBeforeDestructiveAction !== "false",
+    stopBeforeDestructiveAction,
     sourceArtifacts: contextSummary,
     evidenceRows,
     observations: agentObservationSnapshot(config.sessionContext),
     nextActions: proposedActions,
-    safetyGates: makeAgentSafetyGates(proposedActions, approvalRequiredFor),
+    safetyGates,
+    readiness,
+    decisionChecklist,
+    selectedNextAction,
+    riskTags,
+    stopReason,
+    handoffSummary,
     iterations,
     finalState: proposedActions.some((item) => item.requiresApproval)
       ? "ready-for-user-or-gateway-approval"
@@ -1682,6 +1708,163 @@ function makeAgentSafetyGates(proposedActions, approvalRequiredFor) {
       gate: "user-or-gateway-approval",
       reason: action.reason,
     }));
+}
+
+function makeAgentDecisionChecklist(summary, inputSources) {
+  const sources = [...new Set(inputSources.length > 0 ? inputSources : ["browserTrace", "fileDiff", "commandOutput"])];
+  return sources.map((source) => {
+    const count = sourceEvidenceCount(summary, source);
+    const status = count > 0 ? "satisfied" : "missing";
+    return {
+      signal: source,
+      status,
+      count,
+      reason: status === "satisfied"
+        ? `${count} ${source} artifact signal(s) are available for grounded decisions.`
+        : `No ${source} artifact signal is available; gather it before relying on this input.`,
+    };
+  });
+}
+
+function makeAgentReadiness(decisionChecklist, evidenceRows) {
+  const satisfiedSignals = decisionChecklist
+    .filter((item) => item.status === "satisfied")
+    .map((item) => item.signal);
+  const missingSignals = decisionChecklist
+    .filter((item) => item.status === "missing")
+    .map((item) => item.signal);
+  const totalSignals = decisionChecklist.length || 1;
+  const score = Math.round((satisfiedSignals.length / totalSignals) * 100);
+  return {
+    score,
+    evidenceRowCount: evidenceRows.length,
+    satisfiedSignals,
+    missingSignals,
+    canContinue: score >= 50 && evidenceRows.length > 0,
+  };
+}
+
+function selectAgentNextAction(proposedActions, readiness) {
+  if (proposedActions.length === 0) {
+    return {
+      kind: "none",
+      priority: "low",
+      requiresApproval: false,
+      reason: "No proposed next action is available.",
+    };
+  }
+  if (!readiness.canContinue) {
+    return proposedActions.find((action) => action.kind === "observeScreen" || action.kind === "controlBrowser") || proposedActions[0];
+  }
+  return proposedActions.find((action) => !action.requiresApproval && action.kind !== "none") || proposedActions[0];
+}
+
+function makeAgentRiskTags({
+  readiness,
+  decisionChecklist,
+  proposedActions,
+  safetyGates,
+  approvalRequiredFor,
+  stopBeforeDestructiveAction,
+}) {
+  const tags = new Set();
+  if (!readiness.canContinue) {
+    tags.add("insufficient-evidence");
+  }
+  for (const item of decisionChecklist) {
+    if (item.status === "missing") {
+      tags.add(`missing-${kebabCase(item.signal)}`);
+    }
+  }
+  if (safetyGates.length > 0) {
+    tags.add("approval-required");
+  }
+  for (const action of proposedActions) {
+    if (action.requiresApproval) {
+      tags.add("approval-required");
+    }
+    if (action.kind === "controlBrowser" && approvalRequiredFor.includes("externalNetwork")) {
+      tags.add("external-network-gate");
+    }
+    if (action.kind === "manageFiles" && stopBeforeDestructiveAction && approvalRequiredFor.includes("destructiveFileChange")) {
+      tags.add("destructive-action-gate");
+    }
+    if (action.kind === "runShellCommand") {
+      tags.add("shell-command-gate");
+    }
+    if (action.kind === "operateDesktopApp") {
+      tags.add("desktop-control-gate");
+      if (approvalRequiredFor.includes("operateDesktopAppFinalSubmit")) {
+        tags.add("final-submit-gate");
+      }
+    }
+    if (action.kind === "composeMessage" || action.kind === "composeEmail") {
+      tags.add("final-submit-gate");
+    }
+  }
+  return [...tags];
+}
+
+function makeAgentStopReason({
+  readiness,
+  selectedNextAction,
+  riskTags,
+  stopBeforeDestructiveAction,
+}) {
+  if (!readiness.canContinue) {
+    return "insufficient-evidence";
+  }
+  if (riskTags.includes("final-submit-gate")) {
+    return "final-submit";
+  }
+  if (stopBeforeDestructiveAction && riskTags.includes("destructive-action-gate")) {
+    return "destructive";
+  }
+  if (riskTags.includes("external-network-gate")) {
+    return "external";
+  }
+  if (selectedNextAction?.requiresApproval || riskTags.includes("approval-required")) {
+    return "approval-required";
+  }
+  if (selectedNextAction?.kind === "none") {
+    return "complete";
+  }
+  return "none";
+}
+
+function makeAgentHandoffSummary(readiness, selectedNextAction, stopReason) {
+  const satisfied = readiness.satisfiedSignals.length > 0 ? readiness.satisfiedSignals.join(", ") : "none";
+  const missing = readiness.missingSignals.length > 0 ? `; missing ${readiness.missingSignals.join(", ")}` : "";
+  return `Evidence score ${readiness.score}/100 from ${satisfied}${missing}. Selected next action: ${selectedNextAction.kind}. Stop reason: ${stopReason}.`;
+}
+
+function sourceEvidenceCount(summary, source) {
+  switch (source) {
+    case "screenObservation":
+      return summary.screenObservationCount;
+    case "accessibilityTree":
+      return summary.accessibilityTreeCount;
+    case "browserTrace":
+      return summary.browserTraceCount;
+    case "fileDiff":
+      return summary.fileDiffCount;
+    case "commandOutput":
+      return summary.commandOutputCount;
+    case "messageDraft":
+      return summary.messageDraftCount;
+    case "agentTrace":
+      return summary.agentTraceCount;
+    default:
+      return 0;
+  }
+}
+
+function kebabCase(value) {
+  return String(value || "")
+    .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+    .replace(/[^a-zA-Z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase();
 }
 
 async function messageDraftAction(action, index, config) {

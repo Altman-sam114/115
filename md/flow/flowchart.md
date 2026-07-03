@@ -19,7 +19,7 @@ flowchart TD
   M --> LIVE["WebSocket Live Gateway<br/>URLSessionClawGatewayTransport"]
   LIVE --> G["Tools/claw-gateway-server.mjs<br/>校验 token、schema、allowlist、workspace"]
   G --> H["Gateway action handlers<br/>屏幕、浏览器、文件、Shell、提取、桌面 App、agent loop"]
-  H --> ART["Artifacts<br/>screenshot、browserTrace、fileDiff、commandOutput、agentTrace"]
+  H --> ART["Artifacts<br/>screenshot、browserTrace、fileDiff、commandOutput、agentTrace 证据策略"]
   H --> EVT["ClawGatewayEvent<br/>actionStarted、artifactStored、completed、failed、approvalRequested"]
   SIM --> EVT
   EVT --> R["ClawGatewayEventStream.apply<br/>把事件 reduce 到 session"]
@@ -48,7 +48,7 @@ flowchart TD
   KIND --> SH["runShellCommand<br/>结构化命令 dry-run 或 allowlist 执行"]
   KIND --> EXT["extractData<br/>消费已有 artifact 生成结构化数据"]
   KIND --> APP["operateDesktopApp<br/>app/key allowlist、最终提交前停止"]
-  KIND --> AG["runAgentLoop<br/>基于 session artifacts 生成下一步建议和安全闸门"]
+  KIND --> AG["runAgentLoop<br/>基于 session artifacts 生成 readiness、checklist、下一步、风险和停止原因"]
   KIND --> MSG["composeMessage/composeEmail<br/>生成待确认草稿"]
   OBS --> CTX["sessionContext<br/>累计 screen、browser、file、shell、message、agent trace"]
   BRO --> CTX

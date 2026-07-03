@@ -188,7 +188,7 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 - `runShellCommand`：结构化命令 dry-run 或 allowlist 执行。
 - `extractData`：消费同 session artifact 生成结构化数据。
 - `operateDesktopApp`：桌面 App 聚焦、粘贴、allowlist 快捷键、最终提交前审批。
-- `runAgentLoop`：基于 session artifacts 生成观察-规划-动作建议-验证 `agentTrace`。
+- `runAgentLoop`：基于 session artifacts 生成观察-规划-动作建议-验证 `agentTrace`，并在 artifact 内部记录 readiness、decisionChecklist、selectedNextAction、riskTags、stopReason 和 handoffSummary。
 - `composeMessage`/`composeEmail`：生成待确认草稿。
 
 禁止：
@@ -196,6 +196,7 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 - 自然语言直连 Shell 或桌面自动化。
 - 路径逃逸到 workspace 外。
 - 未经 app/key/host allowlist 控制浏览器或桌面 App。
+- 用 `agentTrace` 的下一步建议绕过结构化 `toolArguments`、allowlist 或最终提交审批。
 
 ### 4.6 GitHub Actions CI Results
 
@@ -282,7 +283,7 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 - 将 Gateway prototype handler 拆成可插拔工具层。
 - 引入真实 macOS Accessibility tree bridge。
 - 增加 Playwright/browser-use 兼容浏览器控制器。
-- 强化 `runAgentLoop` 多轮状态机、失败恢复和下一步策略。
+- 强化 `runAgentLoop` 多轮状态机、失败恢复、下一步策略和手机端 artifact 复核体验。
 - 增加 live Gateway 心跳、重连、配对和审计日志持久化。
 - UI 上继续增强 Mission Run 内的 artifact 预览、审批队列和回滚提示。
 - 配置真实 `origin` 后持续执行 main 直推和 Agent C 下载结果包复判。
