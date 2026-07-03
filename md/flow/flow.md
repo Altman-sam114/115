@@ -22,7 +22,25 @@ Claw 的当前主链路是：用户在 iPhone 输入电脑任务，App 生成可
   -> SwiftUI 展示、审批、重试或下一轮
 ```
 
-## 2. 当前核心执行流
+## 2. 当前协作验证流
+
+```text
+人工提出目标
+  -> Agent A 本地分析并写版本化提示词
+  -> Agent B 同步 origin/main 并在 main 上实现
+  -> Agent B 本地轻量检查
+  -> Agent B commit 并 push 到 origin/main
+  -> GitHub Actions 运行 build / smoke / 静态检查
+  -> GitHub Actions 上传未加密 ci-results 结果包
+  -> Agent C 下载结果包并核对 manifest / JUnit / 日志 / 关键文件
+      -> 不通过：退回 Agent B 在 main 上追加修复 commit
+      -> 通过：确认 origin/main 最新 run 通过，必要时补齐文档并重新验证
+  -> 人工复核进入下一轮
+```
+
+当前制度固定使用 `main` 作为唯一上传、提交、推送和云端验证分支；不默认使用 `smalldata_test`、`develop`、`codeb/...`、候选分支或 PR 合并流。
+
+## 3. 当前核心执行流
 
 1. 用户在 App 输入任务，或通过 Shortcuts/App Intents 传入任务。
 2. `ClawStore.generatePhoneAgentPlan()` 调用 `PhoneAgentPlanner.makePlan()`。
@@ -37,9 +55,9 @@ Claw 的当前主链路是：用户在 iPhone 输入电脑任务，App 生成可
 9. 手机端 reducer 用事件更新 session，UI 显示结果、artifact、审批点、retry 状态。
 10. `ClawAutonomousLoopState` 记录计划、审批、发送、观察、重试等自动循环状态。
 
-## 3. 核心模块
+## 4. 核心模块
 
-### 3.1 SwiftUI App
+### 4.1 SwiftUI App
 
 职责：
 
@@ -63,7 +81,7 @@ Claw 的当前主链路是：用户在 iPhone 输入电脑任务，App 生成可
 - 声称 iOS 可静默控制电脑。
 - 读取其他 App 私有数据。
 
-### 3.2 PhoneAgentPlanner
+### 4.2 PhoneAgentPlanner
 
 职责：
 
@@ -84,7 +102,7 @@ Claw 的当前主链路是：用户在 iPhone 输入电脑任务，App 生成可
 - 直接执行动作。
 - 绕过用户确认。
 
-### 3.3 ClawMobileBridge
+### 4.3 ClawMobileBridge
 
 职责：
 
@@ -108,7 +126,7 @@ Claw 的当前主链路是：用户在 iPhone 输入电脑任务，App 生成可
 - 把原始 token 放入 envelope。
 - 让不在 allowlist 中的动作进入可执行状态。
 
-### 3.4 ClawGatewayEventStream
+### 4.4 ClawGatewayEventStream
 
 职责：
 
@@ -131,7 +149,7 @@ Claw 的当前主链路是：用户在 iPhone 输入电脑任务，App 生成可
 - 丢失 actionID/actionKind 对应关系。
 - 用自然语言状态替代结构化 result status。
 
-### 3.5 Desktop Gateway Prototype
+### 4.5 Desktop Gateway Prototype
 
 职责：
 
@@ -156,7 +174,34 @@ Claw 的当前主链路是：用户在 iPhone 输入电脑任务，App 生成可
 - 路径逃逸到 workspace 外。
 - 未经 app/key/host allowlist 控制浏览器或桌面 App。
 
-## 4. 核心状态对象
+### 4.6 GitHub Actions CI Results
+
+职责：
+
+- 在 `main` push 或手动触发时运行本项目重验证。
+- 生成未加密 `ci-results` 结果包，供 Agent C 下载复判。
+- 在 manifest 中记录 branch、commitSha、runId、runAttempt、workflowName、各检查 outcome 和关键日志路径。
+
+输入：
+
+- `origin/main` 最新 commit。
+- `.github/workflows/ci-results.yml` 中定义的 Claw build、Swift logic smoke、Gateway smoke 和静态检查命令。
+
+输出：
+
+- `ci-artifact-manifest.json`
+- `ci-failure-summary.md`
+- `junit.xml`
+- `xcodebuild.log`
+- Swift/Gateway smoke 日志和 `.xcresult`。
+
+禁止：
+
+- 复用带密码发布包作为 Agent C 验收包。
+- 把 checkout 里的旧 artifact 当成本轮云端结果。
+- 缺权限或未下载 artifact 时声称已经核对。
+
+## 5. 核心状态对象
 
 - `LocalClawModel`：本地模型占位、artifact manifest、安装状态。
 - `ArtifactValidationResult`：本地 artifact 缺失/暂存/校验状态。
@@ -170,23 +215,23 @@ Claw 的当前主链路是：用户在 iPhone 输入电脑任务，App 生成可
 - `ClawGatewaySession`：手机端会话视图模型。
 - `ClawAutonomousLoopState`：自治循环状态。
 
-## 5. 用户入口
+## 6. 用户入口
 
 - App UI：`ContentView` 内连接、聊天、电脑接管相关面板。
 - Shortcuts/App Intents：`ClawShortcuts.swift`。
 - Gateway CLI：`node Tools/claw-gateway-server.mjs` 或 `--emit-events`。
 - Smoke：`Tools/claw-gateway-direct-smoke.mjs`、`Tools/claw-gateway-smoke.mjs`、`Tools/LogicSmoke.swift`。
 
-## 6. 层关系
+## 7. 层关系
 
 - 前端层：SwiftUI views 只展示和触发 `ClawStore` 方法。
 - 状态层：`ClawStore` 是主要 ObservableObject。
 - 模型层：`ClawModels.swift` 定义跨 UI、Gateway、测试共享的 schema。
 - 执行层：桌面 Gateway Node 原型负责真实或 dry-run 工具动作。
-- 文档层：README 面向开发者，`Docs/*` 面向协议，`md/flow/*` 面向当前真实逻辑，`AGENTS.md` 面向 Agent 工作规则。
-- 测试层：XCTest、Swift logic smoke、Gateway JS smoke。
+- 文档层：README 面向开发者，`Docs/*` 面向协议，`md/flow/*` 面向当前真实逻辑和协作闭环，`AGENTS.md` 面向 Agent 工作规则。
+- 测试层：本地轻量检查、GitHub Actions 云端重验证、XCTest/Swift logic smoke、Gateway JS smoke。
 
-## 7. 已确认铁律
+## 8. 已确认铁律
 
 - Claw 不做法律方向；任何“法律/合同”等词只可作为禁止项或非目标出现。
 - iOS 不能越权控制电脑；必须通过用户授权的 Gateway。
@@ -195,15 +240,17 @@ Claw 的当前主链路是：用户在 iPhone 输入电脑任务，App 生成可
 - Shell、文件、浏览器网络、桌面 App 控制必须受 allowlist 限制。
 - 每个重要 action 都要产生 artifact 或明确失败/跳过原因。
 - 新协议字段必须同步测试和文档。
+- Agent C 验收必须基于 `origin/main` 最新 run 的未加密结果包，不能只看 Agent B 文字汇报。
+- 云端失败默认用 main 追加修复 commit 处理，不默认回滚或引入候选分支。
 
-## 8. 测试映射
+## 9. 测试映射
 
-- Planner/bridge/schema 变更：`Tools/LogicSmoke.swift`、`ClawTests/ClawTests.swift`。
-- Gateway handler 变更：`node --check Tools/*.mjs`、direct smoke、WebSocket smoke。
-- Event reducer 变更：Swift logic smoke 和 XCTest reducer 测试。
-- 文档-only 变更：`git diff --check`。
+- Planner/bridge/schema 变更：本地 Swift logic smoke（需要时）+ 云端 xcodebuild/logic smoke/结果包验收。
+- Gateway handler 变更：本地 `node --check Tools/*.mjs` + 云端 direct smoke/WebSocket smoke/结果包验收。
+- Event reducer 变更：Swift logic smoke、XCTest 或等价云端 build 结果。
+- 文档-only 变更：本地 `git diff --check`、workflow YAML 语法检查；云端由 `main` push 触发结果包。
 
-## 9. 未来扩展点
+## 10. 未来扩展点
 
 - 将 Gateway prototype handler 拆成可插拔工具层。
 - 引入真实 macOS Accessibility tree bridge。
@@ -211,8 +258,9 @@ Claw 的当前主链路是：用户在 iPhone 输入电脑任务，App 生成可
 - 强化 `runAgentLoop` 多轮状态机、失败恢复和下一步策略。
 - 增加 live Gateway 心跳、重连、配对和审计日志持久化。
 - UI 上增强 artifact 预览、审批队列和回滚提示。
+- 配置真实 `origin` 后持续执行 main 直推和 Agent C 下载结果包复判。
 
-## 10. 不允许破坏的行为
+## 11. 不允许破坏的行为
 
 - staged 模型不能启用真实 runtime。
 - token 不能进入 envelope body。
@@ -220,3 +268,4 @@ Claw 的当前主链路是：用户在 iPhone 输入电脑任务，App 生成可
 - 最终发送、提交、外发消息必须停在用户确认。
 - `ClawGatewayEventStream.apply` 必须能按事件累积结果和 artifact。
 - Smoke 断言不能因为实现不方便被删除。
+- CI manifest 的 commitSha/runId/runAttempt 必须对应 Agent C 正在验收的 `origin/main` 最新 run。

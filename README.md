@@ -4,7 +4,13 @@
 
 当前版本不下载模型权重，模型保持占位状态。App 已完成 UI、数据流、本地 artifact 导入/扫描/校验、电脑接管规划器、Claw Gateway envelope、事件流 reducer、WebSocket transport 边界、Shortcuts 入口和 smoke 测试。
 
-后续 Codex/Agent 接力开发必须先读 `AGENTS.md`。项目已建立“人工目标 -> Agent A 设计提示词 -> Agent B 实现测试 -> Agent C 验收并更新核心逻辑文档 -> 人工复核 -> 下一轮”的迭代工作流。核心记忆和规范分布在 `AGENTS.md`、`update_log.md`、`md/test/test.md`、`md/flow/flow.md`、`md/flow/flowchart.md` 和 `md/prompt/`。
+后续 Codex/Agent 接力开发必须先读 `AGENTS.md`。项目已建立“人工目标 -> Agent A 设计提示词 -> Agent B 在 main 上实现并推送 -> GitHub Actions 云端验证 -> Agent C 下载结果包复判 -> 人工复核 -> 下一轮”的迭代工作流。核心记忆和规范分布在 `AGENTS.md`、`update_log.md`、`md/test/test.md`、`md/flow/flow.md`、`md/flow/flowchart.md` 和 `md/prompt/`。
+
+## 协作与云端验证
+
+当前协作制度固定以 `main` 作为上传、提交、推送和云端验证分支。Agent B 默认在本地跑轻量检查后提交并 push 到 `origin/main`，由 `.github/workflows/ci-results.yml` 运行 Claw build、Swift logic smoke、Gateway smoke 和静态检查，并上传未加密 `ci-results` 结果包。Agent C 必须用 GitHub CLI 下载结果包，核对 manifest、JUnit/摘要、主日志和关键结果文件后再验收。
+
+角色召唤约定：`agenta`/`a:`/`A:` 召唤 Agent A，`agentb`/`b:`/`B:` 召唤 Agent B，`agentc`/`c:`/`C:` 召唤 Agent C。没有角色前缀时按普通 Codex 任务处理。
 
 ## 内容
 
@@ -14,6 +20,7 @@
 - `md/test/test.md`：测试规范、测试分层、命令、触发条件和当前基线。
 - `md/flow/flow.md`：项目当前核心逻辑、数据流、执行流和架构边界。
 - `md/flow/flowchart.md`：核心逻辑和 Agent 迭代流程的 Mermaid 图。
+- `.github/workflows/ci-results.yml`：main push 和手动触发的云端重验证 workflow，会上传 Agent C 可下载复判的未加密结果包。
 - `Claw.xcodeproj`：可用 Xcode 打开的 iOS 工程，target 名暂未重命名。
 - `Claw/Core/ClawModels.swift`：Agent 能力、模型 manifest、artifact 校验、自动化通道、Claw action schema 和聊天数据模型。
 - `Claw/Services/ClawStore.swift`：App 状态、能力库、策略上下文、电脑接管规划器、Claw envelope、live gateway 请求和事件流。
@@ -131,5 +138,6 @@ node Tools/claw-gateway-smoke.mjs
 
 ## 完成情况
 
+- 2026-07-03：升级协作制度为 main 直推、GitHub Actions 云端重验证和 Agent C 下载未加密结果包复判；新增 `ci-results` workflow。验证：本轮至少需运行 `git diff --check` 和 workflow YAML 语法检查；真实云端试跑依赖仓库配置 `origin`。
 - 2026-06-28：建立多 Agent 协作系统和项目记忆目录，统一入口为 `AGENTS.md`，新增 `update_log.md`、`md/prompt/README.md`、`md/prompt/v0（项目初始化）/v0.1（建立多Agent迭代文档）.md`、`md/test/test.md`、`md/flow/flow.md`、`md/flow/flowchart.md`。验证：文档-only 改动，按 `md/test/test.md` 运行静态检查；未运行 Gateway/Swift smoke。
 - 2026-06-27：新增项目级开发规范草案，固化后续 Codex 开发规范、测试矩阵、README/协议文档更新要求和项目方向约束。后续已迁移为标准入口 `AGENTS.md`。

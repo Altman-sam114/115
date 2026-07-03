@@ -1,0 +1,289 @@
+name: Claw CI Results
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  CI_POLICY_VERSION: v0.2
+  PROJECT_NAME: Claw
+  XCODE_PROJECT: Claw.xcodeproj
+  XCODE_SCHEME: Claw
+  XCODE_DESTINATION: generic/platform=iOS
+  RESULT_DIR: ci-results
+  RESULT_BUNDLE: ci-results/Claw.xcresult
+
+jobs:
+  ci-results:
+    name: Build, Smoke, and Package Results
+    runs-on: macos-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare result metadata
+        id: meta
+        shell: bash
+        run: |
+          mkdir -p "$RESULT_DIR"
+          short_sha="${GITHUB_SHA::12}"
+          branch_slug="$(printf '%s' "$GITHUB_REF_NAME" | tr '/_ ' '---' | tr -cd 'A-Za-z0-9.-')"
+          project_slug="$(printf '%s' "$PROJECT_NAME" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9.-')"
+          artifact_name="${project_slug}-ci-${CI_POLICY_VERSION}-${branch_slug}-${short_sha}-run${GITHUB_RUN_ID}-attempt${GITHUB_RUN_ATTEMPT}"
+          echo "short_sha=$short_sha" >> "$GITHUB_OUTPUT"
+          echo "branch_slug=$branch_slug" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=$artifact_name" >> "$GITHUB_OUTPUT"
+
+      - name: Git diff whitespace check
+        id: diff_check
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          {
+            echo "Checking whitespace for the pushed revision."
+            if git rev-parse HEAD^ >/dev/null 2>&1; then
+              git diff --check HEAD^ HEAD
+            else
+              git diff --check
+            fi
+          } 2>&1 | tee "$RESULT_DIR/git-diff-check.log"
+
+      - name: Xcode project plist lint
+        id: plist_lint
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          plutil -lint "$XCODE_PROJECT/project.pbxproj" 2>&1 | tee "$RESULT_DIR/plutil.log"
+
+      - name: Gateway JavaScript syntax check
+        id: node_check
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          {
+            node --check Tools/claw-gateway-server.mjs
+            node --check Tools/claw-gateway-direct-smoke.mjs
+            node --check Tools/claw-gateway-smoke.mjs
+          } 2>&1 | tee "$RESULT_DIR/node-check.log"
+
+      - name: Swift logic smoke
+        id: swift_logic_smoke
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          {
+            mkdir -p .build/SwiftModuleCache
+            sdk_path="$(xcrun --sdk macosx --show-sdk-path)"
+            xcrun swiftc \
+              -swift-version 6 \
+              -sdk "$sdk_path" \
+              -module-cache-path .build/SwiftModuleCache \
+              Claw/Core/ClawModels.swift Claw/Services/ClawStore.swift Tools/LogicSmoke.swift \
+              -o .build/claw-logic-smoke
+            .build/claw-logic-smoke
+          } 2>&1 | tee "$RESULT_DIR/swift-logic-smoke.log"
+
+      - name: Gateway direct smoke
+        id: gateway_direct_smoke
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          node Tools/claw-gateway-direct-smoke.mjs 2>&1 | tee "$RESULT_DIR/gateway-direct-smoke.log"
+
+      - name: Gateway WebSocket smoke
+        id: gateway_websocket_smoke
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          node Tools/claw-gateway-smoke.mjs 2>&1 | tee "$RESULT_DIR/gateway-websocket-smoke.log"
+
+      - name: Xcode build
+        id: xcode_build
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          rm -rf "$RESULT_BUNDLE" .derivedData-ci
+          /usr/bin/xcodebuild \
+            -project "$XCODE_PROJECT" \
+            -scheme "$XCODE_SCHEME" \
+            -configuration Debug \
+            -destination "$XCODE_DESTINATION" \
+            -derivedDataPath .derivedData-ci \
+            -resultBundlePath "$RESULT_BUNDLE" \
+            CODE_SIGNING_ALLOWED=NO \
+            build 2>&1 | tee "$RESULT_DIR/xcodebuild.log"
+
+      - name: Write CI manifest and summaries
+        id: package_results
+        if: always()
+        shell: bash
+        env:
+          ARTIFACT_NAME: ${{ steps.meta.outputs.artifact_name }}
+          SHORT_SHA: ${{ steps.meta.outputs.short_sha }}
+          DIFF_OUTCOME: ${{ steps.diff_check.outcome }}
+          PLIST_OUTCOME: ${{ steps.plist_lint.outcome }}
+          NODE_OUTCOME: ${{ steps.node_check.outcome }}
+          SWIFT_LOGIC_OUTCOME: ${{ steps.swift_logic_smoke.outcome }}
+          GATEWAY_DIRECT_OUTCOME: ${{ steps.gateway_direct_smoke.outcome }}
+          GATEWAY_WEBSOCKET_OUTCOME: ${{ steps.gateway_websocket_smoke.outcome }}
+          XCODE_BUILD_OUTCOME: ${{ steps.xcode_build.outcome }}
+        run: |
+          python3 - <<'PY'
+          import datetime
+          import json
+          import os
+          from pathlib import Path
+          from xml.sax.saxutils import escape
+
+          result_dir = Path(os.environ["RESULT_DIR"])
+          result_dir.mkdir(parents=True, exist_ok=True)
+
+          checks = [
+              ("git-diff-check", os.environ["DIFF_OUTCOME"], "ci-results/git-diff-check.log"),
+              ("plutil", os.environ["PLIST_OUTCOME"], "ci-results/plutil.log"),
+              ("node-check", os.environ["NODE_OUTCOME"], "ci-results/node-check.log"),
+              ("swift-logic-smoke", os.environ["SWIFT_LOGIC_OUTCOME"], "ci-results/swift-logic-smoke.log"),
+              ("gateway-direct-smoke", os.environ["GATEWAY_DIRECT_OUTCOME"], "ci-results/gateway-direct-smoke.log"),
+              ("gateway-websocket-smoke", os.environ["GATEWAY_WEBSOCKET_OUTCOME"], "ci-results/gateway-websocket-smoke.log"),
+              ("xcodebuild", os.environ["XCODE_BUILD_OUTCOME"], "ci-results/xcodebuild.log"),
+          ]
+
+          def aggregate(names):
+              selected = [outcome for name, outcome, _ in checks if name in names]
+              return "success" if selected and all(outcome == "success" for outcome in selected) else "failure"
+
+          manifest = {
+              "version": os.environ["CI_POLICY_VERSION"],
+              "branch": os.environ["GITHUB_REF_NAME"],
+              "commitSha": os.environ["GITHUB_SHA"],
+              "shortSha": os.environ["SHORT_SHA"],
+              "runId": os.environ["GITHUB_RUN_ID"],
+              "runAttempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "workflowName": os.environ["GITHUB_WORKFLOW"],
+              "createdAt": datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+              "projectName": os.environ["PROJECT_NAME"],
+              "scheme": os.environ["XCODE_SCHEME"],
+              "destination": os.environ["XCODE_DESTINATION"],
+              "resultBundlePath": os.environ["RESULT_BUNDLE"],
+              "junitPath": "ci-results/junit.xml",
+              "buildLogPath": "ci-results/xcodebuild.log",
+              "failureSummaryPath": "ci-results/ci-failure-summary.md",
+              "staticChecksOutcome": aggregate({"git-diff-check", "plutil", "node-check"}),
+              "buildOutcome": os.environ["XCODE_BUILD_OUTCOME"],
+              "testOutcome": aggregate({"swift-logic-smoke", "gateway-direct-smoke", "gateway-websocket-smoke"}),
+              "projectSpecificReports": [
+                  "ci-results/swift-logic-smoke.log",
+                  "ci-results/gateway-direct-smoke.log",
+                  "ci-results/gateway-websocket-smoke.log",
+                  "ci-results/node-check.log",
+              ],
+              "artifactName": os.environ["ARTIFACT_NAME"],
+              "checks": [
+                  {"name": name, "outcome": outcome, "logPath": log_path}
+                  for name, outcome, log_path in checks
+              ],
+          }
+
+          (result_dir / "ci-artifact-manifest.json").write_text(
+              json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+
+          failures = [(name, outcome, log_path) for name, outcome, log_path in checks if outcome != "success"]
+          lines = [
+              "# CI Failure Summary",
+              "",
+              f"Project: {os.environ['PROJECT_NAME']}",
+              f"Branch: {os.environ['GITHUB_REF_NAME']}",
+              f"Commit: {os.environ['GITHUB_SHA']}",
+              f"Run: {os.environ['GITHUB_RUN_ID']} attempt {os.environ['GITHUB_RUN_ATTEMPT']}",
+              f"Artifact: {os.environ['ARTIFACT_NAME']}",
+              "",
+              "| Check | Outcome | Log |",
+              "| --- | --- | --- |",
+          ]
+          lines.extend(f"| {name} | {outcome} | {log_path} |" for name, outcome, log_path in checks)
+          lines.append("")
+          if failures:
+              lines.append("Failing checks:")
+              lines.extend(f"- {name}: {outcome}; see {log_path}" for name, outcome, log_path in failures)
+          else:
+              lines.append("All CI checks passed.")
+          (result_dir / "ci-failure-summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+          testcases = []
+          for name, outcome, log_path in checks:
+              if outcome == "success":
+                  testcases.append(f'    <testcase classname="ClawCI" name="{escape(name)}" />')
+              else:
+                  testcases.append(
+                      f'    <testcase classname="ClawCI" name="{escape(name)}">'
+                      f'<failure message="{escape(outcome)}">See {escape(log_path)}</failure>'
+                      f'</testcase>'
+                  )
+          junit = [
+              '<?xml version="1.0" encoding="UTF-8"?>',
+              f'<testsuite name="Claw CI Results" tests="{len(checks)}" failures="{len(failures)}">',
+              *testcases,
+              '</testsuite>',
+              '',
+          ]
+          (result_dir / "junit.xml").write_text("\n".join(junit), encoding="utf-8")
+          PY
+
+      - name: Upload CI result package
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.meta.outputs.artifact_name }}
+          path: ci-results
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Fail when any CI check failed
+        if: always()
+        shell: bash
+        env:
+          DIFF_OUTCOME: ${{ steps.diff_check.outcome }}
+          PLIST_OUTCOME: ${{ steps.plist_lint.outcome }}
+          NODE_OUTCOME: ${{ steps.node_check.outcome }}
+          SWIFT_LOGIC_OUTCOME: ${{ steps.swift_logic_smoke.outcome }}
+          GATEWAY_DIRECT_OUTCOME: ${{ steps.gateway_direct_smoke.outcome }}
+          GATEWAY_WEBSOCKET_OUTCOME: ${{ steps.gateway_websocket_smoke.outcome }}
+          XCODE_BUILD_OUTCOME: ${{ steps.xcode_build.outcome }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import sys
+
+          outcomes = {
+              "git-diff-check": os.environ["DIFF_OUTCOME"],
+              "plutil": os.environ["PLIST_OUTCOME"],
+              "node-check": os.environ["NODE_OUTCOME"],
+              "swift-logic-smoke": os.environ["SWIFT_LOGIC_OUTCOME"],
+              "gateway-direct-smoke": os.environ["GATEWAY_DIRECT_OUTCOME"],
+              "gateway-websocket-smoke": os.environ["GATEWAY_WEBSOCKET_OUTCOME"],
+              "xcodebuild": os.environ["XCODE_BUILD_OUTCOME"],
+          }
+          failed = {name: outcome for name, outcome in outcomes.items() if outcome != "success"}
+          if failed:
+              for name, outcome in failed.items():
+                  print(f"{name}: {outcome}")
+              sys.exit(1)
+          print("All CI checks passed.")
+          PY

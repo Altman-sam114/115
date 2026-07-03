@@ -60,25 +60,30 @@ flowchart TD
   CTX --> OUT["artifactStored + action result<br/>回传 file:// 引用、状态、retryable"]
 ```
 
-## 3. Agent 迭代流程图
+## 3. Agent 迭代与云端验证流程图
 
-读图说明：以后新功能不直接开写。人工先提出目标，Agent A 负责分析和写实现提示词，Agent B 按提示词实现和测试，Agent C 验收；不通过就退回 Agent B，最终通过后更新核心文档并按版本号自动提交，再交回人工复核。
+读图说明：以后新功能不直接开写。人工先提出目标，Agent A 负责分析和写实现提示词，Agent B 在 `main` 上实现、轻量检查、提交并直推 `origin/main`，GitHub Actions 生成未加密结果包，Agent C 下载结果包复判；不通过就退回 Agent B 在 `main` 上追加修复 commit，最终通过后交回人工复核。
 
 ```mermaid
 flowchart TD
   H["人工提出目标<br/>功能、禁止项、验收标准、测试要求"] --> A0["Agent A 阅读入口文档<br/>AGENTS、update_log、flow、flowchart、test"]
   A0 --> A1["Agent A 分析目标<br/>明确目标、非目标、风险、边界"]
-  A1 --> PFILE["写入版本化提示词<br/>md/prompt/vX（阶段）/vX.Y（任务）.md"]
-  PFILE --> B0["Agent B 阅读提示词和项目文档<br/>确认实现范围"]
+  A1 --> PFILE["写入版本化提示词<br/>包含 CI、main push、artifact 要求"]
+  PFILE --> B0["Agent B 同步 origin/main<br/>确认当前分支 main、无无关改动"]
   B0 --> B1["Agent B 小步实现<br/>代码、测试、必要文档"]
-  B1 --> B2["Agent B 运行测试<br/>记录命令、结果、未跑原因"]
-  B2 --> C0["Agent C 查看 diff 和测试结果<br/>核对是否满足目标"]
-  C0 --> C1{"验收结论"}
-  C1 -->|不通过| FIX["问题清单<br/>指出回退 Agent B 的修复点"]
+  B1 --> B2["Agent B 本地轻量检查<br/>git diff --check、语法检查、必要 smoke"]
+  B2 --> B3["Agent B commit<br/>vX.Y: 简要概括本轮工作"]
+  B3 --> PUSH["git push origin main<br/>触发 GitHub Actions"]
+  PUSH --> CI["GitHub Actions ci-results<br/>build、smoke、静态检查"]
+  CI --> ART["未加密 CI 结果包<br/>manifest、JUnit、日志、xcresult、报告"]
+  ART --> C0["Agent C 下载结果包<br/>gh auth login + /private/tmp/claw-c-review-run"]
+  C0 --> C2["核对 origin/main 最新 commit<br/>commitSha、runId、runAttempt、artifact 名称"]
+  C2 --> C1{"验收结论"}
+  C1 -->|不通过| FIX["问题清单<br/>要求 Agent B 在 main 追加修复 commit"]
   FIX --> B0
-  C1 -->|通过| DOC["Agent C 更新核心文档<br/>flow、flowchart、update_log"]
-  DOC --> COMMIT["按版本号自动 git commit<br/>提交信息概括本版工作"]
-  COMMIT --> REPORT["输出版本汇报<br/>版本号、commit、变更、测试、风险"]
+  C1 -->|通过且无需再改| REPORT["输出版本汇报<br/>版本、commit、run、artifact、测试、风险"]
+  C1 -->|通过但需补文档| DOC["补齐核心文档<br/>仅本轮相关文件"]
+  DOC --> B3
   REPORT --> HR["人工复核<br/>确认进入下一轮"]
   HR --> H
 ```

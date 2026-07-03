@@ -8,7 +8,7 @@
 - 记录必须包含：版本/任务名、日期、核心变更、关键文件、验证结果、遗留事项。
 - 文档整理、目录迁移、回滚、打捞等不伪装成新版本，可写入“历史维护记录”。
 - 若核心逻辑、测试规范或项目行为变化，必须同步更新本日志。
-- Agent C 验收通过后，必须按 Agent A 版本号自动创建 git commit；验收不通过时不得提交，必须退回 Agent B 修复。
+- 当前默认由 Agent B 在 `main` 上提交并 push 到 `origin/main` 触发云端验证；Agent C 通过下载结果包复判，不通过时退回 Agent B 追加修复 commit。
 - commit 信息格式为 `vX.Y: 简要概括本轮工作`，必要时用简短正文概括核心变更、测试结果和遗留风险。
 
 ## 当前状态
@@ -17,6 +17,7 @@
 - 当前 schema：`claw.computer.control.v1`。
 - 当前核心闭环：用户自然语言任务 -> `PhoneAgentPlanner` -> `ClawMobileTask` -> `ClawMobileEnvelope` -> 模拟事件流或 WebSocket Gateway -> `ClawGatewayEvent` -> session reducer -> UI 展示和审批。
 - 当前 Gateway 能力：屏幕观察 dry-run/截图策略、浏览器 HTML/URL trace、浏览器打开/搜索计划、workspace 文件写入、Shell dry-run/allowlist 执行、结构化提取、桌面 App 审批闸门、`runAgentLoop`/`agentTrace`。
+- 当前协作闭环：默认 `main` 直推，GitHub Actions 生成未加密 `ci-results` 结果包，Agent C 下载并核对 manifest/JUnit/日志后验收。
 - 当前主要遗留：完整 macOS Accessibility tree、Playwright/browser-use 兼容控制器、真实多轮 agent loop、live Gateway 心跳和重连、UI 级 artifact 复核体验。
 
 ## 历史记录
@@ -110,3 +111,34 @@
 遗留事项：
 
 - 当前修改本身不自动提交；后续从 Agent C 正式验收通过的版本开始执行自动提交规则。
+
+### 升级 main 直推与云端结果包验收制度
+
+日期：2026-07-03
+
+核心变更：
+
+- 将协作流程从本地 Agent C 提交验收升级为 `main` 直推、GitHub Actions 云端重验证和 Agent C 下载未加密结果包复判。
+- 增加 Agent A/B/C 角色召唤、最终回复身份标识、main push 规则、失败时 main 追加修复 commit 规则。
+- 新增 `ci-results` workflow 设计，要求产出 manifest、failure summary、JUnit/摘要、xcodebuild 日志、Swift/Gateway smoke 日志和 `.xcresult`。
+- 说明本次是协作制度和验证骨架升级，不代表业务能力、产品质量或 Gateway 实现发生功能提升。
+
+关键文件：
+
+- `AGENTS.md`
+- `README.md`
+- `md/test/test.md`
+- `md/flow/flow.md`
+- `md/flow/flowchart.md`
+- `md/prompt/README.md`
+- `.github/workflows/ci-results.yml`
+
+验证结果：
+
+- 本地应运行 `git diff --check`。
+- 本地应运行 `ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci-results.yml"); puts "yaml ok"'`。
+- 当前本地仓库未配置 `origin` 时，无法完成真实 `git push origin main`、GitHub Actions run 和 Agent C artifact 下载复判；配置远端后需补跑完整闭环。
+
+遗留事项：
+
+- 配置真实 `origin/main` 后，必须执行一次 main push 云端试跑，下载 `/private/tmp/claw-c-review-<run_id>/` 结果包，并核对 manifest 的 `commitSha`、`runId` 和 `runAttempt`。
