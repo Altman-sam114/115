@@ -24,6 +24,19 @@ expect(dryRunEvents.some((event) => hasArtifact(event, "commandOutput")), "missi
 expect(dryRunEvents.some((event) => hasArtifact(event, "agentTrace")), "missing agentTrace artifact");
 expect(dryRunEvents.some((event) => event.kind === "approvalRequested" && event.actionKind === "operateDesktopApp"), "missing desktop app approval gate");
 await assertArtifactsExist(dryRunEvents);
+const dryRunSnapshot = await assertCapabilitySnapshot(dryRunEvents, {
+  allowedActionKinds: envelope.gateway.allowedActionKinds,
+  capabilities: {
+    workspace: "workspace-only",
+    shell: "dry-run",
+    browserNetwork: "disabled",
+    browserControl: "dry-run",
+    screenCapture: "dry-run",
+    windowMetadata: "dry-run",
+    desktopControl: "dry-run",
+  },
+});
+expect(dryRunSnapshot.policies.shell.allowlist.length === 0, "dry-run shell allowlist should be empty");
 const dryRunRoot = workspaceFileRoot(dryRunEvents);
 await fs.access(`${dryRunRoot}/notes/result.txt`);
 await fs.access(`${dryRunRoot}/notes/extracted.json`);
@@ -92,6 +105,13 @@ const allowlistEvents = await runEmitEvents({
 expect(allowlistEvents.some((event) => event.kind === "actionCompleted" && event.actionKind === "runShellCommand"), "allowlisted shell did not complete");
 expect(!allowlistEvents.some((event) => event.kind === "actionFailed" && event.actionKind === "runShellCommand"), "allowlisted shell unexpectedly failed");
 await assertArtifactsExist(allowlistEvents);
+const allowlistSnapshot = await assertCapabilitySnapshot(allowlistEvents, {
+  allowedActionKinds: envelope.gateway.allowedActionKinds,
+  capabilities: {
+    shell: "real",
+  },
+});
+expect(allowlistSnapshot.policies.shell.allowlist.includes("pwd"), "shell snapshot missing pwd allowlist");
 
 const desktopPolicyEvents = await runEmitEvents({
   CLAW_GATEWAY_TOKEN: token,
@@ -105,6 +125,14 @@ expect(desktopPolicyEvents.some((event) => event.kind === "actionFailed" && even
 const desktopPolicyArtifacts = await readArtifacts(desktopPolicyEvents, "screenshot");
 expect(desktopPolicyArtifacts.some((artifact) => artifact.targetApp === "Slack" && artifact.mode === "policy-blocked"), "missing desktop app policy-blocked artifact");
 await assertArtifactsExist(desktopPolicyEvents);
+const desktopPolicySnapshot = await assertCapabilitySnapshot(desktopPolicyEvents, {
+  allowedActionKinds: envelope.gateway.allowedActionKinds,
+});
+expect(desktopPolicySnapshot.policies.desktopControl.appAllowlist.includes("Notes"), "desktop snapshot missing Notes allowlist");
+expect(
+  ["real", "unavailable"].includes(desktopPolicySnapshot.capabilities.desktopControl.state),
+  "desktop control snapshot should be real on macOS or unavailable off macOS",
+);
 
 const browserPolicyEvents = await runEmitEvents({
   CLAW_GATEWAY_TOKEN: token,
@@ -118,6 +146,15 @@ expect(browserPolicyEvents.some((event) => event.kind === "actionFailed" && even
 const browserPolicyArtifacts = await readArtifacts(browserPolicyEvents, "screenshot");
 expect(browserPolicyArtifacts.some((artifact) => artifact.browserApp === "Safari" && artifact.mode === "browser-control-policy-blocked"), "missing browser policy-blocked artifact");
 await assertArtifactsExist(browserPolicyEvents);
+const browserPolicySnapshot = await assertCapabilitySnapshot(browserPolicyEvents, {
+  allowedActionKinds: envelope.gateway.allowedActionKinds,
+});
+expect(browserPolicySnapshot.policies.browserControl.appAllowlist.includes("Firefox"), "browser snapshot missing Firefox allowlist");
+expect(browserPolicySnapshot.policies.browserControl.hostAllowlist.includes("www.google.com"), "browser snapshot missing host allowlist");
+expect(
+  ["real", "unavailable"].includes(browserPolicySnapshot.capabilities.browserControl.state),
+  "browser control snapshot should be real on macOS or unavailable off macOS",
+);
 
 console.log(`Claw Gateway direct smoke passed (${dryRunEvents.length + allowlistEvents.length + desktopPolicyEvents.length + browserPolicyEvents.length} events)`);
 
@@ -128,6 +165,7 @@ async function runEmitEvents(env) {
     {
       env: {
         ...process.env,
+        ...gatewayPolicyDefaults(),
         ...env,
       },
       stdio: ["pipe", "pipe", "pipe"],
@@ -160,6 +198,27 @@ async function runEmitEvents(env) {
     .map((line) => JSON.parse(line));
 }
 
+function gatewayPolicyDefaults() {
+  return {
+    CLAW_GATEWAY_HOST: "127.0.0.1",
+    CLAW_GATEWAY_PORT: "18789",
+    CLAW_GATEWAY_TOKEN: "",
+    CLAW_REQUIRE_TOKEN: "0",
+    CLAW_WORKSPACE: "",
+    CLAW_ALLOW_SHELL: "0",
+    CLAW_SHELL_ALLOWLIST: "",
+    CLAW_ALLOW_BROWSER_NETWORK: "0",
+    CLAW_BROWSER_HOST_ALLOWLIST: "",
+    CLAW_ALLOW_BROWSER_CONTROL: "0",
+    CLAW_BROWSER_APP_ALLOWLIST: "",
+    CLAW_ALLOW_SCREEN_CAPTURE: "0",
+    CLAW_ALLOW_WINDOW_METADATA: "0",
+    CLAW_ALLOW_DESKTOP_CONTROL: "0",
+    CLAW_DESKTOP_APP_ALLOWLIST: "",
+    CLAW_DESKTOP_KEY_ALLOWLIST: "",
+  };
+}
+
 async function assertArtifactsExist(events) {
   for (const artifact of events.flatMap((event) => event.artifacts || [])) {
     if (artifact.reference?.startsWith("file://")) {
@@ -187,6 +246,45 @@ function findArtifact(events, kind) {
   return events
     .flatMap((event) => event.artifacts || [])
     .find((artifact) => artifact.kind === kind);
+}
+
+async function assertCapabilitySnapshot(events, expected = {}) {
+  const snapshotEventIndex = events.findIndex((event) =>
+    event.kind === "artifactStored" && event.artifacts?.some(isCapabilitySnapshotArtifact)
+  );
+  const connectedIndex = events.findIndex((event) => event.kind === "gatewayConnected");
+  const firstActionIndex = events.findIndex((event) => event.kind === "actionStarted");
+  expect(connectedIndex >= 0, "capability snapshot order check missing gatewayConnected");
+  expect(snapshotEventIndex > connectedIndex, "capability snapshot must follow gatewayConnected");
+  expect(firstActionIndex > snapshotEventIndex, "capability snapshot must precede first actionStarted");
+  const snapshotArtifact = events[snapshotEventIndex].artifacts.find(isCapabilitySnapshotArtifact);
+  expect(snapshotArtifact.isRedacted === true, "capability snapshot artifact should be redacted");
+  const snapshot = JSON.parse(await fs.readFile(new URL(snapshotArtifact.reference), "utf8"));
+  expect(snapshot.mode === "gateway-capability-snapshot", "capability snapshot mode mismatch");
+  expect(!JSON.stringify(snapshot).includes(token), "capability snapshot leaked raw token");
+  expect(snapshot.token.configured === true, "capability snapshot token should be configured");
+  expect(snapshot.token.fingerprint === tokenFingerprint(token), "capability snapshot token fingerprint mismatch");
+  expect(snapshot.envelope.tokenFingerprint === tokenFingerprint(token), "capability snapshot envelope fingerprint mismatch");
+  if (expected.allowedActionKinds) {
+    expect(
+      snapshot.envelope.allowedActionKinds.join(",") === [...expected.allowedActionKinds].sort().join(","),
+      "capability snapshot allowedActionKinds mismatch",
+    );
+  }
+  expect(snapshot.envelope.actionCount === envelope.task.actions.length, "capability snapshot action count mismatch");
+  expect(snapshot.gateway.platform === process.platform, "capability snapshot platform mismatch");
+  expect(snapshot.gateway.sessionWorkspace.startsWith(`${snapshot.gateway.workspaceRoot}/sessions/`), "capability snapshot workspace is not session-scoped");
+  expect(snapshot.policies.workspace.sessionWorkspace === snapshot.gateway.sessionWorkspace, "capability snapshot workspace policy mismatch");
+  expect(snapshot.safety.rawToken === "omitted", "capability snapshot should omit raw token");
+  expect(snapshot.safety.toolArguments === "omitted", "capability snapshot should omit toolArguments");
+  for (const [capability, state] of Object.entries(expected.capabilities || {})) {
+    expect(snapshot.capabilities?.[capability]?.state === state, `capability snapshot ${capability} state mismatch`);
+  }
+  return snapshot;
+}
+
+function isCapabilitySnapshotArtifact(artifact) {
+  return artifact.kind === "auditLog" && artifact.title === "gateway-capability-snapshot.json" && artifact.reference?.startsWith("file://");
 }
 
 function assertAgentTraceMetadata(metadata, trace, label) {

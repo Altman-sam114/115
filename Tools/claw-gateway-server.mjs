@@ -346,6 +346,24 @@ async function makeGatewayEvents(envelope, config) {
       summary: `Gateway accepted task from ${envelope.sourceApp}; workspace=${sessionWorkspace}`,
     }),
   ];
+  const sessionConfig = { ...config, sessionWorkspace, sessionContext };
+  const capabilitySnapshotArtifact = await writeArtifact(
+    "auditLog",
+    "gateway-capability-snapshot.json",
+    gatewayCapabilitySnapshot(envelope, config, sessionID, sessionWorkspace),
+    true,
+    sessionConfig,
+  );
+  events.push(
+    event({
+      sessionID,
+      taskID: task.id,
+      sequence: sequence++,
+      kind: "artifactStored",
+      artifacts: [capabilitySnapshotArtifact],
+      summary: "Stored Gateway capability snapshot audit artifact",
+    }),
+  );
 
   for (const [index, action] of task.actions.entries()) {
     events.push(
@@ -360,11 +378,7 @@ async function makeGatewayEvents(envelope, config) {
       }),
     );
 
-    const result = await runAction(action, index, envelope.gateway, {
-      ...config,
-      sessionWorkspace,
-      sessionContext,
-    });
+    const result = await runAction(action, index, envelope.gateway, sessionConfig);
     if (result.artifacts.length > 0) {
       events.push(
         event({
@@ -419,6 +433,220 @@ function validateEnvelope(envelope, config) {
       throw new GatewayError(401, "token_fingerprint_mismatch");
     }
   }
+}
+
+function gatewayCapabilitySnapshot(envelope, config, sessionID, sessionWorkspace) {
+  const actions = Array.isArray(envelope.task?.actions) ? envelope.task.actions : [];
+  const actionKinds = sortedStrings(actions.map((action) => action?.kind).filter(Boolean));
+  const allowedActionKinds = sortedStrings(envelope.gateway?.allowedActionKinds || []);
+  return {
+    mode: "gateway-capability-snapshot",
+    createdAt: isoNow(),
+    session: {
+      id: sessionID,
+    },
+    gateway: {
+      workspaceRoot: config.workspace,
+      sessionWorkspace,
+      platform: process.platform,
+      arch: process.arch,
+      nodeVersion: process.version,
+      host: config.host || "",
+      port: Number.isFinite(config.port) ? config.port : null,
+    },
+    token: {
+      configured: Boolean(config.token),
+      required: Boolean(config.requireToken),
+      fingerprint: config.token ? tokenFingerprint(config.token) : "",
+    },
+    envelope: {
+      schemaVersion: envelope.schemaVersion || "",
+      sourceApp: envelope.sourceApp || "",
+      gatewayEndpoint: envelope.gateway?.endpoint || "",
+      gatewayDeviceName: envelope.gateway?.deviceName || "",
+      securityMode: envelope.gateway?.securityMode || "",
+      tokenFingerprint: envelope.gateway?.tokenFingerprint || "",
+      allowedActionKinds,
+      auditEnabled: Boolean(envelope.gateway?.auditEnabled),
+      requiresApprovalForSensitiveData: Boolean(envelope.gateway?.requiresApprovalForSensitiveData),
+      actionCount: actions.length,
+      actionKinds,
+    },
+    policies: {
+      workspace: {
+        root: config.workspace,
+        sessionWorkspace,
+        pathPolicy: "session-workspace-only",
+      },
+      shell: {
+        enabled: Boolean(config.allowShell),
+        allowlist: sortedAllowlist(config.shellAllowlist),
+      },
+      browserNetwork: {
+        enabled: Boolean(config.allowBrowserNetwork),
+        hostAllowlist: sortedAllowlist(config.browserHostAllowlist),
+      },
+      browserControl: {
+        enabled: Boolean(config.allowBrowserControl),
+        appAllowlist: sortedAllowlist(config.browserAppAllowlist),
+        hostAllowlist: sortedAllowlist(config.browserHostAllowlist),
+      },
+      screenCapture: {
+        enabled: Boolean(config.allowScreenCapture),
+      },
+      windowMetadata: {
+        enabled: Boolean(config.allowWindowMetadata),
+      },
+      desktopControl: {
+        enabled: Boolean(config.allowDesktopControl),
+        appAllowlist: sortedAllowlist(config.desktopAppAllowlist),
+        keyAllowlist: sortedAllowlist(config.desktopKeyAllowlist),
+        finalSubmitGate: "required",
+      },
+    },
+    capabilities: {
+      workspace: workspaceCapability(config, sessionWorkspace),
+      shell: shellCapability(config),
+      browserNetwork: browserNetworkCapability(config),
+      browserControl: browserControlCapability(config),
+      screenCapture: macPolicyCapability({
+        enabled: config.allowScreenCapture,
+        realReason: "macOS screencapture can run when the host has Screen Recording permission.",
+        dryRunReason: "CLAW_ALLOW_SCREEN_CAPTURE is not enabled.",
+        unavailableReason: "Screen capture is currently implemented only for macOS Gateway hosts.",
+      }),
+      windowMetadata: macPolicyCapability({
+        enabled: config.allowWindowMetadata,
+        realReason: "macOS front window metadata can be collected through System Events.",
+        dryRunReason: "CLAW_ALLOW_WINDOW_METADATA is not enabled.",
+        unavailableReason: "Window metadata is currently implemented only for macOS Gateway hosts.",
+      }),
+      desktopControl: desktopControlCapability(config),
+    },
+    safety: {
+      rawToken: "omitted",
+      authorizationHeader: "omitted",
+      naturalLanguageDirectExecution: "blocked",
+      actionInstructions: "omitted",
+      toolArguments: "omitted",
+      browserPageContent: "omitted",
+      commandOutput: "omitted",
+      screenshotContent: "omitted",
+      draftContent: "omitted",
+      workspacePolicy: "session-workspace-only",
+      allowlistsEnforced: true,
+      finalSubmitGated: true,
+      executionSource: "structured-tool-arguments-only",
+    },
+  };
+}
+
+function workspaceCapability(config, sessionWorkspace) {
+  return {
+    state: "workspace-only",
+    reason: "File artifacts and managed writes are constrained to the session workspace.",
+    root: config.workspace,
+    sessionWorkspace,
+  };
+}
+
+function shellCapability(config) {
+  if (config.allowShell && config.shellAllowlist?.size > 0) {
+    return {
+      state: "real",
+      reason: "CLAW_ALLOW_SHELL is enabled and shell binaries must match CLAW_SHELL_ALLOWLIST.",
+    };
+  }
+  return {
+    state: "dry-run",
+    reason: config.allowShell
+      ? "CLAW_SHELL_ALLOWLIST is empty, so shell commands remain dry-run."
+      : "CLAW_ALLOW_SHELL is not enabled.",
+  };
+}
+
+function browserNetworkCapability(config) {
+  if (config.allowBrowserNetwork && config.browserHostAllowlist?.size > 0) {
+    return {
+      state: "real",
+      reason: "Browser fetch can run for hosts in CLAW_BROWSER_HOST_ALLOWLIST.",
+    };
+  }
+  return {
+    state: "disabled",
+    reason: config.allowBrowserNetwork
+      ? "CLAW_BROWSER_HOST_ALLOWLIST is empty, so browser fetch is disabled."
+      : "CLAW_ALLOW_BROWSER_NETWORK is not enabled.",
+  };
+}
+
+function browserControlCapability(config) {
+  if (!config.allowBrowserControl) {
+    return {
+      state: "dry-run",
+      reason: "CLAW_ALLOW_BROWSER_CONTROL is not enabled.",
+    };
+  }
+  if (process.platform !== "darwin") {
+    return {
+      state: "unavailable",
+      reason: "Desktop browser control is currently implemented only for macOS Gateway hosts.",
+    };
+  }
+  if (config.browserAppAllowlist?.size === 0 || config.browserHostAllowlist?.size === 0) {
+    return {
+      state: "disabled",
+      reason: "Browser control requires both browser app and host allowlists.",
+    };
+  }
+  return {
+    state: "real",
+    reason: "Allowed desktop browsers can be opened on macOS for allowlisted hosts.",
+  };
+}
+
+function macPolicyCapability({ enabled, realReason, dryRunReason, unavailableReason }) {
+  if (!enabled) {
+    return {
+      state: "dry-run",
+      reason: dryRunReason,
+    };
+  }
+  if (process.platform !== "darwin") {
+    return {
+      state: "unavailable",
+      reason: unavailableReason,
+    };
+  }
+  return {
+    state: "real",
+    reason: realReason,
+  };
+}
+
+function desktopControlCapability(config) {
+  if (!config.allowDesktopControl) {
+    return {
+      state: "dry-run",
+      reason: "CLAW_ALLOW_DESKTOP_CONTROL is not enabled.",
+    };
+  }
+  if (process.platform !== "darwin") {
+    return {
+      state: "unavailable",
+      reason: "Desktop app control is currently implemented only for macOS Gateway hosts.",
+    };
+  }
+  if (config.desktopAppAllowlist?.size === 0) {
+    return {
+      state: "disabled",
+      reason: "Desktop app control requires CLAW_DESKTOP_APP_ALLOWLIST.",
+    };
+  }
+  return {
+    state: "real",
+    reason: "Allowlisted macOS apps can be focused, receive prepared text, and run allowlisted non-submit keys.",
+  };
 }
 
 function event({
@@ -2312,6 +2540,17 @@ function parseAllowlist(value) {
       .map((item) => item.trim())
       .filter(Boolean),
   );
+}
+
+function sortedAllowlist(value) {
+  return sortedStrings([...(value || [])]);
+}
+
+function sortedStrings(value) {
+  return [...new Set(Array.isArray(value) ? value : [...value])]
+    .map((item) => String(item).trim())
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b));
 }
 
 function allowlistContains(allowlist, value) {

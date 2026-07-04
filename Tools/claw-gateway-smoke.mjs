@@ -14,6 +14,7 @@ const server = spawn(
   {
     env: {
       ...process.env,
+      ...gatewayPolicyDefaults(),
       CLAW_GATEWAY_HOST: host,
       CLAW_GATEWAY_PORT: String(port),
       CLAW_GATEWAY_TOKEN: token,
@@ -32,11 +33,12 @@ server.stderr.on("data", (chunk) => {
 
 await waitFor(() => serverOutput.includes("Claw Gateway listening"), 3000);
 
+const envelope = makeEnvelope(token);
 const events = await connectAndCollectEvents({
   host,
   port,
   token,
-  envelope: makeEnvelope(token),
+  envelope,
 });
 
 server.kill();
@@ -55,6 +57,21 @@ for (const artifact of events.flatMap((event) => event.artifacts || [])) {
     await fs.access(new URL(artifact.reference));
   }
 }
+
+const capabilitySnapshot = await assertCapabilitySnapshot(events, {
+  allowedActionKinds: envelope.gateway.allowedActionKinds,
+  capabilities: {
+    workspace: "workspace-only",
+    shell: "dry-run",
+    browserNetwork: "disabled",
+    browserControl: "dry-run",
+    screenCapture: "dry-run",
+    windowMetadata: "dry-run",
+    desktopControl: "dry-run",
+  },
+});
+expect(capabilitySnapshot.envelope.allowedActionKinds.includes("controlBrowser"), "websocket snapshot missing controlBrowser allowlist");
+expect(!capabilitySnapshot.envelope.allowedActionKinds.includes("observeScreen"), "websocket snapshot should match envelope allowlist exactly");
 
 const browserTraces = await readArtifacts(events, "browserTrace");
 const pageTrace = browserTraces.find((trace) => trace.mode === "local-html");
@@ -232,6 +249,43 @@ function findArtifact(events, kind) {
     .find((artifact) => artifact.kind === kind);
 }
 
+async function assertCapabilitySnapshot(events, expected = {}) {
+  const snapshotEventIndex = events.findIndex((event) =>
+    event.kind === "artifactStored" && event.artifacts?.some(isCapabilitySnapshotArtifact)
+  );
+  const connectedIndex = events.findIndex((event) => event.kind === "gatewayConnected");
+  const firstActionIndex = events.findIndex((event) => event.kind === "actionStarted");
+  expect(connectedIndex >= 0, "websocket capability snapshot order check missing gatewayConnected");
+  expect(snapshotEventIndex > connectedIndex, "websocket capability snapshot must follow gatewayConnected");
+  expect(firstActionIndex > snapshotEventIndex, "websocket capability snapshot must precede first actionStarted");
+  const snapshotArtifact = events[snapshotEventIndex].artifacts.find(isCapabilitySnapshotArtifact);
+  expect(snapshotArtifact.isRedacted === true, "websocket capability snapshot artifact should be redacted");
+  const snapshot = JSON.parse(await fs.readFile(new URL(snapshotArtifact.reference), "utf8"));
+  expect(snapshot.mode === "gateway-capability-snapshot", "websocket capability snapshot mode mismatch");
+  expect(!JSON.stringify(snapshot).includes(token), "websocket capability snapshot leaked raw token");
+  expect(snapshot.token.configured === true, "websocket capability snapshot token should be configured");
+  expect(snapshot.token.fingerprint === tokenFingerprint(token), "websocket capability snapshot token fingerprint mismatch");
+  expect(snapshot.envelope.tokenFingerprint === tokenFingerprint(token), "websocket capability snapshot envelope fingerprint mismatch");
+  expect(
+    snapshot.envelope.allowedActionKinds.join(",") === [...expected.allowedActionKinds].sort().join(","),
+    "websocket capability snapshot allowedActionKinds mismatch",
+  );
+  expect(snapshot.envelope.actionCount === envelope.task.actions.length, "websocket capability snapshot action count mismatch");
+  expect(snapshot.gateway.platform === process.platform, "websocket capability snapshot platform mismatch");
+  expect(snapshot.gateway.sessionWorkspace.startsWith(`${snapshot.gateway.workspaceRoot}/sessions/`), "websocket capability snapshot workspace is not session-scoped");
+  expect(snapshot.policies.workspace.sessionWorkspace === snapshot.gateway.sessionWorkspace, "websocket capability snapshot workspace policy mismatch");
+  expect(snapshot.safety.rawToken === "omitted", "websocket capability snapshot should omit raw token");
+  expect(snapshot.safety.toolArguments === "omitted", "websocket capability snapshot should omit toolArguments");
+  for (const [capability, state] of Object.entries(expected.capabilities || {})) {
+    expect(snapshot.capabilities?.[capability]?.state === state, `websocket capability snapshot ${capability} state mismatch`);
+  }
+  return snapshot;
+}
+
+function isCapabilitySnapshotArtifact(artifact) {
+  return artifact.kind === "auditLog" && artifact.title === "gateway-capability-snapshot.json" && artifact.reference?.startsWith("file://");
+}
+
 function assertAgentTraceMetadata(metadata, trace, label) {
   expect(metadata && typeof metadata === "object", `${label} missing agentTrace metadata`);
   const allowedKeys = [
@@ -375,6 +429,25 @@ function parseServerFrame(buffer) {
 
 function tokenFingerprint(value) {
   return `sha256:${crypto.createHash("sha256").update(value.trim()).digest("hex").slice(0, 12)}`;
+}
+
+function gatewayPolicyDefaults() {
+  return {
+    CLAW_GATEWAY_TOKEN: "",
+    CLAW_REQUIRE_TOKEN: "0",
+    CLAW_WORKSPACE: "",
+    CLAW_ALLOW_SHELL: "0",
+    CLAW_SHELL_ALLOWLIST: "",
+    CLAW_ALLOW_BROWSER_NETWORK: "0",
+    CLAW_BROWSER_HOST_ALLOWLIST: "",
+    CLAW_ALLOW_BROWSER_CONTROL: "0",
+    CLAW_BROWSER_APP_ALLOWLIST: "",
+    CLAW_ALLOW_SCREEN_CAPTURE: "0",
+    CLAW_ALLOW_WINDOW_METADATA: "0",
+    CLAW_ALLOW_DESKTOP_CONTROL: "0",
+    CLAW_DESKTOP_APP_ALLOWLIST: "",
+    CLAW_DESKTOP_KEY_ALLOWLIST: "",
+  };
 }
 
 function isoNow() {
