@@ -120,6 +120,22 @@ final class ClawStore: ObservableObject {
         "\(gatewayDispatchMode.title) / \(gatewayConnectionState.title)"
     }
 
+    var gatewayLiveHealthSummary: ClawGatewayLiveHealthSummary {
+        let latestSession = clawGatewaySessions.first
+        let sessionEvents: [ClawGatewayEvent]
+        if let latestSession {
+            sessionEvents = gatewayEvents.filter { $0.sessionID == latestSession.id }
+        } else {
+            sessionEvents = []
+        }
+        return ClawGatewayLiveHealthSummary.make(
+            request: lastGatewayLiveRequest,
+            connectionState: gatewayConnectionState,
+            events: sessionEvents,
+            latestSession: latestSession
+        )
+    }
+
     var autonomousLoopStatusText: String {
         "\(autonomousLoop.phase.title) / \(autonomousLoop.iteration)-\(autonomousLoop.maxIterations) / \(autonomousLoop.runMode.title)"
     }
@@ -773,10 +789,29 @@ final class ClawStore: ObservableObject {
                 gatewayConnectionState = latest.status == .blocked ? .failed : .completed
             } else if event?.kind == .fallbackUsed {
                 gatewayConnectionState = .fallbackSimulated
-            } else if gatewayDispatchMode == .liveGateway {
-                gatewayConnectionState = .awaitingGateway
+            } else if gatewayDispatchMode == .liveGateway,
+                      let event,
+                      isLiveGatewayProgressEvent(event),
+                      gatewayConnectionState != .fallbackSimulated,
+                      gatewayConnectionState != .failed {
+                gatewayConnectionState = .streaming
             }
             lastGatewayEvent = ClawGatewayEventStream.eventSummary(for: latest, latestEvent: event)
+        }
+    }
+
+    private func isLiveGatewayProgressEvent(_ event: ClawGatewayEvent) -> Bool {
+        switch event.kind {
+        case .gatewayConnected,
+             .actionStarted,
+             .artifactStored,
+             .actionCompleted,
+             .actionFailed,
+             .approvalRequested,
+             .actionSkipped:
+            return true
+        case .sessionPrepared, .liveRequestPrepared, .sessionCompleted, .fallbackUsed:
+            return false
         }
     }
 

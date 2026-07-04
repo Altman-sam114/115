@@ -2,7 +2,7 @@
 
 这是一个 SwiftUI iPhone 原型 App，用手机作为 Claw 控制台：用户用自然语言描述电脑任务，App 生成可审批的执行计划和 JSON envelope，真正的浏览器、文件、Shell、桌面 App 操作交给用户自托管的 Claw Gateway 在电脑上执行。
 
-当前版本不下载模型权重，模型保持占位状态。App 已完成 UI、数据流、本地 artifact 导入/扫描/校验、电脑接管规划器、Claw Gateway envelope、事件流 reducer、Mission Run 任务回合面板、AgentTrace 复核摘要、Gateway 能力复核摘要、iPad 多栏复核工作台、Gateway 能力快照审计、WebSocket transport 边界、Shortcuts 入口和 smoke 测试。
+当前版本不下载模型权重，模型保持占位状态。App 已完成 UI、数据流、本地 artifact 导入/扫描/校验、电脑接管规划器、Claw Gateway envelope、事件流 reducer、Mission Run 任务回合面板、AgentTrace 复核摘要、Gateway 能力复核摘要、Live Gateway 连接健康摘要、iPad 多栏复核工作台、Gateway 能力快照审计、WebSocket transport 边界、Shortcuts 入口和 smoke 测试。
 
 后续 Codex/Agent 接力开发必须先读 `AGENTS.md`。项目已建立“人工目标 -> Agent A 设计提示词 -> Agent B 在 main 上实现并推送 -> GitHub Actions 云端验证 -> Agent C 下载结果包复判 -> 人工复核 -> 下一轮”的迭代工作流，并准备支持未来由 Agent X 主控多轮调度 A/B/C。核心记忆和规范分布在 `AGENTS.md`、`update_log.md`、`md/test/test.md`、`md/flow/flow.md`、`md/flow/flowchart.md` 和 `md/prompt/`。
 
@@ -36,7 +36,7 @@
 
 这个原型朝 OpenClaw 式电脑智能体迭代：
 
-- 手机端：输入任务、生成计划、用 Mission Run 面板展示当前阶段/下一步/风险/证据、审批高风险动作、查看 envelope 和审计摘要；iPad/宽屏下把命令、Mission Run、计划、Gateway 会话、事件、权限和日志分栏复核。
+- 手机端：输入任务、生成计划、用 Mission Run 面板展示当前阶段/下一步/风险/证据、审批高风险动作、查看 envelope、Live Gateway 连接健康和审计摘要；iPad/宽屏下把命令、Mission Run、计划、Gateway 会话、事件、权限和日志分栏复核。
 - 桌面网关：观察屏幕、控制浏览器、操作桌面 App、管理文件、运行受控 Shell、提取数据，并把事件、artifact 和审批请求推回手机端。
 - 安全策略：token 只保留短 SHA-256 指纹；动作走白名单；敏感动作提升审批；Shell/文件/桌面接管默认需要网关确认。
 - 边界：iOS 普通 App 不能静默控制电脑或读取其他 App 私有数据，电脑接管必须发生在用户授权的桌面/自托管网关。
@@ -63,9 +63,9 @@ App 内置通道：
 Gateway 发送模式：
 
 - `模拟事件流`：本地回放 Gateway 事件，展示 action 结果、artifact、审批点和 retry。
-- `Live Gateway`：准备 WebSocket 请求并发送 envelope，桌面端按 `ClawGatewayEvent` 推流；未配置 endpoint/token 时会安全回退到模拟事件流。
+- `Live Gateway`：准备 WebSocket 请求并发送 envelope，桌面端按 `ClawGatewayEvent` 推流；未配置 endpoint/token 时会安全回退到模拟事件流。手机端会从 live request、连接状态、最新 session 和事件流派生连接健康摘要，展示 preflight、是否可尝试 live、事件数量、最新事件、fallback/error/completed 状态和脱敏 endpoint/token 指纹。
 
-当前桌面 Gateway 原型已有受控工具边界：会校验 token、schema、动作白名单，把 artifact 写入 workspace，并回传事件/file URL 引用。每个 Gateway session 在 `gatewayConnected` 后、任何 action 开始前，都会写入 session 级 `auditLog` artifact `gateway-capability-snapshot.json`，记录 workspace、session workspace、platform、短 token 指纹、envelope `allowedActionKinds`、策略 allowlist 和 Shell/browser/screen/window/desktop/workspace 的 real、dry-run、disabled、unavailable 或 workspace-only 状态；快照 artifact event 会附带安全 metadata，手机端 reducer 会把无 action 绑定的 `artifactStored` 保存为 session-level artifact，Mission Run、Gateway 会话卡片和 iPad 多栏工作台只用 metadata 派生 Gateway 能力复核摘要。快照和 metadata 不包含 raw token、Authorization header、自然语言 instruction、`toolArguments`、网页正文、命令输出、截图内容、草稿正文或完整 workspace path，也不扩大 Gateway 权限，手机端不读取 Gateway `file://` 内容。`controlBrowser` 可从本地 HTML 或受 allowlist 约束的 URL 生成浏览轨迹、链接、标题、表格、表单和候选控件；默认只写入浏览器打开/搜索计划，设置 `CLAW_ALLOW_BROWSER_CONTROL=1`、`CLAW_BROWSER_APP_ALLOWLIST` 和 `CLAW_BROWSER_HOST_ALLOWLIST` 后，可在 macOS 上打开允许的桌面浏览器并跳转到结构化 URL/搜索结果。`extractData` 会消费前序 browser/file/shell/screen artifact 生成结构化结果。`runAgentLoop` 会消费同一 session 内的 artifact context，写出 `agentTrace`：保留 `sourceArtifacts`、`evidenceRows`、`observations`、`nextActions`、`safetyGates` 等旧字段，并新增 `readiness`、`decisionChecklist`、`selectedNextAction`、`riskTags`、`stopReason`、`handoffSummary`，用于解释证据是否充分、缺口在哪、当前推荐下一步和必须停下等待审批的原因；这些字段只从结构化 `toolArguments` 和已有 artifact 推导，不扩大浏览器、Shell、AppleScript 或桌面 App 权限。Gateway 会把 agentTrace 的证据分、缺失信号、下一步、风险标签、停止原因和 handoff 摘要压缩成可选字符串 metadata 随 artifact event 返回；手机端只用这些 metadata 做 Mission Run / Gateway 会话复核，不读取 Gateway `file://` 内容。`manageFiles` 可按 `toolArguments.writePath/writeText` 在 workspace 内真实写文件，路径逃逸会被阻断。Shell 只接受结构化 `toolArguments.shellCommand`，默认 dry-run；必须同时设置 `CLAW_ALLOW_SHELL=1` 和 `CLAW_SHELL_ALLOWLIST` 才会真执行。屏幕观察默认 dry-run，设置 `CLAW_ALLOW_SCREEN_CAPTURE=1` 后可在 macOS 上生成真实截图 artifact。桌面 App 控制默认停在审批闸门，设置 `CLAW_ALLOW_DESKTOP_CONTROL=1`、`CLAW_DESKTOP_APP_ALLOWLIST` 和 `CLAW_DESKTOP_KEY_ALLOWLIST` 后，可在 macOS 上聚焦允许的 App、粘贴结构化草稿、执行允许的非提交快捷键，并在最终提交前回到用户确认。
+当前桌面 Gateway 原型已有受控工具边界：会校验 token、schema、动作白名单，把 artifact 写入 workspace，并回传事件/file URL 引用。每个 Gateway session 在 `gatewayConnected` 后、任何 action 开始前，都会写入 session 级 `auditLog` artifact `gateway-capability-snapshot.json`，记录 workspace、session workspace、platform、短 token 指纹、envelope `allowedActionKinds`、策略 allowlist 和 Shell/browser/screen/window/desktop/workspace 的 real、dry-run、disabled、unavailable 或 workspace-only 状态；快照 artifact event 会附带安全 metadata，手机端 reducer 会把无 action 绑定的 `artifactStored` 保存为 session-level artifact，Mission Run、Gateway 会话卡片和 iPad 多栏工作台只用 metadata 派生 Gateway 能力复核摘要。手机端还会在 Live Gateway request 附近显示连接健康摘要；该摘要只从已存在的 request、connection state、session 和事件派生，不写入 envelope，不读取 `file://` artifact payload，不做自动重连或心跳协议。快照、metadata 和 health 摘要不包含 raw token、Authorization header、自然语言 instruction、`toolArguments`、网页正文、命令输出、截图内容、草稿正文或完整 workspace path，也不扩大 Gateway 权限，手机端不读取 Gateway `file://` 内容。`controlBrowser` 可从本地 HTML 或受 allowlist 约束的 URL 生成浏览轨迹、链接、标题、表格、表单和候选控件；默认只写入浏览器打开/搜索计划，设置 `CLAW_ALLOW_BROWSER_CONTROL=1`、`CLAW_BROWSER_APP_ALLOWLIST` 和 `CLAW_BROWSER_HOST_ALLOWLIST` 后，可在 macOS 上打开允许的桌面浏览器并跳转到结构化 URL/搜索结果。`extractData` 会消费前序 browser/file/shell/screen artifact 生成结构化结果。`runAgentLoop` 会消费同一 session 内的 artifact context，写出 `agentTrace`：保留 `sourceArtifacts`、`evidenceRows`、`observations`、`nextActions`、`safetyGates` 等旧字段，并新增 `readiness`、`decisionChecklist`、`selectedNextAction`、`riskTags`、`stopReason`、`handoffSummary`，用于解释证据是否充分、缺口在哪、当前推荐下一步和必须停下等待审批的原因；这些字段只从结构化 `toolArguments` 和已有 artifact 推导，不扩大浏览器、Shell、AppleScript 或桌面 App 权限。Gateway 会把 agentTrace 的证据分、缺失信号、下一步、风险标签、停止原因和 handoff 摘要压缩成可选字符串 metadata 随 artifact event 返回；手机端只用这些 metadata 做 Mission Run / Gateway 会话复核，不读取 Gateway `file://` 内容。`manageFiles` 可按 `toolArguments.writePath/writeText` 在 workspace 内真实写文件，路径逃逸会被阻断。Shell 只接受结构化 `toolArguments.shellCommand`，默认 dry-run；必须同时设置 `CLAW_ALLOW_SHELL=1` 和 `CLAW_SHELL_ALLOWLIST` 才会真执行。屏幕观察默认 dry-run，设置 `CLAW_ALLOW_SCREEN_CAPTURE=1` 后可在 macOS 上生成真实截图 artifact。桌面 App 控制默认停在审批闸门，设置 `CLAW_ALLOW_DESKTOP_CONTROL=1`、`CLAW_DESKTOP_APP_ALLOWLIST` 和 `CLAW_DESKTOP_KEY_ALLOWLIST` 后，可在 macOS 上聚焦允许的 App、粘贴结构化草稿、执行允许的非提交快捷键，并在最终提交前回到用户确认。
 
 本地启动 Gateway：
 
@@ -138,6 +138,7 @@ node Tools/claw-gateway-smoke.mjs
 
 ## 完成情况
 
+- 2026-07-04：新增 v0.11 Live Gateway 连接健康摘要。手机端从 `ClawGatewayLiveRequest`、连接状态、最新 Gateway session 和事件流派生 health summary，展示 preflight、脱敏 endpoint、transport、短 token 指纹、事件数量、最新事件、fallback/error/completed 和 session 状态；live 非终态事件保持 `streaming`，不降回 `awaitingGateway`。本轮不新增 schema/event/action/artifact kind，不做自动重连，不扩大 Gateway 权限。
 - 2026-07-04：新增 v0.10 手机端 Gateway 能力复核摘要。Gateway capability snapshot artifact 附带安全 metadata；Swift session 保存无 action 绑定的 session-level artifacts，`artifactCount` 和 kind summary 纳入 `auditLog`；Mission Run、Gateway 会话卡片和 iPad 工作台展示 metadata 派生的 Gateway capability review，不读取 `file://` 内容，不新增 schema/action/event/artifact kind，不扩大 Gateway 权限。
 - 2026-07-04：新增 v0.9 Gateway 能力快照 artifact。Gateway 每个 session 会在 `gatewayConnected` 后写入 `gateway-capability-snapshot.json` `auditLog` artifact，用于审计 workspace、platform、短 token 指纹、allowedActionKinds、策略 allowlist 和 real/dry-run/disabled/unavailable/workspace-only 状态；本轮复用既有 `auditLog` artifact kind 和 `artifactStored` event kind，不改变 schema，不新增权限，不写 raw token、自然语言 instruction、`toolArguments` 或动作输出内容。
 - 2026-07-04：新增 v0.8 iPad 多栏复核工作台。电脑接管页在 regular horizontal size class 下使用左右两栏：左侧保留命令输入和 Mission Run 主操作，右侧集中计划、Claw 电脑任务、Gateway 会话、事件/envelope、权限矩阵和执行日志；compact iPhone 布局保持原有单栏。本轮只重排现有展示层，不改变 schema，不新增 action/artifact/event，不读取 Gateway `file://` 内容，不扩展执行权限。

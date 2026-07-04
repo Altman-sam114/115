@@ -22,6 +22,49 @@
 
 ## 历史记录
 
+### v0.11 / Live Gateway 连接健康摘要
+
+日期：2026-07-04
+
+核心变更：
+
+- 新增 `ClawGatewayLiveHealthSummary`，手机端从 `ClawGatewayLiveRequest`、`ClawGatewayConnectionState`、最新 `ClawGatewaySession` 和 session 事件派生 Live Gateway 连接健康摘要。
+- 摘要展示脱敏 endpoint、transport、request path、短 token 指纹、preflight、是否可尝试 live、事件数量、最新事件、fallback/error/completed、session status、重复 `gatewayConnected` 兼容提示和安全 detail line。
+- 修正 live 状态语义：live 模式收到 `.gatewayConnected`、`.actionStarted`、`.artifactStored`、`.actionCompleted`、`.actionFailed`、`.approvalRequested`、`.actionSkipped` 等非终态事件后保持 `streaming`，不再降回 `awaitingGateway`；`.sessionCompleted`、`.fallbackUsed` 和 transport error 仍走既有终态/fallback 路径。
+- Gateway 会话面板在 Live request 附近展示连接健康行，iPad regular 工作台通过复用同一 panel 自动覆盖；UI 不显示 raw token、Authorization header、完整 headers、完整 workspace path、`toolArguments` 或 artifact payload。
+- XCTest 和 Swift logic smoke 覆盖 idle/request/preflight、endpoint 脱敏、缺 token fallback、live progress streaming、completed mock transport、transport error fallback 和敏感内容不泄露。
+- 同步 README、协议、flow 和 flowchart；本轮不新增 schema/action/event/artifact kind，不做自动重连/心跳，不扩大 Gateway 权限。
+
+关键文件：
+
+- `Claw/Core/ClawModels.swift`
+- `Claw/Services/ClawStore.swift`
+- `Claw/Views/ContentView.swift`
+- `ClawTests/ClawTests.swift`
+- `Tools/LogicSmoke.swift`
+- `README.md`
+- `Docs/claw-mobile-gateway-protocol.md`
+- `md/flow/flow.md`
+- `md/flow/flowchart.md`
+- `md/prompt/v0（核心智能能力）/v0.11（LiveGateway连接健康摘要）.md`
+- `update_log.md`
+
+验证结果：
+
+- Swift logic smoke 编译通过。
+- `.build/claw-logic-smoke` 通过，输出 `Claw logic smoke passed`。
+- 无签名 iOS build 通过，输出 `BUILD SUCCEEDED`。
+- `xcodebuild build-for-testing` 通过，输出 `TEST BUILD SUCCEEDED`，确认 `ClawTests` 可编译；本机 CoreSimulator 服务不可用，未执行模拟器 XCTest。
+- `git diff --check` 通过。
+- `ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci-results.yml"); puts "yaml ok"'` 通过，输出 `yaml ok`。
+- `plutil -lint Claw.xcodeproj/project.pbxproj` 通过，输出 `OK`。
+- 本轮未修改 `Tools/*.mjs`，本地未跑 Gateway JS smoke；push `origin/main` 后由 GitHub Actions 覆盖 Gateway direct/WebSocket smoke。
+
+遗留事项：
+
+- push `origin/main` 后仍需等待 GitHub Actions `ci-results` 结果包，供 Agent C 下载并核对 manifest、JUnit/摘要、Gateway direct/WebSocket smoke 日志、Swift logic smoke 和 xcodebuild 日志后复判。
+- 当前是 Live Gateway 连接健康摘要，不是自动重连、心跳协议、配对流程或完整 artifact 内容 viewer；这些仍待后续轮次推进。
+
 ### v0.10 / 手机端 Gateway 能力复核摘要
 
 日期：2026-07-04

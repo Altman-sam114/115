@@ -999,6 +999,8 @@ struct ClawGatewaySessionPanel: View {
                 ClawGatewayLiveRequestCard(request: request)
             }
 
+            ClawGatewayLiveHealthRow(summary: store.gatewayLiveHealthSummary)
+
             if let session = store.clawGatewaySessions.first {
                 ClawGatewaySessionCard(session: session)
 
@@ -1052,12 +1054,12 @@ struct ClawGatewayLiveRequestCard: View {
                     .foregroundStyle(tint)
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(request.endpoint.isEmpty ? "未配置 Gateway" : request.endpoint)
-                        .font(.system(size: 14, weight: .bold))
+                    Text(request.safeEndpointDisplay)
+                        .font(.headline)
                         .lineLimit(1)
                         .minimumScaleFactor(0.75)
                     Text(request.preflightMessage)
-                        .font(.system(size: 12))
+                        .font(.footnote)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -1069,6 +1071,95 @@ struct ClawGatewayLiveRequestCard: View {
                 PhoneAgentTag(text: request.transport, icon: "point.3.connected.trianglepath.dotted", tint: tint)
                 PhoneAgentTag(text: "\(request.actionCount) 动作", icon: "square.stack.3d.forward.dottedline", tint: tint)
                 PhoneAgentTag(text: "\(request.bodyBytes) bytes", icon: "doc.plaintext.fill", tint: tint)
+            }
+        }
+        .panelCard()
+    }
+}
+
+struct ClawGatewayLiveHealthRow: View {
+    let summary: ClawGatewayLiveHealthSummary
+
+    private var tint: Color {
+        if summary.hasError {
+            return .red
+        }
+        if summary.hasFallback {
+            return .orange
+        }
+        if summary.isCompleted {
+            return .green
+        }
+        if summary.connectionState == .streaming {
+            return .purple
+        }
+        return summary.canAttemptLive ? .blue : .secondary
+    }
+
+    private var chips: [(text: String, icon: String, tint: Color)] {
+        var items: [(String, String, Color)] = [
+            (summary.connectionState.title, "antenna.radiowaves.left.and.right", tint),
+            (summary.canAttemptLive ? "可 live" : "预览", summary.canAttemptLive ? "bolt.fill" : "eye.fill", summary.canAttemptLive ? .green : .orange),
+            (summary.transport, "point.3.connected.trianglepath.dotted", .blue),
+            ("\(summary.eventCount) 事件", "number", .purple)
+        ]
+        if let status = summary.sessionStatus {
+            items.append((status.title, "server.rack", tint))
+        }
+        if let sequence = summary.latestEventSequence,
+           let kind = summary.latestEventKind {
+            items.append(("#\(sequence) \(kind.title)", "dot.radiowaves.left.and.right", .purple))
+        }
+        if let fingerprint = summary.tokenFingerprint {
+            items.append((fingerprint, "fingerprint", .secondary))
+        }
+        if summary.hasFallback {
+            items.append(("fallback", "arrow.uturn.backward.circle.fill", .orange))
+        }
+        if summary.hasError {
+            items.append(("需复核", "exclamationmark.triangle.fill", .red))
+        }
+        if summary.isCompleted {
+            items.append(("完成", "checkmark.circle.fill", .green))
+        }
+        if summary.hasDuplicateGatewayConnected {
+            items.append(("双连接事件", "square.stack.3d.up.fill", .orange))
+        }
+        return items
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: summary.hasError ? "waveform.path.ecg.rectangle.fill" : "antenna.radiowaves.left.and.right.circle.fill")
+                    .font(.title3.bold())
+                    .frame(width: 36, height: 36)
+                    .background(tint.opacity(0.12), in: Circle())
+                    .foregroundStyle(tint)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("Live Gateway 健康", systemImage: "heart.text.square.fill")
+                        .font(.subheadline.bold())
+                    Text(summary.compactStatus)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 0)
+            }
+
+            Text(summary.detailLine)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(Array(chips.enumerated()), id: \.offset) { _, chip in
+                        PhoneAgentTag(text: chip.text, icon: chip.icon, tint: chip.tint)
+                    }
+                }
             }
         }
         .panelCard()

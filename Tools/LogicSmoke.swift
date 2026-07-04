@@ -157,6 +157,31 @@ enum LogicSmoke {
         store.sendLatestClawMobileTask()
         expect(store.lastGatewayLiveRequest?.canAttemptLive == false, "live gateway should require a paired token")
         expect(store.gatewayEvents.contains { $0.kind == .fallbackUsed }, "live gateway preflight should fallback when not paired")
+        expect(store.gatewayLiveHealthSummary.hasFallback, "live health should mark fallback")
+        expect(store.gatewayLiveHealthSummary.canAttemptLive == false, "live health should preserve preflight status")
+        expect(store.gatewayLiveHealthSummary.detailLine.contains("Authorization") == false, "live health should not expose headers")
+
+        let liveProgressStore = ClawStore(autoScanLocalArtifacts: false)
+        liveProgressStore.gatewayDispatchMode = .liveGateway
+        liveProgressStore.setGateway(url: "ws://127.0.0.1:18789", token: "paired-secret")
+        liveProgressStore.phoneAgentCommand = "打开浏览器搜索资料"
+        liveProgressStore.generatePhoneAgentPlan()
+        liveProgressStore.queueClawMobileTaskFromCurrentPlan()
+        liveProgressStore.approveLatestClawMobileTask()
+        liveProgressStore.sendLatestClawMobileTask()
+        let liveSession = liveProgressStore.clawGatewaySessions[0]
+        liveProgressStore.ingestGatewayEvents([
+            ClawGatewayEvent(
+                sessionID: liveSession.id,
+                taskID: liveSession.taskID,
+                sequence: 2,
+                kind: .gatewayConnected,
+                summary: "Gateway accepted task from Claw Controller"
+            )
+        ])
+        expect(liveProgressStore.gatewayConnectionState == .streaming, "live progress should keep streaming state")
+        expect(liveProgressStore.gatewayLiveHealthSummary.hasGatewayAck, "live health should mark gateway ack")
+        expect(liveProgressStore.gatewayLiveHealthSummary.eventCount >= 2, "live health should count session events")
 
         let shellPlan = PhoneAgentPlanner.makePlan(
             command: "在项目目录运行测试，失败时导出日志文件",

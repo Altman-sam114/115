@@ -1562,6 +1562,47 @@ struct ClawGatewayLiveRequest: Identifiable, Equatable, Codable, Sendable {
         self.preflightMessage = preflightMessage
         self.createdAt = createdAt
     }
+
+    var safeEndpointDisplay: String {
+        Self.safeEndpointDisplay(endpoint)
+    }
+
+    static func safeEndpointDisplay(_ endpoint: String?) -> String {
+        let trimmed = endpoint?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard trimmed.isEmpty == false else {
+            return "未配置"
+        }
+        if let components = URLComponents(string: trimmed),
+           let scheme = components.scheme,
+           let host = components.host {
+            var display = "\(scheme)://\(host)"
+            if let port = components.port {
+                display += ":\(port)"
+            }
+            let path = components.path.trimmingCharacters(in: .whitespacesAndNewlines)
+            if path.isEmpty == false && path != "/" {
+                display += path
+            }
+            return display
+        }
+
+        var candidate = String(trimmed.split(separator: "?", maxSplits: 1).first ?? "")
+        if let atIndex = candidate.lastIndex(of: "@") {
+            let afterUserInfo = candidate[candidate.index(after: atIndex)...]
+            if let schemeRange = candidate.range(of: "://") {
+                candidate = String(candidate[..<schemeRange.upperBound]) + afterUserInfo
+            } else {
+                candidate = String(afterUserInfo)
+            }
+        }
+        if let schemeRange = candidate.range(of: "://") {
+            let rest = candidate[schemeRange.upperBound...]
+            if let slashIndex = rest.firstIndex(of: "/") {
+                return String(candidate[..<slashIndex])
+            }
+        }
+        return candidate
+    }
 }
 
 enum ClawGatewayEventKind: String, CaseIterable, Codable, Identifiable, Sendable {
@@ -1653,6 +1694,216 @@ struct ClawGatewayEvent: Identifiable, Equatable, Codable, Sendable {
         self.isRetryable = isRetryable
         self.retryCount = retryCount
         self.createdAt = createdAt
+    }
+}
+
+struct ClawGatewayLiveHealthSummary: Equatable, Codable, Sendable {
+    var endpoint: String
+    var transport: String
+    var requestPath: String
+    var tokenFingerprint: String?
+    var preflightMessage: String
+    var canAttemptLive: Bool
+    var connectionState: ClawGatewayConnectionState
+    var sessionStatus: ClawGatewaySessionStatus?
+    var actionCount: Int
+    var bodyBytes: Int
+    var eventCount: Int
+    var latestEventSequence: Int?
+    var latestEventKind: ClawGatewayEventKind?
+    var latestEventAt: Date?
+    var latestEventSummary: String?
+    var hasGatewayAck: Bool
+    var gatewayConnectedCount: Int
+    var hasDuplicateGatewayConnected: Bool
+    var hasFallback: Bool
+    var hasError: Bool
+    var isCompleted: Bool
+    var compactStatus: String
+    var detailLine: String
+
+    static func make(
+        request: ClawGatewayLiveRequest?,
+        connectionState: ClawGatewayConnectionState,
+        events: [ClawGatewayEvent],
+        latestSession: ClawGatewaySession?
+    ) -> ClawGatewayLiveHealthSummary {
+        let endpoint = ClawGatewayLiveRequest.safeEndpointDisplay(request?.endpoint)
+        let preflightMessage = safeSummary(
+            request?.preflightMessage ?? "尚未准备 Live Gateway 请求。",
+            rawEndpoint: request?.endpoint,
+            safeEndpoint: endpoint
+        ) ?? "尚未准备 Live Gateway 请求。"
+        let latestEvent = latestEvent(in: events)
+        let latestEventSummary = safeSummary(
+            latestEvent?.summary,
+            rawEndpoint: request?.endpoint,
+            safeEndpoint: endpoint
+        )
+        let gatewayConnectedCount = events.count { $0.kind == .gatewayConnected }
+        let hasGatewayAck = events.contains(where: isDesktopGatewayAck)
+        let hasFallback = connectionState == .fallbackSimulated || events.contains { $0.kind == .fallbackUsed }
+        let hasError = connectionState == .failed ||
+            latestSession?.status == .blocked ||
+            events.contains { $0.kind == .actionFailed } ||
+            (hasFallback && request?.canAttemptLive == true)
+        let isCompleted = connectionState == .completed || latestSession?.status == .completed
+        let compactStatus = makeCompactStatus(
+            request: request,
+            connectionState: connectionState,
+            eventCount: events.count,
+            hasGatewayAck: hasGatewayAck,
+            gatewayConnectedCount: gatewayConnectedCount,
+            hasFallback: hasFallback,
+            hasError: hasError,
+            isCompleted: isCompleted
+        )
+        let detailLine = makeDetailLine(
+            preflightMessage: preflightMessage,
+            latestEvent: latestEvent,
+            latestEventSummary: latestEventSummary
+        )
+
+        return ClawGatewayLiveHealthSummary(
+            endpoint: endpoint,
+            transport: request?.transport ?? "未选择",
+            requestPath: request?.requestPath ?? "未准备",
+            tokenFingerprint: cleanTokenFingerprint(request?.tokenFingerprint),
+            preflightMessage: preflightMessage,
+            canAttemptLive: request?.canAttemptLive ?? false,
+            connectionState: connectionState,
+            sessionStatus: latestSession?.status,
+            actionCount: request?.actionCount ?? 0,
+            bodyBytes: request?.bodyBytes ?? 0,
+            eventCount: events.count,
+            latestEventSequence: latestEvent?.sequence,
+            latestEventKind: latestEvent?.kind,
+            latestEventAt: latestEvent?.createdAt,
+            latestEventSummary: latestEventSummary,
+            hasGatewayAck: hasGatewayAck,
+            gatewayConnectedCount: gatewayConnectedCount,
+            hasDuplicateGatewayConnected: gatewayConnectedCount > 1,
+            hasFallback: hasFallback,
+            hasError: hasError,
+            isCompleted: isCompleted,
+            compactStatus: compactStatus,
+            detailLine: detailLine
+        )
+    }
+
+    private static func latestEvent(in events: [ClawGatewayEvent]) -> ClawGatewayEvent? {
+        events.max {
+            if $0.createdAt == $1.createdAt {
+                return $0.sequence < $1.sequence
+            }
+            return $0.createdAt < $1.createdAt
+        }
+    }
+
+    private static func safeSummary(
+        _ summary: String?,
+        rawEndpoint: String?,
+        safeEndpoint: String
+    ) -> String? {
+        var value = summary?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard value.isEmpty == false else {
+            return nil
+        }
+        if let rawEndpoint,
+           rawEndpoint.isEmpty == false,
+           rawEndpoint != safeEndpoint {
+            value = value.replacingOccurrences(of: rawEndpoint, with: safeEndpoint)
+        }
+        let replacements: [(String, String)] = [
+            (#"Authorization\s*[:=]\s*\S+"#, "Authorization=<redacted>"),
+            (#"Bearer\s+\S+"#, "Bearer <redacted>"),
+            (#"file://\S+"#, "file://<redacted>"),
+            (#"workspace=[^,\s]+"#, "workspace=<redacted>"),
+            (#"(/Users|/private|/var|/tmp)/[^\s,;]+"#, "<path-redacted>")
+        ]
+        for (pattern, replacement) in replacements {
+            value = value.replacingOccurrences(
+                of: pattern,
+                with: replacement,
+                options: .regularExpression
+            )
+        }
+        return value
+    }
+
+    private static func cleanTokenFingerprint(_ fingerprint: String?) -> String? {
+        let trimmed = fingerprint?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func isDesktopGatewayAck(_ event: ClawGatewayEvent) -> Bool {
+        event.kind == .gatewayConnected &&
+            event.summary.localizedStandardContains("Live Gateway WebSocket") == false
+    }
+
+    private static func makeCompactStatus(
+        request: ClawGatewayLiveRequest?,
+        connectionState: ClawGatewayConnectionState,
+        eventCount: Int,
+        hasGatewayAck: Bool,
+        gatewayConnectedCount: Int,
+        hasFallback: Bool,
+        hasError: Bool,
+        isCompleted: Bool
+    ) -> String {
+        guard request != nil else {
+            return "尚未准备 Live Gateway 请求。"
+        }
+        if hasFallback {
+            return hasError ? "Live Gateway 失败后已回退模拟。" : "Live Gateway 已回退模拟。"
+        }
+        if hasError {
+            return "Live Gateway 事件流需要复核。"
+        }
+        if isCompleted {
+            return "Live Gateway 会话已完成。"
+        }
+        switch connectionState {
+        case .streaming:
+            if hasGatewayAck {
+                return "正在同步桌面 Gateway 事件，已收到 \(eventCount) 条。"
+            }
+            if gatewayConnectedCount > 0 {
+                return "WebSocket 已打开并发送 envelope，等待桌面端事件。"
+            }
+            return "正在同步 Live Gateway 事件。"
+        case .awaitingGateway:
+            return "Live Gateway 请求已准备，等待桌面端接受任务。"
+        case .notConfigured:
+            return "Live Gateway 尚不可用。"
+        case .preparingLiveRequest:
+            return "正在准备 Live Gateway 请求。"
+        case .completed:
+            return "Live Gateway 会话已完成。"
+        case .fallbackSimulated:
+            return "Live Gateway 已回退模拟。"
+        case .failed:
+            return "Live Gateway 连接失败。"
+        case .idle:
+            return "Live Gateway 空闲。"
+        case .simulated:
+            return "当前使用模拟事件流。"
+        }
+    }
+
+    private static func makeDetailLine(
+        preflightMessage: String,
+        latestEvent: ClawGatewayEvent?,
+        latestEventSummary: String?
+    ) -> String {
+        guard let latestEvent else {
+            return "\(preflightMessage) 暂无 Gateway 事件。"
+        }
+        let eventText = "#\(latestEvent.sequence) \(latestEvent.kind.title)"
+        if let latestEventSummary {
+            return "\(preflightMessage) 最新事件 \(eventText)：\(latestEventSummary)"
+        }
+        return "\(preflightMessage) 最新事件 \(eventText)。"
     }
 }
 

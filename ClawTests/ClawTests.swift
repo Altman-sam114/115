@@ -763,6 +763,65 @@ final class ClawTests: XCTestCase {
         XCTAssertTrue(store.gatewayEvents.contains { $0.kind == .fallbackUsed })
         XCTAssertFalse(store.clawGatewaySessions.isEmpty)
         XCTAssertGreaterThan(store.clawGatewaySessions[0].results.count, 0)
+        XCTAssertTrue(store.gatewayLiveHealthSummary.hasFallback)
+        XCTAssertFalse(store.gatewayLiveHealthSummary.canAttemptLive)
+        XCTAssertFalse(store.gatewayLiveHealthSummary.detailLine.contains("Authorization"))
+    }
+
+    func testLiveGatewayHealthSummarySanitizesEndpoint() throws {
+        let store = ClawStore(autoScanLocalArtifacts: false)
+
+        store.setGateway(url: "ws://user:secret@127.0.0.1:18789/live?token=raw#frag", token: "paired-secret")
+        store.phoneAgentCommand = "打开浏览器搜索资料"
+        store.generatePhoneAgentPlan()
+        store.queueClawMobileTaskFromCurrentPlan()
+        let task = try XCTUnwrap(store.clawMobileTasks.first)
+        let request = ClawGatewayLiveClient.makeRequest(
+            task: task,
+            profile: store.clawGatewayProfile,
+            envelopeJSON: store.lastClawMobileEnvelope,
+            rawToken: store.gatewayToken
+        )
+        let summary = ClawGatewayLiveHealthSummary.make(
+            request: request,
+            connectionState: .awaitingGateway,
+            events: [],
+            latestSession: nil
+        )
+
+        XCTAssertEqual(summary.endpoint, "ws://127.0.0.1:18789/live")
+        XCTAssertFalse(summary.endpoint.contains("user"))
+        XCTAssertFalse(summary.endpoint.contains("secret"))
+        XCTAssertFalse(summary.endpoint.contains("token=raw"))
+        XCTAssertEqual(summary.tokenFingerprint, store.clawGatewayProfile.tokenFingerprint)
+    }
+
+    func testLiveGatewayProgressKeepsStreamingState() {
+        let store = ClawStore(autoScanLocalArtifacts: false)
+
+        store.gatewayDispatchMode = .liveGateway
+        store.setGateway(url: "ws://127.0.0.1:18789", token: "paired-secret")
+        store.phoneAgentCommand = "打开浏览器搜索资料"
+        store.generatePhoneAgentPlan()
+        store.queueClawMobileTaskFromCurrentPlan()
+        store.approveLatestClawMobileTask()
+        store.sendLatestClawMobileTask()
+
+        let sessionID = store.clawGatewaySessions[0].id
+        let taskID = store.clawGatewaySessions[0].taskID
+        store.ingestGatewayEvents([
+            ClawGatewayEvent(
+                sessionID: sessionID,
+                taskID: taskID,
+                sequence: 2,
+                kind: .gatewayConnected,
+                summary: "Gateway accepted task from Claw Controller"
+            )
+        ])
+
+        XCTAssertEqual(store.gatewayConnectionState, .streaming)
+        XCTAssertTrue(store.gatewayLiveHealthSummary.hasGatewayAck)
+        XCTAssertEqual(store.gatewayLiveHealthSummary.latestEventKind, .gatewayConnected)
     }
 
     func testLiveGatewayTransportEventsUpdateSession() async {
@@ -779,6 +838,9 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(store.clawMobileTasks[0].status, .sent)
         XCTAssertEqual(store.lastGatewayLiveRequest?.canAttemptLive, true)
         XCTAssertEqual(store.gatewayConnectionState, .completed)
+        XCTAssertTrue(store.gatewayLiveHealthSummary.isCompleted)
+        XCTAssertGreaterThan(store.gatewayLiveHealthSummary.eventCount, 0)
+        XCTAssertEqual(store.gatewayLiveHealthSummary.latestEventKind, .sessionCompleted)
         XCTAssertTrue(store.gatewayEvents.contains { $0.kind == .gatewayConnected })
         XCTAssertTrue(store.gatewayEvents.contains { $0.kind == .artifactStored })
         XCTAssertEqual(store.clawGatewaySessions[0].status, .completed)
@@ -787,6 +849,36 @@ final class ClawTests: XCTestCase {
             result.status == .succeeded &&
             result.artifacts.contains { $0.kind == .browserTrace }
         })
+    }
+
+    func testLiveGatewayTransportErrorFallsBackWithHealthSummary() async {
+        let store = ClawStore(autoScanLocalArtifacts: false)
+
+        store.setGateway(url: "ws://127.0.0.1:18789", token: "paired-secret")
+        store.phoneAgentCommand = "打开浏览器搜索资料"
+        store.generatePhoneAgentPlan()
+        store.queueClawMobileTaskFromCurrentPlan()
+        store.approveLatestClawMobileTask()
+
+        await store.sendLatestClawMobileTaskOverLiveGateway(transport: FailingClawGatewayTransport())
+
+        XCTAssertEqual(store.gatewayConnectionState, .completed)
+        XCTAssertTrue(store.gatewayLiveHealthSummary.hasFallback)
+        XCTAssertTrue(store.gatewayLiveHealthSummary.hasError)
+        XCTAssertFalse(store.gatewayLiveHealthSummary.detailLine.contains("paired-secret"))
+        XCTAssertFalse(store.gatewayLiveHealthSummary.detailLine.contains("Authorization"))
+    }
+
+    func testLiveGatewayHealthSummaryFallsBackWhenNoRequestExists() {
+        let store = ClawStore(autoScanLocalArtifacts: false)
+
+        let summary = store.gatewayLiveHealthSummary
+
+        XCTAssertEqual(summary.endpoint, "未配置")
+        XCTAssertEqual(summary.connectionState, .idle)
+        XCTAssertFalse(summary.canAttemptLive)
+        XCTAssertEqual(summary.eventCount, 0)
+        XCTAssertTrue(summary.compactStatus.contains("尚未准备"))
     }
 
     func testClawMobileBlockedIOSActionCannotBeApproved() {
@@ -829,6 +921,19 @@ private struct MockClawGatewayTransport: ClawGatewayTransport {
                 continuation.yield(event)
             }
             continuation.finish()
+        }
+    }
+}
+
+private struct FailingClawGatewayTransport: ClawGatewayTransport {
+    func streamEvents(
+        request: ClawGatewayLiveRequest,
+        envelopeJSON: String,
+        sessionID: UUID,
+        taskID: UUID
+    ) -> AsyncThrowingStream<ClawGatewayEvent, Error> {
+        AsyncThrowingStream { continuation in
+            continuation.finish(throwing: ClawGatewayTransportError.invalidEndpoint("ws://redacted"))
         }
     }
 }

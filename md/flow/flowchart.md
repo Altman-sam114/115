@@ -17,6 +17,7 @@ flowchart TD
   E --> M{"发送模式<br/>simulatedEventStream 或 liveGateway"}
   M --> SIM["模拟事件流<br/>ClawGatewayEventStream.simulatedEvents"]
   M --> LIVE["WebSocket Live Gateway<br/>URLSessionClawGatewayTransport"]
+  LIVE --> LREQ["ClawGatewayLiveRequest<br/>preflight、脱敏 endpoint、transport、token 指纹"]
   LIVE --> G["Tools/claw-gateway-server.mjs<br/>校验 token、schema、allowlist、workspace"]
   G --> SNAP["gateway-capability-snapshot.json<br/>session-start auditLog 能力快照"]
   SNAP --> SMETA["capability snapshot metadata<br/>token 指纹、allowlist、capability 状态、safety flags"]
@@ -33,7 +34,11 @@ flowchart TD
   SMETA --> R
   META --> R
   R --> SES["ClawGatewaySession<br/>results、sessionArtifacts、auditTrail、retryable"]
-  SES --> RUN["ClawMissionRunSummary<br/>派生目标、阶段、主动作、风险、证据、Gateway 能力复核和 AgentTrace 复核"]
+  LREQ --> LHEALTH["ClawGatewayLiveHealthSummary<br/>连接状态、事件数量、最新事件、fallback/error/completed"]
+  R --> LHEALTH
+  SES --> LHEALTH
+  LHEALTH --> RUN["ClawMissionRunSummary<br/>派生目标、阶段、主动作、风险、证据、Live health、Gateway 能力复核和 AgentTrace 复核"]
+  SES --> RUN
   RUN --> UI["SwiftUI Mission Run / iPad 多栏工作台<br/>展示计划、风险、事件、artifact、审批点、复核摘要"]
   UI --> LOOP{"用户审批或继续循环"}
   LOOP -->|"批准发送/重试"| M
