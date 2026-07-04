@@ -20,9 +20,13 @@ flowchart TD
   LIVE --> LREQ["ClawGatewayLiveRequest<br/>preflight、脱敏 endpoint、transport、token 指纹"]
   LREQ --> RETRY["bounded retry + ping observe<br/>attempt、reconnect、ping、transport error"]
   RETRY --> G["Tools/claw-gateway-server.mjs<br/>校验 token、schema、allowlist、workspace"]
-  G --> SNAP["gateway-capability-snapshot.json<br/>session-start auditLog 能力快照"]
+  G --> RPLAY{"task replay guard<br/>同一进程内 task.id 是否已接受"}
+  RPLAY -->|"重复"| RAUD["task-replay-guard.json<br/>session-level auditLog"]
+  RAUD --> RSKIP["actionSkipped<br/>不重新执行 handler、不写业务 artifact"]
+  RSKIP --> EVT
+  RPLAY -->|"首次"| SNAP["gateway-capability-snapshot.json<br/>session-start auditLog 能力快照"]
   SNAP --> SMETA["capability snapshot metadata<br/>token 指纹、allowlist、capability 状态、safety flags"]
-  G --> H["Gateway action handlers<br/>屏幕、浏览器、文件、Shell、提取、桌面 App、agent loop"]
+  RPLAY -->|"首次"| H["Gateway action handlers<br/>屏幕、浏览器、文件、Shell、提取、桌面 App、agent loop"]
   H --> ART["Artifacts<br/>screenshot、browserTrace、fileDiff、commandOutput、agentTrace 证据策略"]
   SNAP --> SART["sessionArtifacts<br/>无 action 绑定的 session 级 artifact"]
   ART --> META["agentTrace artifact metadata<br/>证据分、缺口、下一步、风险、停止原因"]
@@ -54,8 +58,13 @@ flowchart TD
 ```mermaid
 flowchart TD
   ENV["ClawMobileEnvelope<br/>来自 iOS 控制台"] --> VAL["validateEnvelope<br/>校验 schema、token 指纹、task actions"]
-  VAL --> SNAP["session-start auditLog<br/>gateway-capability-snapshot.json<br/>workspace、platform、token 指纹、allowlist、capability 状态、安全 metadata"]
-  VAL --> POL["actionPolicy<br/>检查 approval 和 allowedActionKinds"]
+  VAL --> REPLAY{"taskReplayGuard<br/>同一 Gateway 进程内是否重复 task.id"}
+  REPLAY -->|"重复"| RG["task-replay-guard.json<br/>auditLog 脱敏摘要"]
+  RG --> RGS["actionSkipped<br/>跳过所有 action handler"]
+  RG --> SOUT
+  RGS --> OUT
+  REPLAY -->|"首次"| SNAP["session-start auditLog<br/>gateway-capability-snapshot.json<br/>workspace、platform、token 指纹、allowlist、capability 状态、安全 metadata"]
+  REPLAY -->|"首次"| POL["actionPolicy<br/>检查 approval 和 allowedActionKinds"]
   POL -->|不允许| SKIP["actionSkipped<br/>写 auditLog 说明原因"]
   POL -->|允许| KIND{"action.kind"}
   KIND --> OBS["observeScreen<br/>dry-run 或 macOS 截图/窗口元数据"]

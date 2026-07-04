@@ -95,6 +95,26 @@ expect(desktopDryRun?.blockedKeys?.some((item) => item.key === "return" && item.
 const axTrees = await readArtifacts(dryRunEvents, "accessibilityTree");
 expect(axTrees.some((tree) => tree.includeAccessibilityTree === true && tree.maxCandidateControls === 12), "missing accessibility tree metadata");
 
+const replayEvents = await runEmitEvents(
+  {
+    CLAW_GATEWAY_TOKEN: token,
+    CLAW_WORKSPACE: `${workspace}-replay`,
+  },
+  [envelope, envelope],
+);
+const replayGroups = groupEventsBySession(replayEvents);
+expect(replayGroups.length === 2, "direct replay guard should create exactly two sessions");
+const replayGuardEvents = replayGroups.find((group) => group.some((event) => event.artifacts?.some(isTaskReplayGuardArtifact)));
+expect(Boolean(replayGuardEvents), "direct replay guard session missing audit artifact");
+const firstReplayEvents = replayGroups.find((group) => group !== replayGuardEvents);
+expect(firstReplayEvents?.some((event) => hasArtifact(event, "browserTrace")), "direct replay first session should still run browser trace");
+expect(
+  replayEvents.filter((event) => event.kind === "actionStarted").length === envelope.task.actions.length,
+  "direct replay guard should not duplicate actionStarted events",
+);
+await assertTaskReplayGuard(replayGuardEvents, envelope.task.actions.length, "direct replay guard");
+await assertArtifactsExist(replayEvents);
+
 const allowlistEvents = await runEmitEvents({
   CLAW_GATEWAY_TOKEN: token,
   CLAW_WORKSPACE: `${workspace}-allowlist`,
@@ -156,9 +176,9 @@ expect(
   "browser control snapshot should be real on macOS or unavailable off macOS",
 );
 
-console.log(`Claw Gateway direct smoke passed (${dryRunEvents.length + allowlistEvents.length + desktopPolicyEvents.length + browserPolicyEvents.length} events)`);
+console.log(`Claw Gateway direct smoke passed (${dryRunEvents.length + replayEvents.length + allowlistEvents.length + desktopPolicyEvents.length + browserPolicyEvents.length} events)`);
 
-async function runEmitEvents(env) {
+async function runEmitEvents(env, input = envelope) {
   const child = spawn(
     process.execPath,
     ["Tools/claw-gateway-server.mjs", "--emit-events"],
@@ -181,7 +201,7 @@ async function runEmitEvents(env) {
     stderr += chunk.toString("utf8");
   });
 
-  child.stdin.end(JSON.stringify(envelope));
+  child.stdin.end(JSON.stringify(input));
 
   const exitCode = await new Promise((resolve) => {
     child.on("close", resolve);
@@ -196,6 +216,16 @@ async function runEmitEvents(env) {
     .split("\n")
     .filter(Boolean)
     .map((line) => JSON.parse(line));
+}
+
+function groupEventsBySession(events) {
+  const groups = new Map();
+  for (const event of events) {
+    const group = groups.get(event.sessionID) || [];
+    group.push(event);
+    groups.set(event.sessionID, group);
+  }
+  return [...groups.values()];
 }
 
 function gatewayPolicyDefaults() {
@@ -246,6 +276,104 @@ function findArtifact(events, kind) {
   return events
     .flatMap((event) => event.artifacts || [])
     .find((artifact) => artifact.kind === kind);
+}
+
+async function assertTaskReplayGuard(events, expectedActionCount, label) {
+  expect(Array.isArray(events) && events.length > 0, `${label} missing events`);
+  const allowedEventKinds = new Set(["gatewayConnected", "artifactStored", "actionSkipped", "sessionCompleted"]);
+  expect(events.every((event) => allowedEventKinds.has(event.kind)), `${label} emitted unexpected event kind`);
+  expect(!events.some((event) => event.kind === "actionStarted"), `${label} should not start actions`);
+  const skippedEvents = events.filter((event) => event.kind === "actionSkipped");
+  expect(skippedEvents.length === expectedActionCount, `${label} actionSkipped count mismatch`);
+  for (const skipped of skippedEvents) {
+    const action = envelope.task.actions.find((candidate) => candidate.id === skipped.actionID);
+    expect(Boolean(action), `${label} actionSkipped should keep action id`);
+    expect(skipped.actionKind === action.kind, `${label} actionSkipped should keep action kind`);
+    expect(skipped.actionTitle === action.title, `${label} actionSkipped should keep action title`);
+    expect(skipped.resultStatus === "skipped", `${label} actionSkipped should be skipped`);
+    expect(skipped.isRetryable === false, `${label} actionSkipped should not be retryable`);
+  }
+  const businessKinds = new Set([
+    "accessibilityTree",
+    "agentTrace",
+    "browserTrace",
+    "commandOutput",
+    "fileDiff",
+    "messageDraft",
+    "screenshot",
+  ]);
+  const artifacts = events.flatMap((event) => event.artifacts || []);
+  expect(!artifacts.some((artifact) => businessKinds.has(artifact.kind)), `${label} wrote business artifact`);
+  const replayArtifact = artifacts.find(isTaskReplayGuardArtifact);
+  expect(Boolean(replayArtifact), `${label} missing replay audit artifact`);
+  expect(replayArtifact.isRedacted === true, `${label} replay audit should be redacted`);
+  const audit = JSON.parse(await fs.readFile(new URL(replayArtifact.reference), "utf8"));
+  assertTaskReplayGuardMetadata(replayArtifact.metadata, audit, label);
+  expect(audit.mode === "gateway-task-replay-guard", `${label} audit mode mismatch`);
+  expect(audit.decision === "skip-duplicate-task", `${label} audit decision mismatch`);
+  expect(audit.task?.id === envelope.task.id, `${label} task id mismatch`);
+  expect(audit.task?.actionCount === expectedActionCount, `${label} action count mismatch`);
+  expect(audit.replay?.count === 1, `${label} replay count mismatch`);
+  expect(audit.safety?.businessArtifacts === "not-written", `${label} should not write business artifacts`);
+  expect(audit.safety?.handlerExecution === "blocked", `${label} should block handler execution`);
+  const serialized = JSON.stringify({ audit, metadata: replayArtifact.metadata });
+  for (const forbidden of [
+    token,
+    "Authorization",
+    "Bearer",
+    "toolArguments",
+    "shellCommand",
+    "Open a page and extract structured data",
+    "Smoke Page",
+    "workspace write verified",
+    "targetApp",
+    "pasteText",
+    "/sessions/",
+  ]) {
+    expect(!serialized.includes(forbidden), `${label} leaked ${forbidden}`);
+  }
+}
+
+function isTaskReplayGuardArtifact(artifact) {
+  return artifact.kind === "auditLog" && artifact.title === "task-replay-guard.json" && artifact.reference?.startsWith("file://");
+}
+
+function assertTaskReplayGuardMetadata(metadata, audit, label) {
+  expect(metadata && typeof metadata === "object", `${label} missing metadata`);
+  const allowedKeys = [
+    "actionCount",
+    "actionKinds",
+    "decision",
+    "digestMatchesFirst",
+    "firstSessionID",
+    "originalStatus",
+    "replayCount",
+    "replayDigest",
+    "replayGuard",
+    "safetyFlags",
+    "taskID",
+  ];
+  expect(
+    Object.keys(metadata).sort().join(",") === allowedKeys.join(","),
+    `${label} metadata includes unexpected keys`,
+  );
+  for (const [key, value] of Object.entries(metadata)) {
+    expect(typeof value === "string", `${label} metadata ${key} should be a string`);
+  }
+  expect(metadata.replayGuard === "taskReplayGuard", `${label} replayGuard metadata mismatch`);
+  expect(metadata.decision === audit.decision, `${label} decision metadata mismatch`);
+  expect(metadata.taskID === audit.task.id, `${label} task metadata mismatch`);
+  expect(metadata.replayDigest === audit.task.replayDigest, `${label} digest metadata mismatch`);
+  expect(metadata.digestMatchesFirst === String(audit.task.digestMatchesFirst), `${label} digest match metadata mismatch`);
+  expect(metadata.firstSessionID === audit.sessions.firstSessionID, `${label} first session metadata mismatch`);
+  expect(metadata.originalStatus === audit.firstRun.status, `${label} status metadata mismatch`);
+  expect(metadata.replayCount === String(audit.replay.count), `${label} replay count metadata mismatch`);
+  expect(metadata.actionCount === String(audit.task.actionCount), `${label} action count metadata mismatch`);
+  expect(metadata.actionKinds === audit.task.actionKinds.join(","), `${label} action kinds metadata mismatch`);
+  expect(
+    metadata.safetyFlags === "process-local,actions-skipped,business-artifacts-not-written,credentials-omitted,structured-arguments-omitted",
+    `${label} safety flags metadata mismatch`,
+  );
 }
 
 async function assertCapabilitySnapshot(events, expected = {}) {

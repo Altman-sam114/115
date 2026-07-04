@@ -18,6 +18,7 @@ Claw 的当前主链路是：用户在 iPhone 输入电脑任务，App 生成可
   -> 模拟事件流或 WebSocket live Gateway
   -> ClawGatewayLiveRequest + ClawGatewayConnectionState 记录 preflight 和连接阶段
   -> URLSessionClawGatewayTransport 有界重连 + ping 可观测性
+  -> Gateway process-local task replay guard 防止同一 task.id 重复执行 handler
   -> Gateway session-start capability snapshot auditLog + 安全 metadata
   -> ClawGatewayEvent
   -> ClawGatewayEventStream.apply
@@ -78,11 +79,12 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
    - `simulatedEventStream`：本地生成 `ClawGatewayEvent`。
    - `liveGateway`：准备 WebSocket 请求，endpoint/token 不满足时回退模拟流；客户端默认最多重试 1 次并做一次 ping 观测，从 request、connection state、session、事件和 transport 诊断派生 Live Gateway 连接健康摘要。
 7. 桌面 Gateway 原型 `Tools/claw-gateway-server.mjs` 校验 schema、token、动作白名单和策略。
-8. Gateway 在 `gatewayConnected` 后写入 session 级 `gateway-capability-snapshot.json` `auditLog` artifact，记录 workspace、platform、短 token 指纹、envelope allowlist、策略 allowlist 和 capability 状态，并在 artifact event metadata 上附安全字符串摘要。
-9. Gateway action handler 写 artifact 并返回状态：成功、失败、等待审批、跳过。
-10. 手机端 reducer 用事件更新 session；无 action 绑定的 `artifactStored` 进入 `sessionArtifacts` 和 auditTrail，action-bound artifact 保持 result 合并逻辑。
-11. UI 显示结果、artifact、审批点、retry 状态、Live Gateway 连接健康摘要、Gateway 能力复核摘要和 AgentTrace 复核摘要。
-12. `ClawAutonomousLoopState` 记录计划、审批、发送、观察、重试等自动循环状态。
+8. Gateway 先查进程内 task replay guard：同一 `task.id` 已被接受过时，只写 `task-replay-guard.json` `auditLog`、逐个 action 返回 `actionSkipped` 并结束 session，不调用 action handler。
+9. 正常路径在 `gatewayConnected` 后写入 session 级 `gateway-capability-snapshot.json` `auditLog` artifact，记录 workspace、platform、短 token 指纹、envelope allowlist、策略 allowlist 和 capability 状态，并在 artifact event metadata 上附安全字符串摘要。
+10. Gateway action handler 写 artifact 并返回状态：成功、失败、等待审批、跳过。
+11. 手机端 reducer 用事件更新 session；无 action 绑定的 `artifactStored` 进入 `sessionArtifacts` 和 auditTrail，action-bound artifact 保持 result 合并逻辑。
+12. UI 显示结果、artifact、审批点、retry 状态、Live Gateway 连接健康摘要、Gateway 能力复核摘要和 AgentTrace 复核摘要。
+13. `ClawAutonomousLoopState` 记录计划、审批、发送、观察、重试等自动循环状态。
 
 ## 4. 核心模块
 
@@ -190,6 +192,7 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 
 - 通过 WebSocket 或 `--emit-events` 接收 envelope。
 - 校验 schema、token、动作白名单。
+- 对同一 Gateway 进程内重复提交的 `task.id` 启用 replay guard：写 `task-replay-guard.json` `auditLog`，返回 `actionSkipped`，不重新执行 handler 或写业务 artifact。
 - 在 session 开始后写入 `gateway-capability-snapshot.json` `auditLog`，并附安全 metadata，说明当前 Gateway 是 real、dry-run、disabled、unavailable 还是 workspace-only。
 - 处理 action 并写入 workspace artifact。
 
@@ -204,6 +207,7 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 - `runAgentLoop`：基于 session artifacts 生成观察-规划-动作建议-验证 `agentTrace`，并在 artifact 内部记录 readiness、decisionChecklist、selectedNextAction、riskTags、stopReason 和 handoffSummary，同时把证据分、缺失信号、下一步、风险、停止原因和 handoff 摘要压缩成 artifact event 上的可选字符串 metadata 供手机端复核。
 - `composeMessage`/`composeEmail`：生成待确认草稿。
 - session-start `auditLog`：`gateway-capability-snapshot.json`，只记录 workspace、session workspace、platform、短 token 指纹、allowedActionKinds、策略 allowlist 和 capability 状态，并把 `snapshotKind`、token 配置/指纹、allowlist、capability state、safety flags 和 platform 压缩成 artifact event metadata；不记录 raw token、Authorization header、自然语言 instruction、`toolArguments`、网页正文、命令输出、截图内容、草稿正文、联系人或完整 workspace path。
+- replay guard `auditLog`：`task-replay-guard.json`，只记录 task id、短 digest、首次 session id、原始状态、replay count、action count/kinds 和安全标志；不记录 raw token、Authorization header、自然语言 instruction、`toolArguments`、业务 artifact payload 或完整 workspace path。该防护只在当前 Gateway 进程生命周期内有效，不是跨重启持久化 exactly-once。
 
 禁止：
 
@@ -211,6 +215,7 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 - 路径逃逸到 workspace 外。
 - 未经 app/key/host allowlist 控制浏览器或桌面 App。
 - 用 `agentTrace` 的下一步建议绕过结构化 `toolArguments`、allowlist 或最终提交审批。
+- 把 replay guard 描述成跨进程、跨重启或分布式 exactly-once，或在 replay path 调用 action handler。
 
 ### 4.6 GitHub Actions CI Results
 

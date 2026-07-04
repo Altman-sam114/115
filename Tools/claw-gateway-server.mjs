@@ -8,6 +8,7 @@ import { spawn } from "node:child_process";
 
 const DEFAULT_PORT = 18789;
 const SCHEMA_VERSION = "claw.computer.control.v1";
+const TASK_REPLAY_CACHE_LIMIT = 128;
 
 function printHelp() {
   console.log(`usage: node Tools/claw-gateway-server.mjs [--once]
@@ -71,13 +72,18 @@ const options = {
   desktopKeyAllowlist: parseAllowlist(
     process.env.CLAW_DESKTOP_KEY_ALLOWLIST || "tab,escape,esc,command+k,command+l,command+t,command+a,command+f,command+c",
   ),
+  taskReplayCache: new Map(),
+  taskReplayCacheLimit: TASK_REPLAY_CACHE_LIMIT,
 };
 
 if (process.argv.includes("--emit-events")) {
-  const envelope = JSON.parse(await readEnvelopeInput());
-  const events = await makeGatewayEvents(envelope, options);
-  for (const event of events) {
-    console.log(JSON.stringify(event));
+  const input = JSON.parse(await readEnvelopeInput());
+  const envelopes = Array.isArray(input) ? input : [input];
+  for (const envelope of envelopes) {
+    const events = await makeGatewayEvents(envelope, options);
+    for (const event of events) {
+      console.log(JSON.stringify(event));
+    }
   }
   process.exit(0);
 }
@@ -322,20 +328,37 @@ function encodeFrame(payload, opcode) {
 
 async function makeGatewayEvents(envelope, config) {
   validateEnvelope(envelope, config);
-  const sessionID = crypto.randomUUID();
+  const replayKey = taskReplayKey(envelope);
+  const cache = config.taskReplayCache;
+  if (!cache) {
+    return buildGatewayEvents(envelope, config);
+  }
+
+  const existingRecord = cache.get(replayKey);
+  if (existingRecord) {
+    return makeTaskReplayGuardEvents(envelope, config, existingRecord);
+  }
+
+  const firstSessionID = crypto.randomUUID();
+  const replayRecord = makeTaskReplayRecord(envelope, replayKey, firstSessionID);
+  cache.set(replayKey, replayRecord);
+  pruneTaskReplayCache(cache, config.taskReplayCacheLimit || TASK_REPLAY_CACHE_LIMIT);
+
+  try {
+    const events = await buildGatewayEvents(envelope, config, firstSessionID);
+    markTaskReplayCompleted(replayRecord, events);
+    return events;
+  } catch (error) {
+    markTaskReplayFailed(replayRecord, error);
+    throw error;
+  }
+}
+
+async function buildGatewayEvents(envelope, config, sessionID = crypto.randomUUID()) {
   const task = envelope.task;
   const sessionWorkspace = path.join(config.workspace, "sessions", sessionID);
   await fs.mkdir(sessionWorkspace, { recursive: true });
-  const sessionContext = {
-    artifacts: [],
-    browserTraces: [],
-    screenObservations: [],
-    accessibilityTrees: [],
-    fileDiffs: [],
-    commandOutputs: [],
-    messageDrafts: [],
-    agentTraces: [],
-  };
+  const sessionContext = makeSessionContext();
   let sequence = 0;
   const events = [
     event({
@@ -422,12 +445,232 @@ async function makeGatewayEvents(envelope, config) {
   return events;
 }
 
+async function makeTaskReplayGuardEvents(envelope, config, record) {
+  record.replayCount += 1;
+  record.lastReplayAt = isoNow();
+  const sessionID = crypto.randomUUID();
+  const task = envelope.task;
+  const sessionWorkspace = path.join(config.workspace, "sessions", sessionID);
+  await fs.mkdir(sessionWorkspace, { recursive: true });
+  const sessionConfig = {
+    ...config,
+    sessionWorkspace,
+    sessionContext: makeSessionContext(),
+  };
+  let sequence = 0;
+  const events = [
+    event({
+      sessionID,
+      taskID: task.id,
+      sequence: sequence++,
+      kind: "gatewayConnected",
+      summary: `Gateway replay guard recognized duplicate task; firstSession=${record.firstSessionID} status=${record.status}`,
+    }),
+  ];
+
+  const audit = taskReplayGuardAudit(envelope, record, sessionID);
+  const replayArtifact = await writeArtifact(
+    "auditLog",
+    "task-replay-guard.json",
+    audit,
+    true,
+    sessionConfig,
+    taskReplayGuardMetadata(audit),
+  );
+  events.push(
+    event({
+      sessionID,
+      taskID: task.id,
+      sequence: sequence++,
+      kind: "artifactStored",
+      artifacts: [replayArtifact],
+      summary: "Stored Gateway task replay guard audit artifact",
+    }),
+  );
+
+  for (const action of task.actions) {
+    events.push(
+      event({
+        sessionID,
+        taskID: task.id,
+        sequence: sequence++,
+        kind: "actionSkipped",
+        action,
+        resultStatus: "skipped",
+        summary: `${action.title} skipped by Gateway replay guard; first session ${record.firstSessionID} already accepted this task`,
+      }),
+    );
+  }
+
+  events.push(
+    event({
+      sessionID,
+      taskID: task.id,
+      sequence,
+      kind: "sessionCompleted",
+      summary: "Gateway replay guard completed without re-running actions",
+    }),
+  );
+  return events;
+}
+
+function makeSessionContext() {
+  return {
+    artifacts: [],
+    browserTraces: [],
+    screenObservations: [],
+    accessibilityTrees: [],
+    fileDiffs: [],
+    commandOutputs: [],
+    messageDrafts: [],
+    agentTraces: [],
+  };
+}
+
+function taskReplayKey(envelope) {
+  return `task:${hashJSON({
+    schemaVersion: envelope.schemaVersion,
+    taskID: envelope.task.id,
+    tokenFingerprint: envelope.gateway?.tokenFingerprint || "",
+  })}`;
+}
+
+function taskReplayDigest(envelope) {
+  return `sha256:${hashJSON({
+    schemaVersion: envelope.schemaVersion,
+    taskID: envelope.task.id,
+    tokenFingerprint: envelope.gateway?.tokenFingerprint || "",
+    actionRefs: sortedStrings(envelope.task.actions.map((action) => `${action?.id || ""}:${action?.kind || ""}`)),
+  }).slice(0, 16)}`;
+}
+
+function hashJSON(value) {
+  return crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+function makeTaskReplayRecord(envelope, replayKey, firstSessionID) {
+  const actionKinds = sortedStrings(envelope.task.actions.map((action) => action?.kind).filter(Boolean));
+  return {
+    replayKey,
+    taskID: envelope.task.id,
+    taskDigest: taskReplayDigest(envelope),
+    firstSessionID,
+    firstSeenAt: isoNow(),
+    completedAt: "",
+    failedAt: "",
+    lastReplayAt: "",
+    replayCount: 0,
+    status: "running",
+    actionCount: envelope.task.actions.length,
+    actionKinds,
+    eventCount: 0,
+    finalSequence: null,
+    finalEventKind: "",
+    failureCode: "",
+  };
+}
+
+function markTaskReplayCompleted(record, events) {
+  const finalEvent = events.at(-1);
+  record.status = "completed";
+  record.completedAt = isoNow();
+  record.eventCount = events.length;
+  record.finalSequence = finalEvent?.sequence ?? null;
+  record.finalEventKind = finalEvent?.kind || "";
+}
+
+function markTaskReplayFailed(record, error) {
+  record.status = "failed";
+  record.failedAt = isoNow();
+  record.failureCode = error instanceof GatewayError ? error.code : "internal_error";
+}
+
+function pruneTaskReplayCache(cache, limit) {
+  while (cache.size > limit) {
+    const oldestKey = cache.keys().next().value;
+    if (!oldestKey) {
+      return;
+    }
+    cache.delete(oldestKey);
+  }
+}
+
+function taskReplayGuardAudit(envelope, record, replaySessionID) {
+  const replayDigest = taskReplayDigest(envelope);
+  return {
+    mode: "gateway-task-replay-guard",
+    createdAt: isoNow(),
+    decision: "skip-duplicate-task",
+    reason: "task id was already accepted by this Gateway process",
+    task: {
+      id: record.taskID,
+      replayDigest,
+      digestMatchesFirst: replayDigest === record.taskDigest,
+      actionCount: envelope.task.actions.length,
+      actionKinds: sortedStrings(envelope.task.actions.map((action) => action?.kind).filter(Boolean)),
+    },
+    sessions: {
+      firstSessionID: record.firstSessionID,
+      replaySessionID,
+    },
+    firstRun: {
+      status: record.status,
+      firstSeenAt: record.firstSeenAt,
+      completedAt: record.completedAt,
+      failedAt: record.failedAt,
+      eventCount: record.eventCount,
+      finalSequence: record.finalSequence,
+      finalEventKind: record.finalEventKind,
+      failureCode: record.failureCode,
+    },
+    replay: {
+      count: record.replayCount,
+      replayedAt: record.lastReplayAt,
+    },
+    safety: {
+      rawCredential: "omitted",
+      authorization: "omitted",
+      naturalLanguage: "omitted",
+      structuredArguments: "omitted",
+      actionPayloads: "omitted",
+      workspacePaths: "omitted",
+      businessArtifacts: "not-written",
+      handlerExecution: "blocked",
+    },
+  };
+}
+
+function taskReplayGuardMetadata(audit) {
+  return compactMetadata({
+    replayGuard: "taskReplayGuard",
+    decision: audit.decision,
+    taskID: audit.task?.id,
+    replayDigest: audit.task?.replayDigest,
+    digestMatchesFirst: audit.task?.digestMatchesFirst,
+    firstSessionID: audit.sessions?.firstSessionID,
+    originalStatus: audit.firstRun?.status,
+    replayCount: audit.replay?.count,
+    actionCount: audit.task?.actionCount,
+    actionKinds: audit.task?.actionKinds,
+    safetyFlags: [
+      "process-local",
+      "actions-skipped",
+      "business-artifacts-not-written",
+      "credentials-omitted",
+      "structured-arguments-omitted",
+    ],
+  });
+}
+
 function validateEnvelope(envelope, config) {
   if (envelope.schemaVersion !== SCHEMA_VERSION) {
     throw new GatewayError(400, "unsupported_schema");
   }
   if (!envelope.task || !Array.isArray(envelope.task.actions)) {
     throw new GatewayError(400, "invalid_task");
+  }
+  if (typeof envelope.task.id !== "string" || envelope.task.id.trim().length === 0) {
+    throw new GatewayError(400, "invalid_task_id");
   }
   if (config.token) {
     const expected = tokenFingerprint(config.token);

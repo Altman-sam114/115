@@ -107,15 +107,71 @@ expect(agentTrace?.riskTags?.includes("approval-required"), "websocket agent loo
 expect(agentTrace?.riskTags?.includes("final-submit-gate") || agentTrace?.stopReason === "final-submit", "websocket agent loop should stop before final delivery");
 expect(typeof agentTrace?.handoffSummary === "string" && agentTrace.handoffSummary.includes(agentTrace.selectedNextAction.kind), "websocket agent loop handoff summary should name selected action");
 
-console.log(`Claw Gateway smoke passed (${events.length} events)`);
+const replayPort = port + 1;
+const replayServer = spawn(
+  process.execPath,
+  ["Tools/claw-gateway-server.mjs"],
+  {
+    env: {
+      ...process.env,
+      ...gatewayPolicyDefaults(),
+      CLAW_GATEWAY_HOST: host,
+      CLAW_GATEWAY_PORT: String(replayPort),
+      CLAW_GATEWAY_TOKEN: token,
+      CLAW_WORKSPACE: ".build/claw-gateway-websocket-replay",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  },
+);
 
-function makeEnvelope(rawToken) {
+let replayServerOutput = "";
+replayServer.stdout.on("data", (chunk) => {
+  replayServerOutput += chunk.toString("utf8");
+});
+replayServer.stderr.on("data", (chunk) => {
+  replayServerOutput += chunk.toString("utf8");
+});
+
+await waitFor(
+  () => replayServerOutput.includes("Claw Gateway listening"),
+  3000,
+  () => replayServerOutput,
+);
+
+const replayEnvelope = makeEnvelope(token, replayPort);
+let firstReplayEvents = [];
+let replayGuardEvents = [];
+try {
+  firstReplayEvents = await connectAndCollectEvents({
+    host,
+    port: replayPort,
+    token,
+    envelope: replayEnvelope,
+  });
+  replayGuardEvents = await connectAndCollectEvents({
+    host,
+    port: replayPort,
+    token,
+    envelope: replayEnvelope,
+  });
+} finally {
+  replayServer.kill();
+}
+
+expect(firstReplayEvents.some((event) => hasArtifact(event, "browserTrace")), "websocket replay first session should still run browser trace");
+expect(firstReplayEvents.some((event) => event.kind === "actionStarted"), "websocket replay first session missing actionStarted");
+expect(replayGuardEvents[0]?.sessionID !== firstReplayEvents[0]?.sessionID, "websocket replay guard should use a replay session");
+await assertTaskReplayGuard(replayGuardEvents, replayEnvelope, token, "websocket replay guard");
+
+console.log(`Claw Gateway smoke passed (${events.length + firstReplayEvents.length + replayGuardEvents.length} events)`);
+
+function makeEnvelope(rawToken, endpointPort = port) {
   const taskID = crypto.randomUUID();
   return {
     schemaVersion: "claw.computer.control.v1",
     sourceApp: "Claw Controller",
     gateway: {
-      endpoint: `ws://${host}:${port}`,
+      endpoint: `ws://${host}:${endpointPort}`,
       deviceName: "smoke",
       securityMode: "mutualApproval",
       tokenFingerprint: tokenFingerprint(rawToken),
@@ -128,7 +184,7 @@ function makeEnvelope(rawToken) {
       command: "open browser and collect data",
       summary: "smoke",
       sourceDevice: "smoke",
-      destinationGateway: `ws://${host}:${port}`,
+      destinationGateway: `ws://${host}:${endpointPort}`,
       actions: [
         {
           id: crypto.randomUUID(),
@@ -247,6 +303,106 @@ function findArtifact(events, kind) {
   return events
     .flatMap((event) => event.artifacts || [])
     .find((artifact) => artifact.kind === kind);
+}
+
+function hasArtifact(event, kind) {
+  return event.artifacts?.some((artifact) => artifact.kind === kind);
+}
+
+async function assertTaskReplayGuard(events, replayEnvelope, rawToken, label) {
+  expect(Array.isArray(events) && events.length > 0, `${label} missing events`);
+  const allowedEventKinds = new Set(["gatewayConnected", "artifactStored", "actionSkipped", "sessionCompleted"]);
+  expect(events.every((event) => allowedEventKinds.has(event.kind)), `${label} emitted unexpected event kind`);
+  expect(!events.some((event) => event.kind === "actionStarted"), `${label} should not start actions`);
+  const skippedEvents = events.filter((event) => event.kind === "actionSkipped");
+  expect(skippedEvents.length === replayEnvelope.task.actions.length, `${label} actionSkipped count mismatch`);
+  for (const skipped of skippedEvents) {
+    const action = replayEnvelope.task.actions.find((candidate) => candidate.id === skipped.actionID);
+    expect(Boolean(action), `${label} actionSkipped should keep action id`);
+    expect(skipped.actionKind === action.kind, `${label} actionSkipped should keep action kind`);
+    expect(skipped.actionTitle === action.title, `${label} actionSkipped should keep action title`);
+    expect(skipped.resultStatus === "skipped", `${label} actionSkipped should be skipped`);
+    expect(skipped.isRetryable === false, `${label} actionSkipped should not be retryable`);
+  }
+  const businessKinds = new Set([
+    "accessibilityTree",
+    "agentTrace",
+    "browserTrace",
+    "commandOutput",
+    "fileDiff",
+    "messageDraft",
+    "screenshot",
+  ]);
+  const artifacts = events.flatMap((event) => event.artifacts || []);
+  expect(!artifacts.some((artifact) => businessKinds.has(artifact.kind)), `${label} wrote business artifact`);
+  const replayArtifact = artifacts.find(isTaskReplayGuardArtifact);
+  expect(Boolean(replayArtifact), `${label} missing replay audit artifact`);
+  expect(replayArtifact.isRedacted === true, `${label} replay audit should be redacted`);
+  const audit = JSON.parse(await fs.readFile(new URL(replayArtifact.reference), "utf8"));
+  assertTaskReplayGuardMetadata(replayArtifact.metadata, audit, label);
+  expect(audit.mode === "gateway-task-replay-guard", `${label} audit mode mismatch`);
+  expect(audit.decision === "skip-duplicate-task", `${label} audit decision mismatch`);
+  expect(audit.task?.id === replayEnvelope.task.id, `${label} task id mismatch`);
+  expect(audit.task?.actionCount === replayEnvelope.task.actions.length, `${label} action count mismatch`);
+  expect(audit.replay?.count === 1, `${label} replay count mismatch`);
+  expect(audit.safety?.businessArtifacts === "not-written", `${label} should not write business artifacts`);
+  expect(audit.safety?.handlerExecution === "blocked", `${label} should block handler execution`);
+  const serialized = JSON.stringify({ audit, metadata: replayArtifact.metadata });
+  for (const forbidden of [
+    rawToken,
+    "Authorization",
+    "Bearer",
+    "toolArguments",
+    "shellCommand",
+    "Open a page and extract structured data",
+    "Gateway Smoke Page",
+    "websocket workspace write verified",
+    "/sessions/",
+  ]) {
+    expect(!serialized.includes(forbidden), `${label} leaked ${forbidden}`);
+  }
+}
+
+function isTaskReplayGuardArtifact(artifact) {
+  return artifact.kind === "auditLog" && artifact.title === "task-replay-guard.json" && artifact.reference?.startsWith("file://");
+}
+
+function assertTaskReplayGuardMetadata(metadata, audit, label) {
+  expect(metadata && typeof metadata === "object", `${label} missing metadata`);
+  const allowedKeys = [
+    "actionCount",
+    "actionKinds",
+    "decision",
+    "digestMatchesFirst",
+    "firstSessionID",
+    "originalStatus",
+    "replayCount",
+    "replayDigest",
+    "replayGuard",
+    "safetyFlags",
+    "taskID",
+  ];
+  expect(
+    Object.keys(metadata).sort().join(",") === allowedKeys.join(","),
+    `${label} metadata includes unexpected keys`,
+  );
+  for (const [key, value] of Object.entries(metadata)) {
+    expect(typeof value === "string", `${label} metadata ${key} should be a string`);
+  }
+  expect(metadata.replayGuard === "taskReplayGuard", `${label} replayGuard metadata mismatch`);
+  expect(metadata.decision === audit.decision, `${label} decision metadata mismatch`);
+  expect(metadata.taskID === audit.task.id, `${label} task metadata mismatch`);
+  expect(metadata.replayDigest === audit.task.replayDigest, `${label} digest metadata mismatch`);
+  expect(metadata.digestMatchesFirst === String(audit.task.digestMatchesFirst), `${label} digest match metadata mismatch`);
+  expect(metadata.firstSessionID === audit.sessions.firstSessionID, `${label} first session metadata mismatch`);
+  expect(metadata.originalStatus === audit.firstRun.status, `${label} status metadata mismatch`);
+  expect(metadata.replayCount === String(audit.replay.count), `${label} replay count metadata mismatch`);
+  expect(metadata.actionCount === String(audit.task.actionCount), `${label} action count metadata mismatch`);
+  expect(metadata.actionKinds === audit.task.actionKinds.join(","), `${label} action kinds metadata mismatch`);
+  expect(
+    metadata.safetyFlags === "process-local,actions-skipped,business-artifacts-not-written,credentials-omitted,structured-arguments-omitted",
+    `${label} safety flags metadata mismatch`,
+  );
 }
 
 async function assertCapabilitySnapshot(events, expected = {}) {
@@ -503,11 +659,11 @@ function expect(condition, message) {
   }
 }
 
-async function waitFor(predicate, timeoutMs) {
+async function waitFor(predicate, timeoutMs, outputText = () => serverOutput) {
   const started = Date.now();
   while (!predicate()) {
     if (Date.now() - started > timeoutMs) {
-      throw new Error(`timeout waiting for gateway. Output:\n${serverOutput}`);
+      throw new Error(`timeout waiting for gateway. Output:\n${outputText()}`);
     }
     await new Promise((resolve) => setTimeout(resolve, 25));
   }

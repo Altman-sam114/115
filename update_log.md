@@ -15,12 +15,52 @@
 
 - 项目方向：OpenClaw 式电脑接管智能体，iPhone 作为控制台，桌面 Claw Gateway 作为执行端。
 - 当前 schema：`claw.computer.control.v1`。
-- 当前核心闭环：用户自然语言任务 -> `PhoneAgentPlanner` -> `ClawMobileTask` -> `ClawMobileEnvelope` -> 模拟事件流或带有界重连/ping 可观测性的 WebSocket Gateway -> `ClawGatewayEvent` -> session reducer -> Mission Run / Live Gateway 连接健康 / Gateway 能力复核摘要 / AgentTrace 复核 UI / iPad 多栏工作台展示和审批。
-- 当前 Gateway 能力：session-start 能力快照 `auditLog`、屏幕观察 dry-run/截图策略、浏览器 HTML/URL trace、浏览器打开/搜索计划、workspace 文件写入、Shell dry-run/allowlist 执行、结构化提取、桌面 App 审批闸门、带 readiness/checklist/risk/stop/handoff 与安全 metadata 的 `runAgentLoop`/`agentTrace`。
+- 当前核心闭环：用户自然语言任务 -> `PhoneAgentPlanner` -> `ClawMobileTask` -> `ClawMobileEnvelope` -> 模拟事件流或带有界重连/ping 可观测性和进程内 task replay guard 的 WebSocket Gateway -> `ClawGatewayEvent` -> session reducer -> Mission Run / Live Gateway 连接健康 / Gateway 能力复核摘要 / AgentTrace 复核 UI / iPad 多栏工作台展示和审批。
+- 当前 Gateway 能力：进程内 task replay guard、session-start 能力快照 `auditLog`、屏幕观察 dry-run/截图策略、浏览器 HTML/URL trace、浏览器打开/搜索计划、workspace 文件写入、Shell dry-run/allowlist 执行、结构化提取、桌面 App 审批闸门、带 readiness/checklist/risk/stop/handoff 与安全 metadata 的 `runAgentLoop`/`agentTrace`。
 - 当前协作闭环：默认 `main` 直推，GitHub Actions 生成未加密 `ci-results` 结果包，Agent C 下载并核对 manifest/JUnit/日志后验收。
 - 当前主要遗留：完整 macOS Accessibility tree、Playwright/browser-use 兼容控制器、真实多轮 agent loop、live Gateway 后台保活/真实心跳协议/配对、完整 artifact 内容复核体验。
 
 ## 历史记录
+
+### v0.13 / Gateway task replay guard
+
+日期：2026-07-04
+
+核心变更：
+
+- `Tools/claw-gateway-server.mjs` 新增进程内 task replay cache；首次接受 `task.id` 前登记安全记录，重复提交同一任务时进入 replay guard，不再调用 action handler。
+- replay guard 复用既有 `auditLog` artifact、`artifactStored` event、`actionSkipped` event 和 `sessionCompleted` event；重复任务会写 session-level `task-replay-guard.json`，逐个 action 返回 skipped。
+- replay audit payload/metadata 只记录 task id、短 digest、首次 session id、原始状态、replay count、action count/kinds 和安全标志，不包含 raw token、Authorization header、自然语言 instruction、`toolArguments`、业务 artifact payload 或完整 workspace path。
+- `--emit-events` 支持 JSON array 输入，用于同一 Gateway 进程内连续处理重复 envelope；单 envelope 输入保持兼容。
+- direct smoke 覆盖同一 `--emit-events` 进程内重复 envelope；WebSocket smoke 保留原 `--once` 正常路径，并新增非 `--once` server 上两次连接的 replay guard 验证。
+- 同步 README、协议和 flow/flowchart；本轮不新增 schema/event/action/artifact kind，不扩大 Gateway 权限，不做跨重启持久化 exactly-once。
+
+关键文件：
+
+- `Tools/claw-gateway-server.mjs`
+- `Tools/claw-gateway-direct-smoke.mjs`
+- `Tools/claw-gateway-smoke.mjs`
+- `README.md`
+- `Docs/claw-mobile-gateway-protocol.md`
+- `md/flow/flow.md`
+- `md/flow/flowchart.md`
+- `md/prompt/v0（核心智能能力）/v0.13（GatewayTaskReplayGuard）.md`
+- `update_log.md`
+
+验证结果：
+
+- `node --check Tools/claw-gateway-server.mjs` 通过。
+- `node --check Tools/claw-gateway-direct-smoke.mjs` 通过。
+- `node --check Tools/claw-gateway-smoke.mjs` 通过。
+- `node Tools/claw-gateway-direct-smoke.mjs` 通过，输出 `Claw Gateway direct smoke passed (146 events)`。
+- `node Tools/claw-gateway-smoke.mjs` 在普通沙箱内因 `listen EPERM 127.0.0.1:18879` 被阻断，升级权限后通过，输出 `Claw Gateway smoke passed (44 events)`。
+- `git diff --check` 通过。
+- `ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci-results.yml"); puts "yaml ok"'` 通过，输出 `yaml ok`。
+
+遗留事项：
+
+- replay guard 只覆盖同一 Gateway 进程生命周期；进程重启、多 Gateway 进程、cache 淘汰或分布式执行仍可能重复处理同一 `task.id`。
+- 本轮未修改 Swift 代码，本地未跑 Swift logic smoke 或 iOS build；push `origin/main` 后由 GitHub Actions 覆盖 Swift logic smoke、Gateway direct/WebSocket smoke 和 xcodebuild，并由 Agent C 下载结果包复判。
 
 ### v0.12 / Live Gateway 有界重连与心跳可观测性
 
