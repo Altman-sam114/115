@@ -260,6 +260,7 @@ async function assertCapabilitySnapshot(events, expected = {}) {
   const snapshotArtifact = events[snapshotEventIndex].artifacts.find(isCapabilitySnapshotArtifact);
   expect(snapshotArtifact.isRedacted === true, "capability snapshot artifact should be redacted");
   const snapshot = JSON.parse(await fs.readFile(new URL(snapshotArtifact.reference), "utf8"));
+  assertCapabilitySnapshotMetadata(snapshotArtifact.metadata, snapshot, "capability snapshot");
   expect(snapshot.mode === "gateway-capability-snapshot", "capability snapshot mode mismatch");
   expect(!JSON.stringify(snapshot).includes(token), "capability snapshot leaked raw token");
   expect(snapshot.token.configured === true, "capability snapshot token should be configured");
@@ -285,6 +286,48 @@ async function assertCapabilitySnapshot(events, expected = {}) {
 
 function isCapabilitySnapshotArtifact(artifact) {
   return artifact.kind === "auditLog" && artifact.title === "gateway-capability-snapshot.json" && artifact.reference?.startsWith("file://");
+}
+
+function assertCapabilitySnapshotMetadata(metadata, snapshot, label) {
+  expect(metadata && typeof metadata === "object", `${label} missing metadata`);
+  const allowedKeys = [
+    "allowedActionKinds",
+    "browserControlState",
+    "browserNetworkState",
+    "desktopControlState",
+    "platform",
+    "safetyFlags",
+    "screenCaptureState",
+    "shellState",
+    "snapshotKind",
+    "tokenConfigured",
+    "tokenFingerprint",
+    "tokenRequired",
+    "windowMetadataState",
+    "workspaceState",
+  ];
+  expect(
+    Object.keys(metadata).sort().join(",") === allowedKeys.join(","),
+    `${label} metadata includes unexpected keys`,
+  );
+  expect(metadata.snapshotKind === "gatewayCapability", `${label} metadata kind mismatch`);
+  expect(metadata.tokenConfigured === String(snapshot.token.configured), `${label} tokenConfigured mismatch`);
+  expect(metadata.tokenRequired === String(snapshot.token.required), `${label} tokenRequired mismatch`);
+  expect(metadata.tokenFingerprint === snapshot.token.fingerprint, `${label} tokenFingerprint mismatch`);
+  expect(metadata.allowedActionKinds === snapshot.envelope.allowedActionKinds.join(","), `${label} allowedActionKinds mismatch`);
+  expect(metadata.workspaceState === snapshot.capabilities.workspace.state, `${label} workspace state mismatch`);
+  expect(metadata.shellState === snapshot.capabilities.shell.state, `${label} shell state mismatch`);
+  expect(metadata.browserControlState === snapshot.capabilities.browserControl.state, `${label} browser control state mismatch`);
+  expect(metadata.browserNetworkState === snapshot.capabilities.browserNetwork.state, `${label} browser network state mismatch`);
+  expect(metadata.screenCaptureState === snapshot.capabilities.screenCapture.state, `${label} screen capture state mismatch`);
+  expect(metadata.windowMetadataState === snapshot.capabilities.windowMetadata.state, `${label} window metadata state mismatch`);
+  expect(metadata.desktopControlState === snapshot.capabilities.desktopControl.state, `${label} desktop control state mismatch`);
+  expect(metadata.platform === snapshot.gateway.platform, `${label} platform mismatch`);
+  expect(metadata.safetyFlags === "allowlists-enforced,workspace-only,raw-token-omitted,final-submit-gated", `${label} safety flags mismatch`);
+  const serialized = JSON.stringify(metadata);
+  for (const forbidden of [token, "Authorization", "toolArguments", "instruction", "commandOutput", "browserPageContent", "screenshotContent", "draftContent", "workspaceRoot", "sessionWorkspace"]) {
+    expect(!serialized.includes(forbidden), `${label} metadata leaked ${forbidden}`);
+  }
 }
 
 function assertAgentTraceMetadata(metadata, trace, label) {

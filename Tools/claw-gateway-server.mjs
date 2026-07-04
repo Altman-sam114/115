@@ -347,12 +347,14 @@ async function makeGatewayEvents(envelope, config) {
     }),
   ];
   const sessionConfig = { ...config, sessionWorkspace, sessionContext };
+  const capabilitySnapshot = gatewayCapabilitySnapshot(envelope, config, sessionID, sessionWorkspace);
   const capabilitySnapshotArtifact = await writeArtifact(
     "auditLog",
     "gateway-capability-snapshot.json",
-    gatewayCapabilitySnapshot(envelope, config, sessionID, sessionWorkspace),
+    capabilitySnapshot,
     true,
     sessionConfig,
+    gatewayCapabilitySnapshotMetadata(capabilitySnapshot),
   );
   events.push(
     event({
@@ -539,6 +541,30 @@ function gatewayCapabilitySnapshot(envelope, config, sessionID, sessionWorkspace
       executionSource: "structured-tool-arguments-only",
     },
   };
+}
+
+function gatewayCapabilitySnapshotMetadata(snapshot) {
+  return compactMetadata({
+    snapshotKind: "gatewayCapability",
+    tokenConfigured: snapshot.token?.configured,
+    tokenRequired: snapshot.token?.required,
+    tokenFingerprint: snapshot.token?.fingerprint,
+    allowedActionKinds: snapshot.envelope?.allowedActionKinds,
+    workspaceState: snapshot.capabilities?.workspace?.state,
+    shellState: snapshot.capabilities?.shell?.state,
+    browserControlState: snapshot.capabilities?.browserControl?.state,
+    browserNetworkState: snapshot.capabilities?.browserNetwork?.state,
+    screenCaptureState: snapshot.capabilities?.screenCapture?.state,
+    windowMetadataState: snapshot.capabilities?.windowMetadata?.state,
+    desktopControlState: snapshot.capabilities?.desktopControl?.state,
+    safetyFlags: [
+      "allowlists-enforced",
+      "workspace-only",
+      "raw-token-omitted",
+      "final-submit-gated",
+    ],
+    platform: snapshot.gateway?.platform,
+  });
 }
 
 function workspaceCapability(config, sessionWorkspace) {

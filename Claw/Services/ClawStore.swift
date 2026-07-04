@@ -148,6 +148,7 @@ final class ClawStore: ObservableObject {
             artifactCount: session?.artifactCount ?? 0,
             artifactKinds: missionRunArtifactKinds(from: session),
             agentTraceReview: missionRunAgentTraceReview(from: session),
+            gatewayCapabilityReview: missionRunGatewayCapabilityReview(from: session),
             primaryActionTitle: primaryAction.title,
             primaryActionIcon: primaryAction.icon,
             primaryActionKind: primaryAction.kind,
@@ -260,7 +261,7 @@ final class ClawStore: ObservableObject {
         }
         var seen: Set<ClawGatewayArtifactKind> = []
         var kinds: [ClawGatewayArtifactKind] = []
-        for artifact in session.results.flatMap(\.artifacts) {
+        for artifact in session.allArtifacts {
             if seen.insert(artifact.kind).inserted {
                 kinds.append(artifact.kind)
             }
@@ -270,6 +271,10 @@ final class ClawStore: ObservableObject {
 
     private func missionRunAgentTraceReview(from session: ClawGatewaySession?) -> ClawAgentTraceReviewSummary? {
         ClawAgentTraceReviewSummary.latest(from: session)
+    }
+
+    private func missionRunGatewayCapabilityReview(from session: ClawGatewaySession?) -> ClawGatewayCapabilityReviewSummary? {
+        ClawGatewayCapabilityReviewSummary.latest(from: session)
     }
 
     private func missionRunStageTrack(
@@ -1648,6 +1653,7 @@ enum ClawGatewaySimulator {
             workspace: "~/ClawWorkspace",
             status: status,
             results: results,
+            sessionArtifacts: [capabilitySnapshotArtifact(for: profile)],
             auditTrail: audit
         )
     }
@@ -1812,6 +1818,35 @@ enum ClawGatewaySimulator {
                 artifacts: [artifact(.auditLog, "unsupported-\(index + 1).json", redacted: true)]
             )
         }
+    }
+
+    static func capabilitySnapshotArtifact(for profile: ClawGatewayProfile) -> ClawGatewayArtifact {
+        let allowedKinds = profile.allowedActionKinds
+            .map(\.rawValue)
+            .sorted()
+            .joined(separator: ",")
+        let tokenConfigured = profile.tokenFingerprint != "unset"
+        return artifact(
+            .auditLog,
+            "gateway-capability-snapshot.json",
+            redacted: true,
+            metadata: [
+                "snapshotKind": "gatewayCapability",
+                "tokenConfigured": tokenConfigured ? "true" : "false",
+                "tokenRequired": "false",
+                "tokenFingerprint": tokenConfigured ? profile.tokenFingerprint : "unset",
+                "allowedActionKinds": allowedKinds,
+                "workspaceState": "workspace-only",
+                "shellState": "dry-run",
+                "browserControlState": "dry-run",
+                "browserNetworkState": "disabled",
+                "screenCaptureState": "dry-run",
+                "windowMetadataState": "dry-run",
+                "desktopControlState": "dry-run",
+                "safetyFlags": "allowlists-enforced,workspace-only,raw-token-omitted,final-submit-gated",
+                "platform": "simulated"
+            ]
+        )
     }
 
     private static func artifact(
@@ -2100,6 +2135,18 @@ enum ClawGatewayEventStream {
         ]
         sequence += 1
 
+        events.append(
+            ClawGatewayEvent(
+                sessionID: sessionID,
+                taskID: task.id,
+                sequence: sequence,
+                kind: .artifactStored,
+                summary: "保存 Gateway 能力快照 artifact。",
+                artifacts: [ClawGatewaySimulator.capabilitySnapshotArtifact(for: profile)]
+            )
+        )
+        sequence += 1
+
         for (index, action) in task.actions.enumerated() {
             let result = ClawGatewaySimulator.makeResult(for: action, index: index)
             events.append(
@@ -2185,7 +2232,11 @@ enum ClawGatewayEventStream {
         case .actionStarted:
             upsertResult(from: event, in: &updated, fallbackStatus: .running, finished: false)
         case .artifactStored:
-            upsertResult(from: event, in: &updated, fallbackStatus: .running, finished: false)
+            if event.actionID == nil || event.actionKind == nil || event.actionTitle == nil {
+                mergeSessionArtifacts(from: event, in: &updated)
+            } else {
+                upsertResult(from: event, in: &updated, fallbackStatus: .running, finished: false)
+            }
         case .actionCompleted, .actionFailed, .approvalRequested, .actionSkipped:
             upsertResult(from: event, in: &updated, fallbackStatus: event.resultStatus ?? .succeeded, finished: true)
         case .sessionCompleted:
@@ -2267,6 +2318,19 @@ enum ClawGatewayEventStream {
                     finishedAt: finishedAt
                 )
             )
+        }
+    }
+
+    private static func mergeSessionArtifacts(
+        from event: ClawGatewayEvent,
+        in session: inout ClawGatewaySession
+    ) {
+        session.sessionArtifacts = mergedArtifacts(session.sessionArtifacts, event.artifacts)
+        if event.artifacts.isEmpty {
+            session.auditTrail.append("event.\(event.sequence) artifactStored session-level no artifacts")
+        } else {
+            let titles = event.artifacts.map(\.title).joined(separator: ",")
+            session.auditTrail.append("event.\(event.sequence) artifactStored session-level \(event.artifacts.count) artifact(s) \(titles)")
         }
     }
 

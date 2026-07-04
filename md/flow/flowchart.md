@@ -19,18 +19,21 @@ flowchart TD
   M --> LIVE["WebSocket Live Gateway<br/>URLSessionClawGatewayTransport"]
   LIVE --> G["Tools/claw-gateway-server.mjs<br/>校验 token、schema、allowlist、workspace"]
   G --> SNAP["gateway-capability-snapshot.json<br/>session-start auditLog 能力快照"]
+  SNAP --> SMETA["capability snapshot metadata<br/>token 指纹、allowlist、capability 状态、safety flags"]
   G --> H["Gateway action handlers<br/>屏幕、浏览器、文件、Shell、提取、桌面 App、agent loop"]
   H --> ART["Artifacts<br/>screenshot、browserTrace、fileDiff、commandOutput、agentTrace 证据策略"]
-  SNAP --> ART
+  SNAP --> SART["sessionArtifacts<br/>无 action 绑定的 session 级 artifact"]
   ART --> META["agentTrace artifact metadata<br/>证据分、缺口、下一步、风险、停止原因"]
   H --> EVT["ClawGatewayEvent<br/>actionStarted、artifactStored、completed、failed、approvalRequested"]
   SNAP --> EVT
   SIM --> EVT
   EVT --> R["ClawGatewayEventStream.apply<br/>把事件 reduce 到 session"]
   ART --> R
+  SART --> R
+  SMETA --> R
   META --> R
-  R --> SES["ClawGatewaySession<br/>results、artifacts、auditTrail、retryable"]
-  SES --> RUN["ClawMissionRunSummary<br/>派生目标、阶段、主动作、风险、证据和 AgentTrace 复核"]
+  R --> SES["ClawGatewaySession<br/>results、sessionArtifacts、auditTrail、retryable"]
+  SES --> RUN["ClawMissionRunSummary<br/>派生目标、阶段、主动作、风险、证据、Gateway 能力复核和 AgentTrace 复核"]
   RUN --> UI["SwiftUI Mission Run / iPad 多栏工作台<br/>展示计划、风险、事件、artifact、审批点、复核摘要"]
   UI --> LOOP{"用户审批或继续循环"}
   LOOP -->|"批准发送/重试"| M
@@ -44,7 +47,7 @@ flowchart TD
 ```mermaid
 flowchart TD
   ENV["ClawMobileEnvelope<br/>来自 iOS 控制台"] --> VAL["validateEnvelope<br/>校验 schema、token 指纹、task actions"]
-  VAL --> SNAP["session-start auditLog<br/>gateway-capability-snapshot.json<br/>workspace、platform、token 指纹、allowlist、capability 状态"]
+  VAL --> SNAP["session-start auditLog<br/>gateway-capability-snapshot.json<br/>workspace、platform、token 指纹、allowlist、capability 状态、安全 metadata"]
   VAL --> POL["actionPolicy<br/>检查 approval 和 allowedActionKinds"]
   POL -->|不允许| SKIP["actionSkipped<br/>写 auditLog 说明原因"]
   POL -->|允许| KIND{"action.kind"}
@@ -64,8 +67,9 @@ flowchart TD
   APP --> CTX
   AG --> CTX
   MSG --> CTX
-  SNAP --> OUT
+  SNAP --> SOUT["session-level artifactStored<br/>无 action 绑定，手机端保存到 sessionArtifacts"]
   CTX --> OUT["artifactStored + action result<br/>回传 file:// 引用、状态、retryable、agentTrace metadata"]
+  SOUT --> OUT
 ```
 
 ## 3. Agent X 主控循环与云端验证流程图

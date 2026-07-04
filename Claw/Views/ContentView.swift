@@ -700,6 +700,10 @@ struct ClawMissionRunPanel: View {
                 }
             }
 
+            if let review = summary.gatewayCapabilityReview {
+                ClawGatewayCapabilityReviewRow(review: review)
+            }
+
             if let review = summary.agentTraceReview {
                 ClawAgentTraceReviewRow(review: review)
             }
@@ -1116,6 +1120,10 @@ struct ClawGatewaySessionCard: View {
                 PhoneAgentTag(text: "\(session.artifactCount) 证据", icon: "paperclip", tint: .purple)
             }
 
+            if let review = ClawGatewayCapabilityReviewSummary.latest(from: session) {
+                ClawGatewayCapabilityReviewRow(review: review)
+            }
+
             if let review = ClawAgentTraceReviewSummary.latest(from: session) {
                 ClawAgentTraceReviewRow(review: review)
             }
@@ -1258,6 +1266,119 @@ struct ClawGatewayResultRow: View {
         }
         .padding(10)
         .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+struct ClawGatewayCapabilityReviewRow: View {
+    let review: ClawGatewayCapabilityReviewSummary
+
+    private var stateChips: [(text: String, icon: String, tint: Color)] {
+        var items: [(String, String, Color)] = []
+        if let workspace = review.workspaceState {
+            items.append(("workspace \(workspace)", "folder.badge.gearshape", tint(for: workspace)))
+        }
+        if let shell = review.shellState {
+            items.append(("shell \(shell)", "terminal.fill", tint(for: shell)))
+        }
+        if let browser = review.browserControlState {
+            items.append(("browser \(browser)", "safari.fill", tint(for: browser)))
+        }
+        if let network = review.browserNetworkState {
+            items.append(("network \(network)", "network", tint(for: network)))
+        }
+        if let desktop = review.desktopControlState {
+            items.append(("desktop \(desktop)", "macwindow.badge.plus", tint(for: desktop)))
+        }
+        if let screen = review.screenCaptureState {
+            items.append(("screen \(screen)", "camera.viewfinder", tint(for: screen)))
+        }
+        if let window = review.windowMetadataState {
+            items.append(("window \(window)", "macwindow", tint(for: window)))
+        }
+        if items.isEmpty {
+            items.append(("metadata 待同步", "hourglass", .secondary))
+        }
+        return items
+    }
+
+    private var safetyChips: [(text: String, icon: String, tint: Color)] {
+        var items = review.safetyFlags.prefix(3).map { flag in
+            (text: flag, icon: "shield.lefthalf.filled.badge.checkmark", tint: Color.purple)
+        }
+        if items.isEmpty {
+            items.append((text: "审计复核", icon: "checkmark.shield.fill", tint: .purple))
+        }
+        return items
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Label("Gateway 能力", systemImage: "server.rack")
+                    .font(.footnote.bold())
+                    .foregroundStyle(.primary)
+                PhoneAgentTag(text: "\(review.snapshotCount) 条", icon: "number", tint: .purple)
+                PhoneAgentTag(
+                    text: review.isRedacted ? "已脱敏" : "可见",
+                    icon: review.isRedacted ? "eye.slash.fill" : "eye.fill",
+                    tint: review.isRedacted ? .orange : .green
+                )
+                Spacer(minLength: 0)
+            }
+
+            Text(review.compactStatus)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(Array(stateChips.enumerated()), id: \.offset) { _, chip in
+                        PhoneAgentTag(text: chip.text, icon: chip.icon, tint: chip.tint)
+                    }
+                }
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    if let fingerprint = review.tokenFingerprint {
+                        PhoneAgentTag(text: fingerprint, icon: "key.fill", tint: .purple)
+                    }
+                    if review.tokenConfigured == true {
+                        PhoneAgentTag(text: review.tokenRequired == true ? "token required" : "token configured", icon: "lock.shield.fill", tint: .purple)
+                    }
+                    ForEach(Array(review.allowedActionKinds.prefix(3)), id: \.self) { kind in
+                        PhoneAgentTag(text: kind, icon: "square.stack.3d.forward.dottedline", tint: .blue)
+                    }
+                }
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(Array(safetyChips.enumerated()), id: \.offset) { _, chip in
+                        PhoneAgentTag(text: chip.text, icon: chip.icon, tint: chip.tint)
+                    }
+                }
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func tint(for state: String) -> Color {
+        switch state {
+        case "real":
+            return .green
+        case "workspace-only":
+            return .purple
+        case "dry-run":
+            return .blue
+        case "disabled":
+            return .secondary
+        case "unavailable":
+            return .orange
+        default:
+            return .secondary
+        }
     }
 }
 

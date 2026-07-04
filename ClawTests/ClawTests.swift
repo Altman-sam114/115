@@ -367,7 +367,31 @@ final class ClawTests: XCTestCase {
         XCTAssertGreaterThan(summary.artifactCount, 0)
         XCTAssertTrue(summary.artifactKinds.contains(.browserTrace))
         XCTAssertTrue(summary.artifactKinds.contains(.screenshot))
+        XCTAssertTrue(summary.artifactKinds.contains(.auditLog))
         XCTAssertTrue(summary.statusLine.contains("待确认"))
+    }
+
+    func testMissionRunSummaryDerivesGatewayCapabilityReview() throws {
+        let store = ClawStore(autoScanLocalArtifacts: false)
+
+        store.phoneAgentCommand = "打开浏览器搜索资料并发到 Slack"
+        store.startAutonomousComputerTakeover()
+        store.approveAndContinueAutonomousLoop()
+        let review = try XCTUnwrap(store.missionRunSummary.gatewayCapabilityReview)
+
+        XCTAssertEqual(review.snapshotCount, 1)
+        XCTAssertTrue(review.hasMetadata)
+        XCTAssertEqual(review.latestTitle, "gateway-capability-snapshot.json")
+        XCTAssertEqual(review.workspaceState, "workspace-only")
+        XCTAssertEqual(review.shellState, "dry-run")
+        XCTAssertEqual(review.browserControlState, "dry-run")
+        XCTAssertEqual(review.browserNetworkState, "disabled")
+        XCTAssertEqual(review.desktopControlState, "dry-run")
+        XCTAssertEqual(review.platform, "simulated")
+        XCTAssertTrue(review.safetyFlags.contains("raw-token-omitted"))
+        XCTAssertTrue(review.allowedActionKinds.contains("controlBrowser"))
+        XCTAssertTrue(review.compactStatus.contains("Gateway simulated"))
+        XCTAssertTrue(review.isRedacted)
     }
 
     func testMissionRunSummaryDerivesAgentTraceReview() throws {
@@ -521,6 +545,29 @@ final class ClawTests: XCTestCase {
         XCTAssertNil(artifact.metadata)
     }
 
+    func testClawGatewaySessionDecodesLegacyJSONWithoutSessionArtifacts() throws {
+        let json = """
+        {
+          "id": "\(UUID())",
+          "taskID": "\(UUID())",
+          "command": "legacy",
+          "channel": "test",
+          "workspace": "~/ClawWorkspace",
+          "status": "completed",
+          "results": [],
+          "auditTrail": [],
+          "createdAt": 0,
+          "updatedAt": 0
+        }
+        """
+
+        let session = try JSONDecoder().decode(ClawGatewaySession.self, from: Data(json.utf8))
+
+        XCTAssertTrue(session.sessionArtifacts.isEmpty)
+        XCTAssertEqual(session.artifactCount, 0)
+        XCTAssertTrue(session.allArtifacts.isEmpty)
+    }
+
     func testAgentTraceReviewFallsBackWhenMetadataIsMissing() throws {
         let actionID = UUID()
         let artifact = ClawGatewayArtifact(
@@ -556,6 +603,118 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(review.latestTitle, "legacy-agent-loop.json")
         XCTAssertTrue(review.isRedacted)
         XCTAssertTrue(review.compactStatus.contains("metadata"))
+    }
+
+    func testGatewayCapabilityReviewParsesMetadataAndFallsBack() throws {
+        let artifact = ClawGatewayArtifact(
+            kind: .auditLog,
+            title: "gateway-capability-snapshot.json",
+            reference: "file:///tmp/gateway-capability-snapshot.json",
+            isRedacted: true,
+            metadata: [
+                "snapshotKind": "gatewayCapability",
+                "tokenConfigured": "true",
+                "tokenRequired": "true",
+                "tokenFingerprint": "sha256:abcdef123456",
+                "allowedActionKinds": "controlBrowser,manageFiles,runAgentLoop",
+                "workspaceState": "workspace-only",
+                "shellState": "dry-run",
+                "browserControlState": "real",
+                "browserNetworkState": "disabled",
+                "screenCaptureState": "dry-run",
+                "windowMetadataState": "dry-run",
+                "desktopControlState": "unavailable",
+                "safetyFlags": "allowlists-enforced,workspace-only,raw-token-omitted,final-submit-gated",
+                "platform": "darwin"
+            ]
+        )
+        let review = try XCTUnwrap(ClawGatewayCapabilityReviewSummary.latest(from: [artifact]))
+
+        XCTAssertEqual(review.snapshotCount, 1)
+        XCTAssertTrue(review.hasMetadata)
+        XCTAssertEqual(review.tokenConfigured, true)
+        XCTAssertEqual(review.tokenRequired, true)
+        XCTAssertEqual(review.tokenFingerprint, "sha256:abcdef123456")
+        XCTAssertEqual(review.allowedActionKinds, ["controlBrowser", "manageFiles", "runAgentLoop"])
+        XCTAssertEqual(review.workspaceState, "workspace-only")
+        XCTAssertEqual(review.browserControlState, "real")
+        XCTAssertEqual(review.desktopControlState, "unavailable")
+        XCTAssertTrue(review.safetyFlags.contains("final-submit-gated"))
+        XCTAssertTrue(review.compactStatus.contains("sha256:abcdef123456"))
+
+        let legacyArtifact = ClawGatewayArtifact(
+            kind: .auditLog,
+            title: "gateway-capability-snapshot.json",
+            reference: "file:///tmp/legacy-gateway-capability-snapshot.json",
+            isRedacted: true
+        )
+        let legacyReview = try XCTUnwrap(ClawGatewayCapabilityReviewSummary.latest(from: [legacyArtifact]))
+        XCTAssertFalse(legacyReview.hasMetadata)
+        XCTAssertTrue(legacyReview.compactStatus.contains("metadata"))
+    }
+
+    func testGatewayEventReducerStoresSessionLevelArtifactsWithoutFakeResult() {
+        let taskID = UUID()
+        let sessionID = UUID()
+        let session = ClawGatewaySession(
+            id: sessionID,
+            taskID: taskID,
+            command: "capability",
+            channel: "test",
+            workspace: "~/ClawWorkspace",
+            status: .running,
+            results: [],
+            auditTrail: []
+        )
+        let capabilityArtifact = ClawGatewayArtifact(
+            kind: .auditLog,
+            title: "gateway-capability-snapshot.json",
+            reference: "file:///tmp/gateway-capability-snapshot.json",
+            isRedacted: true,
+            metadata: ["snapshotKind": "gatewayCapability"]
+        )
+        let sessionArtifactEvent = ClawGatewayEvent(
+            sessionID: sessionID,
+            taskID: taskID,
+            sequence: 2,
+            kind: .artifactStored,
+            summary: "Stored Gateway capability snapshot audit artifact",
+            artifacts: [capabilityArtifact]
+        )
+
+        let reduced = ClawGatewayEventStream.apply(event: sessionArtifactEvent, to: session)
+
+        XCTAssertEqual(reduced.sessionArtifacts.count, 1)
+        XCTAssertEqual(reduced.artifactCount, 1)
+        XCTAssertTrue(reduced.results.isEmpty)
+        XCTAssertTrue(reduced.auditTrail.contains { $0.contains("session-level") })
+
+        let actionID = UUID()
+        let actionArtifact = ClawGatewayArtifact(
+            kind: .browserTrace,
+            title: "browser-trace.json",
+            reference: "browserTrace://browser-trace.json",
+            isRedacted: false
+        )
+        let actionArtifactEvent = ClawGatewayEvent(
+            sessionID: sessionID,
+            taskID: taskID,
+            sequence: 3,
+            kind: .artifactStored,
+            actionID: actionID,
+            actionKind: .controlBrowser,
+            actionTitle: "控制浏览器",
+            resultStatus: .running,
+            summary: "Stored action artifact",
+            artifacts: [actionArtifact]
+        )
+
+        let actionReduced = ClawGatewayEventStream.apply(event: actionArtifactEvent, to: reduced)
+
+        XCTAssertEqual(actionReduced.sessionArtifacts.count, 1)
+        XCTAssertEqual(actionReduced.results.count, 1)
+        XCTAssertEqual(actionReduced.results[0].artifacts.first?.kind, .browserTrace)
+        XCTAssertEqual(actionReduced.artifactCount, 2)
     }
 
     func testPhoneAgentSurfaceDecodesLegacyAICLawRuntimeValue() throws {

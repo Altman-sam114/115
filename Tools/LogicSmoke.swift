@@ -114,6 +114,20 @@ enum LogicSmoke {
         expect(missionSummary.primaryActionKind == .continueAfterReview, "mission summary should expose review action")
         expect(missionSummary.artifactCount > 0, "mission summary should count gateway artifacts")
         expect(missionSummary.artifactKinds.contains(.browserTrace), "mission summary should summarize artifact kinds")
+        expect(missionSummary.artifactKinds.contains(.auditLog), "mission summary should include session-level audit artifacts")
+        if let capabilityReview = missionSummary.gatewayCapabilityReview {
+            expect(capabilityReview.snapshotCount == 1, "mission summary should count capability snapshots")
+            expect(capabilityReview.hasMetadata, "capability review should include metadata")
+            expect(capabilityReview.workspaceState == "workspace-only", "capability review should expose workspace state")
+            expect(capabilityReview.shellState == "dry-run", "capability review should expose shell state")
+            expect(capabilityReview.browserControlState == "dry-run", "capability review should expose browser state")
+            expect(capabilityReview.browserNetworkState == "disabled", "capability review should expose browser network state")
+            expect(capabilityReview.desktopControlState == "dry-run", "capability review should expose desktop state")
+            expect(capabilityReview.safetyFlags.contains("raw-token-omitted"), "capability review should expose safety flags")
+            expect(capabilityReview.compactStatus.contains("Gateway simulated"), "capability review should summarize gateway platform")
+        } else {
+            failures.append("mission summary should derive gateway capability review")
+        }
         if let agentTraceReview = missionSummary.agentTraceReview {
             expect(agentTraceReview.traceCount > 0, "mission summary should count agent traces")
             expect(agentTraceReview.hasMetadata, "agent trace review should include metadata")
@@ -181,6 +195,15 @@ enum LogicSmoke {
         }
         expect(reducedFixture.results.isEmpty == false, "gateway event reducer should build action results")
         expect(reducedFixture.artifactCount > 0, "gateway event reducer should merge artifacts")
+        expect(reducedFixture.sessionArtifacts.contains { $0.kind == .auditLog && $0.title == "gateway-capability-snapshot.json" }, "gateway event reducer should merge session-level artifacts")
+        expect(reducedFixture.artifactCount == reducedFixture.allArtifacts.count, "gateway session artifact count should include all artifacts")
+        expect(reducedFixture.auditTrail.contains { $0.contains("artifactStored session-level") }, "gateway event reducer should audit session-level artifacts")
+        if let reducedCapabilityReview = ClawGatewayCapabilityReviewSummary.latest(from: reducedFixture) {
+            expect(reducedCapabilityReview.hasMetadata, "reduced fixture should derive capability metadata")
+            expect(reducedCapabilityReview.allowedActionKinds.contains("controlBrowser"), "capability review should expose action allowlist")
+        } else {
+            failures.append("reduced fixture should derive gateway capability review")
+        }
 
         var restrictedProfile = ClawStore.defaultClawGatewayProfile
         restrictedProfile.allowedActionKinds.removeAll { $0 == .composeMessage }

@@ -1062,6 +1062,7 @@ struct ClawGatewaySession: Identifiable, Equatable, Codable, Sendable {
     var workspace: String
     var status: ClawGatewaySessionStatus
     var results: [ClawGatewayActionResult]
+    var sessionArtifacts: [ClawGatewayArtifact]
     var auditTrail: [String]
     var createdAt: Date
     var updatedAt: Date
@@ -1074,6 +1075,7 @@ struct ClawGatewaySession: Identifiable, Equatable, Codable, Sendable {
         workspace: String,
         status: ClawGatewaySessionStatus,
         results: [ClawGatewayActionResult],
+        sessionArtifacts: [ClawGatewayArtifact] = [],
         auditTrail: [String],
         createdAt: Date = Date(),
         updatedAt: Date = Date()
@@ -1085,9 +1087,54 @@ struct ClawGatewaySession: Identifiable, Equatable, Codable, Sendable {
         self.workspace = workspace
         self.status = status
         self.results = results
+        self.sessionArtifacts = sessionArtifacts
         self.auditTrail = auditTrail
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case taskID
+        case command
+        case channel
+        case workspace
+        case status
+        case results
+        case sessionArtifacts
+        case auditTrail
+        case createdAt
+        case updatedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        taskID = try container.decode(UUID.self, forKey: .taskID)
+        command = try container.decode(String.self, forKey: .command)
+        channel = try container.decode(String.self, forKey: .channel)
+        workspace = try container.decode(String.self, forKey: .workspace)
+        status = try container.decode(ClawGatewaySessionStatus.self, forKey: .status)
+        results = try container.decode([ClawGatewayActionResult].self, forKey: .results)
+        sessionArtifacts = try container.decodeIfPresent([ClawGatewayArtifact].self, forKey: .sessionArtifacts) ?? []
+        auditTrail = try container.decode([String].self, forKey: .auditTrail)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(taskID, forKey: .taskID)
+        try container.encode(command, forKey: .command)
+        try container.encode(channel, forKey: .channel)
+        try container.encode(workspace, forKey: .workspace)
+        try container.encode(status, forKey: .status)
+        try container.encode(results, forKey: .results)
+        try container.encode(sessionArtifacts, forKey: .sessionArtifacts)
+        try container.encode(auditTrail, forKey: .auditTrail)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(updatedAt, forKey: .updatedAt)
     }
 
     var succeededCount: Int {
@@ -1103,7 +1150,11 @@ struct ClawGatewaySession: Identifiable, Equatable, Codable, Sendable {
     }
 
     var artifactCount: Int {
-        results.map(\.artifacts.count).reduce(0, +)
+        allArtifacts.count
+    }
+
+    var allArtifacts: [ClawGatewayArtifact] {
+        sessionArtifacts + results.flatMap(\.artifacts)
     }
 }
 
@@ -1278,6 +1329,44 @@ struct ClawMissionRunStage: Identifiable, Equatable, Codable, Sendable {
     var isBlocked: Bool
 }
 
+private enum ClawArtifactMetadataParser {
+    static func cleanValue(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty || trimmed == "none" ? nil : trimmed
+    }
+
+    static func intValue(_ value: String?) -> Int? {
+        guard let clean = cleanValue(value) else {
+            return nil
+        }
+        return Int(clean)
+    }
+
+    static func boolValue(_ value: String?) -> Bool? {
+        guard let clean = cleanValue(value)?.lowercased() else {
+            return nil
+        }
+        switch clean {
+        case "true", "yes", "1":
+            return true
+        case "false", "no", "0":
+            return false
+        default:
+            return nil
+        }
+    }
+
+    static func listValue(_ value: String?) -> [String] {
+        guard let clean = cleanValue(value) else {
+            return []
+        }
+        return clean
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { $0.isEmpty == false && $0 != "none" }
+    }
+}
+
 struct ClawAgentTraceReviewSummary: Equatable, Codable, Sendable {
     var traceCount: Int
     var latestTitle: String
@@ -1320,53 +1409,87 @@ struct ClawAgentTraceReviewSummary: Equatable, Codable, Sendable {
             traceCount: traces.count,
             latestTitle: latest.title,
             hasMetadata: metadata.isEmpty == false,
-            readinessScore: intValue(metadata["readinessScore"]),
-            readinessCanContinue: boolValue(metadata["readinessCanContinue"]),
-            satisfiedSignals: listValue(metadata["satisfiedSignals"]),
-            missingSignals: listValue(metadata["missingSignals"]),
-            selectedNextActionKind: cleanValue(metadata["selectedNextActionKind"]),
-            selectedNextActionRequiresApproval: boolValue(metadata["selectedNextActionRequiresApproval"]),
-            riskTags: listValue(metadata["riskTags"]),
-            stopReason: cleanValue(metadata["stopReason"]),
-            handoffSummary: cleanValue(metadata["handoffSummary"]),
+            readinessScore: ClawArtifactMetadataParser.intValue(metadata["readinessScore"]),
+            readinessCanContinue: ClawArtifactMetadataParser.boolValue(metadata["readinessCanContinue"]),
+            satisfiedSignals: ClawArtifactMetadataParser.listValue(metadata["satisfiedSignals"]),
+            missingSignals: ClawArtifactMetadataParser.listValue(metadata["missingSignals"]),
+            selectedNextActionKind: ClawArtifactMetadataParser.cleanValue(metadata["selectedNextActionKind"]),
+            selectedNextActionRequiresApproval: ClawArtifactMetadataParser.boolValue(metadata["selectedNextActionRequiresApproval"]),
+            riskTags: ClawArtifactMetadataParser.listValue(metadata["riskTags"]),
+            stopReason: ClawArtifactMetadataParser.cleanValue(metadata["stopReason"]),
+            handoffSummary: ClawArtifactMetadataParser.cleanValue(metadata["handoffSummary"]),
+            isRedacted: latest.isRedacted
+        )
+    }
+}
+
+struct ClawGatewayCapabilityReviewSummary: Equatable, Codable, Sendable {
+    var snapshotCount: Int
+    var latestTitle: String
+    var hasMetadata: Bool
+    var tokenConfigured: Bool?
+    var tokenRequired: Bool?
+    var tokenFingerprint: String?
+    var allowedActionKinds: [String]
+    var workspaceState: String?
+    var shellState: String?
+    var browserControlState: String?
+    var browserNetworkState: String?
+    var screenCaptureState: String?
+    var windowMetadataState: String?
+    var desktopControlState: String?
+    var safetyFlags: [String]
+    var platform: String?
+    var isRedacted: Bool
+
+    var compactStatus: String {
+        guard hasMetadata else {
+            return "已收到 Gateway 能力快照，metadata 待同步。"
+        }
+        let host = platform.map { "Gateway \($0)" } ?? "Gateway 能力"
+        let token = tokenFingerprint.map { "token \($0)" } ?? "token 待复核"
+        let shell = shellState.map { "shell \($0)" } ?? "shell 待复核"
+        let desktop = desktopControlState.map { "desktop \($0)" } ?? "desktop 待复核"
+        return "\(host) · \(token) · \(shell) · \(desktop)"
+    }
+
+    static func latest(from session: ClawGatewaySession?) -> ClawGatewayCapabilityReviewSummary? {
+        guard let session else {
+            return nil
+        }
+        return latest(from: session.allArtifacts)
+    }
+
+    static func latest(from artifacts: [ClawGatewayArtifact]) -> ClawGatewayCapabilityReviewSummary? {
+        let snapshots = artifacts.filter(isCapabilitySnapshot)
+        guard let latest = snapshots.last else {
+            return nil
+        }
+        let metadata = latest.metadata ?? [:]
+        return ClawGatewayCapabilityReviewSummary(
+            snapshotCount: snapshots.count,
+            latestTitle: latest.title,
+            hasMetadata: metadata.isEmpty == false,
+            tokenConfigured: ClawArtifactMetadataParser.boolValue(metadata["tokenConfigured"]),
+            tokenRequired: ClawArtifactMetadataParser.boolValue(metadata["tokenRequired"]),
+            tokenFingerprint: ClawArtifactMetadataParser.cleanValue(metadata["tokenFingerprint"]),
+            allowedActionKinds: ClawArtifactMetadataParser.listValue(metadata["allowedActionKinds"]),
+            workspaceState: ClawArtifactMetadataParser.cleanValue(metadata["workspaceState"]),
+            shellState: ClawArtifactMetadataParser.cleanValue(metadata["shellState"]),
+            browserControlState: ClawArtifactMetadataParser.cleanValue(metadata["browserControlState"]),
+            browserNetworkState: ClawArtifactMetadataParser.cleanValue(metadata["browserNetworkState"]),
+            screenCaptureState: ClawArtifactMetadataParser.cleanValue(metadata["screenCaptureState"]),
+            windowMetadataState: ClawArtifactMetadataParser.cleanValue(metadata["windowMetadataState"]),
+            desktopControlState: ClawArtifactMetadataParser.cleanValue(metadata["desktopControlState"]),
+            safetyFlags: ClawArtifactMetadataParser.listValue(metadata["safetyFlags"]),
+            platform: ClawArtifactMetadataParser.cleanValue(metadata["platform"]),
             isRedacted: latest.isRedacted
         )
     }
 
-    private static func cleanValue(_ value: String?) -> String? {
-        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return trimmed.isEmpty || trimmed == "none" ? nil : trimmed
-    }
-
-    private static func intValue(_ value: String?) -> Int? {
-        guard let clean = cleanValue(value) else {
-            return nil
-        }
-        return Int(clean)
-    }
-
-    private static func boolValue(_ value: String?) -> Bool? {
-        guard let clean = cleanValue(value)?.lowercased() else {
-            return nil
-        }
-        switch clean {
-        case "true", "yes", "1":
-            return true
-        case "false", "no", "0":
-            return false
-        default:
-            return nil
-        }
-    }
-
-    private static func listValue(_ value: String?) -> [String] {
-        guard let clean = cleanValue(value) else {
-            return []
-        }
-        return clean
-            .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { $0.isEmpty == false && $0 != "none" }
+    private static func isCapabilitySnapshot(_ artifact: ClawGatewayArtifact) -> Bool {
+        artifact.kind == .auditLog &&
+        (artifact.title == "gateway-capability-snapshot.json" || artifact.metadata?["snapshotKind"] == "gatewayCapability")
     }
 }
 
@@ -1385,6 +1508,7 @@ struct ClawMissionRunSummary: Equatable, Codable, Sendable {
     var artifactCount: Int
     var artifactKinds: [ClawGatewayArtifactKind]
     var agentTraceReview: ClawAgentTraceReviewSummary?
+    var gatewayCapabilityReview: ClawGatewayCapabilityReviewSummary?
     var primaryActionTitle: String
     var primaryActionIcon: String
     var primaryActionKind: ClawMissionRunPrimaryActionKind

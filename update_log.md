@@ -15,12 +15,61 @@
 
 - 项目方向：OpenClaw 式电脑接管智能体，iPhone 作为控制台，桌面 Claw Gateway 作为执行端。
 - 当前 schema：`claw.computer.control.v1`。
-- 当前核心闭环：用户自然语言任务 -> `PhoneAgentPlanner` -> `ClawMobileTask` -> `ClawMobileEnvelope` -> 模拟事件流或 WebSocket Gateway -> `ClawGatewayEvent` -> session reducer -> Mission Run / AgentTrace 复核 UI / iPad 多栏工作台展示和审批。
+- 当前核心闭环：用户自然语言任务 -> `PhoneAgentPlanner` -> `ClawMobileTask` -> `ClawMobileEnvelope` -> 模拟事件流或 WebSocket Gateway -> `ClawGatewayEvent` -> session reducer -> Mission Run / Gateway 能力复核摘要 / AgentTrace 复核 UI / iPad 多栏工作台展示和审批。
 - 当前 Gateway 能力：session-start 能力快照 `auditLog`、屏幕观察 dry-run/截图策略、浏览器 HTML/URL trace、浏览器打开/搜索计划、workspace 文件写入、Shell dry-run/allowlist 执行、结构化提取、桌面 App 审批闸门、带 readiness/checklist/risk/stop/handoff 与安全 metadata 的 `runAgentLoop`/`agentTrace`。
 - 当前协作闭环：默认 `main` 直推，GitHub Actions 生成未加密 `ci-results` 结果包，Agent C 下载并核对 manifest/JUnit/日志后验收。
 - 当前主要遗留：完整 macOS Accessibility tree、Playwright/browser-use 兼容控制器、真实多轮 agent loop、live Gateway 心跳和重连、完整 artifact 内容复核体验。
 
 ## 历史记录
+
+### v0.10 / 手机端 Gateway 能力复核摘要
+
+日期：2026-07-04
+
+核心变更：
+
+- Gateway `gateway-capability-snapshot.json` `auditLog` artifact event 附带安全 metadata，包含固定 allowlist 键：snapshot kind、token 配置/短指纹、allowedActionKinds、workspace/shell/browser/screen/window/desktop capability state、safety flags 和 platform。
+- Swift `ClawGatewaySession` 新增向后兼容的 `sessionArtifacts`，旧 JSON 缺字段时默认为空；`artifactCount` 和 artifact kind summary 改为统计 session-level artifacts 与 action-bound artifacts。
+- Reducer 对无 action 绑定的 `artifactStored` 不再丢弃，而是合并到 `sessionArtifacts` 并写入 auditTrail；action-bound artifact 仍进入对应 action result，不创建伪 result。
+- 新增 `ClawGatewayCapabilityReviewSummary`，Mission Run、Gateway session card 和 iPad regular 工作台展示 metadata 派生的 Gateway 能力复核摘要；UI 不读取 `file://` 内容，不显示 raw token、完整 path、payload、`instruction` 或 `toolArguments`。
+- Simulator、XCTest、Swift logic smoke、Gateway direct/WebSocket smoke 同步覆盖 session-level artifact、metadata allowlist、一致性和无敏感内容泄露。
+- 同步 README、协议和 flow/flowchart 文档；本轮不新增 schema/action/event/artifact kind，不扩大 Gateway 权限。
+
+关键文件：
+
+- `Tools/claw-gateway-server.mjs`
+- `Tools/claw-gateway-direct-smoke.mjs`
+- `Tools/claw-gateway-smoke.mjs`
+- `Claw/Core/ClawModels.swift`
+- `Claw/Services/ClawStore.swift`
+- `Claw/Views/ContentView.swift`
+- `ClawTests/ClawTests.swift`
+- `Tools/LogicSmoke.swift`
+- `README.md`
+- `Docs/claw-mobile-gateway-protocol.md`
+- `md/flow/flow.md`
+- `md/flow/flowchart.md`
+- `md/prompt/v0（核心智能能力）/v0.10（手机端Gateway能力复核摘要）.md`
+- `update_log.md`
+
+验证结果：
+
+- `node --check Tools/claw-gateway-server.mjs` 通过。
+- `node --check Tools/claw-gateway-direct-smoke.mjs` 通过。
+- `node --check Tools/claw-gateway-smoke.mjs` 通过。
+- `node Tools/claw-gateway-direct-smoke.mjs` 通过，输出 `Claw Gateway direct smoke passed (108 events)`。
+- Swift logic smoke 编译通过。
+- `.build/claw-logic-smoke` 通过，输出 `Claw logic smoke passed`。
+- `node Tools/claw-gateway-smoke.mjs` 在普通沙箱内因 `listen EPERM 127.0.0.1:18879` 被阻断，升级权限后通过，输出 `Claw Gateway smoke passed (18 events)`。
+- 无签名 iOS build 通过，输出 `BUILD SUCCEEDED`。
+- `xcodebuild build-for-testing` 通过，输出 `TEST BUILD SUCCEEDED`，确认 `ClawTests` 可编译；本机未启动模拟器执行 XCTest。
+- `git diff --check` 通过。
+- `ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci-results.yml"); puts "yaml ok"'` 通过，输出 `yaml ok`。
+
+遗留事项：
+
+- push `origin/main` 后仍需等待 GitHub Actions `ci-results` 结果包，供 Agent C 下载并核对 manifest、JUnit/摘要、Gateway direct/WebSocket smoke 日志、Swift logic smoke 和 xcodebuild 日志后复判。
+- 当前是 metadata 摘要复核，不是完整 artifact JSON viewer；live Gateway 心跳/重连、真实多轮 agent loop 和完整 artifact 内容复核仍待后续轮次推进。
 
 ### v0.9 / Gateway 能力快照 artifact
 
