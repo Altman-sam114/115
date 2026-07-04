@@ -15,12 +15,45 @@
 
 - 项目方向：OpenClaw 式电脑接管智能体，iPhone 作为控制台，桌面 Claw Gateway 作为执行端。
 - 当前 schema：`claw.computer.control.v1`。
-- 当前核心闭环：用户自然语言任务 -> `PhoneAgentPlanner` -> `ClawMobileTask` -> `ClawMobileEnvelope` -> 模拟事件流或 WebSocket Gateway -> `ClawGatewayEvent` -> session reducer -> Mission Run / AgentTrace 复核 UI 展示和审批。
+- 当前核心闭环：用户自然语言任务 -> `PhoneAgentPlanner` -> `ClawMobileTask` -> `ClawMobileEnvelope` -> 模拟事件流或 WebSocket Gateway -> `ClawGatewayEvent` -> session reducer -> Mission Run / AgentTrace 复核 UI / iPad 多栏工作台展示和审批。
 - 当前 Gateway 能力：屏幕观察 dry-run/截图策略、浏览器 HTML/URL trace、浏览器打开/搜索计划、workspace 文件写入、Shell dry-run/allowlist 执行、结构化提取、桌面 App 审批闸门、带 readiness/checklist/risk/stop/handoff 与安全 metadata 的 `runAgentLoop`/`agentTrace`。
 - 当前协作闭环：默认 `main` 直推，GitHub Actions 生成未加密 `ci-results` 结果包，Agent C 下载并核对 manifest/JUnit/日志后验收。
-- 当前主要遗留：完整 macOS Accessibility tree、Playwright/browser-use 兼容控制器、真实多轮 agent loop、live Gateway 心跳和重连、完整 artifact 内容复核体验和 iPad 多栏操作面板。
+- 当前主要遗留：完整 macOS Accessibility tree、Playwright/browser-use 兼容控制器、真实多轮 agent loop、live Gateway 心跳和重连、完整 artifact 内容复核体验。
 
 ## 历史记录
+
+### v0.8 / iPad 多栏复核工作台
+
+日期：2026-07-04
+
+核心变更：
+
+- 电脑接管页在 regular horizontal size class 下切换为左右两栏工作台：左侧显示命令输入和 Mission Run 主操作，右侧显示计划、Claw 电脑任务、Gateway 会话、事件/envelope、权限矩阵和执行日志。
+- compact 布局保持原有单栏滚动顺序，不删除任何现有入口或操作按钮。
+- 本轮只复用既有 `ClawStore` 安全路径和现有面板，不新增 source of truth，不改变 `claw.computer.control.v1` schema，不新增 action/artifact/event，不扩大 Gateway 权限。
+- 同步 README、协议和 flow 文档，明确 iPad 工作台属于 presentation layer，不读取 Gateway `file://` artifact 内容。
+
+关键文件：
+
+- `Claw/Views/ContentView.swift`
+- `README.md`
+- `Docs/claw-mobile-gateway-protocol.md`
+- `md/flow/flow.md`
+- `md/flow/flowchart.md`
+- `md/prompt/v0（核心智能能力）/v0.8（iPad多栏复核工作台）.md`
+- `update_log.md`
+
+验证结果：
+
+- 无签名 iOS build 通过，输出 `BUILD SUCCEEDED`。
+- `git diff --check` 通过。
+- `ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci-results.yml"); puts "yaml ok"'` 通过，输出 `yaml ok`。
+- 本轮未修改 `Claw/Core/ClawModels.swift`、`Claw/Services/ClawStore.swift` 或 `Tools/*.mjs`，本地未跑 Swift logic smoke 和 Gateway smoke；云端 CI 仍会覆盖。
+- push `origin/main` 后仍需等待 GitHub Actions `ci-results` 结果包供 Agent C 复判。
+
+遗留事项：
+
+- 当前是分栏复核工作台，不是完整 artifact JSON viewer；真实多轮 agent loop、完整 artifact 内容复核、live Gateway 心跳和重连仍待后续轮次推进。
 
 ### v0.7 / 手机端 AgentTrace 复核体验
 
@@ -64,7 +97,7 @@
 - `node Tools/claw-gateway-smoke.mjs` 在普通沙箱内因 `listen EPERM 127.0.0.1:18879` 被阻断，升级权限后通过，输出 `Claw Gateway smoke passed (17 events)`。
 - 无签名 iOS build 通过，输出 `BUILD SUCCEEDED`。
 - `xcodebuild build-for-testing` 通过，输出 `TEST BUILD SUCCEEDED`，确认 `ClawTests` 可编译；本机 CoreSimulator 服务不可用，未执行模拟器 XCTest。
-- push `origin/main` 后仍需等待 GitHub Actions `ci-results` 结果包供 Agent C 复判。
+- GitHub Actions run `28703524664` attempt `1` 通过；Agent C 下载结果包 `claw-ci-v0.2-main-545c6b79c86d-run28703524664-attempt1` 并核对 manifest/JUnit/日志通过，manifest commit 为 `545c6b79c86d50e877e3929274aee10345b5aa8a`。
 
 遗留事项：
 

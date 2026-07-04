@@ -21,7 +21,7 @@ Claw 的当前主链路是：用户在 iPhone 输入电脑任务，App 生成可
   -> ClawGatewaySession.results/artifacts/auditTrail
   -> ClawGatewayArtifact.metadata 上的 agentTrace 安全摘要
   -> ClawMissionRunSummary 派生任务回合摘要和 AgentTrace 复核摘要
-  -> SwiftUI Mission Run 展示、复核、审批、重试或下一轮
+  -> SwiftUI Mission Run / iPad 多栏工作台展示、复核、审批、重试或下一轮
 ```
 
 ## 2. 当前协作验证流
@@ -86,6 +86,7 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 - 展示连接、聊天、电脑接管、能力和榜单。
 - 让用户输入任务、配置 Gateway URL/token、切换发送模式、查看 envelope 和事件。
 - 在电脑接管首屏用 Mission Run 面板汇总任务目标、阶段、下一步主动作、风险、审批点、Gateway 结果、artifact 证据和最近 AgentTrace 复核摘要。
+- 在 iPad/regular horizontal size class 上用多栏工作台重排同一组展示层信息：左侧命令输入和 Mission Run，右侧计划、Claw 电脑任务、Gateway 会话、事件/envelope、权限和日志；compact 布局保持单栏。
 
 输入：
 
@@ -240,11 +241,11 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 - `ClawGatewaySession`：手机端会话视图模型。
 - `ClawAutonomousLoopState`：自治循环状态。
 - `ClawAgentTraceReviewSummary`：手机端从最近 `agentTrace` artifact metadata 派生的复核摘要，只展示安全字符串摘要，不读取 Gateway `file://` 内容。
-- `ClawMissionRunSummary`：手机端 presentation layer 摘要，只从 loop/task/session 派生，不进入 envelope 或 Gateway 协议。
+- `ClawMissionRunSummary`：手机端 presentation layer 摘要，只从 loop/task/session 派生，不进入 envelope 或 Gateway 协议；iPad 多栏工作台只重排该展示层和既有会话/日志面板。
 
 ## 6. 用户入口
 
-- App UI：`ContentView` 内连接、聊天、电脑接管 Mission Run 面板和相关详情面板。
+- App UI：`ContentView` 内连接、聊天、电脑接管 Mission Run 面板、iPad 多栏复核工作台和相关详情面板。
 - Shortcuts/App Intents：`ClawShortcuts.swift`。
 - Gateway CLI：`node Tools/claw-gateway-server.mjs` 或 `--emit-events`。
 - Smoke：`Tools/claw-gateway-direct-smoke.mjs`、`Tools/claw-gateway-smoke.mjs`、`Tools/LogicSmoke.swift`。

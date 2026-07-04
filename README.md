@@ -2,7 +2,7 @@
 
 这是一个 SwiftUI iPhone 原型 App，用手机作为 Claw 控制台：用户用自然语言描述电脑任务，App 生成可审批的执行计划和 JSON envelope，真正的浏览器、文件、Shell、桌面 App 操作交给用户自托管的 Claw Gateway 在电脑上执行。
 
-当前版本不下载模型权重，模型保持占位状态。App 已完成 UI、数据流、本地 artifact 导入/扫描/校验、电脑接管规划器、Claw Gateway envelope、事件流 reducer、Mission Run 任务回合面板、AgentTrace 复核摘要、WebSocket transport 边界、Shortcuts 入口和 smoke 测试。
+当前版本不下载模型权重，模型保持占位状态。App 已完成 UI、数据流、本地 artifact 导入/扫描/校验、电脑接管规划器、Claw Gateway envelope、事件流 reducer、Mission Run 任务回合面板、AgentTrace 复核摘要、iPad 多栏复核工作台、WebSocket transport 边界、Shortcuts 入口和 smoke 测试。
 
 后续 Codex/Agent 接力开发必须先读 `AGENTS.md`。项目已建立“人工目标 -> Agent A 设计提示词 -> Agent B 在 main 上实现并推送 -> GitHub Actions 云端验证 -> Agent C 下载结果包复判 -> 人工复核 -> 下一轮”的迭代工作流，并准备支持未来由 Agent X 主控多轮调度 A/B/C。核心记忆和规范分布在 `AGENTS.md`、`update_log.md`、`md/test/test.md`、`md/flow/flow.md`、`md/flow/flowchart.md` 和 `md/prompt/`。
 
@@ -36,7 +36,7 @@
 
 这个原型朝 OpenClaw 式电脑智能体迭代：
 
-- 手机端：输入任务、生成计划、用 Mission Run 面板展示当前阶段/下一步/风险/证据、审批高风险动作、查看 envelope 和审计摘要。
+- 手机端：输入任务、生成计划、用 Mission Run 面板展示当前阶段/下一步/风险/证据、审批高风险动作、查看 envelope 和审计摘要；iPad/宽屏下把命令、Mission Run、计划、Gateway 会话、事件、权限和日志分栏复核。
 - 桌面网关：观察屏幕、控制浏览器、操作桌面 App、管理文件、运行受控 Shell、提取数据，并把事件、artifact 和审批请求推回手机端。
 - 安全策略：token 只保留短 SHA-256 指纹；动作走白名单；敏感动作提升审批；Shell/文件/桌面接管默认需要网关确认。
 - 边界：iOS 普通 App 不能静默控制电脑或读取其他 App 私有数据，电脑接管必须发生在用户授权的桌面/自托管网关。
@@ -138,6 +138,7 @@ node Tools/claw-gateway-smoke.mjs
 
 ## 完成情况
 
+- 2026-07-04：新增 v0.8 iPad 多栏复核工作台。电脑接管页在 regular horizontal size class 下使用左右两栏：左侧保留命令输入和 Mission Run 主操作，右侧集中计划、Claw 电脑任务、Gateway 会话、事件/envelope、权限矩阵和执行日志；compact iPhone 布局保持原有单栏。本轮只重排现有展示层，不改变 schema，不新增 action/artifact/event，不读取 Gateway `file://` 内容，不扩展执行权限。
 - 2026-07-04：新增 v0.7 手机端 AgentTrace 复核体验。`ClawGatewayArtifact.metadata` 变为可选字符串字典，Gateway/simulator 在 `agentTrace` artifact event 上附带安全复核摘要，Mission Run / Gateway 会话显示证据分、缺口、下一步、停止原因和脱敏状态；本轮不读取 Gateway `file://` 内容，不新增 action/artifact/event kind，不扩展执行权限。
 - 2026-07-04：新增 v0.6 AgentTrace 证据策略。Gateway `runAgentLoop` 的 `agentTrace` artifact 在保留旧字段基础上新增 readiness、decisionChecklist、selectedNextAction、riskTags、stopReason 和 handoffSummary；direct/WebSocket smoke 断言新增字段。本轮不改变 `claw.computer.control.v1` schema，不扩展 Gateway 执行权限。
 - 2026-07-04：新增 v0.5 Agent X 循环迭代文档基线。补充 `agentx`/`x:`/`X:` 召唤规则、Agent X 主控调度职责、停止条件、flow/flowchart/test/prompt README 协作说明和小数据量 artifact 下载限制；本轮只做文档准备，不启动真实 Agent X 自动循环。

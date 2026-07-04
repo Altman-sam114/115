@@ -431,13 +431,30 @@ struct AutomationTargetRow: View {
 }
 
 struct PhoneAgentView: View {
-    @EnvironmentObject private var store: ClawStore
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     private let examples = [
         "接管我的电脑，打开浏览器搜索竞品信息，整理成表格后发到 Slack",
         "读取微信新消息并自动回复客户",
         "在项目目录运行测试，失败时定位原因并准备补丁"
     ]
+
+    var body: some View {
+        Group {
+            if horizontalSizeClass == .regular {
+                PhoneAgentWorkbenchLayout(examples: examples)
+            } else {
+                PhoneAgentCompactLayout(examples: examples)
+            }
+        }
+        .background(AppSurfaceBackground())
+        .navigationTitle("Claw Agent")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+struct PhoneAgentCompactLayout: View {
+    let examples: [String]
 
     var body: some View {
         ScrollView {
@@ -458,9 +475,74 @@ struct PhoneAgentView: View {
             }
             .padding(16)
         }
-        .background(AppSurfaceBackground())
-        .navigationTitle("Claw Agent")
-        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+struct PhoneAgentWorkbenchLayout: View {
+    let examples: [String]
+
+    var body: some View {
+        GeometryReader { proxy in
+            let leftWidth = min(max(proxy.size.width * 0.36, 330), 440)
+
+            HStack(alignment: .top, spacing: 16) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        PhoneAgentCommandPanel(examples: examples)
+                        ClawMissionRunPanel()
+                    }
+                    .padding(.vertical, 16)
+                    .padding(.leading, 16)
+                }
+                .frame(width: leftWidth)
+
+                Divider()
+                    .padding(.vertical, 16)
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        PhoneAgentReviewColumn()
+                    }
+                    .padding(.vertical, 16)
+                    .padding(.trailing, 16)
+                }
+                .frame(maxWidth: .infinity)
+            }
+        }
+    }
+}
+
+struct PhoneAgentReviewColumn: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            PhoneAgentReviewSection(title: "计划复核", icon: "checklist") {
+                PhoneAgentPlanPanel()
+            }
+            PhoneAgentReviewSection(title: "Gateway 任务", icon: "display.and.arrow.down") {
+                ClawMobileBridgePanel()
+            }
+            PhoneAgentReviewSection(title: "会话与事件", icon: "waveform.path.ecg.rectangle.fill") {
+                ClawGatewaySessionPanel()
+            }
+            PhoneAgentReviewSection(title: "权限与日志", icon: "lock.rectangle.stack.fill") {
+                PhoneAgentPermissionMatrix()
+                PhoneAgentExecutionPanel()
+            }
+        }
+    }
+}
+
+struct PhoneAgentReviewSection<Content: View>: View {
+    let title: String
+    let icon: String
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionHeader(title: title, icon: icon)
+            content
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
