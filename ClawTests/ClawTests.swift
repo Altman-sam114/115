@@ -653,6 +653,180 @@ final class ClawTests: XCTestCase {
         XCTAssertTrue(legacyReview.compactStatus.contains("metadata"))
     }
 
+    func testGatewayTaskReplayGuardReviewParsesMetadataAndFallsBack() throws {
+        let artifact = ClawGatewayArtifact(
+            kind: .auditLog,
+            title: "task-replay-guard.json",
+            reference: "file:///tmp/task-replay-guard.json",
+            isRedacted: true,
+            metadata: [
+                "replayGuard": "taskReplayGuard",
+                "decision": "skip-duplicate-task",
+                "taskID": "12345678-1234-1234-1234-123456789abc",
+                "replayDigest": "sha256:abcdef1234567890",
+                "digestMatchesFirst": "true",
+                "firstSessionID": "87654321-4321-4321-4321-cba987654321",
+                "originalStatus": "completed",
+                "replayCount": "2",
+                "actionCount": "5",
+                "actionKinds": "controlBrowser,manageFiles,runAgentLoop",
+                "safetyFlags": "process-local,actions-skipped,business-artifacts-not-written",
+                "toolArguments": "should-not-be-read",
+                "Authorization": "Bearer raw-token"
+            ]
+        )
+
+        let review = try XCTUnwrap(ClawGatewayTaskReplayGuardReviewSummary.latest(from: [artifact]))
+
+        XCTAssertEqual(review.replayCountArtifacts, 1)
+        XCTAssertTrue(review.hasMetadata)
+        XCTAssertEqual(review.decision, "skip-duplicate-task")
+        XCTAssertEqual(review.shortTaskID, "12345678")
+        XCTAssertEqual(review.shortReplayDigest, "sha256:abcdef123456")
+        XCTAssertEqual(review.shortFirstSessionID, "87654321")
+        XCTAssertEqual(review.digestMatchesFirst, true)
+        XCTAssertEqual(review.originalStatus, "completed")
+        XCTAssertEqual(review.replayCount, 2)
+        XCTAssertEqual(review.actionCount, 5)
+        XCTAssertEqual(review.actionKinds, ["controlBrowser", "manageFiles", "runAgentLoop"])
+        XCTAssertTrue(review.safetyFlags.contains("actions-skipped"))
+        XCTAssertTrue(review.compactStatus.contains("skip-duplicate-task"))
+        XCTAssertTrue(review.compactStatus.contains("重复 2 次"))
+        XCTAssertFalse(review.compactStatus.contains("toolArguments"))
+        XCTAssertFalse(review.compactStatus.contains("raw-token"))
+        XCTAssertTrue(review.isRedacted)
+
+        let legacyArtifact = ClawGatewayArtifact(
+            kind: .auditLog,
+            title: "task-replay-guard.json",
+            reference: "file:///tmp/legacy-task-replay-guard.json",
+            isRedacted: true
+        )
+        let legacyReview = try XCTUnwrap(ClawGatewayTaskReplayGuardReviewSummary.latest(from: [legacyArtifact]))
+        XCTAssertFalse(legacyReview.hasMetadata)
+        XCTAssertTrue(legacyReview.compactStatus.contains("metadata"))
+
+        let unrelatedAuditArtifact = ClawGatewayArtifact(
+            kind: .auditLog,
+            title: "other-audit.json",
+            reference: "file:///tmp/other-audit.json",
+            isRedacted: true,
+            metadata: ["replayGuard": "notReplayGuard"]
+        )
+        XCTAssertNil(ClawGatewayTaskReplayGuardReviewSummary.latest(from: [unrelatedAuditArtifact]))
+
+        let sensitiveArtifact = ClawGatewayArtifact(
+            kind: .auditLog,
+            title: "task-replay-guard.json",
+            reference: "file:///tmp/sensitive-task-replay-guard.json",
+            isRedacted: true,
+            metadata: [
+                "replayGuard": "taskReplayGuard",
+                "decision": "skip Authorization: Bearer raw-token",
+                "originalStatus": "completed file:///tmp/private.txt",
+                "actionKinds": "controlBrowser,token=raw-token",
+                "safetyFlags": "headers={Authorization: Bearer raw-token},workspace=/private/tmp/claw-work"
+            ]
+        )
+        let sensitiveReview = try XCTUnwrap(ClawGatewayTaskReplayGuardReviewSummary.latest(from: [sensitiveArtifact]))
+        let visibleReplayText = [
+            sensitiveReview.compactStatus,
+            sensitiveReview.actionKinds.joined(separator: " "),
+            sensitiveReview.safetyFlags.joined(separator: " ")
+        ].joined(separator: " ")
+        XCTAssertFalse(visibleReplayText.contains("Authorization"))
+        XCTAssertFalse(visibleReplayText.contains("Bearer"))
+        XCTAssertFalse(visibleReplayText.contains("raw-token"))
+        XCTAssertFalse(visibleReplayText.contains("file://"))
+        XCTAssertFalse(visibleReplayText.contains("/private"))
+        XCTAssertFalse(visibleReplayText.contains("workspace=/"))
+    }
+
+    func testMissionRunSummaryDerivesGatewayTaskReplayGuardReview() throws {
+        let store = ClawStore(autoScanLocalArtifacts: false)
+
+        store.gatewayDispatchMode = .liveGateway
+        store.setGateway(url: "ws://127.0.0.1:18789", token: "paired-secret")
+        store.phoneAgentCommand = "打开浏览器搜索资料"
+        store.generatePhoneAgentPlan()
+        store.queueClawMobileTaskFromCurrentPlan()
+        store.approveLatestClawMobileTask()
+        store.sendLatestClawMobileTask()
+
+        let sessionID = try XCTUnwrap(store.clawGatewaySessions.first?.id)
+        let task = try XCTUnwrap(store.clawMobileTasks.first)
+        let replayArtifact = ClawGatewayArtifact(
+            kind: .auditLog,
+            title: "task-replay-guard.json",
+            reference: "file:///private/tmp/claw/session/task-replay-guard.json",
+            isRedacted: true,
+            metadata: [
+                "replayGuard": "taskReplayGuard",
+                "decision": "skip-duplicate-task",
+                "taskID": task.id.uuidString,
+                "replayDigest": "sha256:abcdef1234567890",
+                "digestMatchesFirst": "true",
+                "firstSessionID": UUID().uuidString,
+                "originalStatus": "completed",
+                "replayCount": "1",
+                "actionCount": "\(task.actions.count)",
+                "actionKinds": task.actions.map(\.kind.rawValue).joined(separator: ","),
+                "safetyFlags": "process-local,actions-skipped,business-artifacts-not-written"
+            ]
+        )
+        var replayEvents = [
+            ClawGatewayEvent(
+                sessionID: sessionID,
+                taskID: task.id,
+                sequence: 2,
+                kind: .gatewayConnected,
+                summary: "Gateway replay guard recognized duplicate task"
+            ),
+            ClawGatewayEvent(
+                sessionID: sessionID,
+                taskID: task.id,
+                sequence: 3,
+                kind: .artifactStored,
+                summary: "Stored Gateway task replay guard audit artifact",
+                artifacts: [replayArtifact]
+            )
+        ]
+        replayEvents.append(contentsOf: task.actions.enumerated().map { index, action in
+            ClawGatewayEvent(
+                sessionID: sessionID,
+                taskID: task.id,
+                sequence: 4 + index,
+                kind: .actionSkipped,
+                actionID: action.id,
+                actionKind: action.kind,
+                actionTitle: action.title,
+                resultStatus: .skipped,
+                summary: "\(action.title) skipped by Gateway replay guard"
+            )
+        })
+        replayEvents.append(
+            ClawGatewayEvent(
+                sessionID: sessionID,
+                taskID: task.id,
+                sequence: 4 + task.actions.count,
+                kind: .sessionCompleted,
+                summary: "Gateway replay guard completed without re-running actions"
+            )
+        )
+
+        store.ingestGatewayEvents(replayEvents)
+
+        let review = try XCTUnwrap(store.missionRunSummary.gatewayTaskReplayGuardReview)
+        XCTAssertEqual(review.replayCount, 1)
+        XCTAssertEqual(review.actionCount, task.actions.count)
+        XCTAssertTrue(review.digestMatchesFirst == true)
+        XCTAssertEqual(store.clawGatewaySessions[0].sessionArtifacts.first?.title, "task-replay-guard.json")
+        XCTAssertTrue(store.clawGatewaySessions[0].results.allSatisfy { $0.status == .skipped })
+        XCTAssertTrue(store.missionRunSummary.statusLine.contains("Replay Guard"))
+        XCTAssertFalse(store.missionRunSummary.statusLine.contains("file://"))
+        XCTAssertFalse(store.missionRunSummary.statusLine.contains("paired-secret"))
+    }
+
     func testGatewayEventReducerStoresSessionLevelArtifactsWithoutFakeResult() {
         let taskID = UUID()
         let sessionID = UUID()
@@ -715,6 +889,28 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(actionReduced.results.count, 1)
         XCTAssertEqual(actionReduced.results[0].artifacts.first?.kind, .browserTrace)
         XCTAssertEqual(actionReduced.artifactCount, 2)
+
+        let replayArtifact = ClawGatewayArtifact(
+            kind: .auditLog,
+            title: "task-replay-guard.json",
+            reference: "file:///tmp/task-replay-guard.json",
+            isRedacted: true,
+            metadata: ["replayGuard": "taskReplayGuard"]
+        )
+        let replayArtifactEvent = ClawGatewayEvent(
+            sessionID: sessionID,
+            taskID: taskID,
+            sequence: 4,
+            kind: .artifactStored,
+            summary: "Stored replay guard artifact",
+            artifacts: [replayArtifact]
+        )
+
+        let replayReduced = ClawGatewayEventStream.apply(event: replayArtifactEvent, to: actionReduced)
+
+        XCTAssertEqual(replayReduced.sessionArtifacts.count, 2)
+        XCTAssertEqual(replayReduced.results.count, 1)
+        XCTAssertNotNil(ClawGatewayTaskReplayGuardReviewSummary.latest(from: replayReduced))
     }
 
     func testPhoneAgentSurfaceDecodesLegacyAICLawRuntimeValue() throws {

@@ -704,6 +704,10 @@ struct ClawMissionRunPanel: View {
                 ClawGatewayCapabilityReviewRow(review: review)
             }
 
+            if let review = summary.gatewayTaskReplayGuardReview {
+                ClawGatewayTaskReplayGuardReviewRow(review: review)
+            }
+
             if let review = summary.agentTraceReview {
                 ClawAgentTraceReviewRow(review: review)
             }
@@ -1227,6 +1231,10 @@ struct ClawGatewaySessionCard: View {
                 ClawGatewayCapabilityReviewRow(review: review)
             }
 
+            if let review = ClawGatewayTaskReplayGuardReviewSummary.latest(from: session) {
+                ClawGatewayTaskReplayGuardReviewRow(review: review)
+            }
+
             if let review = ClawAgentTraceReviewSummary.latest(from: session) {
                 ClawAgentTraceReviewRow(review: review)
             }
@@ -1479,6 +1487,119 @@ struct ClawGatewayCapabilityReviewRow: View {
             return .secondary
         case "unavailable":
             return .orange
+        default:
+            return .secondary
+        }
+    }
+}
+
+struct ClawGatewayTaskReplayGuardReviewRow: View {
+    let review: ClawGatewayTaskReplayGuardReviewSummary
+
+    private var statusChips: [(text: String, icon: String, tint: Color)] {
+        var items: [(String, String, Color)] = []
+        if let replayCount = review.replayCount {
+            items.append(("replay \(replayCount)", "arrow.clockwise.circle.fill", .orange))
+        }
+        if let actionCount = review.actionCount {
+            items.append(("skipped \(actionCount)", "forward.end.fill", .orange))
+        }
+        if let originalStatus = review.originalStatus {
+            items.append(("first \(originalStatus)", "clock.badge.checkmark.fill", tint(forStatus: originalStatus)))
+        }
+        if let matches = review.digestMatchesFirst {
+            items.append((matches ? "digest match" : "digest changed", matches ? "checkmark.seal.fill" : "exclamationmark.triangle.fill", matches ? .green : .red))
+        }
+        if let digest = review.shortReplayDigest {
+            items.append((digest, "number", .purple))
+        }
+        if items.isEmpty {
+            items.append(("metadata 待同步", "hourglass", .secondary))
+        }
+        return items
+    }
+
+    private var identityChips: [(text: String, icon: String, tint: Color)] {
+        var items: [(String, String, Color)] = []
+        if let taskID = review.shortTaskID {
+            items.append(("task \(taskID)", "doc.badge.gearshape", .purple))
+        }
+        if let firstSessionID = review.shortFirstSessionID {
+            items.append(("first \(firstSessionID)", "rectangle.stack.badge.person.crop", .purple))
+        }
+        for kind in review.actionKinds.prefix(3) {
+            items.append((kind, "square.stack.3d.forward.dottedline", .blue))
+        }
+        return items
+    }
+
+    private var safetyChips: [(text: String, icon: String, tint: Color)] {
+        var items = review.safetyFlags.prefix(3).map { flag in
+            (text: flag, icon: "shield.lefthalf.filled.badge.checkmark", tint: Color.purple)
+        }
+        if items.isEmpty {
+            items.append((text: "process-local", icon: "desktopcomputer.trianglebadge.exclamationmark", tint: .orange))
+        }
+        return items
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Label("Replay Guard", systemImage: "arrow.triangle.2.circlepath.circle.fill")
+                    .font(.footnote.bold())
+                    .foregroundStyle(.primary)
+                PhoneAgentTag(text: "\(review.replayCountArtifacts) 条", icon: "number", tint: .orange)
+                PhoneAgentTag(
+                    text: review.isRedacted ? "已脱敏" : "可见",
+                    icon: review.isRedacted ? "eye.slash.fill" : "eye.fill",
+                    tint: review.isRedacted ? .orange : .green
+                )
+                Spacer(minLength: 0)
+            }
+
+            Text(review.compactStatus)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(Array(statusChips.enumerated()), id: \.offset) { _, chip in
+                        PhoneAgentTag(text: chip.text, icon: chip.icon, tint: chip.tint)
+                    }
+                }
+            }
+
+            if identityChips.isEmpty == false {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(Array(identityChips.enumerated()), id: \.offset) { _, chip in
+                            PhoneAgentTag(text: chip.text, icon: chip.icon, tint: chip.tint)
+                        }
+                    }
+                }
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(Array(safetyChips.enumerated()), id: \.offset) { _, chip in
+                        PhoneAgentTag(text: chip.text, icon: chip.icon, tint: chip.tint)
+                    }
+                }
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func tint(forStatus status: String) -> Color {
+        switch status {
+        case "completed":
+            return .green
+        case "running":
+            return .blue
+        case "failed":
+            return .red
         default:
             return .secondary
         }

@@ -15,12 +15,51 @@
 
 - 项目方向：OpenClaw 式电脑接管智能体，iPhone 作为控制台，桌面 Claw Gateway 作为执行端。
 - 当前 schema：`claw.computer.control.v1`。
-- 当前核心闭环：用户自然语言任务 -> `PhoneAgentPlanner` -> `ClawMobileTask` -> `ClawMobileEnvelope` -> 模拟事件流或带有界重连/ping 可观测性和进程内 task replay guard 的 WebSocket Gateway -> `ClawGatewayEvent` -> session reducer -> Mission Run / Live Gateway 连接健康 / Gateway 能力复核摘要 / AgentTrace 复核 UI / iPad 多栏工作台展示和审批。
+- 当前核心闭环：用户自然语言任务 -> `PhoneAgentPlanner` -> `ClawMobileTask` -> `ClawMobileEnvelope` -> 模拟事件流或带有界重连/ping 可观测性和进程内 task replay guard 的 WebSocket Gateway -> `ClawGatewayEvent` -> session reducer -> Mission Run / Live Gateway 连接健康 / Gateway 能力复核摘要 / Replay Guard 复核摘要 / AgentTrace 复核 UI / iPad 多栏工作台展示和审批。
 - 当前 Gateway 能力：进程内 task replay guard、session-start 能力快照 `auditLog`、屏幕观察 dry-run/截图策略、浏览器 HTML/URL trace、浏览器打开/搜索计划、workspace 文件写入、Shell dry-run/allowlist 执行、结构化提取、桌面 App 审批闸门、带 readiness/checklist/risk/stop/handoff 与安全 metadata 的 `runAgentLoop`/`agentTrace`。
 - 当前协作闭环：默认 `main` 直推，GitHub Actions 生成未加密 `ci-results` 结果包，Agent C 下载并核对 manifest/JUnit/日志后验收。
 - 当前主要遗留：完整 macOS Accessibility tree、Playwright/browser-use 兼容控制器、真实多轮 agent loop、live Gateway 后台保活/真实心跳协议/配对、完整 artifact 内容复核体验。
 
 ## 历史记录
+
+### v0.14 / 手机端 Replay Guard 复核摘要
+
+日期：2026-07-05
+
+核心变更：
+
+- 新增 `ClawGatewayTaskReplayGuardReviewSummary`，手机端只从 `task-replay-guard.json` `auditLog` artifact metadata 派生 replay guard 复核摘要，不读取 Gateway `file://` payload。
+- `ClawMissionRunSummary` 增加 replay guard review，blocked 状态遇到 replay guard session 时优先说明重复任务已被 Gateway Replay Guard 跳过、未重新执行桌面 handler。
+- Mission Run 面板和 Gateway session card 新增 Replay Guard row，展示 replay 次数、跳过动作数、digest match、首次状态、短 task/session/digest、action kind 和 safety flags；metadata 缺失时降级为待同步。
+- XCTest 和 Swift logic smoke 覆盖 replay guard metadata 解析、legacy fallback、session-level artifact 合并、Mission Run 派生和敏感字段不展示。
+- 同步 README、协议和 flow/flowchart；本轮不新增 schema/event/action/artifact kind，不修改 Gateway JS，不扩大 Gateway 权限。
+
+关键文件：
+
+- `Claw/Core/ClawModels.swift`
+- `Claw/Services/ClawStore.swift`
+- `Claw/Views/ContentView.swift`
+- `ClawTests/ClawTests.swift`
+- `Tools/LogicSmoke.swift`
+- `README.md`
+- `Docs/claw-mobile-gateway-protocol.md`
+- `md/flow/flow.md`
+- `md/flow/flowchart.md`
+- `md/prompt/v0（核心智能能力）/v0.14（手机端ReplayGuard复核摘要）.md`
+- `update_log.md`
+
+验证结果：
+
+- Swift logic smoke 编译通过。
+- `.build/claw-logic-smoke` 通过，输出 `Claw logic smoke passed`。
+- `git diff --check` 通过。
+- `ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci-results.yml"); puts "yaml ok"'` 通过，输出 `yaml ok`。
+- 无签名 iOS build 通过，输出 `BUILD SUCCEEDED`；本机 CoreSimulator 服务不可用，仅影响 simulator 发现日志，不影响 generic iOS build。
+
+遗留事项：
+
+- 本轮不改变 Gateway JS；本地未跑 Gateway direct/WebSocket smoke，push `origin/main` 后由 GitHub Actions 覆盖。
+- 仍需本轮 push 后等待 GitHub Actions `ci-results` 结果包，供 Agent C 下载并核对 manifest、JUnit/摘要、Swift logic smoke、Gateway direct/WebSocket smoke 和 xcodebuild 日志后复判。
 
 ### v0.13 / Gateway task replay guard
 

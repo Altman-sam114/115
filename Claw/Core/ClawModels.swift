@@ -1493,6 +1493,129 @@ struct ClawGatewayCapabilityReviewSummary: Equatable, Codable, Sendable {
     }
 }
 
+struct ClawGatewayTaskReplayGuardReviewSummary: Equatable, Codable, Sendable {
+    var replayCountArtifacts: Int
+    var latestTitle: String
+    var hasMetadata: Bool
+    var decision: String?
+    var taskID: String?
+    var replayDigest: String?
+    var digestMatchesFirst: Bool?
+    var firstSessionID: String?
+    var originalStatus: String?
+    var replayCount: Int?
+    var actionCount: Int?
+    var actionKinds: [String]
+    var safetyFlags: [String]
+    var isRedacted: Bool
+
+    var shortTaskID: String? {
+        shortIdentifier(taskID)
+    }
+
+    var shortReplayDigest: String? {
+        shortDigest(replayDigest)
+    }
+
+    var shortFirstSessionID: String? {
+        shortIdentifier(firstSessionID)
+    }
+
+    var compactStatus: String {
+        guard hasMetadata else {
+            return "已收到 replay guard 审计，metadata 待同步。"
+        }
+        let decisionText = decision ?? "replay guard"
+        let replayText = replayCount.map { "重复 \($0) 次" } ?? "重复次数待复核"
+        let actionText = actionCount.map { "跳过 \($0) 个动作" } ?? "动作数待复核"
+        let statusText = originalStatus.map { "首次 \($0)" } ?? "首次状态待复核"
+        return "\(decisionText) · \(replayText) · \(actionText) · \(statusText)"
+    }
+
+    static func latest(from session: ClawGatewaySession?) -> ClawGatewayTaskReplayGuardReviewSummary? {
+        guard let session else {
+            return nil
+        }
+        return latest(from: session.allArtifacts)
+    }
+
+    static func latest(from artifacts: [ClawGatewayArtifact]) -> ClawGatewayTaskReplayGuardReviewSummary? {
+        let replayArtifacts = artifacts.filter(isReplayGuardArtifact)
+        guard let latest = replayArtifacts.last else {
+            return nil
+        }
+        let metadata = latest.metadata ?? [:]
+        return ClawGatewayTaskReplayGuardReviewSummary(
+            replayCountArtifacts: replayArtifacts.count,
+            latestTitle: latest.title,
+            hasMetadata: metadata.isEmpty == false,
+            decision: safeMetadataValue(metadata["decision"]),
+            taskID: safeMetadataValue(metadata["taskID"]),
+            replayDigest: safeMetadataValue(metadata["replayDigest"]),
+            digestMatchesFirst: ClawArtifactMetadataParser.boolValue(metadata["digestMatchesFirst"]),
+            firstSessionID: safeMetadataValue(metadata["firstSessionID"]),
+            originalStatus: safeMetadataValue(metadata["originalStatus"]),
+            replayCount: ClawArtifactMetadataParser.intValue(metadata["replayCount"]),
+            actionCount: ClawArtifactMetadataParser.intValue(metadata["actionCount"]),
+            actionKinds: safeMetadataList(metadata["actionKinds"]),
+            safetyFlags: safeMetadataList(metadata["safetyFlags"]),
+            isRedacted: latest.isRedacted
+        )
+    }
+
+    private static func isReplayGuardArtifact(_ artifact: ClawGatewayArtifact) -> Bool {
+        artifact.kind == .auditLog &&
+        (
+            artifact.title == "task-replay-guard.json" ||
+            ClawArtifactMetadataParser.cleanValue(artifact.metadata?["replayGuard"]) == "taskReplayGuard"
+        )
+    }
+
+    private static func safeMetadataValue(_ value: String?) -> String? {
+        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
+            return nil
+        }
+        var redacted = ClawSensitiveTextRedactor.redacted(clean)
+        let replacements: [(String, String)] = [
+            (#"(?i)\bAuthorization=<redacted>"#, "header-redacted"),
+            (#"(?i)\bBearer <redacted>"#, "token-redacted"),
+            (#"(?i)\b(token|password|secret)=<redacted>"#, "secret-redacted"),
+            (#"(?i)\bheaders=<redacted>"#, "headers-redacted"),
+            (#"(?i)\bworkspace=<redacted>"#, "workspace-redacted"),
+            (#"file://<redacted>"#, "file-redacted"),
+            (#"<path-redacted>"#, "path-redacted")
+        ]
+        for (pattern, replacement) in replacements {
+            redacted = redacted.replacingOccurrences(
+                of: pattern,
+                with: replacement,
+                options: .regularExpression
+            )
+        }
+        return ClawArtifactMetadataParser.cleanValue(redacted)
+    }
+
+    private static func safeMetadataList(_ value: String?) -> [String] {
+        ClawArtifactMetadataParser.listValue(value).compactMap(safeMetadataValue)
+    }
+
+    private func shortIdentifier(_ value: String?) -> String? {
+        guard let value else {
+            return nil
+        }
+        return String(value.prefix(8))
+    }
+
+    private func shortDigest(_ value: String?) -> String? {
+        guard let value else {
+            return nil
+        }
+        let prefix = value.hasPrefix("sha256:") ? "sha256:" : ""
+        let body = value.hasPrefix("sha256:") ? String(value.dropFirst(7)) : value
+        return prefix + body.prefix(12)
+    }
+}
+
 struct ClawMissionRunSummary: Equatable, Codable, Sendable {
     var command: String
     var phaseTitle: String
@@ -1509,6 +1632,7 @@ struct ClawMissionRunSummary: Equatable, Codable, Sendable {
     var artifactKinds: [ClawGatewayArtifactKind]
     var agentTraceReview: ClawAgentTraceReviewSummary?
     var gatewayCapabilityReview: ClawGatewayCapabilityReviewSummary?
+    var gatewayTaskReplayGuardReview: ClawGatewayTaskReplayGuardReviewSummary?
     var primaryActionTitle: String
     var primaryActionIcon: String
     var primaryActionKind: ClawMissionRunPrimaryActionKind

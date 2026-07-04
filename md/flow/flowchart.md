@@ -24,6 +24,7 @@ flowchart TD
   RPLAY -->|"重复"| RAUD["task-replay-guard.json<br/>session-level auditLog"]
   RAUD --> RSKIP["actionSkipped<br/>不重新执行 handler、不写业务 artifact"]
   RSKIP --> EVT
+  RAUD --> RMETA["Replay Guard metadata<br/>replay 次数、动作数、digest match、安全标志"]
   RPLAY -->|"首次"| SNAP["gateway-capability-snapshot.json<br/>session-start auditLog 能力快照"]
   SNAP --> SMETA["capability snapshot metadata<br/>token 指纹、allowlist、capability 状态、safety flags"]
   RPLAY -->|"首次"| H["Gateway action handlers<br/>屏幕、浏览器、文件、Shell、提取、桌面 App、agent loop"]
@@ -37,13 +38,16 @@ flowchart TD
   ART --> R
   SART --> R
   SMETA --> R
+  RMETA --> R
   META --> R
   R --> SES["ClawGatewaySession<br/>results、sessionArtifacts、auditTrail、retryable"]
   LREQ --> LHEALTH["ClawGatewayLiveHealthSummary<br/>连接状态、attempt/reconnect/ping、最新事件、fallback/error/completed"]
   RETRY --> LHEALTH
   R --> LHEALTH
   SES --> LHEALTH
-  LHEALTH --> RUN["ClawMissionRunSummary<br/>派生目标、阶段、主动作、风险、证据、Live health、Gateway 能力复核和 AgentTrace 复核"]
+  SES --> RREVIEW["ClawGatewayTaskReplayGuardReviewSummary<br/>重复任务安全跳过复核"]
+  LHEALTH --> RUN["ClawMissionRunSummary<br/>派生目标、阶段、主动作、风险、证据、Live health、Gateway 能力、Replay Guard 和 AgentTrace 复核"]
+  RREVIEW --> RUN
   SES --> RUN
   RUN --> UI["SwiftUI Mission Run / iPad 多栏工作台<br/>展示计划、风险、事件、artifact、审批点、复核摘要"]
   UI --> LOOP{"用户审批或继续循环"}

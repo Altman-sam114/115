@@ -282,6 +282,47 @@ enum LogicSmoke {
             failures.append("reduced fixture should derive gateway capability review")
         }
 
+        let replayArtifact = ClawGatewayArtifact(
+            kind: .auditLog,
+            title: "task-replay-guard.json",
+            reference: "file:///private/tmp/claw/session/task-replay-guard.json",
+            isRedacted: true,
+            metadata: [
+                "replayGuard": "taskReplayGuard",
+                "decision": "skip-duplicate-task",
+                "taskID": shellTask.id.uuidString,
+                "replayDigest": "sha256:abcdef1234567890",
+                "digestMatchesFirst": "true",
+                "firstSessionID": fixtureSession.id.uuidString,
+                "originalStatus": "completed",
+                "replayCount": "1",
+                "actionCount": "\(shellTask.actions.count)",
+                "actionKinds": shellTask.actions.map(\.kind.rawValue).joined(separator: ","),
+                "safetyFlags": "process-local,actions-skipped,business-artifacts-not-written",
+                "toolArguments": "should-not-be-read"
+            ]
+        )
+        let replayEvent = ClawGatewayEvent(
+            sessionID: fixtureSession.id,
+            taskID: shellTask.id,
+            sequence: 99,
+            kind: .artifactStored,
+            summary: "Stored replay guard artifact",
+            artifacts: [replayArtifact]
+        )
+        let replayReducedFixture = ClawGatewayEventStream.apply(event: replayEvent, to: reducedFixture)
+        expect(replayReducedFixture.sessionArtifacts.contains { $0.title == "task-replay-guard.json" }, "replay guard artifact should remain session-level")
+        if let replayReview = ClawGatewayTaskReplayGuardReviewSummary.latest(from: replayReducedFixture) {
+            expect(replayReview.hasMetadata, "replay guard review should include metadata")
+            expect(replayReview.replayCount == 1, "replay guard review should parse replay count")
+            expect(replayReview.actionCount == shellTask.actions.count, "replay guard review should parse action count")
+            expect(replayReview.digestMatchesFirst == true, "replay guard review should parse digest match")
+            expect(replayReview.compactStatus.contains("toolArguments") == false, "replay guard status should ignore unknown sensitive metadata")
+            expect(replayReview.compactStatus.contains("file://") == false, "replay guard status should not expose artifact reference")
+        } else {
+            failures.append("reduced fixture should derive replay guard review")
+        }
+
         var restrictedProfile = ClawStore.defaultClawGatewayProfile
         restrictedProfile.allowedActionKinds.removeAll { $0 == .composeMessage }
         let restrictedTask = ClawMobileBridge.makeTask(

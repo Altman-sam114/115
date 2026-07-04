@@ -165,6 +165,7 @@ final class ClawStore: ObservableObject {
             artifactKinds: missionRunArtifactKinds(from: session),
             agentTraceReview: missionRunAgentTraceReview(from: session),
             gatewayCapabilityReview: missionRunGatewayCapabilityReview(from: session),
+            gatewayTaskReplayGuardReview: missionRunGatewayTaskReplayGuardReview(from: session),
             primaryActionTitle: primaryAction.title,
             primaryActionIcon: primaryAction.icon,
             primaryActionKind: primaryAction.kind,
@@ -265,6 +266,11 @@ final class ClawStore: ObservableObject {
         case .completed:
             return "任务回合完成：成功 \(session?.succeededCount ?? 0) 个动作，收集 \(session?.artifactCount ?? 0) 个 artifact。"
         case .blocked:
+            if let replayReview = missionRunGatewayTaskReplayGuardReview(from: session) {
+                let replayCount = replayReview.replayCount.map { "重复 \($0) 次" } ?? "重复任务"
+                let actionCount = replayReview.actionCount.map { "跳过 \($0) 个动作" } ?? "已跳过动作"
+                return "Gateway Replay Guard 已识别\(replayCount)，\(actionCount)，未重新执行桌面 handler。"
+            }
             return "任务被安全策略阻断：\(task?.blockedCount ?? phoneAgentPlan.blockedCount) 个动作不能自动发送，请修改任务或网关白名单。"
         default:
             return autonomousLoop.statusLine
@@ -291,6 +297,10 @@ final class ClawStore: ObservableObject {
 
     private func missionRunGatewayCapabilityReview(from session: ClawGatewaySession?) -> ClawGatewayCapabilityReviewSummary? {
         ClawGatewayCapabilityReviewSummary.latest(from: session)
+    }
+
+    private func missionRunGatewayTaskReplayGuardReview(from session: ClawGatewaySession?) -> ClawGatewayTaskReplayGuardReviewSummary? {
+        ClawGatewayTaskReplayGuardReviewSummary.latest(from: session)
     }
 
     private func missionRunStageTrack(
