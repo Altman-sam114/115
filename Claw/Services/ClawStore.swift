@@ -147,6 +147,7 @@ final class ClawStore: ObservableObject {
             retryableCount: session?.retryableCount ?? 0,
             artifactCount: session?.artifactCount ?? 0,
             artifactKinds: missionRunArtifactKinds(from: session),
+            agentTraceReview: missionRunAgentTraceReview(from: session),
             primaryActionTitle: primaryAction.title,
             primaryActionIcon: primaryAction.icon,
             primaryActionKind: primaryAction.kind,
@@ -265,6 +266,10 @@ final class ClawStore: ObservableObject {
             }
         }
         return kinds
+    }
+
+    private func missionRunAgentTraceReview(from session: ClawGatewaySession?) -> ClawAgentTraceReviewSummary? {
+        ClawAgentTraceReviewSummary.latest(from: session)
     }
 
     private func missionRunStageTrack(
@@ -1709,7 +1714,14 @@ enum ClawGatewaySimulator {
                 actionTitle: action.title,
                 status: .succeeded,
                 summary: "电脑智能体循环已完成一次观察、决策、受限动作建议和验证记录。",
-                artifacts: [artifact(.agentTrace, "agent-loop-\(index + 1).json", redacted: true)]
+                artifacts: [
+                    artifact(
+                        .agentTrace,
+                        "agent-loop-\(index + 1).json",
+                        redacted: true,
+                        metadata: agentTraceMetadata()
+                    )
+                ]
             )
         case .observeScreen:
             return ClawGatewayActionResult(
@@ -1805,14 +1817,30 @@ enum ClawGatewaySimulator {
     private static func artifact(
         _ kind: ClawGatewayArtifactKind,
         _ title: String,
-        redacted: Bool
+        redacted: Bool,
+        metadata: [String: String]? = nil
     ) -> ClawGatewayArtifact {
         ClawGatewayArtifact(
             kind: kind,
             title: title,
             reference: "\(kind.rawValue)://\(title)",
-            isRedacted: redacted
+            isRedacted: redacted,
+            metadata: metadata
         )
+    }
+
+    private static func agentTraceMetadata() -> [String: String] {
+        [
+            "readinessScore": "72",
+            "readinessCanContinue": "true",
+            "satisfiedSignals": "screenObservation,accessibilityTree,browserTrace,fileDiff,commandOutput",
+            "missingSignals": "messageDraft",
+            "selectedNextActionKind": "composeMessage",
+            "selectedNextActionRequiresApproval": "true",
+            "riskTags": "approval-required,final-submit-gate,missing-message-draft",
+            "stopReason": "final-submit",
+            "handoffSummary": "Evidence score 72/100 from screenObservation, accessibilityTree, browserTrace, fileDiff, commandOutput; missing messageDraft. Selected next action: composeMessage. Stop reason: final-submit."
+        ]
     }
 }
 

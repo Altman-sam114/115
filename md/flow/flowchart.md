@@ -20,13 +20,15 @@ flowchart TD
   LIVE --> G["Tools/claw-gateway-server.mjs<br/>校验 token、schema、allowlist、workspace"]
   G --> H["Gateway action handlers<br/>屏幕、浏览器、文件、Shell、提取、桌面 App、agent loop"]
   H --> ART["Artifacts<br/>screenshot、browserTrace、fileDiff、commandOutput、agentTrace 证据策略"]
+  ART --> META["agentTrace artifact metadata<br/>证据分、缺口、下一步、风险、停止原因"]
   H --> EVT["ClawGatewayEvent<br/>actionStarted、artifactStored、completed、failed、approvalRequested"]
   SIM --> EVT
   EVT --> R["ClawGatewayEventStream.apply<br/>把事件 reduce 到 session"]
   ART --> R
+  META --> R
   R --> SES["ClawGatewaySession<br/>results、artifacts、auditTrail、retryable"]
-  SES --> RUN["ClawMissionRunSummary<br/>派生目标、阶段、主动作、风险、证据"]
-  RUN --> UI["SwiftUI Mission Run 面板<br/>展示计划、风险、事件、artifact、审批点"]
+  SES --> RUN["ClawMissionRunSummary<br/>派生目标、阶段、主动作、风险、证据和 AgentTrace 复核"]
+  RUN --> UI["SwiftUI Mission Run 面板<br/>展示计划、风险、事件、artifact、审批点、复核摘要"]
   UI --> LOOP{"用户审批或继续循环"}
   LOOP -->|"批准发送/重试"| M
   LOOP -->|"人工修改目标"| U
@@ -58,7 +60,7 @@ flowchart TD
   APP --> CTX
   AG --> CTX
   MSG --> CTX
-  CTX --> OUT["artifactStored + action result<br/>回传 file:// 引用、状态、retryable"]
+  CTX --> OUT["artifactStored + action result<br/>回传 file:// 引用、状态、retryable、agentTrace metadata"]
 ```
 
 ## 3. Agent X 主控循环与云端验证流程图

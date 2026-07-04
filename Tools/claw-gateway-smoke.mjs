@@ -70,6 +70,8 @@ expect(extractedTrace?.rows?.some((row) => row.title === "Gateway Smoke Page"), 
 const agentTraces = await readArtifacts(events, "agentTrace");
 const agentTrace = agentTraces.find((trace) => trace.mode === "agent-loop-trace");
 expect(Boolean(agentTrace), "missing websocket agent loop trace");
+const agentTraceArtifact = findArtifact(events, "agentTrace");
+assertAgentTraceMetadata(agentTraceArtifact?.metadata, agentTrace, "websocket agent loop");
 expect(agentTrace?.sourceArtifacts?.browserTraceCount >= 1, "websocket agent loop did not consume browser trace");
 expect(agentTrace?.sourceArtifacts?.fileDiffCount >= 1, "websocket agent loop did not consume file diff");
 expect(agentTrace?.sourceArtifacts?.commandOutputCount >= 1, "websocket agent loop did not consume command output");
@@ -222,6 +224,40 @@ async function readArtifacts(events, kind) {
     parsed.push(JSON.parse(await fs.readFile(new URL(artifact.reference), "utf8")));
   }
   return parsed;
+}
+
+function findArtifact(events, kind) {
+  return events
+    .flatMap((event) => event.artifacts || [])
+    .find((artifact) => artifact.kind === kind);
+}
+
+function assertAgentTraceMetadata(metadata, trace, label) {
+  expect(metadata && typeof metadata === "object", `${label} missing agentTrace metadata`);
+  const allowedKeys = [
+    "handoffSummary",
+    "missingSignals",
+    "readinessCanContinue",
+    "readinessScore",
+    "riskTags",
+    "satisfiedSignals",
+    "selectedNextActionKind",
+    "selectedNextActionRequiresApproval",
+    "stopReason",
+  ];
+  expect(
+    Object.keys(metadata).sort().join(",") === allowedKeys.join(","),
+    `${label} agentTrace metadata includes unexpected keys`,
+  );
+  expect(metadata.readinessScore === String(trace.readiness.score), `${label} readiness score metadata mismatch`);
+  expect(metadata.readinessCanContinue === String(trace.readiness.canContinue), `${label} readiness continuation metadata mismatch`);
+  expect(metadata.satisfiedSignals === trace.readiness.satisfiedSignals.join(","), `${label} satisfied signals metadata mismatch`);
+  expect(metadata.missingSignals === trace.readiness.missingSignals.join(","), `${label} missing signals metadata mismatch`);
+  expect(metadata.selectedNextActionKind === trace.selectedNextAction.kind, `${label} selected action metadata mismatch`);
+  expect(metadata.selectedNextActionRequiresApproval === String(trace.selectedNextAction.requiresApproval), `${label} selected approval metadata mismatch`);
+  expect(metadata.riskTags === trace.riskTags.join(","), `${label} risk tags metadata mismatch`);
+  expect(metadata.stopReason === trace.stopReason, `${label} stop reason metadata mismatch`);
+  expect(metadata.handoffSummary === trace.handoffSummary, `${label} handoff summary metadata mismatch`);
 }
 
 function connectAndCollectEvents({ host, port, token, envelope }) {

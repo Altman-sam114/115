@@ -15,12 +15,60 @@
 
 - 项目方向：OpenClaw 式电脑接管智能体，iPhone 作为控制台，桌面 Claw Gateway 作为执行端。
 - 当前 schema：`claw.computer.control.v1`。
-- 当前核心闭环：用户自然语言任务 -> `PhoneAgentPlanner` -> `ClawMobileTask` -> `ClawMobileEnvelope` -> 模拟事件流或 WebSocket Gateway -> `ClawGatewayEvent` -> session reducer -> UI 展示和审批。
-- 当前 Gateway 能力：屏幕观察 dry-run/截图策略、浏览器 HTML/URL trace、浏览器打开/搜索计划、workspace 文件写入、Shell dry-run/allowlist 执行、结构化提取、桌面 App 审批闸门、带 readiness/checklist/risk/stop/handoff 的 `runAgentLoop`/`agentTrace`。
+- 当前核心闭环：用户自然语言任务 -> `PhoneAgentPlanner` -> `ClawMobileTask` -> `ClawMobileEnvelope` -> 模拟事件流或 WebSocket Gateway -> `ClawGatewayEvent` -> session reducer -> Mission Run / AgentTrace 复核 UI 展示和审批。
+- 当前 Gateway 能力：屏幕观察 dry-run/截图策略、浏览器 HTML/URL trace、浏览器打开/搜索计划、workspace 文件写入、Shell dry-run/allowlist 执行、结构化提取、桌面 App 审批闸门、带 readiness/checklist/risk/stop/handoff 与安全 metadata 的 `runAgentLoop`/`agentTrace`。
 - 当前协作闭环：默认 `main` 直推，GitHub Actions 生成未加密 `ci-results` 结果包，Agent C 下载并核对 manifest/JUnit/日志后验收。
-- 当前主要遗留：完整 macOS Accessibility tree、Playwright/browser-use 兼容控制器、真实多轮 agent loop、live Gateway 心跳和重连、UI 级 artifact 复核体验。
+- 当前主要遗留：完整 macOS Accessibility tree、Playwright/browser-use 兼容控制器、真实多轮 agent loop、live Gateway 心跳和重连、完整 artifact 内容复核体验和 iPad 多栏操作面板。
 
 ## 历史记录
+
+### v0.7 / 手机端 AgentTrace 复核体验
+
+日期：2026-07-04
+
+核心变更：
+
+- `ClawGatewayArtifact` 新增向后兼容的可选字符串 `metadata`，旧 artifact JSON 缺少 metadata 时仍可 decode。
+- Gateway 和 simulator 在 `agentTrace` artifact event 上附带安全复核摘要：证据分、是否可继续、满足/缺失信号、推荐下一步、审批需求、风险标签、停止原因和 handoff 摘要。
+- 手机端新增 `ClawAgentTraceReviewSummary`，Mission Run、Gateway session 和 result 行可显示最近 AgentTrace 复核状态、脱敏状态、缺口、下一步和停止原因。
+- direct/WebSocket smoke 增加 artifact metadata 与 trace JSON 关键字段一致性断言；Swift logic smoke 和 XCTest 覆盖 metadata 存在与缺失路径。
+- 同步 README、协议、flow/flowchart 和本提示词，明确 metadata 只用于手机端复核展示，不读取 Gateway `file://` 内容，不扩大执行权限。
+
+关键文件：
+
+- `Claw/Core/ClawModels.swift`
+- `Claw/Services/ClawStore.swift`
+- `Claw/Views/ContentView.swift`
+- `ClawTests/ClawTests.swift`
+- `Tools/LogicSmoke.swift`
+- `Tools/claw-gateway-server.mjs`
+- `Tools/claw-gateway-direct-smoke.mjs`
+- `Tools/claw-gateway-smoke.mjs`
+- `README.md`
+- `Docs/claw-mobile-gateway-protocol.md`
+- `md/flow/flow.md`
+- `md/flow/flowchart.md`
+- `md/prompt/v0（核心智能能力）/v0.7（手机端AgentTrace复核体验）.md`
+- `update_log.md`
+
+验证结果：
+
+- `node --check Tools/claw-gateway-server.mjs` 通过。
+- `node --check Tools/claw-gateway-direct-smoke.mjs` 通过。
+- `node --check Tools/claw-gateway-smoke.mjs` 通过。
+- Swift logic smoke 编译通过。
+- `.build/claw-logic-smoke` 通过，输出 `Claw logic smoke passed`。
+- `git diff --check` 通过。
+- `ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci-results.yml"); puts "yaml ok"'` 通过，输出 `yaml ok`。
+- `node Tools/claw-gateway-direct-smoke.mjs` 通过，输出 `Claw Gateway direct smoke passed (104 events)`。
+- `node Tools/claw-gateway-smoke.mjs` 在普通沙箱内因 `listen EPERM 127.0.0.1:18879` 被阻断，升级权限后通过，输出 `Claw Gateway smoke passed (17 events)`。
+- 无签名 iOS build 通过，输出 `BUILD SUCCEEDED`。
+- `xcodebuild build-for-testing` 通过，输出 `TEST BUILD SUCCEEDED`，确认 `ClawTests` 可编译；本机 CoreSimulator 服务不可用，未执行模拟器 XCTest。
+- push `origin/main` 后仍需等待 GitHub Actions `ci-results` 结果包供 Agent C 复判。
+
+遗留事项：
+
+- 当前只展示 `agentTrace` 的安全 metadata 摘要；完整 JSON artifact viewer、iPad 多栏复核面板、真实多轮 agent loop、live Gateway 心跳和重连仍待后续轮次推进。
 
 ### v0.6 / 增强 AgentTrace 证据策略
 

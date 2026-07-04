@@ -114,6 +114,19 @@ enum LogicSmoke {
         expect(missionSummary.primaryActionKind == .continueAfterReview, "mission summary should expose review action")
         expect(missionSummary.artifactCount > 0, "mission summary should count gateway artifacts")
         expect(missionSummary.artifactKinds.contains(.browserTrace), "mission summary should summarize artifact kinds")
+        if let agentTraceReview = missionSummary.agentTraceReview {
+            expect(agentTraceReview.traceCount > 0, "mission summary should count agent traces")
+            expect(agentTraceReview.hasMetadata, "agent trace review should include metadata")
+            expect(agentTraceReview.readinessScore == 72, "agent trace review should expose readiness score")
+            expect(agentTraceReview.missingSignals.contains("messageDraft"), "agent trace review should expose missing signals")
+            expect(agentTraceReview.selectedNextActionKind == "composeMessage", "agent trace review should expose selected action")
+            expect(agentTraceReview.selectedNextActionRequiresApproval == true, "agent trace review should expose approval requirement")
+            expect(agentTraceReview.riskTags.contains("final-submit-gate"), "agent trace review should expose risk tags")
+            expect(agentTraceReview.stopReason == "final-submit", "agent trace review should expose stop reason")
+            expect(agentTraceReview.isRedacted, "agent trace review should preserve redacted status")
+        } else {
+            failures.append("mission summary should derive agent trace review")
+        }
 
         let retryMissionStore = ClawStore(autoScanLocalArtifacts: false)
         retryMissionStore.phoneAgentCommand = "在项目目录运行测试，失败时导出日志文件"

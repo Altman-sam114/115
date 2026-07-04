@@ -995,19 +995,22 @@ struct ClawGatewayArtifact: Identifiable, Equatable, Codable, Sendable {
     var title: String
     var reference: String
     var isRedacted: Bool
+    var metadata: [String: String]?
 
     init(
         id: UUID = UUID(),
         kind: ClawGatewayArtifactKind,
         title: String,
         reference: String,
-        isRedacted: Bool
+        isRedacted: Bool,
+        metadata: [String: String]? = nil
     ) {
         self.id = id
         self.kind = kind
         self.title = title
         self.reference = reference
         self.isRedacted = isRedacted
+        self.metadata = metadata
     }
 }
 
@@ -1275,6 +1278,98 @@ struct ClawMissionRunStage: Identifiable, Equatable, Codable, Sendable {
     var isBlocked: Bool
 }
 
+struct ClawAgentTraceReviewSummary: Equatable, Codable, Sendable {
+    var traceCount: Int
+    var latestTitle: String
+    var hasMetadata: Bool
+    var readinessScore: Int?
+    var readinessCanContinue: Bool?
+    var satisfiedSignals: [String]
+    var missingSignals: [String]
+    var selectedNextActionKind: String?
+    var selectedNextActionRequiresApproval: Bool?
+    var riskTags: [String]
+    var stopReason: String?
+    var handoffSummary: String?
+    var isRedacted: Bool
+
+    var compactStatus: String {
+        guard hasMetadata else {
+            return "已收到智能体轨迹，metadata 待同步。"
+        }
+        let score = readinessScore.map { "证据 \($0)/100" } ?? "证据待复核"
+        let action = selectedNextActionKind ?? "下一步待定"
+        let stop = stopReason ?? "stop 未标记"
+        return "\(score) · \(action) · \(stop)"
+    }
+
+    static func latest(from session: ClawGatewaySession?) -> ClawAgentTraceReviewSummary? {
+        guard let session else {
+            return nil
+        }
+        return latest(from: session.results.flatMap(\.artifacts))
+    }
+
+    static func latest(from artifacts: [ClawGatewayArtifact]) -> ClawAgentTraceReviewSummary? {
+        let traces = artifacts.filter { $0.kind == .agentTrace }
+        guard let latest = traces.last else {
+            return nil
+        }
+        let metadata = latest.metadata ?? [:]
+        return ClawAgentTraceReviewSummary(
+            traceCount: traces.count,
+            latestTitle: latest.title,
+            hasMetadata: metadata.isEmpty == false,
+            readinessScore: intValue(metadata["readinessScore"]),
+            readinessCanContinue: boolValue(metadata["readinessCanContinue"]),
+            satisfiedSignals: listValue(metadata["satisfiedSignals"]),
+            missingSignals: listValue(metadata["missingSignals"]),
+            selectedNextActionKind: cleanValue(metadata["selectedNextActionKind"]),
+            selectedNextActionRequiresApproval: boolValue(metadata["selectedNextActionRequiresApproval"]),
+            riskTags: listValue(metadata["riskTags"]),
+            stopReason: cleanValue(metadata["stopReason"]),
+            handoffSummary: cleanValue(metadata["handoffSummary"]),
+            isRedacted: latest.isRedacted
+        )
+    }
+
+    private static func cleanValue(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty || trimmed == "none" ? nil : trimmed
+    }
+
+    private static func intValue(_ value: String?) -> Int? {
+        guard let clean = cleanValue(value) else {
+            return nil
+        }
+        return Int(clean)
+    }
+
+    private static func boolValue(_ value: String?) -> Bool? {
+        guard let clean = cleanValue(value)?.lowercased() else {
+            return nil
+        }
+        switch clean {
+        case "true", "yes", "1":
+            return true
+        case "false", "no", "0":
+            return false
+        default:
+            return nil
+        }
+    }
+
+    private static func listValue(_ value: String?) -> [String] {
+        guard let clean = cleanValue(value) else {
+            return []
+        }
+        return clean
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { $0.isEmpty == false && $0 != "none" }
+    }
+}
+
 struct ClawMissionRunSummary: Equatable, Codable, Sendable {
     var command: String
     var phaseTitle: String
@@ -1289,6 +1384,7 @@ struct ClawMissionRunSummary: Equatable, Codable, Sendable {
     var retryableCount: Int
     var artifactCount: Int
     var artifactKinds: [ClawGatewayArtifactKind]
+    var agentTraceReview: ClawAgentTraceReviewSummary?
     var primaryActionTitle: String
     var primaryActionIcon: String
     var primaryActionKind: ClawMissionRunPrimaryActionKind

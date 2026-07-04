@@ -370,6 +370,28 @@ final class ClawTests: XCTestCase {
         XCTAssertTrue(summary.statusLine.contains("待确认"))
     }
 
+    func testMissionRunSummaryDerivesAgentTraceReview() throws {
+        let store = ClawStore(autoScanLocalArtifacts: false)
+
+        store.phoneAgentCommand = "打开浏览器搜索资料并发到 Slack"
+        store.startAutonomousComputerTakeover()
+        store.approveAndContinueAutonomousLoop()
+        let review = try XCTUnwrap(store.missionRunSummary.agentTraceReview)
+
+        XCTAssertTrue(review.hasMetadata)
+        XCTAssertEqual(review.readinessScore, 72)
+        XCTAssertEqual(review.readinessCanContinue, true)
+        XCTAssertTrue(review.missingSignals.contains("messageDraft"))
+        XCTAssertEqual(review.selectedNextActionKind, "composeMessage")
+        XCTAssertEqual(review.selectedNextActionRequiresApproval, true)
+        XCTAssertTrue(review.riskTags.contains("final-submit-gate"))
+        XCTAssertEqual(review.stopReason, "final-submit")
+        XCTAssertTrue(review.isRedacted)
+        XCTAssertTrue(review.compactStatus.contains("72/100"))
+        XCTAssertTrue(review.compactStatus.contains("composeMessage"))
+        XCTAssertTrue(review.compactStatus.contains("final-submit"))
+    }
+
     func testMissionRunSummaryShowsCompletedRetryState() {
         let store = ClawStore(autoScanLocalArtifacts: false)
 
@@ -480,6 +502,60 @@ final class ClawTests: XCTestCase {
 
         XCTAssertEqual(action.kind, .controlBrowser)
         XCTAssertEqual(action.toolArguments, [:])
+    }
+
+    func testClawGatewayArtifactDecodesLegacyJSONWithoutMetadata() throws {
+        let json = """
+        {
+          "id": "\(UUID())",
+          "kind": "agentTrace",
+          "title": "legacy-agent-loop.json",
+          "reference": "file:///tmp/legacy-agent-loop.json",
+          "isRedacted": true
+        }
+        """
+
+        let artifact = try JSONDecoder().decode(ClawGatewayArtifact.self, from: Data(json.utf8))
+
+        XCTAssertEqual(artifact.kind, .agentTrace)
+        XCTAssertNil(artifact.metadata)
+    }
+
+    func testAgentTraceReviewFallsBackWhenMetadataIsMissing() throws {
+        let actionID = UUID()
+        let artifact = ClawGatewayArtifact(
+            kind: .agentTrace,
+            title: "legacy-agent-loop.json",
+            reference: "file:///tmp/legacy-agent-loop.json",
+            isRedacted: true
+        )
+        let session = ClawGatewaySession(
+            taskID: UUID(),
+            command: "legacy",
+            channel: "test",
+            workspace: "/tmp",
+            status: .completed,
+            results: [
+                ClawGatewayActionResult(
+                    actionID: actionID,
+                    actionKind: .runAgentLoop,
+                    actionTitle: "Run agent loop",
+                    status: .succeeded,
+                    summary: "legacy trace",
+                    artifacts: [artifact]
+                )
+            ],
+            auditTrail: []
+        )
+
+        let review = try XCTUnwrap(ClawAgentTraceReviewSummary.latest(from: session))
+
+        XCTAssertEqual(review.traceCount, 1)
+        XCTAssertFalse(review.hasMetadata)
+        XCTAssertNil(review.readinessScore)
+        XCTAssertEqual(review.latestTitle, "legacy-agent-loop.json")
+        XCTAssertTrue(review.isRedacted)
+        XCTAssertTrue(review.compactStatus.contains("metadata"))
     }
 
     func testPhoneAgentSurfaceDecodesLegacyAICLawRuntimeValue() throws {

@@ -618,6 +618,10 @@ struct ClawMissionRunPanel: View {
                 }
             }
 
+            if let review = summary.agentTraceReview {
+                ClawAgentTraceReviewRow(review: review)
+            }
+
             Text(summary.statusLine)
                 .font(.footnote)
                 .foregroundStyle(.secondary)
@@ -1030,6 +1034,10 @@ struct ClawGatewaySessionCard: View {
                 PhoneAgentTag(text: "\(session.artifactCount) 证据", icon: "paperclip", tint: .purple)
             }
 
+            if let review = ClawAgentTraceReviewSummary.latest(from: session) {
+                ClawAgentTraceReviewRow(review: review)
+            }
+
             VStack(spacing: 8) {
                 ForEach(session.results.prefix(4)) { result in
                     ClawGatewayResultRow(result: result)
@@ -1161,9 +1169,80 @@ struct ClawGatewayResultRow: View {
                     Spacer()
                 }
             }
+
+            if let review = ClawAgentTraceReviewSummary.latest(from: result.artifacts) {
+                ClawAgentTraceReviewRow(review: review)
+            }
         }
         .padding(10)
         .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+struct ClawAgentTraceReviewRow: View {
+    let review: ClawAgentTraceReviewSummary
+
+    private var chips: [(text: String, icon: String, tint: Color)] {
+        var items: [(String, String, Color)] = []
+        if let score = review.readinessScore {
+            items.append(("证据 \(score)/100", "gauge.with.dots.needle.67percent", score >= 70 ? .green : .orange))
+        }
+        if review.missingSignals.isEmpty == false {
+            items.append(("缺 \(review.missingSignals.prefix(2).joined(separator: ","))", "exclamationmark.triangle.fill", .orange))
+        }
+        if let action = review.selectedNextActionKind {
+            let icon = review.selectedNextActionRequiresApproval == true ? "checkmark.seal.fill" : "arrow.forward.circle.fill"
+            items.append((action, icon, review.selectedNextActionRequiresApproval == true ? .orange : .blue))
+        }
+        if let stop = review.stopReason {
+            items.append((stop, "hand.raised.fill", stop == "none" || stop == "complete" ? .green : .red))
+        }
+        if let risk = review.riskTags.first {
+            items.append((risk, "shield.lefthalf.filled.badge.checkmark", .purple))
+        }
+        if items.isEmpty {
+            items.append(("metadata 待同步", "hourglass", .secondary))
+        }
+        return items
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Label("AgentTrace", systemImage: "point.topleft.down.curvedto.point.bottomright.up")
+                    .font(.footnote.bold())
+                    .foregroundStyle(.primary)
+                PhoneAgentTag(text: "\(review.traceCount) 条", icon: "number", tint: .purple)
+                PhoneAgentTag(
+                    text: review.isRedacted ? "已脱敏" : "可见",
+                    icon: review.isRedacted ? "eye.slash.fill" : "eye.fill",
+                    tint: review.isRedacted ? .orange : .green
+                )
+                Spacer(minLength: 0)
+            }
+
+            Text(review.compactStatus)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(Array(chips.enumerated()), id: \.offset) { _, chip in
+                        PhoneAgentTag(text: chip.text, icon: chip.icon, tint: chip.tint)
+                    }
+                }
+            }
+
+            if let handoffSummary = review.handoffSummary {
+                Text(handoffSummary)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 

@@ -19,8 +19,9 @@ Claw 的当前主链路是：用户在 iPhone 输入电脑任务，App 生成可
   -> ClawGatewayEvent
   -> ClawGatewayEventStream.apply
   -> ClawGatewaySession.results/artifacts/auditTrail
-  -> ClawMissionRunSummary 派生任务回合摘要
-  -> SwiftUI Mission Run 展示、审批、重试或下一轮
+  -> ClawGatewayArtifact.metadata 上的 agentTrace 安全摘要
+  -> ClawMissionRunSummary 派生任务回合摘要和 AgentTrace 复核摘要
+  -> SwiftUI Mission Run 展示、复核、审批、重试或下一轮
 ```
 
 ## 2. 当前协作验证流
@@ -84,7 +85,7 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 
 - 展示连接、聊天、电脑接管、能力和榜单。
 - 让用户输入任务、配置 Gateway URL/token、切换发送模式、查看 envelope 和事件。
-- 在电脑接管首屏用 Mission Run 面板汇总任务目标、阶段、下一步主动作、风险、审批点、Gateway 结果和 artifact 证据。
+- 在电脑接管首屏用 Mission Run 面板汇总任务目标、阶段、下一步主动作、风险、审批点、Gateway 结果、artifact 证据和最近 AgentTrace 复核摘要。
 
 输入：
 
@@ -95,7 +96,7 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 输出：
 
 - UI 状态。
-- `ClawMissionRunSummary` 派生展示状态。
+- `ClawMissionRunSummary` 派生展示状态和 `ClawAgentTraceReviewSummary` 复核摘要。
 - `ClawMobileEnvelope`。
 - 审批/发送/重试动作。
 
@@ -188,7 +189,7 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 - `runShellCommand`：结构化命令 dry-run 或 allowlist 执行。
 - `extractData`：消费同 session artifact 生成结构化数据。
 - `operateDesktopApp`：桌面 App 聚焦、粘贴、allowlist 快捷键、最终提交前审批。
-- `runAgentLoop`：基于 session artifacts 生成观察-规划-动作建议-验证 `agentTrace`，并在 artifact 内部记录 readiness、decisionChecklist、selectedNextAction、riskTags、stopReason 和 handoffSummary。
+- `runAgentLoop`：基于 session artifacts 生成观察-规划-动作建议-验证 `agentTrace`，并在 artifact 内部记录 readiness、decisionChecklist、selectedNextAction、riskTags、stopReason 和 handoffSummary，同时把证据分、缺失信号、下一步、风险、停止原因和 handoff 摘要压缩成 artifact event 上的可选字符串 metadata 供手机端复核。
 - `composeMessage`/`composeEmail`：生成待确认草稿。
 
 禁止：
@@ -238,6 +239,7 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 - `ClawGatewayEvent`：Gateway 推送事件。
 - `ClawGatewaySession`：手机端会话视图模型。
 - `ClawAutonomousLoopState`：自治循环状态。
+- `ClawAgentTraceReviewSummary`：手机端从最近 `agentTrace` artifact metadata 派生的复核摘要，只展示安全字符串摘要，不读取 Gateway `file://` 内容。
 - `ClawMissionRunSummary`：手机端 presentation layer 摘要，只从 loop/task/session 派生，不进入 envelope 或 Gateway 协议。
 
 ## 6. 用户入口
@@ -266,6 +268,7 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 - Shell、文件、浏览器网络、桌面 App 控制必须受 allowlist 限制。
 - 每个重要 action 都要产生 artifact 或明确失败/跳过原因。
 - 新协议字段必须同步测试和文档。
+- `agentTrace` metadata 只能用于手机端复核展示，不能成为执行计划来源，不能放入浏览器正文、命令输出、截图内容、草稿正文、联系人或 token。
 - Agent C 验收必须基于 `origin/main` 最新 run 的未加密结果包，不能只看 Agent B 文字汇报。
 - 云端失败默认用 main 追加修复 commit 处理，不默认回滚或引入候选分支。
 - Agent X 只能调度 A/B/C 多轮迭代，不能代替 Agent C 宣布云端 artifact 验收通过。
@@ -275,7 +278,7 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 - Planner/bridge/schema 变更：本地 Swift logic smoke（需要时）+ 云端 xcodebuild/logic smoke/结果包验收。
 - Gateway handler 变更：本地 `node --check Tools/*.mjs` + 云端 direct smoke/WebSocket smoke/结果包验收。
 - Event reducer 变更：Swift logic smoke、XCTest 或等价云端 build 结果。
-- Mission Run 派生摘要或首屏任务回合 UI 变更：XCTest/Swift logic smoke 覆盖 idle、待审批、需处理、完成、阻断摘要；云端 xcodebuild 覆盖 SwiftUI 编译。
+- Mission Run 派生摘要或首屏任务回合 UI 变更：XCTest/Swift logic smoke 覆盖 idle、待审批、需处理、完成、阻断摘要；AgentTrace 复核摘要需覆盖 metadata 存在和缺失两种路径；云端 xcodebuild 覆盖 SwiftUI 编译。
 - 文档-only 变更：本地 `git diff --check`、workflow YAML 语法检查；云端由 `main` push 触发结果包。
 
 ## 10. 未来扩展点
@@ -283,7 +286,7 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 - 将 Gateway prototype handler 拆成可插拔工具层。
 - 引入真实 macOS Accessibility tree bridge。
 - 增加 Playwright/browser-use 兼容浏览器控制器。
-- 强化 `runAgentLoop` 多轮状态机、失败恢复、下一步策略和手机端 artifact 复核体验。
+- 强化 `runAgentLoop` 多轮状态机、失败恢复、下一步策略和手机端完整 artifact 复核体验。
 - 增加 live Gateway 心跳、重连、配对和审计日志持久化。
 - UI 上继续增强 Mission Run 内的 artifact 预览、审批队列和回滚提示。
 - 配置真实 `origin` 后持续执行 main 直推和 Agent C 下载结果包复判。

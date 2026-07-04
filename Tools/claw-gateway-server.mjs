@@ -1579,7 +1579,14 @@ async function agentLoopAction(action, index, config) {
   };
 
   const artifacts = [
-    await writeArtifact("agentTrace", `agent-loop-${index + 1}.json`, trace, true, config),
+    await writeArtifact(
+      "agentTrace",
+      `agent-loop-${index + 1}.json`,
+      trace,
+      true,
+      config,
+      agentTraceMetadata(trace),
+    ),
   ];
   return {
     status: "succeeded",
@@ -1587,6 +1594,44 @@ async function agentLoopAction(action, index, config) {
     artifacts,
     isRetryable: false,
   };
+}
+
+function agentTraceMetadata(trace) {
+  return compactMetadata({
+    readinessScore: trace.readiness?.score,
+    readinessCanContinue: trace.readiness?.canContinue,
+    satisfiedSignals: trace.readiness?.satisfiedSignals,
+    missingSignals: trace.readiness?.missingSignals,
+    selectedNextActionKind: trace.selectedNextAction?.kind,
+    selectedNextActionRequiresApproval: trace.selectedNextAction?.requiresApproval,
+    riskTags: trace.riskTags,
+    stopReason: trace.stopReason,
+    handoffSummary: trace.handoffSummary,
+  });
+}
+
+function compactMetadata(values) {
+  const metadata = {};
+  for (const [key, value] of Object.entries(values)) {
+    const normalized = metadataValue(value);
+    if (normalized) {
+      metadata[key] = normalized;
+    }
+  }
+  return metadata;
+}
+
+function metadataValue(value) {
+  if (value === undefined || value === null) {
+    return "";
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item).trim()).filter(Boolean).join(",");
+  }
+  if (typeof value === "boolean") {
+    return value ? "true" : "false";
+  }
+  return String(value).trim();
 }
 
 function parseCSV(value) {
@@ -1931,7 +1976,7 @@ function eventKindForStatus(status) {
   }
 }
 
-async function writeArtifact(kind, title, payload, redacted, config) {
+async function writeArtifact(kind, title, payload, redacted, config, metadata = undefined) {
   await fs.mkdir(config.sessionWorkspace, { recursive: true });
   const safeTitle = sanitizeTitle(title);
   const filePath = path.join(config.sessionWorkspace, safeTitle);
@@ -1944,6 +1989,9 @@ async function writeArtifact(kind, title, payload, redacted, config) {
     reference: `file://${filePath}`,
     isRedacted: redacted,
   };
+  if (metadata && Object.keys(metadata).length > 0) {
+    artifact.metadata = metadata;
+  }
   config.sessionContext?.artifacts?.push({ ...artifact, payload });
   rememberArtifact(kind, payload, config.sessionContext);
   return artifact;

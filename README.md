@@ -2,7 +2,7 @@
 
 这是一个 SwiftUI iPhone 原型 App，用手机作为 Claw 控制台：用户用自然语言描述电脑任务，App 生成可审批的执行计划和 JSON envelope，真正的浏览器、文件、Shell、桌面 App 操作交给用户自托管的 Claw Gateway 在电脑上执行。
 
-当前版本不下载模型权重，模型保持占位状态。App 已完成 UI、数据流、本地 artifact 导入/扫描/校验、电脑接管规划器、Claw Gateway envelope、事件流 reducer、Mission Run 任务回合面板、WebSocket transport 边界、Shortcuts 入口和 smoke 测试。
+当前版本不下载模型权重，模型保持占位状态。App 已完成 UI、数据流、本地 artifact 导入/扫描/校验、电脑接管规划器、Claw Gateway envelope、事件流 reducer、Mission Run 任务回合面板、AgentTrace 复核摘要、WebSocket transport 边界、Shortcuts 入口和 smoke 测试。
 
 后续 Codex/Agent 接力开发必须先读 `AGENTS.md`。项目已建立“人工目标 -> Agent A 设计提示词 -> Agent B 在 main 上实现并推送 -> GitHub Actions 云端验证 -> Agent C 下载结果包复判 -> 人工复核 -> 下一轮”的迭代工作流，并准备支持未来由 Agent X 主控多轮调度 A/B/C。核心记忆和规范分布在 `AGENTS.md`、`update_log.md`、`md/test/test.md`、`md/flow/flow.md`、`md/flow/flowchart.md` 和 `md/prompt/`。
 
@@ -65,7 +65,7 @@ Gateway 发送模式：
 - `模拟事件流`：本地回放 Gateway 事件，展示 action 结果、artifact、审批点和 retry。
 - `Live Gateway`：准备 WebSocket 请求并发送 envelope，桌面端按 `ClawGatewayEvent` 推流；未配置 endpoint/token 时会安全回退到模拟事件流。
 
-当前桌面 Gateway 原型已有受控工具边界：会校验 token、schema、动作白名单，把 artifact 写入 workspace，并回传事件/file URL 引用。`controlBrowser` 可从本地 HTML 或受 allowlist 约束的 URL 生成浏览轨迹、链接、标题、表格、表单和候选控件；默认只写入浏览器打开/搜索计划，设置 `CLAW_ALLOW_BROWSER_CONTROL=1`、`CLAW_BROWSER_APP_ALLOWLIST` 和 `CLAW_BROWSER_HOST_ALLOWLIST` 后，可在 macOS 上打开允许的桌面浏览器并跳转到结构化 URL/搜索结果。`extractData` 会消费前序 browser/file/shell/screen artifact 生成结构化结果。`runAgentLoop` 会消费同一 session 内的 artifact context，写出 `agentTrace`：保留 `sourceArtifacts`、`evidenceRows`、`observations`、`nextActions`、`safetyGates` 等旧字段，并新增 `readiness`、`decisionChecklist`、`selectedNextAction`、`riskTags`、`stopReason`、`handoffSummary`，用于解释证据是否充分、缺口在哪、当前推荐下一步和必须停下等待审批的原因；这些字段只从结构化 `toolArguments` 和已有 artifact 推导，不扩大浏览器、Shell、AppleScript 或桌面 App 权限。`manageFiles` 可按 `toolArguments.writePath/writeText` 在 workspace 内真实写文件，路径逃逸会被阻断。Shell 只接受结构化 `toolArguments.shellCommand`，默认 dry-run；必须同时设置 `CLAW_ALLOW_SHELL=1` 和 `CLAW_SHELL_ALLOWLIST` 才会真执行。屏幕观察默认 dry-run，设置 `CLAW_ALLOW_SCREEN_CAPTURE=1` 后可在 macOS 上生成真实截图 artifact。桌面 App 控制默认停在审批闸门，设置 `CLAW_ALLOW_DESKTOP_CONTROL=1`、`CLAW_DESKTOP_APP_ALLOWLIST` 和 `CLAW_DESKTOP_KEY_ALLOWLIST` 后，可在 macOS 上聚焦允许的 App、粘贴结构化草稿、执行允许的非提交快捷键，并在最终提交前回到用户确认。
+当前桌面 Gateway 原型已有受控工具边界：会校验 token、schema、动作白名单，把 artifact 写入 workspace，并回传事件/file URL 引用。`controlBrowser` 可从本地 HTML 或受 allowlist 约束的 URL 生成浏览轨迹、链接、标题、表格、表单和候选控件；默认只写入浏览器打开/搜索计划，设置 `CLAW_ALLOW_BROWSER_CONTROL=1`、`CLAW_BROWSER_APP_ALLOWLIST` 和 `CLAW_BROWSER_HOST_ALLOWLIST` 后，可在 macOS 上打开允许的桌面浏览器并跳转到结构化 URL/搜索结果。`extractData` 会消费前序 browser/file/shell/screen artifact 生成结构化结果。`runAgentLoop` 会消费同一 session 内的 artifact context，写出 `agentTrace`：保留 `sourceArtifacts`、`evidenceRows`、`observations`、`nextActions`、`safetyGates` 等旧字段，并新增 `readiness`、`decisionChecklist`、`selectedNextAction`、`riskTags`、`stopReason`、`handoffSummary`，用于解释证据是否充分、缺口在哪、当前推荐下一步和必须停下等待审批的原因；这些字段只从结构化 `toolArguments` 和已有 artifact 推导，不扩大浏览器、Shell、AppleScript 或桌面 App 权限。Gateway 会把 agentTrace 的证据分、缺失信号、下一步、风险标签、停止原因和 handoff 摘要压缩成可选字符串 metadata 随 artifact event 返回；手机端只用这些 metadata 做 Mission Run / Gateway 会话复核，不读取 Gateway `file://` 内容。`manageFiles` 可按 `toolArguments.writePath/writeText` 在 workspace 内真实写文件，路径逃逸会被阻断。Shell 只接受结构化 `toolArguments.shellCommand`，默认 dry-run；必须同时设置 `CLAW_ALLOW_SHELL=1` 和 `CLAW_SHELL_ALLOWLIST` 才会真执行。屏幕观察默认 dry-run，设置 `CLAW_ALLOW_SCREEN_CAPTURE=1` 后可在 macOS 上生成真实截图 artifact。桌面 App 控制默认停在审批闸门，设置 `CLAW_ALLOW_DESKTOP_CONTROL=1`、`CLAW_DESKTOP_APP_ALLOWLIST` 和 `CLAW_DESKTOP_KEY_ALLOWLIST` 后，可在 macOS 上聚焦允许的 App、粘贴结构化草稿、执行允许的非提交快捷键，并在最终提交前回到用户确认。
 
 本地启动 Gateway：
 
@@ -103,7 +103,7 @@ node Tools/claw-gateway-direct-smoke.mjs
 node Tools/claw-gateway-smoke.mjs
 ```
 
-`direct-smoke` 不监听端口，用 `--emit-events` 直接验证同一套 Gateway handler、workspace artifact、browser trace 到结构化提取链路、workspace 文件真实写入、Shell dry-run 阻断、allowlist Shell 真执行、浏览器打开/搜索计划与 allowlist 阻断、`agentTrace` 证据充分性/缺口/下一步选择/审批停止原因，以及桌面 App 控制的审批闸门和 allowlist 阻断；`claw-gateway-smoke` 会实际启动 WebSocket server，并覆盖同类 `agentTrace` 证据策略断言。
+`direct-smoke` 不监听端口，用 `--emit-events` 直接验证同一套 Gateway handler、workspace artifact、browser trace 到结构化提取链路、workspace 文件真实写入、Shell dry-run 阻断、allowlist Shell 真执行、浏览器打开/搜索计划与 allowlist 阻断、`agentTrace` 证据充分性/缺口/下一步选择/审批停止原因、artifact metadata 与 trace JSON 关键字段一致性，以及桌面 App 控制的审批闸门和 allowlist 阻断；`claw-gateway-smoke` 会实际启动 WebSocket server，并覆盖同类 `agentTrace` 证据策略和 metadata 断言。
 
 ## 运行
 
@@ -138,6 +138,7 @@ node Tools/claw-gateway-smoke.mjs
 
 ## 完成情况
 
+- 2026-07-04：新增 v0.7 手机端 AgentTrace 复核体验。`ClawGatewayArtifact.metadata` 变为可选字符串字典，Gateway/simulator 在 `agentTrace` artifact event 上附带安全复核摘要，Mission Run / Gateway 会话显示证据分、缺口、下一步、停止原因和脱敏状态；本轮不读取 Gateway `file://` 内容，不新增 action/artifact/event kind，不扩展执行权限。
 - 2026-07-04：新增 v0.6 AgentTrace 证据策略。Gateway `runAgentLoop` 的 `agentTrace` artifact 在保留旧字段基础上新增 readiness、decisionChecklist、selectedNextAction、riskTags、stopReason 和 handoffSummary；direct/WebSocket smoke 断言新增字段。本轮不改变 `claw.computer.control.v1` schema，不扩展 Gateway 执行权限。
 - 2026-07-04：新增 v0.5 Agent X 循环迭代文档基线。补充 `agentx`/`x:`/`X:` 召唤规则、Agent X 主控调度职责、停止条件、flow/flowchart/test/prompt README 协作说明和小数据量 artifact 下载限制；本轮只做文档准备，不启动真实 Agent X 自动循环。
 - 2026-07-03：新增 v0.2 任务回合化体验。电脑接管页首屏增加 Mission Run 面板，把现有计划、审批、自治循环、Gateway session、artifact 和 retry 状态整理成目标、阶段、主动作、风险、证据和结果摘要；本轮不改变 `claw.computer.control.v1` schema，也不扩展 Gateway 权限。
