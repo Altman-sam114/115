@@ -1406,6 +1406,9 @@ struct ClawGatewayCapabilityReviewRow: View {
         if let window = review.windowMetadataState {
             items.append(("window \(window)", "macwindow", tint(for: window)))
         }
+        if let accessibility = review.accessibilityTreeState {
+            items.append(("ax \(accessibility)", "accessibility", tint(for: accessibility)))
+        }
         if items.isEmpty {
             items.append(("metadata 待同步", "hourglass", .secondary))
         }

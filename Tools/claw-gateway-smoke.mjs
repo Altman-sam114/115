@@ -67,6 +67,7 @@ const capabilitySnapshot = await assertCapabilitySnapshot(events, {
     browserControl: "dry-run",
     screenCapture: "dry-run",
     windowMetadata: "dry-run",
+    accessibilityTree: "dry-run",
     desktopControl: "dry-run",
   },
 });
@@ -446,6 +447,7 @@ function isCapabilitySnapshotArtifact(artifact) {
 function assertCapabilitySnapshotMetadata(metadata, snapshot, label) {
   expect(metadata && typeof metadata === "object", `${label} missing metadata`);
   const allowedKeys = [
+    "accessibilityTreeState",
     "allowedActionKinds",
     "browserControlState",
     "browserNetworkState",
@@ -476,6 +478,7 @@ function assertCapabilitySnapshotMetadata(metadata, snapshot, label) {
   expect(metadata.browserNetworkState === snapshot.capabilities.browserNetwork.state, `${label} browser network state mismatch`);
   expect(metadata.screenCaptureState === snapshot.capabilities.screenCapture.state, `${label} screen capture state mismatch`);
   expect(metadata.windowMetadataState === snapshot.capabilities.windowMetadata.state, `${label} window metadata state mismatch`);
+  expect(metadata.accessibilityTreeState === snapshot.capabilities.accessibilityTree.state, `${label} accessibility tree state mismatch`);
   expect(metadata.desktopControlState === snapshot.capabilities.desktopControl.state, `${label} desktop control state mismatch`);
   expect(metadata.platform === snapshot.gateway.platform, `${label} platform mismatch`);
   expect(metadata.safetyFlags === "allowlists-enforced,workspace-only,raw-token-omitted,final-submit-gated", `${label} safety flags mismatch`);
@@ -643,6 +646,7 @@ function gatewayPolicyDefaults() {
     CLAW_BROWSER_APP_ALLOWLIST: "",
     CLAW_ALLOW_SCREEN_CAPTURE: "0",
     CLAW_ALLOW_WINDOW_METADATA: "0",
+    CLAW_ALLOW_ACCESSIBILITY_OBSERVE: "0",
     CLAW_ALLOW_DESKTOP_CONTROL: "0",
     CLAW_DESKTOP_APP_ALLOWLIST: "",
     CLAW_DESKTOP_KEY_ALLOWLIST: "",

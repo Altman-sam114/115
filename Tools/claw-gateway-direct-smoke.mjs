@@ -33,6 +33,7 @@ const dryRunSnapshot = await assertCapabilitySnapshot(dryRunEvents, {
     browserControl: "dry-run",
     screenCapture: "dry-run",
     windowMetadata: "dry-run",
+    accessibilityTree: "dry-run",
     desktopControl: "dry-run",
   },
 });
@@ -94,6 +95,12 @@ expect(desktopDryRun?.executableKeys?.includes("command+k"), "missing allowliste
 expect(desktopDryRun?.blockedKeys?.some((item) => item.key === "return" && item.reason === "final_submit_requires_approval"), "missing blocked final submit key");
 const axTrees = await readArtifacts(dryRunEvents, "accessibilityTree");
 expect(axTrees.some((tree) => tree.includeAccessibilityTree === true && tree.maxCandidateControls === 12), "missing accessibility tree metadata");
+const dryRunAccessibilityArtifact = findArtifact(dryRunEvents, "accessibilityTree");
+assertAccessibilityTreeArtifact(dryRunAccessibilityArtifact, axTrees[0], {
+  mode: ["dry-run", "window-metadata"],
+  policy: "dry-run",
+  label: "dry-run accessibility tree",
+});
 
 const replayEvents = await runEmitEvents(
   {
@@ -176,19 +183,42 @@ expect(
   "browser control snapshot should be real on macOS or unavailable off macOS",
 );
 
-console.log(`Claw Gateway direct smoke passed (${dryRunEvents.length + replayEvents.length + allowlistEvents.length + desktopPolicyEvents.length + browserPolicyEvents.length} events)`);
+const accessibilityPolicyEvents = await runEmitEvents({
+  CLAW_GATEWAY_TOKEN: token,
+  CLAW_WORKSPACE: `${workspace}-accessibility-policy`,
+  CLAW_ALLOW_ACCESSIBILITY_OBSERVE: "1",
+});
+await assertArtifactsExist(accessibilityPolicyEvents);
+const accessibilityPolicySnapshot = await assertCapabilitySnapshot(accessibilityPolicyEvents, {
+  allowedActionKinds: envelope.gateway.allowedActionKinds,
+});
+expect(
+  ["real", "unavailable"].includes(accessibilityPolicySnapshot.capabilities.accessibilityTree.state),
+  "accessibility snapshot should be real on macOS or unavailable off macOS",
+);
+const accessibilityPolicyTrees = await readArtifacts(accessibilityPolicyEvents, "accessibilityTree");
+const accessibilityPolicyArtifact = findArtifact(accessibilityPolicyEvents, "accessibilityTree");
+assertAccessibilityTreeArtifact(accessibilityPolicyArtifact, accessibilityPolicyTrees[0], {
+  mode: ["accessibility-summary", "accessibility-failed", "accessibility-unavailable"],
+  policy: "enabled",
+  label: "enabled accessibility tree",
+});
+
+console.log(`Claw Gateway direct smoke passed (${dryRunEvents.length + replayEvents.length + allowlistEvents.length + desktopPolicyEvents.length + browserPolicyEvents.length + accessibilityPolicyEvents.length} events)`);
 
 async function runEmitEvents(env, input = envelope) {
+  const inputPath = `/private/tmp/claw-gateway-direct-smoke-${crypto.randomUUID()}.json`;
+  await fs.writeFile(inputPath, JSON.stringify(input), "utf8");
   const child = spawn(
     process.execPath,
-    ["Tools/claw-gateway-server.mjs", "--emit-events"],
+    ["Tools/claw-gateway-server.mjs", "--emit-events", inputPath],
     {
       env: {
         ...process.env,
         ...gatewayPolicyDefaults(),
         ...env,
       },
-      stdio: ["pipe", "pipe", "pipe"],
+      stdio: ["ignore", "pipe", "pipe"],
     },
   );
 
@@ -201,11 +231,10 @@ async function runEmitEvents(env, input = envelope) {
     stderr += chunk.toString("utf8");
   });
 
-  child.stdin.end(JSON.stringify(input));
-
   const exitCode = await new Promise((resolve) => {
     child.on("close", resolve);
   });
+  await fs.unlink(inputPath).catch(() => {});
 
   if (exitCode !== 0) {
     throw new Error(`direct smoke failed with exit ${exitCode}\n${stderr}`);
@@ -243,6 +272,7 @@ function gatewayPolicyDefaults() {
     CLAW_BROWSER_APP_ALLOWLIST: "",
     CLAW_ALLOW_SCREEN_CAPTURE: "0",
     CLAW_ALLOW_WINDOW_METADATA: "0",
+    CLAW_ALLOW_ACCESSIBILITY_OBSERVE: "0",
     CLAW_ALLOW_DESKTOP_CONTROL: "0",
     CLAW_DESKTOP_APP_ALLOWLIST: "",
     CLAW_DESKTOP_KEY_ALLOWLIST: "",
@@ -419,6 +449,7 @@ function isCapabilitySnapshotArtifact(artifact) {
 function assertCapabilitySnapshotMetadata(metadata, snapshot, label) {
   expect(metadata && typeof metadata === "object", `${label} missing metadata`);
   const allowedKeys = [
+    "accessibilityTreeState",
     "allowedActionKinds",
     "browserControlState",
     "browserNetworkState",
@@ -449,12 +480,33 @@ function assertCapabilitySnapshotMetadata(metadata, snapshot, label) {
   expect(metadata.browserNetworkState === snapshot.capabilities.browserNetwork.state, `${label} browser network state mismatch`);
   expect(metadata.screenCaptureState === snapshot.capabilities.screenCapture.state, `${label} screen capture state mismatch`);
   expect(metadata.windowMetadataState === snapshot.capabilities.windowMetadata.state, `${label} window metadata state mismatch`);
+  expect(metadata.accessibilityTreeState === snapshot.capabilities.accessibilityTree.state, `${label} accessibility tree state mismatch`);
   expect(metadata.desktopControlState === snapshot.capabilities.desktopControl.state, `${label} desktop control state mismatch`);
   expect(metadata.platform === snapshot.gateway.platform, `${label} platform mismatch`);
   expect(metadata.safetyFlags === "allowlists-enforced,workspace-only,raw-token-omitted,final-submit-gated", `${label} safety flags mismatch`);
   const serialized = JSON.stringify(metadata);
   for (const forbidden of [token, "Authorization", "toolArguments", "instruction", "commandOutput", "browserPageContent", "screenshotContent", "draftContent", "workspaceRoot", "sessionWorkspace"]) {
     expect(!serialized.includes(forbidden), `${label} metadata leaked ${forbidden}`);
+  }
+}
+
+function assertAccessibilityTreeArtifact(artifact, tree, { mode, policy, label }) {
+  expect(Boolean(artifact), `${label} missing artifact`);
+  expect(artifact.kind === "accessibilityTree", `${label} artifact kind mismatch`);
+  expect(artifact.isRedacted === true, `${label} artifact should be redacted`);
+  expect(artifact.metadata?.accessibilityTree === "observeSummary", `${label} metadata kind mismatch`);
+  expect(mode.includes(tree?.mode), `${label} unexpected mode ${tree?.mode}`);
+  expect(artifact.metadata?.mode === tree?.mode, `${label} metadata mode mismatch`);
+  expect(tree?.accessibilityPolicy === policy, `${label} policy mismatch`);
+  expect(artifact.metadata?.accessibilityPolicy === policy, `${label} metadata policy mismatch`);
+  expect(Number(artifact.metadata?.maxCandidateControls) === tree?.maxCandidateControls, `${label} max controls metadata mismatch`);
+  expect(Number(artifact.metadata?.nodeCount) === tree?.nodeCount, `${label} node count metadata mismatch`);
+  expect(Number(artifact.metadata?.candidateControlCount) === tree?.candidateControlCount, `${label} candidate count metadata mismatch`);
+  expect(tree?.safety?.actionExecution === "not-supported", `${label} should not support actions`);
+  expect(artifact.metadata?.safetyFlags?.includes("action-execution-not-supported"), `${label} missing safety flag`);
+  const serialized = JSON.stringify({ metadata: artifact.metadata, tree });
+  for (const forbidden of [token, "Authorization", "Bearer", "toolArguments", "shellCommand", "pasteText", "/sessions/"]) {
+    expect(!serialized.includes(forbidden), `${label} leaked ${forbidden}`);
   }
 }
 

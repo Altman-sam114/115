@@ -16,11 +16,59 @@
 - 项目方向：OpenClaw 式电脑接管智能体，iPhone 作为控制台，桌面 Claw Gateway 作为执行端。
 - 当前 schema：`claw.computer.control.v1`。
 - 当前核心闭环：用户自然语言任务 -> `PhoneAgentPlanner` -> `ClawMobileTask` -> `ClawMobileEnvelope` -> 模拟事件流或带有界重连/ping 可观测性和进程内 task replay guard 的 WebSocket Gateway -> `ClawGatewayEvent` -> session reducer -> Mission Run / Live Gateway 连接健康 / Gateway 能力复核摘要 / Replay Guard 复核摘要 / AgentTrace 复核 UI / iPad 多栏工作台展示和审批。
-- 当前 Gateway 能力：进程内 task replay guard、session-start 能力快照 `auditLog`、屏幕观察 dry-run/截图策略、浏览器 HTML/URL trace、浏览器打开/搜索计划、workspace 文件写入、Shell dry-run/allowlist 执行、结构化提取、桌面 App 审批闸门、带 readiness/checklist/risk/stop/handoff 与安全 metadata 的 `runAgentLoop`/`agentTrace`。
+- 当前 Gateway 能力：进程内 task replay guard、session-start 能力快照 `auditLog`、屏幕观察 dry-run/截图/窗口元数据/受控 Accessibility 摘要策略、浏览器 HTML/URL trace、浏览器打开/搜索计划、workspace 文件写入、Shell dry-run/allowlist 执行、结构化提取、桌面 App 审批闸门、带 readiness/checklist/risk/stop/handoff 与安全 metadata 的 `runAgentLoop`/`agentTrace`。
 - 当前协作闭环：默认 `main` 直推，GitHub Actions 生成未加密 `ci-results` 结果包，Agent C 下载并核对 manifest/JUnit/日志后验收。
-- 当前主要遗留：完整 macOS Accessibility tree、Playwright/browser-use 兼容控制器、真实多轮 agent loop、live Gateway 后台保活/真实心跳协议/配对、完整 artifact 内容复核体验。
+- 当前主要遗留：完整 macOS Accessibility bridge、Playwright/browser-use 兼容控制器、真实多轮 agent loop、live Gateway 后台保活/真实心跳协议/配对、完整 artifact 内容复核体验。
 
 ## 历史记录
+
+### v0.15 / macOS Accessibility 观察摘要
+
+日期：2026-07-05
+
+核心变更：
+
+- Gateway 新增显式 `CLAW_ALLOW_ACCESSIBILITY_OBSERVE=1` 开关；默认仍为 dry-run/window metadata，不做真实 Accessibility 读取。
+- `observeScreen` 继续复用既有 `accessibilityTree` artifact；授权 macOS Gateway 上只用固定只读 System Events 脚本采集前台 App/窗口和有限候选控件摘要，无权限或非 macOS 时返回可审计 failed/unavailable artifact。
+- `gateway-capability-snapshot.json` capability 和 metadata 增加 `accessibilityTreeState`，同时标记 Accessibility 文本为 summary-only、值和密码字段省略、动作执行不支持。
+- 手机端 `ClawGatewayCapabilityReviewSummary` 解析 `accessibilityTreeState`，Mission Run / Gateway 能力行展示 `ax <state>` chip；模拟事件流、XCTest 和 Swift logic smoke 覆盖该 metadata。
+- direct/WebSocket smoke 覆盖默认 dry-run 状态、metadata allowlist，以及显式 env 开启但 CI 无 macOS 权限时仍能生成合法审计 artifact。
+- 同步 README、协议和 flow/flowchart；本轮不新增 schema/event/action/artifact kind，不执行点击/输入，不让 iOS 声称能读取其他 App 私有数据。
+
+关键文件：
+
+- `Tools/claw-gateway-server.mjs`
+- `Tools/claw-gateway-direct-smoke.mjs`
+- `Tools/claw-gateway-smoke.mjs`
+- `Claw/Core/ClawModels.swift`
+- `Claw/Services/ClawStore.swift`
+- `Claw/Views/ContentView.swift`
+- `ClawTests/ClawTests.swift`
+- `Tools/LogicSmoke.swift`
+- `README.md`
+- `Docs/claw-mobile-gateway-protocol.md`
+- `md/flow/flow.md`
+- `md/flow/flowchart.md`
+- `md/prompt/v0（核心智能能力）/v0.15（macOSAccessibility观察摘要）.md`
+- `update_log.md`
+
+验证结果：
+
+- `node --check Tools/claw-gateway-server.mjs` 通过。
+- `node --check Tools/claw-gateway-direct-smoke.mjs` 通过。
+- `node --check Tools/claw-gateway-smoke.mjs` 通过。
+- `node Tools/claw-gateway-direct-smoke.mjs` 通过，输出 `Claw Gateway direct smoke passed (173 events)`。
+- Swift logic smoke 编译通过。
+- `.build/claw-logic-smoke` 通过，输出 `Claw logic smoke passed`。
+- `node Tools/claw-gateway-smoke.mjs` 在普通沙箱内因 `listen EPERM 127.0.0.1:18879` 被阻断，升级权限后通过，输出 `Claw Gateway smoke passed (44 events)`。
+- `git diff --check` 通过。
+- `ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci-results.yml"); puts "yaml ok"'` 通过，输出 `yaml ok`。
+
+遗留事项：
+
+- 当前是只读观察摘要，不是完整 Accessibility bridge；尚未实现控件级点击、输入、表单提交、视觉定位或默认敏感区域打码。
+- macOS Accessibility 权限缺失、非 macOS 或 CI 无 GUI 时会返回 failed/unavailable 审计结果，这是预期安全降级。
+- 本地未跑无签名 iOS xcodebuild；本轮按测试规范使用轻量检查，push `origin/main` 后由 GitHub Actions 覆盖 xcodebuild、Swift logic smoke、Gateway direct/WebSocket smoke 和结果包验收。
 
 ### v0.14 / 手机端 Replay Guard 复核摘要
 

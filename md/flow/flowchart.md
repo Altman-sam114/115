@@ -71,7 +71,7 @@ flowchart TD
   REPLAY -->|"首次"| POL["actionPolicy<br/>检查 approval 和 allowedActionKinds"]
   POL -->|不允许| SKIP["actionSkipped<br/>写 auditLog 说明原因"]
   POL -->|允许| KIND{"action.kind"}
-  KIND --> OBS["observeScreen<br/>dry-run 或 macOS 截图/窗口元数据"]
+  KIND --> OBS["observeScreen<br/>dry-run、macOS 截图、窗口元数据或受控 Accessibility 摘要"]
   KIND --> BRO["controlBrowser<br/>HTML/URL trace、浏览器打开/搜索计划"]
   KIND --> FILE["manageFiles<br/>workspace 内结构化写文件"]
   KIND --> SH["runShellCommand<br/>结构化命令 dry-run 或 allowlist 执行"]

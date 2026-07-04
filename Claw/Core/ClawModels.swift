@@ -1437,6 +1437,7 @@ struct ClawGatewayCapabilityReviewSummary: Equatable, Codable, Sendable {
     var browserNetworkState: String?
     var screenCaptureState: String?
     var windowMetadataState: String?
+    var accessibilityTreeState: String?
     var desktopControlState: String?
     var safetyFlags: [String]
     var platform: String?
@@ -1449,8 +1450,9 @@ struct ClawGatewayCapabilityReviewSummary: Equatable, Codable, Sendable {
         let host = platform.map { "Gateway \($0)" } ?? "Gateway 能力"
         let token = tokenFingerprint.map { "token \($0)" } ?? "token 待复核"
         let shell = shellState.map { "shell \($0)" } ?? "shell 待复核"
+        let accessibility = accessibilityTreeState.map { "ax \($0)" } ?? "ax 待复核"
         let desktop = desktopControlState.map { "desktop \($0)" } ?? "desktop 待复核"
-        return "\(host) · \(token) · \(shell) · \(desktop)"
+        return "\(host) · \(token) · \(shell) · \(accessibility) · \(desktop)"
     }
 
     static func latest(from session: ClawGatewaySession?) -> ClawGatewayCapabilityReviewSummary? {
@@ -1480,6 +1482,7 @@ struct ClawGatewayCapabilityReviewSummary: Equatable, Codable, Sendable {
             browserNetworkState: ClawArtifactMetadataParser.cleanValue(metadata["browserNetworkState"]),
             screenCaptureState: ClawArtifactMetadataParser.cleanValue(metadata["screenCaptureState"]),
             windowMetadataState: ClawArtifactMetadataParser.cleanValue(metadata["windowMetadataState"]),
+            accessibilityTreeState: ClawArtifactMetadataParser.cleanValue(metadata["accessibilityTreeState"]),
             desktopControlState: ClawArtifactMetadataParser.cleanValue(metadata["desktopControlState"]),
             safetyFlags: ClawArtifactMetadataParser.listValue(metadata["safetyFlags"]),
             platform: ClawArtifactMetadataParser.cleanValue(metadata["platform"]),

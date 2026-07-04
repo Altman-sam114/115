@@ -199,7 +199,7 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 
 当前 action handler：
 
-- `observeScreen`：dry-run 或 macOS 截图/窗口元数据。
+- `observeScreen`：dry-run、macOS 截图、窗口元数据或受 `CLAW_ALLOW_ACCESSIBILITY_OBSERVE=1` 控制的前台 Accessibility 只读摘要。
 - `controlBrowser`：HTML/URL trace、浏览器打开/搜索计划、受 allowlist 的 macOS 浏览器控制。
 - `manageFiles`：workspace 内结构化写文件。
 - `runShellCommand`：结构化命令 dry-run 或 allowlist 执行。
@@ -207,7 +207,7 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 - `operateDesktopApp`：桌面 App 聚焦、粘贴、allowlist 快捷键、最终提交前审批。
 - `runAgentLoop`：基于 session artifacts 生成观察-规划-动作建议-验证 `agentTrace`，并在 artifact 内部记录 readiness、decisionChecklist、selectedNextAction、riskTags、stopReason 和 handoffSummary，同时把证据分、缺失信号、下一步、风险、停止原因和 handoff 摘要压缩成 artifact event 上的可选字符串 metadata 供手机端复核。
 - `composeMessage`/`composeEmail`：生成待确认草稿。
-- session-start `auditLog`：`gateway-capability-snapshot.json`，只记录 workspace、session workspace、platform、短 token 指纹、allowedActionKinds、策略 allowlist 和 capability 状态，并把 `snapshotKind`、token 配置/指纹、allowlist、capability state、safety flags 和 platform 压缩成 artifact event metadata；不记录 raw token、Authorization header、自然语言 instruction、`toolArguments`、网页正文、命令输出、截图内容、草稿正文、联系人或完整 workspace path。
+- session-start `auditLog`：`gateway-capability-snapshot.json`，只记录 workspace、session workspace、platform、短 token 指纹、allowedActionKinds、策略 allowlist 和 capability 状态，并把 `snapshotKind`、token 配置/指纹、allowlist、capability state、`accessibilityTreeState`、safety flags 和 platform 压缩成 artifact event metadata；不记录 raw token、Authorization header、自然语言 instruction、`toolArguments`、网页正文、命令输出、截图内容、草稿正文、联系人或完整 workspace path。
 - replay guard `auditLog`：`task-replay-guard.json`，只记录 task id、短 digest、首次 session id、原始状态、replay count、action count/kinds 和安全标志；不记录 raw token、Authorization header、自然语言 instruction、`toolArguments`、业务 artifact payload 或完整 workspace path。该防护只在当前 Gateway 进程生命周期内有效，不是跨重启持久化 exactly-once。
 
 禁止：
@@ -259,7 +259,7 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 - `ClawGatewaySession`：手机端会话视图模型，区分 action results 和 session-level artifacts。
 - `ClawGatewayLiveHealthSummary`：手机端从 `ClawGatewayLiveRequest`、`ClawGatewayConnectionState`、最新 session 和事件流派生的连接健康摘要；只展示脱敏 endpoint、transport、request path、短 token 指纹、preflight、事件数量、最新事件、attempt、reconnect、ping、脱敏 transport error、fallback/error/completed 和 session 状态，不写入 envelope，不新增协议字段，不做后台保活。
 - `ClawAutonomousLoopState`：自治循环状态。
-- `ClawGatewayCapabilityReviewSummary`：手机端从 `gateway-capability-snapshot.json` `auditLog` metadata 派生的能力复核摘要，只展示短 token 指纹、allowlist、capability state 和 safety flags，不读取 Gateway `file://` 内容。
+- `ClawGatewayCapabilityReviewSummary`：手机端从 `gateway-capability-snapshot.json` `auditLog` metadata 派生的能力复核摘要，只展示短 token 指纹、allowlist、capability state、`accessibilityTreeState` 和 safety flags，不读取 Gateway `file://` 内容。
 - `ClawGatewayTaskReplayGuardReviewSummary`：手机端从 `task-replay-guard.json` `auditLog` metadata 派生的 Replay Guard 复核摘要，只展示重复次数、跳过动作数、短 digest、首次状态和 safety flags，不读取 Gateway `file://` 内容，不声称跨进程 exactly-once。
 - `ClawAgentTraceReviewSummary`：手机端从最近 `agentTrace` artifact metadata 派生的复核摘要，只展示安全字符串摘要，不读取 Gateway `file://` 内容。
 - `ClawMissionRunSummary`：手机端 presentation layer 摘要，只从 loop/task/session 派生，不进入 envelope 或 Gateway 协议；iPad 多栏工作台只重排该展示层和既有会话/日志面板，并展示 Gateway capability、Replay Guard 和 AgentTrace 复核摘要。
@@ -307,7 +307,7 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 ## 10. 未来扩展点
 
 - 将 Gateway prototype handler 拆成可插拔工具层。
-- 引入真实 macOS Accessibility tree bridge。
+- 将当前 macOS Accessibility 观察摘要演进为完整 Accessibility bridge。
 - 增加 Playwright/browser-use 兼容浏览器控制器。
 - 强化 `runAgentLoop` 多轮状态机、失败恢复、下一步策略和手机端完整 artifact 复核体验。
 - 在 v0.12 有界重连/ping 可观测性基础上，继续补完整 live Gateway 后台保活、真实心跳协议、配对和审计日志持久化。

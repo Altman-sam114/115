@@ -122,6 +122,7 @@ enum LogicSmoke {
             expect(capabilityReview.shellState == "dry-run", "capability review should expose shell state")
             expect(capabilityReview.browserControlState == "dry-run", "capability review should expose browser state")
             expect(capabilityReview.browserNetworkState == "disabled", "capability review should expose browser network state")
+            expect(capabilityReview.accessibilityTreeState == "dry-run", "capability review should expose accessibility tree state")
             expect(capabilityReview.desktopControlState == "dry-run", "capability review should expose desktop state")
             expect(capabilityReview.safetyFlags.contains("raw-token-omitted"), "capability review should expose safety flags")
             expect(capabilityReview.compactStatus.contains("Gateway simulated"), "capability review should summarize gateway platform")

@@ -34,6 +34,8 @@ Environment:
                          Set to 1 to allow macOS screencapture artifacts
   CLAW_ALLOW_WINDOW_METADATA
                          Set to 1 to allow macOS front window metadata
+  CLAW_ALLOW_ACCESSIBILITY_OBSERVE
+                         Set to 1 to allow read-only macOS Accessibility summaries
   CLAW_ALLOW_DESKTOP_CONTROL
                          Set to 1 to allow macOS app focus/paste/key actions
   CLAW_DESKTOP_APP_ALLOWLIST
@@ -67,6 +69,7 @@ const options = {
   browserAppAllowlist: parseAllowlist(process.env.CLAW_BROWSER_APP_ALLOWLIST),
   allowScreenCapture: process.env.CLAW_ALLOW_SCREEN_CAPTURE === "1",
   allowWindowMetadata: process.env.CLAW_ALLOW_WINDOW_METADATA === "1",
+  allowAccessibilityObserve: process.env.CLAW_ALLOW_ACCESSIBILITY_OBSERVE === "1",
   allowDesktopControl: process.env.CLAW_ALLOW_DESKTOP_CONTROL === "1",
   desktopAppAllowlist: parseAllowlist(process.env.CLAW_DESKTOP_APP_ALLOWLIST),
   desktopKeyAllowlist: parseAllowlist(
@@ -132,6 +135,9 @@ server.listen(options.port, options.host, () => {
   );
   console.log(
     `screenCapture ${options.allowScreenCapture ? "enabled" : "dry-run"} windowMetadata=${options.allowWindowMetadata ? "enabled" : "dry-run"}`,
+  );
+  console.log(
+    `accessibilityObserve ${options.allowAccessibilityObserve ? "enabled" : "dry-run"}`,
   );
   console.log(
     `browserControl ${options.allowBrowserControl ? "enabled" : "dry-run"} appAllowlist=${[...options.browserAppAllowlist].join(",") || "empty"}`,
@@ -742,6 +748,11 @@ function gatewayCapabilitySnapshot(envelope, config, sessionID, sessionWorkspace
       windowMetadata: {
         enabled: Boolean(config.allowWindowMetadata),
       },
+      accessibilityTree: {
+        enabled: Boolean(config.allowAccessibilityObserve),
+        maxCandidateControlsHardLimit: 50,
+        scope: "front-application-window-summary",
+      },
       desktopControl: {
         enabled: Boolean(config.allowDesktopControl),
         appAllowlist: sortedAllowlist(config.desktopAppAllowlist),
@@ -766,6 +777,7 @@ function gatewayCapabilitySnapshot(envelope, config, sessionID, sessionWorkspace
         dryRunReason: "CLAW_ALLOW_WINDOW_METADATA is not enabled.",
         unavailableReason: "Window metadata is currently implemented only for macOS Gateway hosts.",
       }),
+      accessibilityTree: accessibilityTreeCapability(config),
       desktopControl: desktopControlCapability(config),
     },
     safety: {
@@ -777,6 +789,7 @@ function gatewayCapabilitySnapshot(envelope, config, sessionID, sessionWorkspace
       browserPageContent: "omitted",
       commandOutput: "omitted",
       screenshotContent: "omitted",
+      accessibilityText: "summary-only",
       draftContent: "omitted",
       workspacePolicy: "session-workspace-only",
       allowlistsEnforced: true,
@@ -799,6 +812,7 @@ function gatewayCapabilitySnapshotMetadata(snapshot) {
     browserNetworkState: snapshot.capabilities?.browserNetwork?.state,
     screenCaptureState: snapshot.capabilities?.screenCapture?.state,
     windowMetadataState: snapshot.capabilities?.windowMetadata?.state,
+    accessibilityTreeState: snapshot.capabilities?.accessibilityTree?.state,
     desktopControlState: snapshot.capabilities?.desktopControl?.state,
     safetyFlags: [
       "allowlists-enforced",
@@ -890,6 +904,25 @@ function macPolicyCapability({ enabled, realReason, dryRunReason, unavailableRea
   return {
     state: "real",
     reason: realReason,
+  };
+}
+
+function accessibilityTreeCapability(config) {
+  if (!config.allowAccessibilityObserve) {
+    return {
+      state: "dry-run",
+      reason: "CLAW_ALLOW_ACCESSIBILITY_OBSERVE is not enabled.",
+    };
+  }
+  if (process.platform !== "darwin") {
+    return {
+      state: "unavailable",
+      reason: "Accessibility observation summaries are currently implemented only for macOS Gateway hosts.",
+    };
+  }
+  return {
+    state: "real",
+    reason: "Read-only macOS Accessibility summaries can run for the front application after user-granted Accessibility permission.",
   };
 }
 
@@ -1012,6 +1045,7 @@ async function observeScreenAction(action, index, config) {
   const observationGoal = args.observationGoal || action.instruction;
   const windows = await collectWindowMetadata(config);
   const capture = await captureScreenIfAllowed(index, config);
+  const accessibilityTree = await collectAccessibilityTreeSummary(action, windows, config);
   const observation = {
     mode: capture.mode,
     observationGoal,
@@ -1044,17 +1078,10 @@ async function observeScreenAction(action, index, config) {
     await writeArtifact(
       "accessibilityTree",
       `accessibility-tree-${index + 1}.json`,
-      {
-        mode: config.allowWindowMetadata && process.platform === "darwin" ? "window-metadata" : "dry-run",
-        includeAccessibilityTree: args.includeAccessibilityTree !== "false",
-        maxCandidateControls: Number(args.maxCandidateControls || 20),
-        nodes: accessibilityNodesFromWindows(windows),
-        note: config.allowWindowMetadata
-          ? "Window metadata collected through approved local desktop policy; full Accessibility tree still requires a native bridge."
-          : "Window metadata is dry-run. Set CLAW_ALLOW_WINDOW_METADATA=1 to collect front app metadata on macOS.",
-      },
+      accessibilityTree,
       true,
       config,
+      accessibilityTreeMetadata(accessibilityTree),
     ),
   );
   return {
@@ -1157,8 +1184,8 @@ async function collectWindowMetadata(config) {
 function accessibilityNodesFromWindows(windows) {
   return windows.map((window, index) => ({
     role: "AXWindow",
-    title: window.title || `Window ${index + 1}`,
-    app: window.app || "Unknown App",
+    title: safeAccessibilityText(window.title || `Window ${index + 1}`),
+    app: safeAccessibilityText(window.app || "Unknown App"),
     focused: Boolean(window.focused),
     sourceMode: window.mode || "unknown",
     children: [
@@ -1166,6 +1193,217 @@ function accessibilityNodesFromWindows(windows) {
       { role: "AXTextField", label: "Input", action: "type", confidence: 0.4 },
     ],
   }));
+}
+
+async function collectAccessibilityTreeSummary(action, windows, config) {
+  const args = action.toolArguments || {};
+  const includeAccessibilityTree = args.includeAccessibilityTree !== "false";
+  const maxCandidateControls = clampInteger(Number(args.maxCandidateControls || 20), 1, 50);
+  const base = {
+    mode: "dry-run",
+    accessibilityPolicy: "dry-run",
+    includeAccessibilityTree,
+    maxCandidateControls,
+    observationGoal: safeAccessibilityText(args.observationGoal || action.target || ""),
+    redaction: args.redaction || "required",
+    platform: process.platform,
+    target: safeAccessibilityText(action.target || ""),
+    nodeCount: 0,
+    candidateControlCount: 0,
+    nodes: [],
+    safety: {
+      textPolicy: "label-title-summary-only",
+      values: "omitted",
+      passwordFields: "omitted",
+      actionExecution: "not-supported",
+      source: "structured-tool-arguments-only",
+    },
+  };
+
+  if (!includeAccessibilityTree) {
+    return {
+      ...base,
+      mode: "not-requested",
+      accessibilityPolicy: "not-requested",
+      note: "toolArguments.includeAccessibilityTree=false; Gateway wrote an audit summary without UI nodes.",
+    };
+  }
+
+  if (!config.allowAccessibilityObserve) {
+    const nodes = accessibilityNodesFromWindows(windows).slice(0, maxCandidateControls);
+    return {
+      ...base,
+      mode: config.allowWindowMetadata && process.platform === "darwin" ? "window-metadata" : "dry-run",
+      accessibilityPolicy: "dry-run",
+      nodes,
+      nodeCount: nodes.length,
+      candidateControlCount: countAccessibilityCandidates(nodes),
+      note: config.allowWindowMetadata
+        ? "Window metadata collected through approved local desktop policy; set CLAW_ALLOW_ACCESSIBILITY_OBSERVE=1 for read-only Accessibility summaries."
+        : "Accessibility observation is dry-run. Set CLAW_ALLOW_ACCESSIBILITY_OBSERVE=1 on an authorized macOS Gateway to collect a read-only summary.",
+    };
+  }
+
+  if (process.platform !== "darwin") {
+    return {
+      ...base,
+      mode: "accessibility-unavailable",
+      accessibilityPolicy: "enabled",
+      note: "Accessibility observation summaries are currently implemented only for macOS Gateway hosts.",
+    };
+  }
+
+  const result = await collectMacAccessibilitySummary(maxCandidateControls, config);
+  if (result.status !== "succeeded") {
+    const nodes = accessibilityNodesFromWindows(windows).slice(0, maxCandidateControls);
+    return {
+      ...base,
+      mode: result.mode,
+      accessibilityPolicy: "enabled",
+      nodes,
+      nodeCount: nodes.length,
+      candidateControlCount: countAccessibilityCandidates(nodes),
+      error: result.error,
+      note: result.note,
+    };
+  }
+
+  return {
+    ...base,
+    mode: "accessibility-summary",
+    accessibilityPolicy: "enabled",
+    app: result.app,
+    windowTitle: result.windowTitle,
+    nodes: result.nodes,
+    nodeCount: result.nodes.length,
+    candidateControlCount: countAccessibilityCandidates(result.nodes),
+    note: "Read-only macOS Accessibility summary collected from the front application. Values, password fields, raw text bodies, and action execution are omitted.",
+  };
+}
+
+async function collectMacAccessibilitySummary(maxCandidateControls, config) {
+  const script = [
+    'tell application "System Events"',
+    'set maxControls to ' + maxCandidateControls,
+    'set frontProcess to first application process whose frontmost is true',
+    'set appName to name of frontProcess',
+    'set windowTitle to ""',
+    'try',
+    'set windowTitle to name of front window of frontProcess',
+    'end try',
+    'set output to appName & tab & windowTitle',
+    'set controlCount to 0',
+    'try',
+    'set uiItems to entire contents of front window of frontProcess',
+    'repeat with uiItem in uiItems',
+    'if controlCount >= maxControls then exit repeat',
+    'set itemRole to ""',
+    'set itemName to ""',
+    'set itemDescription to ""',
+    'try',
+    'set itemRole to role of uiItem',
+    'end try',
+    'try',
+    'set itemName to name of uiItem',
+    'end try',
+    'try',
+    'set itemDescription to description of uiItem',
+    'end try',
+    'if itemRole is not "" then',
+    'set output to output & linefeed & itemRole & tab & itemName & tab & itemDescription',
+    'set controlCount to controlCount + 1',
+    'end if',
+    'end repeat',
+    'end try',
+    'return output',
+    'end tell',
+  ].join("\n");
+  const result = await runProcess("/usr/bin/osascript", ["-e", script], config.sessionWorkspace, 9000);
+  if (result.exitCode !== 0) {
+    return {
+      status: "failed",
+      mode: "accessibility-failed",
+      error: normalizeText(result.stderr || result.stdout || "osascript failed").slice(0, 300),
+      note: "macOS Accessibility permission may be missing for the Gateway host process.",
+    };
+  }
+  const lines = result.stdout.split(/\r?\n/).filter((line) => line.trim().length > 0);
+  const [app = "Unknown App", windowTitle = "Untitled front window"] = splitAccessibilityLine(lines[0] || "");
+  const controls = lines.slice(1, maxCandidateControls + 1).map((line, index) => {
+    const [role = "AXUnknown", name = "", description = ""] = splitAccessibilityLine(line);
+    return {
+      role: safeAccessibilityText(role) || "AXUnknown",
+      label: safeAccessibilityText(name || description || `Control ${index + 1}`),
+      description: safeAccessibilityText(description),
+      focused: false,
+      enabled: null,
+      action: "observe-only",
+      confidence: 0.65,
+      sourceMode: "macos-accessibility-summary",
+    };
+  });
+  return {
+    status: "succeeded",
+    app: safeAccessibilityText(app) || "Unknown App",
+    windowTitle: safeAccessibilityText(windowTitle) || "Untitled front window",
+    nodes: [
+      {
+        role: "AXWindow",
+        title: safeAccessibilityText(windowTitle) || "Untitled front window",
+        app: safeAccessibilityText(app) || "Unknown App",
+        focused: true,
+        sourceMode: "macos-accessibility-summary",
+        children: controls,
+      },
+    ],
+  };
+}
+
+function splitAccessibilityLine(line) {
+  return String(line).split("\t").map((item) => item.trim());
+}
+
+function safeAccessibilityText(value) {
+  const text = normalizeText(value).slice(0, 120);
+  if (!text) {
+    return "";
+  }
+  if (/\b(password|passcode|secret|token|authorization|bearer)\b/i.test(text)) {
+    return "<redacted>";
+  }
+  return text;
+}
+
+function countAccessibilityCandidates(nodes) {
+  let count = 0;
+  for (const node of nodes || []) {
+    if (node && typeof node.action === "string" && node.action.length > 0) {
+      count += 1;
+    }
+    count += countAccessibilityCandidates(node.children || []);
+  }
+  return count;
+}
+
+function accessibilityTreeMetadata(tree) {
+  return compactMetadata({
+    accessibilityTree: "observeSummary",
+    mode: tree.mode,
+    accessibilityPolicy: tree.accessibilityPolicy,
+    includeAccessibilityTree: tree.includeAccessibilityTree,
+    maxCandidateControls: tree.maxCandidateControls,
+    nodeCount: tree.nodeCount,
+    candidateControlCount: tree.candidateControlCount,
+    platform: tree.platform,
+    redaction: tree.redaction,
+    safetyFlags: [
+      "observe-only",
+      "values-omitted",
+      "password-fields-omitted",
+      "action-execution-not-supported",
+      "structured-arguments-only",
+    ],
+  });
 }
 
 async function controlBrowserAction(action, index, config) {

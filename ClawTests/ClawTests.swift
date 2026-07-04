@@ -386,6 +386,7 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(review.shellState, "dry-run")
         XCTAssertEqual(review.browserControlState, "dry-run")
         XCTAssertEqual(review.browserNetworkState, "disabled")
+        XCTAssertEqual(review.accessibilityTreeState, "dry-run")
         XCTAssertEqual(review.desktopControlState, "dry-run")
         XCTAssertEqual(review.platform, "simulated")
         XCTAssertTrue(review.safetyFlags.contains("raw-token-omitted"))
@@ -623,6 +624,7 @@ final class ClawTests: XCTestCase {
                 "browserNetworkState": "disabled",
                 "screenCaptureState": "dry-run",
                 "windowMetadataState": "dry-run",
+                "accessibilityTreeState": "dry-run",
                 "desktopControlState": "unavailable",
                 "safetyFlags": "allowlists-enforced,workspace-only,raw-token-omitted,final-submit-gated",
                 "platform": "darwin"
@@ -638,6 +640,7 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(review.allowedActionKinds, ["controlBrowser", "manageFiles", "runAgentLoop"])
         XCTAssertEqual(review.workspaceState, "workspace-only")
         XCTAssertEqual(review.browserControlState, "real")
+        XCTAssertEqual(review.accessibilityTreeState, "dry-run")
         XCTAssertEqual(review.desktopControlState, "unavailable")
         XCTAssertTrue(review.safetyFlags.contains("final-submit-gated"))
         XCTAssertTrue(review.compactStatus.contains("sha256:abcdef123456"))

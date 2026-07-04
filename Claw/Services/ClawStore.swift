@@ -1894,6 +1894,7 @@ enum ClawGatewaySimulator {
                 "browserNetworkState": "disabled",
                 "screenCaptureState": "dry-run",
                 "windowMetadataState": "dry-run",
+                "accessibilityTreeState": "dry-run",
                 "desktopControlState": "dry-run",
                 "safetyFlags": "allowlists-enforced,workspace-only,raw-token-omitted,final-submit-gated",
                 "platform": "simulated"
