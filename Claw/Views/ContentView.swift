@@ -704,6 +704,10 @@ struct ClawMissionRunPanel: View {
                 ClawGatewayCapabilityReviewRow(review: review)
             }
 
+            if let review = summary.gatewayAccessibilityReview {
+                ClawGatewayAccessibilityReviewRow(review: review)
+            }
+
             if let review = summary.gatewayTaskReplayGuardReview {
                 ClawGatewayTaskReplayGuardReviewRow(review: review)
             }
@@ -1231,6 +1235,10 @@ struct ClawGatewaySessionCard: View {
                 ClawGatewayCapabilityReviewRow(review: review)
             }
 
+            if let review = ClawGatewayAccessibilityReviewSummary.latest(from: session) {
+                ClawGatewayAccessibilityReviewRow(review: review)
+            }
+
             if let review = ClawGatewayTaskReplayGuardReviewSummary.latest(from: session) {
                 ClawGatewayTaskReplayGuardReviewRow(review: review)
             }
@@ -1374,6 +1382,10 @@ struct ClawGatewayResultRow: View {
             if let review = ClawAgentTraceReviewSummary.latest(from: result.artifacts) {
                 ClawAgentTraceReviewRow(review: review)
             }
+
+            if let review = ClawGatewayAccessibilityReviewSummary.latest(from: result.artifacts) {
+                ClawGatewayAccessibilityReviewRow(review: review)
+            }
         }
         .padding(10)
         .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -1490,6 +1502,124 @@ struct ClawGatewayCapabilityReviewRow: View {
             return .secondary
         case "unavailable":
             return .orange
+        default:
+            return .secondary
+        }
+    }
+}
+
+struct ClawGatewayAccessibilityReviewRow: View {
+    let review: ClawGatewayAccessibilityReviewSummary
+
+    private var statusChips: [(text: String, icon: String, tint: Color)] {
+        var items: [(String, String, Color)] = []
+        if let mode = review.mode {
+            items.append(("mode \(mode)", "accessibility", tint(forMode: mode)))
+        }
+        if let policy = review.accessibilityPolicy {
+            items.append(("policy \(policy)", "checkmark.shield.fill", tint(forMode: policy)))
+        }
+        if let candidateControlCount = review.candidateControlCount {
+            if let maxCandidateControls = review.maxCandidateControls {
+                items.append(("controls \(candidateControlCount)/\(maxCandidateControls)", "point.3.connected.trianglepath.dotted", .purple))
+            } else {
+                items.append(("controls \(candidateControlCount)", "point.3.connected.trianglepath.dotted", .purple))
+            }
+        }
+        if let nodeCount = review.nodeCount {
+            items.append(("nodes \(nodeCount)", "square.stack.3d.up.fill", .blue))
+        }
+        if items.isEmpty {
+            items.append(("metadata 待同步", "hourglass", .secondary))
+        }
+        return items
+    }
+
+    private var detailChips: [(text: String, icon: String, tint: Color)] {
+        var items: [(String, String, Color)] = []
+        if let platform = review.platform {
+            items.append((platform, "desktopcomputer", .purple))
+        }
+        if let redaction = review.redaction {
+            items.append(("redaction \(redaction)", "eye.slash.fill", .orange))
+        }
+        if let include = review.includeAccessibilityTree {
+            items.append((include ? "tree requested" : "tree skipped", include ? "checkmark.circle.fill" : "minus.circle.fill", include ? .green : .secondary))
+        }
+        return items
+    }
+
+    private var safetyChips: [(text: String, icon: String, tint: Color)] {
+        var items = review.safetyFlags.prefix(3).map { flag in
+            (text: flag, icon: "shield.lefthalf.filled.badge.checkmark", tint: Color.purple)
+        }
+        if items.isEmpty {
+            items.append((text: "metadata-only", icon: "doc.text.magnifyingglass", tint: .purple))
+        }
+        return items
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Label("Accessibility", systemImage: "accessibility")
+                    .font(.footnote.bold())
+                    .foregroundStyle(.primary)
+                PhoneAgentTag(text: "\(review.treeCount) 条", icon: "number", tint: .purple)
+                PhoneAgentTag(
+                    text: review.isRedacted ? "已脱敏" : "可见",
+                    icon: review.isRedacted ? "eye.slash.fill" : "eye.fill",
+                    tint: review.isRedacted ? .orange : .green
+                )
+                Spacer(minLength: 0)
+            }
+
+            Text(review.compactStatus)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(Array(statusChips.enumerated()), id: \.offset) { _, chip in
+                        PhoneAgentTag(text: chip.text, icon: chip.icon, tint: chip.tint)
+                    }
+                }
+            }
+
+            if detailChips.isEmpty == false {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(Array(detailChips.enumerated()), id: \.offset) { _, chip in
+                            PhoneAgentTag(text: chip.text, icon: chip.icon, tint: chip.tint)
+                        }
+                    }
+                }
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(Array(safetyChips.enumerated()), id: \.offset) { _, chip in
+                        PhoneAgentTag(text: chip.text, icon: chip.icon, tint: chip.tint)
+                    }
+                }
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func tint(forMode mode: String) -> Color {
+        switch mode {
+        case "accessibility-summary", "enabled":
+            return .green
+        case "dry-run", "window-metadata":
+            return .blue
+        case "accessibility-failed":
+            return .red
+        case "accessibility-unavailable":
+            return .orange
+        case "not-requested", "disabled":
+            return .secondary
         default:
             return .secondary
         }

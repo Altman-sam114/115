@@ -164,6 +164,7 @@ final class ClawStore: ObservableObject {
             artifactCount: session?.artifactCount ?? 0,
             artifactKinds: missionRunArtifactKinds(from: session),
             agentTraceReview: missionRunAgentTraceReview(from: session),
+            gatewayAccessibilityReview: missionRunGatewayAccessibilityReview(from: session),
             gatewayCapabilityReview: missionRunGatewayCapabilityReview(from: session),
             gatewayTaskReplayGuardReview: missionRunGatewayTaskReplayGuardReview(from: session),
             primaryActionTitle: primaryAction.title,
@@ -293,6 +294,10 @@ final class ClawStore: ObservableObject {
 
     private func missionRunAgentTraceReview(from session: ClawGatewaySession?) -> ClawAgentTraceReviewSummary? {
         ClawAgentTraceReviewSummary.latest(from: session)
+    }
+
+    private func missionRunGatewayAccessibilityReview(from session: ClawGatewaySession?) -> ClawGatewayAccessibilityReviewSummary? {
+        ClawGatewayAccessibilityReviewSummary.latest(from: session)
     }
 
     private func missionRunGatewayCapabilityReview(from session: ClawGatewaySession?) -> ClawGatewayCapabilityReviewSummary? {
@@ -1790,7 +1795,12 @@ enum ClawGatewaySimulator {
                 summary: "已采集屏幕截图和可访问性树，敏感区域已打码。",
                 artifacts: [
                     artifact(.screenshot, "screen-\(index + 1).png", redacted: true),
-                    artifact(.accessibilityTree, "ax-tree-\(index + 1).json", redacted: true)
+                    artifact(
+                        .accessibilityTree,
+                        "ax-tree-\(index + 1).json",
+                        redacted: true,
+                        metadata: accessibilityTreeMetadata()
+                    )
                 ]
             )
         case .controlBrowser:
@@ -1928,6 +1938,21 @@ enum ClawGatewaySimulator {
             "riskTags": "approval-required,final-submit-gate,missing-message-draft",
             "stopReason": "final-submit",
             "handoffSummary": "Evidence score 72/100 from screenObservation, accessibilityTree, browserTrace, fileDiff, commandOutput; missing messageDraft. Selected next action: composeMessage. Stop reason: final-submit."
+        ]
+    }
+
+    private static func accessibilityTreeMetadata() -> [String: String] {
+        [
+            "accessibilityTree": "observeSummary",
+            "mode": "dry-run",
+            "accessibilityPolicy": "dry-run",
+            "includeAccessibilityTree": "true",
+            "maxCandidateControls": "20",
+            "nodeCount": "1",
+            "candidateControlCount": "2",
+            "platform": "simulated",
+            "redaction": "maskSensitiveText",
+            "safetyFlags": "observe-only,values-omitted,password-fields-omitted,action-execution-not-supported,structured-arguments-only"
         ]
     }
 }

@@ -129,6 +129,16 @@ enum LogicSmoke {
         } else {
             failures.append("mission summary should derive gateway capability review")
         }
+        if let accessibilityReview = missionSummary.gatewayAccessibilityReview {
+            expect(accessibilityReview.treeCount == 1, "mission summary should count accessibility tree artifacts")
+            expect(accessibilityReview.hasMetadata, "accessibility review should include metadata")
+            expect(accessibilityReview.mode == "dry-run", "accessibility review should expose dry-run mode")
+            expect(accessibilityReview.candidateControlCount == 2, "accessibility review should expose candidate controls")
+            expect(accessibilityReview.maxCandidateControls == 20, "accessibility review should expose max controls")
+            expect(accessibilityReview.safetyFlags.contains("action-execution-not-supported"), "accessibility review should expose safety flags")
+        } else {
+            failures.append("mission summary should derive accessibility review")
+        }
         if let agentTraceReview = missionSummary.agentTraceReview {
             expect(agentTraceReview.traceCount > 0, "mission summary should count agent traces")
             expect(agentTraceReview.hasMetadata, "agent trace review should include metadata")

@@ -417,6 +417,30 @@ final class ClawTests: XCTestCase {
         XCTAssertTrue(review.compactStatus.contains("final-submit"))
     }
 
+    func testMissionRunSummaryDerivesAccessibilityReview() throws {
+        let store = ClawStore(autoScanLocalArtifacts: false)
+
+        store.phoneAgentCommand = "打开浏览器搜索资料并发到 Slack"
+        store.startAutonomousComputerTakeover()
+        store.approveAndContinueAutonomousLoop()
+        let review = try XCTUnwrap(store.missionRunSummary.gatewayAccessibilityReview)
+
+        XCTAssertEqual(review.treeCount, 1)
+        XCTAssertTrue(review.hasMetadata)
+        XCTAssertEqual(review.mode, "dry-run")
+        XCTAssertEqual(review.accessibilityPolicy, "dry-run")
+        XCTAssertEqual(review.includeAccessibilityTree, true)
+        XCTAssertEqual(review.maxCandidateControls, 20)
+        XCTAssertEqual(review.nodeCount, 1)
+        XCTAssertEqual(review.candidateControlCount, 2)
+        XCTAssertEqual(review.platform, "simulated")
+        XCTAssertEqual(review.redaction, "maskSensitiveText")
+        XCTAssertTrue(review.safetyFlags.contains("action-execution-not-supported"))
+        XCTAssertTrue(review.compactStatus.contains("ax dry-run"))
+        XCTAssertTrue(review.compactStatus.contains("controls 2/20"))
+        XCTAssertTrue(review.isRedacted)
+    }
+
     func testMissionRunSummaryShowsCompletedRetryState() {
         let store = ClawStore(autoScanLocalArtifacts: false)
 
@@ -654,6 +678,79 @@ final class ClawTests: XCTestCase {
         let legacyReview = try XCTUnwrap(ClawGatewayCapabilityReviewSummary.latest(from: [legacyArtifact]))
         XCTAssertFalse(legacyReview.hasMetadata)
         XCTAssertTrue(legacyReview.compactStatus.contains("metadata"))
+    }
+
+    func testAccessibilityReviewParsesMetadataAndFallsBack() throws {
+        let artifact = ClawGatewayArtifact(
+            kind: .accessibilityTree,
+            title: "accessibility-tree-1.json",
+            reference: "file:///tmp/accessibility-tree-1.json",
+            isRedacted: true,
+            metadata: [
+                "accessibilityTree": "observeSummary",
+                "mode": "accessibility-summary",
+                "accessibilityPolicy": "enabled",
+                "includeAccessibilityTree": "true",
+                "maxCandidateControls": "12",
+                "nodeCount": "1",
+                "candidateControlCount": "8",
+                "platform": "darwin",
+                "redaction": "maskSensitiveText",
+                "safetyFlags": "observe-only,values-omitted,password-fields-omitted"
+            ]
+        )
+
+        let review = try XCTUnwrap(ClawGatewayAccessibilityReviewSummary.latest(from: [artifact]))
+
+        XCTAssertEqual(review.treeCount, 1)
+        XCTAssertTrue(review.hasMetadata)
+        XCTAssertEqual(review.mode, "accessibility-summary")
+        XCTAssertEqual(review.accessibilityPolicy, "enabled")
+        XCTAssertEqual(review.includeAccessibilityTree, true)
+        XCTAssertEqual(review.maxCandidateControls, 12)
+        XCTAssertEqual(review.nodeCount, 1)
+        XCTAssertEqual(review.candidateControlCount, 8)
+        XCTAssertEqual(review.platform, "darwin")
+        XCTAssertEqual(review.redaction, "maskSensitiveText")
+        XCTAssertTrue(review.safetyFlags.contains("values-omitted"))
+        XCTAssertTrue(review.compactStatus.contains("controls 8/12"))
+        XCTAssertTrue(review.isRedacted)
+
+        let legacyArtifact = ClawGatewayArtifact(
+            kind: .accessibilityTree,
+            title: "legacy-accessibility-tree.json",
+            reference: "file:///tmp/legacy-accessibility-tree.json",
+            isRedacted: true
+        )
+        let legacyReview = try XCTUnwrap(ClawGatewayAccessibilityReviewSummary.latest(from: [legacyArtifact]))
+        XCTAssertFalse(legacyReview.hasMetadata)
+        XCTAssertTrue(legacyReview.compactStatus.contains("metadata"))
+
+        let sensitiveArtifact = ClawGatewayArtifact(
+            kind: .accessibilityTree,
+            title: "sensitive-accessibility-tree.json",
+            reference: "file:///tmp/sensitive-accessibility-tree.json",
+            isRedacted: true,
+            metadata: [
+                "accessibilityTree": "observeSummary",
+                "mode": "dry-run Authorization: Bearer raw-token",
+                "accessibilityPolicy": "dry-run",
+                "redaction": "workspace=/private/tmp/claw-work",
+                "safetyFlags": "observe-only,headers={Authorization: Bearer raw-token},file:///tmp/private.txt"
+            ]
+        )
+        let sensitiveReview = try XCTUnwrap(ClawGatewayAccessibilityReviewSummary.latest(from: [sensitiveArtifact]))
+        let visibleText = [
+            sensitiveReview.compactStatus,
+            sensitiveReview.redaction ?? "",
+            sensitiveReview.safetyFlags.joined(separator: " ")
+        ].joined(separator: " ")
+        XCTAssertFalse(visibleText.contains("Authorization"))
+        XCTAssertFalse(visibleText.contains("Bearer"))
+        XCTAssertFalse(visibleText.contains("raw-token"))
+        XCTAssertFalse(visibleText.contains("file://"))
+        XCTAssertFalse(visibleText.contains("/private"))
+        XCTAssertFalse(visibleText.contains("workspace=/"))
     }
 
     func testGatewayTaskReplayGuardReviewParsesMetadataAndFallsBack() throws {

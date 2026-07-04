@@ -1423,6 +1423,99 @@ struct ClawAgentTraceReviewSummary: Equatable, Codable, Sendable {
     }
 }
 
+struct ClawGatewayAccessibilityReviewSummary: Equatable, Codable, Sendable {
+    var treeCount: Int
+    var latestTitle: String
+    var hasMetadata: Bool
+    var mode: String?
+    var accessibilityPolicy: String?
+    var includeAccessibilityTree: Bool?
+    var maxCandidateControls: Int?
+    var nodeCount: Int?
+    var candidateControlCount: Int?
+    var platform: String?
+    var redaction: String?
+    var safetyFlags: [String]
+    var isRedacted: Bool
+
+    var compactStatus: String {
+        guard hasMetadata else {
+            return "已收到 Accessibility 观察，metadata 待同步。"
+        }
+        let modeText = mode.map { "ax \($0)" } ?? "ax 待复核"
+        let policyText = accessibilityPolicy.map { "policy \($0)" } ?? "policy 待复核"
+        let controlText: String
+        if let candidateControlCount, let maxCandidateControls {
+            controlText = "controls \(candidateControlCount)/\(maxCandidateControls)"
+        } else if let nodeCount {
+            controlText = "nodes \(nodeCount)"
+        } else {
+            controlText = "controls 待复核"
+        }
+        return "\(modeText) · \(policyText) · \(controlText)"
+    }
+
+    static func latest(from session: ClawGatewaySession?) -> ClawGatewayAccessibilityReviewSummary? {
+        guard let session else {
+            return nil
+        }
+        return latest(from: session.allArtifacts)
+    }
+
+    static func latest(from artifacts: [ClawGatewayArtifact]) -> ClawGatewayAccessibilityReviewSummary? {
+        let trees = artifacts.filter { $0.kind == .accessibilityTree }
+        guard let latest = trees.last else {
+            return nil
+        }
+        let metadata = latest.metadata ?? [:]
+        let hasReviewMetadata = ClawArtifactMetadataParser.cleanValue(metadata["accessibilityTree"]) == "observeSummary" ||
+            ClawArtifactMetadataParser.cleanValue(metadata["mode"]) != nil
+        return ClawGatewayAccessibilityReviewSummary(
+            treeCount: trees.count,
+            latestTitle: latest.title,
+            hasMetadata: hasReviewMetadata,
+            mode: safeMetadataValue(metadata["mode"]),
+            accessibilityPolicy: safeMetadataValue(metadata["accessibilityPolicy"]),
+            includeAccessibilityTree: ClawArtifactMetadataParser.boolValue(metadata["includeAccessibilityTree"]),
+            maxCandidateControls: ClawArtifactMetadataParser.intValue(metadata["maxCandidateControls"]),
+            nodeCount: ClawArtifactMetadataParser.intValue(metadata["nodeCount"]),
+            candidateControlCount: ClawArtifactMetadataParser.intValue(metadata["candidateControlCount"]),
+            platform: safeMetadataValue(metadata["platform"]),
+            redaction: safeMetadataValue(metadata["redaction"]),
+            safetyFlags: safeMetadataList(metadata["safetyFlags"]),
+            isRedacted: latest.isRedacted
+        )
+    }
+
+    private static func safeMetadataValue(_ value: String?) -> String? {
+        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
+            return nil
+        }
+        var redacted = ClawSensitiveTextRedactor.redacted(clean)
+        let replacements: [(String, String)] = [
+            (#"(?i)\bAuthorization=<redacted>"#, "header-redacted"),
+            (#"(?i)\bBearer <redacted>"#, "token-redacted"),
+            (#"(?i)\b(token|password|secret)=<redacted>"#, "secret-redacted"),
+            (#"(?i)\bheaders=<redacted>"#, "headers-redacted"),
+            (#"(?i)\bworkspace=<redacted>"#, "workspace-redacted"),
+            (#"file://<redacted>"#, "file-redacted"),
+            (#"<path-redacted>"#, "path-redacted")
+        ]
+        for (pattern, replacement) in replacements {
+            redacted = redacted.replacingOccurrences(
+                of: pattern,
+                with: replacement,
+                options: .regularExpression
+            )
+        }
+        return ClawArtifactMetadataParser.cleanValue(redacted)
+    }
+
+    private static func safeMetadataList(_ value: String?) -> [String] {
+        ClawArtifactMetadataParser.listValue(value).compactMap(safeMetadataValue)
+    }
+}
+
 struct ClawGatewayCapabilityReviewSummary: Equatable, Codable, Sendable {
     var snapshotCount: Int
     var latestTitle: String
@@ -1634,6 +1727,7 @@ struct ClawMissionRunSummary: Equatable, Codable, Sendable {
     var artifactCount: Int
     var artifactKinds: [ClawGatewayArtifactKind]
     var agentTraceReview: ClawAgentTraceReviewSummary?
+    var gatewayAccessibilityReview: ClawGatewayAccessibilityReviewSummary?
     var gatewayCapabilityReview: ClawGatewayCapabilityReviewSummary?
     var gatewayTaskReplayGuardReview: ClawGatewayTaskReplayGuardReviewSummary?
     var primaryActionTitle: String
