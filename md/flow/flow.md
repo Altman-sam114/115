@@ -17,11 +17,12 @@ Claw 的当前主链路是：用户在 iPhone 输入电脑任务，App 生成可
   -> ClawMobileEnvelope(JSON)
   -> 模拟事件流或 WebSocket live Gateway
   -> ClawGatewayLiveRequest + ClawGatewayConnectionState 记录 preflight 和连接阶段
+  -> URLSessionClawGatewayTransport 有界重连 + ping 可观测性
   -> Gateway session-start capability snapshot auditLog + 安全 metadata
   -> ClawGatewayEvent
   -> ClawGatewayEventStream.apply
   -> ClawGatewaySession.results/sessionArtifacts/auditTrail
-  -> ClawGatewayLiveHealthSummary 从 request、连接状态、session 和事件派生连接健康摘要
+  -> ClawGatewayLiveHealthSummary 从 request、连接状态、session、事件、attempt/reconnect/ping 派生连接健康摘要
   -> ClawGatewayCapabilityReviewSummary 从 snapshot metadata 派生能力复核摘要
   -> ClawGatewayArtifact.metadata 上的 agentTrace 安全摘要
   -> ClawMissionRunSummary 派生任务回合摘要、Live Gateway 连接健康、Gateway 能力复核摘要和 AgentTrace 复核摘要
@@ -75,7 +76,7 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 5. bridge 将步骤转换成 `ClawMobileAction`，补充 `toolArguments`、审批级别、敏感数据标记和风险分。
 6. 用户审批后，`sendLatestClawMobileTask()` 根据 `gatewayDispatchMode` 选择：
    - `simulatedEventStream`：本地生成 `ClawGatewayEvent`。
-   - `liveGateway`：准备 WebSocket 请求，endpoint/token 不满足时回退模拟流，并从 request、connection state、session 和事件派生 Live Gateway 连接健康摘要。
+   - `liveGateway`：准备 WebSocket 请求，endpoint/token 不满足时回退模拟流；客户端默认最多重试 1 次并做一次 ping 观测，从 request、connection state、session、事件和 transport 诊断派生 Live Gateway 连接健康摘要。
 7. 桌面 Gateway 原型 `Tools/claw-gateway-server.mjs` 校验 schema、token、动作白名单和策略。
 8. Gateway 在 `gatewayConnected` 后写入 session 级 `gateway-capability-snapshot.json` `auditLog` artifact，记录 workspace、platform、短 token 指纹、envelope allowlist、策略 allowlist 和 capability 状态，并在 artifact event metadata 上附安全字符串摘要。
 9. Gateway action handler 写 artifact 并返回状态：成功、失败、等待审批、跳过。
@@ -250,7 +251,7 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 - `ClawMobileEnvelope`：live/simulated Gateway 的请求体。
 - `ClawGatewayEvent`：Gateway 推送事件。
 - `ClawGatewaySession`：手机端会话视图模型，区分 action results 和 session-level artifacts。
-- `ClawGatewayLiveHealthSummary`：手机端从 `ClawGatewayLiveRequest`、`ClawGatewayConnectionState`、最新 session 和事件流派生的连接健康摘要；只展示脱敏 endpoint、transport、request path、短 token 指纹、preflight、事件数量、最新事件、fallback/error/completed 和 session 状态，不写入 envelope，不新增协议字段，不做自动重连。
+- `ClawGatewayLiveHealthSummary`：手机端从 `ClawGatewayLiveRequest`、`ClawGatewayConnectionState`、最新 session 和事件流派生的连接健康摘要；只展示脱敏 endpoint、transport、request path、短 token 指纹、preflight、事件数量、最新事件、attempt、reconnect、ping、脱敏 transport error、fallback/error/completed 和 session 状态，不写入 envelope，不新增协议字段，不做后台保活。
 - `ClawAutonomousLoopState`：自治循环状态。
 - `ClawGatewayCapabilityReviewSummary`：手机端从 `gateway-capability-snapshot.json` `auditLog` metadata 派生的能力复核摘要，只展示短 token 指纹、allowlist、capability state 和 safety flags，不读取 Gateway `file://` 内容。
 - `ClawAgentTraceReviewSummary`：手机端从最近 `agentTrace` artifact metadata 派生的复核摘要，只展示安全字符串摘要，不读取 Gateway `file://` 内容。
@@ -302,7 +303,7 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 - 引入真实 macOS Accessibility tree bridge。
 - 增加 Playwright/browser-use 兼容浏览器控制器。
 - 强化 `runAgentLoop` 多轮状态机、失败恢复、下一步策略和手机端完整 artifact 复核体验。
-- 增加 live Gateway 心跳、重连、配对和审计日志持久化。
+- 在 v0.12 有界重连/ping 可观测性基础上，继续补完整 live Gateway 后台保活、真实心跳协议、配对和审计日志持久化。
 - UI 上继续增强 Mission Run 内的 artifact 预览、审批队列和回滚提示。
 - 配置真实 `origin` 后持续执行 main 直推和 Agent C 下载结果包复判。
 - 后续可由 `agentx:` 启动主控循环，但每轮仍必须经过 Agent A 提示词、Agent B main push 和 Agent C artifact 验收。

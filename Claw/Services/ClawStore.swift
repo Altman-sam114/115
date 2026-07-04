@@ -652,11 +652,16 @@ final class ClawStore: ObservableObject {
             }
         } catch {
             gatewayConnectionState = .failed
+            let safeError = ClawGatewayLiveClient.safeTransportErrorSummary(
+                error.localizedDescription,
+                request: request
+            )
             fallbackLatestSessionToSimulatedEvents(
                 task: dispatch.task,
                 sessionID: dispatch.sessionID,
                 reason: error.localizedDescription,
-                startingSequence: gatewayEvents.map(\.sequence).max().map { $0 + 1 } ?? 2
+                startingSequence: gatewayEvents.map(\.sequence).max().map { $0 + 1 } ?? 2,
+                transportErrorSummary: safeError
             )
         }
 
@@ -733,14 +738,16 @@ final class ClawStore: ObservableObject {
         task: ClawMobileTask,
         sessionID: UUID,
         reason: String,
-        startingSequence: Int
+        startingSequence: Int,
+        transportErrorSummary: String? = nil
     ) {
         gatewayConnectionState = .fallbackSimulated
         let fallbackEvent = ClawGatewayLiveClient.fallbackEvent(
             task: task,
             sessionID: sessionID,
             reason: reason,
-            sequence: startingSequence
+            sequence: startingSequence,
+            transportErrorSummary: transportErrorSummary
         )
         let events = ClawGatewayEventStream.simulatedEvents(
             task: task,
@@ -1965,7 +1972,7 @@ enum ClawGatewayLiveClient {
         request: ClawGatewayLiveRequest,
         sequence: Int
     ) -> ClawGatewayEvent {
-        ClawGatewayEvent(
+        return ClawGatewayEvent(
             sessionID: sessionID,
             taskID: task.id,
             sequence: sequence,
@@ -1974,19 +1981,73 @@ enum ClawGatewayLiveClient {
         )
     }
 
+    static func liveTransportProgressEvent(
+        taskID: UUID,
+        sessionID: UUID,
+        sequence: Int,
+        attempt: Int,
+        reconnectCount: Int,
+        pingStatus: String,
+        transportErrorSummary: String? = nil,
+        willRetry: Bool = false
+    ) -> ClawGatewayEvent {
+        var parts = [
+            willRetry ? "Live Gateway WebSocket 将重连。" : "Live Gateway WebSocket 已连接，等待桌面端事件。",
+            "attempt=\(attempt)",
+            "reconnect=\(reconnectCount)",
+            "ping=\(pingStatus)"
+        ]
+        if let transportErrorSummary {
+            parts.append("transportError=\(transportErrorSummary)")
+        }
+        if willRetry {
+            parts.append("willRetry=true")
+        }
+        return ClawGatewayEvent(
+            sessionID: sessionID,
+            taskID: taskID,
+            sequence: sequence,
+            kind: .gatewayConnected,
+            summary: parts.joined(separator: " ")
+        )
+    }
+
     static func fallbackEvent(
         task: ClawMobileTask,
         sessionID: UUID,
         reason: String,
-        sequence: Int
+        sequence: Int,
+        transportErrorSummary: String? = nil
     ) -> ClawGatewayEvent {
-        ClawGatewayEvent(
+        var summary = "Live Gateway 未启动：\(reason) 已切换为本地事件流模拟，方便继续审查计划。"
+        if let transportErrorSummary {
+            summary += " transportError=\(transportErrorSummary)"
+        }
+        return ClawGatewayEvent(
             sessionID: sessionID,
             taskID: task.id,
             sequence: sequence,
             kind: .fallbackUsed,
-            summary: "Live Gateway 未启动：\(reason) 已切换为本地事件流模拟，方便继续审查计划。"
+            summary: summary
         )
+    }
+
+    static func safeTransportErrorSummary(_ text: String, request: ClawGatewayLiveRequest? = nil) -> String {
+        var value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let safeEndpoint = ClawGatewayLiveRequest.safeEndpointDisplay(request?.endpoint)
+        value = ClawSensitiveTextRedactor.redacted(
+            value,
+            rawEndpoint: request?.endpoint,
+            safeEndpoint: safeEndpoint
+        )
+        value = value.replacingOccurrences(of: #"\s+"#, with: "_", options: .regularExpression)
+        if value.isEmpty {
+            return "unknown"
+        }
+        if value.count > 48 {
+            return String(value.prefix(48)) + "..."
+        }
+        return value
     }
 
     static func requestSummary(_ request: ClawGatewayLiveRequest, session: ClawGatewaySession) -> String {
@@ -2010,7 +2071,29 @@ protocol ClawGatewayTransport: Sendable {
     ) -> AsyncThrowingStream<ClawGatewayEvent, Error>
 }
 
+struct ClawGatewayTransportRetryPolicy: Equatable, Sendable {
+    var maxRetries: Int
+    var retryDelayNanoseconds: UInt64
+    var pingAfterConnect: Bool
+
+    static let liveDefault = ClawGatewayTransportRetryPolicy(
+        maxRetries: 1,
+        retryDelayNanoseconds: 250_000_000,
+        pingAfterConnect: true
+    )
+
+    var maxAttempts: Int {
+        max(1, maxRetries + 1)
+    }
+}
+
 struct URLSessionClawGatewayTransport: ClawGatewayTransport {
+    var retryPolicy: ClawGatewayTransportRetryPolicy
+
+    init(retryPolicy: ClawGatewayTransportRetryPolicy = .liveDefault) {
+        self.retryPolicy = retryPolicy
+    }
+
     func streamEvents(
         request: ClawGatewayLiveRequest,
         envelopeJSON: String,
@@ -2024,67 +2107,100 @@ struct URLSessionClawGatewayTransport: ClawGatewayTransport {
             }
 
             let task = Task {
+                var nextSequence = 2
+                var attempt = 1
                 do {
-                    var urlRequest = URLRequest(url: url)
-                    for (key, value) in request.headers {
-                        urlRequest.setValue(value, forHTTPHeaderField: key)
-                    }
-                    let socket = URLSession.shared.webSocketTask(with: urlRequest)
-                    socket.resume()
-                    try await socket.send(.string(envelopeJSON))
+                    while attempt <= retryPolicy.maxAttempts, Task.isCancelled == false {
+                        var receivedDesktopEvent = false
+                        let socket = URLSession.shared.webSocketTask(with: urlRequest(for: url, request: request))
+                        do {
+                            socket.resume()
+                            try await socket.send(.string(envelopeJSON))
 
-                    let connected = ClawGatewayEvent(
-                        sessionID: sessionID,
-                        taskID: taskID,
-                        sequence: 2,
-                        kind: .gatewayConnected,
-                        summary: "Live Gateway WebSocket 已连接，等待桌面端事件。"
-                    )
-                    continuation.yield(connected)
-
-                    var sequenceFallback = 3
-                    while Task.isCancelled == false {
-                        let message = try await socket.receive()
-                        let data: Data
-                        switch message {
-                        case .data(let payload):
-                            data = payload
-                        case .string(let text):
-                            data = Data(text.utf8)
-                        @unknown default:
-                            continue
-                        }
-                        var event = try JSONDecoder.clawGateway.decode(ClawGatewayEvent.self, from: data)
-                        if event.sessionID != sessionID {
-                            event = ClawGatewayEvent(
-                                id: event.id,
-                                sessionID: sessionID,
+                            let pingStatus = await pingStatus(for: socket, policy: retryPolicy)
+                            continuation.yield(ClawGatewayLiveClient.liveTransportProgressEvent(
                                 taskID: taskID,
-                                sequence: event.sequence,
-                                kind: event.kind,
-                                actionID: event.actionID,
-                                actionKind: event.actionKind,
-                                actionTitle: event.actionTitle,
-                                resultStatus: event.resultStatus,
-                                summary: event.summary,
-                                artifacts: event.artifacts,
-                                isRetryable: event.isRetryable,
-                                retryCount: event.retryCount,
-                                createdAt: event.createdAt
-                            )
-                        }
-                        if event.sequence <= 0 {
-                            event.sequence = sequenceFallback
-                            sequenceFallback += 1
-                        }
-                        continuation.yield(event)
-                        if event.kind == .sessionCompleted {
-                            socket.cancel(with: .normalClosure, reason: nil)
+                                sessionID: sessionID,
+                                sequence: nextSequence,
+                                attempt: attempt,
+                                reconnectCount: attempt - 1,
+                                pingStatus: pingStatus
+                            ))
+                            nextSequence += 1
+
+                            while Task.isCancelled == false {
+                                let message = try await socket.receive()
+                                let data: Data
+                                switch message {
+                                case .data(let payload):
+                                    data = payload
+                                case .string(let text):
+                                    data = Data(text.utf8)
+                                @unknown default:
+                                    continue
+                                }
+                                var event = try JSONDecoder.clawGateway.decode(ClawGatewayEvent.self, from: data)
+                                receivedDesktopEvent = true
+                                if event.sessionID != sessionID {
+                                    event = ClawGatewayEvent(
+                                        id: event.id,
+                                        sessionID: sessionID,
+                                        taskID: taskID,
+                                        sequence: event.sequence,
+                                        kind: event.kind,
+                                        actionID: event.actionID,
+                                        actionKind: event.actionKind,
+                                        actionTitle: event.actionTitle,
+                                        resultStatus: event.resultStatus,
+                                        summary: event.summary,
+                                        artifacts: event.artifacts,
+                                        isRetryable: event.isRetryable,
+                                        retryCount: event.retryCount,
+                                        createdAt: event.createdAt
+                                    )
+                                }
+                                if event.sequence <= 0 {
+                                    event.sequence = nextSequence
+                                    nextSequence += 1
+                                } else {
+                                    nextSequence = max(nextSequence, event.sequence + 1)
+                                }
+                                continuation.yield(event)
+                                if event.kind == .sessionCompleted {
+                                    socket.cancel(with: .normalClosure, reason: nil)
+                                    continuation.finish()
+                                    return
+                                }
+                            }
+                            socket.cancel(with: .goingAway, reason: nil)
                             continuation.finish()
                             return
+                        } catch {
+                            socket.cancel(with: .goingAway, reason: nil)
+                            let canRetry = attempt < retryPolicy.maxAttempts && receivedDesktopEvent == false
+                            if canRetry {
+                                attempt += 1
+                                let safeError = ClawGatewayLiveClient.safeTransportErrorSummary(
+                                    error.localizedDescription,
+                                    request: request
+                                )
+                                continuation.yield(ClawGatewayLiveClient.liveTransportProgressEvent(
+                                    taskID: taskID,
+                                    sessionID: sessionID,
+                                    sequence: nextSequence,
+                                    attempt: attempt,
+                                    reconnectCount: attempt - 1,
+                                    pingStatus: "skipped",
+                                    transportErrorSummary: safeError,
+                                    willRetry: true
+                                ))
+                                nextSequence += 1
+                                try await Task.sleep(for: .nanoseconds(Int64(retryPolicy.retryDelayNanoseconds)))
+                                continue
+                            }
+                            throw error
                         }
                     }
-                    socket.cancel(with: .goingAway, reason: nil)
                     continuation.finish()
                 } catch {
                     continuation.finish(throwing: error)
@@ -2094,6 +2210,37 @@ struct URLSessionClawGatewayTransport: ClawGatewayTransport {
             continuation.onTermination = { _ in
                 task.cancel()
             }
+        }
+    }
+
+    private func urlRequest(for url: URL, request: ClawGatewayLiveRequest) -> URLRequest {
+        var urlRequest = URLRequest(url: url)
+        for (key, value) in request.headers {
+            urlRequest.setValue(value, forHTTPHeaderField: key)
+        }
+        return urlRequest
+    }
+
+    private func pingStatus(
+        for socket: URLSessionWebSocketTask,
+        policy: ClawGatewayTransportRetryPolicy
+    ) async -> String {
+        guard policy.pingAfterConnect else {
+            return "skipped"
+        }
+        do {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                socket.sendPing { error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else {
+                        continuation.resume()
+                    }
+                }
+            }
+            return "ok"
+        } catch {
+            return "failed"
         }
     }
 }

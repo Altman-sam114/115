@@ -1113,6 +1113,18 @@ struct ClawGatewayLiveHealthRow: View {
         if let fingerprint = summary.tokenFingerprint {
             items.append((fingerprint, "fingerprint", .secondary))
         }
+        if summary.transportAttemptCount > 0 {
+            items.append(("\(summary.transportAttemptCount) 次尝试", "arrow.triangle.2.circlepath", .blue))
+        }
+        if summary.hasReconnectAttempt {
+            items.append(("重连 \(summary.reconnectCount)", "arrow.clockwise.circle.fill", .orange))
+        }
+        if let lastPingSucceeded = summary.lastPingSucceeded {
+            items.append((lastPingSucceeded ? "ping 正常" : "ping 失败", lastPingSucceeded ? "waveform.circle.fill" : "waveform.path.ecg", lastPingSucceeded ? .green : .orange))
+        }
+        if let lastTransportErrorSummary = summary.lastTransportErrorSummary {
+            items.append((lastTransportErrorSummary, "exclamationmark.octagon.fill", summary.hasError ? .red : .orange))
+        }
         if summary.hasFallback {
             items.append(("fallback", "arrow.uturn.backward.circle.fill", .orange))
         }

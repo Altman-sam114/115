@@ -15,12 +15,55 @@
 
 - 项目方向：OpenClaw 式电脑接管智能体，iPhone 作为控制台，桌面 Claw Gateway 作为执行端。
 - 当前 schema：`claw.computer.control.v1`。
-- 当前核心闭环：用户自然语言任务 -> `PhoneAgentPlanner` -> `ClawMobileTask` -> `ClawMobileEnvelope` -> 模拟事件流或 WebSocket Gateway -> `ClawGatewayEvent` -> session reducer -> Mission Run / Gateway 能力复核摘要 / AgentTrace 复核 UI / iPad 多栏工作台展示和审批。
+- 当前核心闭环：用户自然语言任务 -> `PhoneAgentPlanner` -> `ClawMobileTask` -> `ClawMobileEnvelope` -> 模拟事件流或带有界重连/ping 可观测性的 WebSocket Gateway -> `ClawGatewayEvent` -> session reducer -> Mission Run / Live Gateway 连接健康 / Gateway 能力复核摘要 / AgentTrace 复核 UI / iPad 多栏工作台展示和审批。
 - 当前 Gateway 能力：session-start 能力快照 `auditLog`、屏幕观察 dry-run/截图策略、浏览器 HTML/URL trace、浏览器打开/搜索计划、workspace 文件写入、Shell dry-run/allowlist 执行、结构化提取、桌面 App 审批闸门、带 readiness/checklist/risk/stop/handoff 与安全 metadata 的 `runAgentLoop`/`agentTrace`。
 - 当前协作闭环：默认 `main` 直推，GitHub Actions 生成未加密 `ci-results` 结果包，Agent C 下载并核对 manifest/JUnit/日志后验收。
-- 当前主要遗留：完整 macOS Accessibility tree、Playwright/browser-use 兼容控制器、真实多轮 agent loop、live Gateway 心跳和重连、完整 artifact 内容复核体验。
+- 当前主要遗留：完整 macOS Accessibility tree、Playwright/browser-use 兼容控制器、真实多轮 agent loop、live Gateway 后台保活/真实心跳协议/配对、完整 artifact 内容复核体验。
 
 ## 历史记录
+
+### v0.12 / Live Gateway 有界重连与心跳可观测性
+
+日期：2026-07-04
+
+核心变更：
+
+- `URLSessionClawGatewayTransport` 新增 `ClawGatewayTransportRetryPolicy`，默认最多重试 1 次；每次 WebSocket 发送 envelope 后执行一次 ping 观测。
+- transport 复用现有 `.gatewayConnected` 进度事件携带 `attempt`、`reconnect`、`ping` 和脱敏 `transportError`，不新增 event/action/artifact kind，不改变 `claw.computer.control.v1`。
+- 重连只在尚未收到桌面 Gateway 业务事件前进行；收到桌面事件后的错误仍走现有 fallback/复核路径，避免重复发送 envelope 扩大执行风险。
+- `ClawGatewayLiveHealthSummary` 新增 attempt、reconnect、ping、transport error 派生字段，并扩展敏感信息遮蔽；Gateway 会话 UI chip 展示尝试次数、重连次数、ping 状态和短错误摘要。
+- XCTest 和 Swift logic smoke 覆盖 reconnect/ping summary 解析、重连后完成、ping failed 不中断、最终失败 fallback 和错误摘要脱敏。
+- 同步 README、协议和 flow/flowchart；本轮不做后台保活、配对服务或桌面端真实心跳协议，不扩大 Gateway 权限。
+
+关键文件：
+
+- `Claw/Core/ClawModels.swift`
+- `Claw/Services/ClawStore.swift`
+- `Claw/Views/ContentView.swift`
+- `ClawTests/ClawTests.swift`
+- `Tools/LogicSmoke.swift`
+- `README.md`
+- `Docs/claw-mobile-gateway-protocol.md`
+- `md/flow/flow.md`
+- `md/flow/flowchart.md`
+- `md/prompt/v0（核心智能能力）/v0.12（LiveGateway有界重连与心跳可观测性）.md`
+- `update_log.md`
+
+验证结果：
+
+- Swift logic smoke 编译通过。
+- `.build/claw-logic-smoke` 通过，输出 `Claw logic smoke passed`。
+- 无签名 iOS build 通过，输出 `BUILD SUCCEEDED`。
+- `xcodebuild build-for-testing` 通过，输出 `TEST BUILD SUCCEEDED`，确认 `ClawTests` 可编译；本机 CoreSimulator 服务不可用，未执行模拟器 XCTest。
+- `git diff --check` 通过。
+- `ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci-results.yml"); puts "yaml ok"'` 通过，输出 `yaml ok`。
+- `plutil -lint Claw.xcodeproj/project.pbxproj` 通过，输出 `OK`。
+- 本轮未修改 `Tools/*.mjs`，本地未跑 Gateway JS smoke；push `origin/main` 后由 GitHub Actions 覆盖 Gateway direct/WebSocket smoke。
+
+遗留事项：
+
+- 本轮是客户端有界重连和 ping 可观测性，不是 iOS 后台保活、桌面端真实心跳协议、配对服务或 server-side task idempotency。
+- push `origin/main` 后仍需等待 GitHub Actions `ci-results` 结果包，供 Agent C 下载并核对 manifest、JUnit/摘要、Gateway direct/WebSocket smoke 日志、Swift logic smoke 和 xcodebuild 日志后复判。
 
 ### v0.11 / Live Gateway 连接健康摘要
 

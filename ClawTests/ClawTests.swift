@@ -851,6 +851,97 @@ final class ClawTests: XCTestCase {
         })
     }
 
+    func testLiveGatewayReconnectDiagnosticsCompleteAfterRetry() async {
+        let store = ClawStore(autoScanLocalArtifacts: false)
+
+        store.setGateway(url: "ws://127.0.0.1:18789", token: "paired-secret")
+        store.phoneAgentCommand = "打开浏览器搜索资料"
+        store.generatePhoneAgentPlan()
+        store.queueClawMobileTaskFromCurrentPlan()
+        store.approveLatestClawMobileTask()
+
+        await store.sendLatestClawMobileTaskOverLiveGateway(transport: ReconnectingClawGatewayTransport())
+
+        XCTAssertEqual(store.gatewayConnectionState, .completed)
+        XCTAssertTrue(store.gatewayLiveHealthSummary.isCompleted)
+        XCTAssertFalse(store.gatewayLiveHealthSummary.hasError)
+        XCTAssertEqual(store.gatewayLiveHealthSummary.transportAttemptCount, 2)
+        XCTAssertEqual(store.gatewayLiveHealthSummary.reconnectCount, 1)
+        XCTAssertTrue(store.gatewayLiveHealthSummary.hasReconnectAttempt)
+        XCTAssertEqual(store.gatewayLiveHealthSummary.lastPingSucceeded, true)
+        XCTAssertEqual(store.gatewayLiveHealthSummary.lastTransportErrorSummary, "network_lost")
+        XCTAssertFalse(store.gatewayLiveHealthSummary.detailLine.contains("Authorization"))
+    }
+
+    func testLiveGatewayTransportDiagnosticsRedactSensitiveFragments() {
+        let taskID = UUID()
+        let sessionID = UUID()
+        let rawEndpoint = "ws://user:secret@127.0.0.1:18789/live?token=raw"
+        let safeEndpoint = ClawGatewayLiveRequest.safeEndpointDisplay(rawEndpoint)
+        let sensitiveSummary = """
+        Live Gateway WebSocket 将重连。 attempt=2 reconnect=1 ping=failed \
+        transportError=headers={Authorization: Bearer paired-secret} \
+        password:open-sesame secret=raw-secret token=raw-token \
+        file:///Users/a114514/Desktop/codex/aiclaw/private.txt workspace=/private/tmp/claw-work
+        """
+        let summary = ClawGatewayLiveHealthSummary.make(
+            request: ClawGatewayLiveRequest(
+                endpoint: rawEndpoint,
+                tokenFingerprint: "sha256:abc123",
+                headers: ["Authorization": "Bearer paired-secret"],
+                bodyBytes: 128,
+                taskID: taskID,
+                command: "打开浏览器搜索资料",
+                actionCount: 1,
+                canAttemptLive: true,
+                preflightMessage: "Live Gateway request ready"
+            ),
+            connectionState: .streaming,
+            events: [
+                ClawGatewayEvent(
+                    sessionID: sessionID,
+                    taskID: taskID,
+                    sequence: 2,
+                    kind: .gatewayConnected,
+                    summary: sensitiveSummary
+                )
+            ],
+            latestSession: nil
+        )
+
+        XCTAssertEqual(summary.endpoint, safeEndpoint)
+        XCTAssertEqual(summary.transportAttemptCount, 2)
+        XCTAssertEqual(summary.reconnectCount, 1)
+        XCTAssertEqual(summary.lastPingSucceeded, false)
+        XCTAssertFalse(summary.detailLine.contains("paired-secret"))
+        XCTAssertFalse(summary.latestEventSummary?.contains("paired-secret") ?? true)
+        XCTAssertFalse(summary.lastTransportErrorSummary?.contains("paired-secret") ?? true)
+        XCTAssertFalse(summary.latestEventSummary?.contains("Authorization: Bearer") ?? true)
+        XCTAssertFalse(summary.latestEventSummary?.contains("open-sesame") ?? true)
+        XCTAssertFalse(summary.latestEventSummary?.contains("raw-secret") ?? true)
+        XCTAssertFalse(summary.latestEventSummary?.contains("raw-token") ?? true)
+        XCTAssertFalse(summary.latestEventSummary?.contains("/Users/a114514") ?? true)
+        XCTAssertFalse(summary.latestEventSummary?.contains("/private/tmp") ?? true)
+    }
+
+    func testLiveGatewayPingFailureCanContinueWithoutFallback() async {
+        let store = ClawStore(autoScanLocalArtifacts: false)
+
+        store.setGateway(url: "ws://127.0.0.1:18789", token: "paired-secret")
+        store.phoneAgentCommand = "打开浏览器搜索资料"
+        store.generatePhoneAgentPlan()
+        store.queueClawMobileTaskFromCurrentPlan()
+        store.approveLatestClawMobileTask()
+
+        await store.sendLatestClawMobileTaskOverLiveGateway(transport: PingFailedClawGatewayTransport())
+
+        XCTAssertEqual(store.gatewayConnectionState, .completed)
+        XCTAssertFalse(store.gatewayLiveHealthSummary.hasFallback)
+        XCTAssertEqual(store.gatewayLiveHealthSummary.transportAttemptCount, 1)
+        XCTAssertEqual(store.gatewayLiveHealthSummary.reconnectCount, 0)
+        XCTAssertEqual(store.gatewayLiveHealthSummary.lastPingSucceeded, false)
+    }
+
     func testLiveGatewayTransportErrorFallsBackWithHealthSummary() async {
         let store = ClawStore(autoScanLocalArtifacts: false)
 
@@ -860,13 +951,25 @@ final class ClawTests: XCTestCase {
         store.queueClawMobileTaskFromCurrentPlan()
         store.approveLatestClawMobileTask()
 
-        await store.sendLatestClawMobileTaskOverLiveGateway(transport: FailingClawGatewayTransport())
+        await store.sendLatestClawMobileTaskOverLiveGateway(transport: SensitiveFailingClawGatewayTransport())
 
         XCTAssertEqual(store.gatewayConnectionState, .completed)
         XCTAssertTrue(store.gatewayLiveHealthSummary.hasFallback)
         XCTAssertTrue(store.gatewayLiveHealthSummary.hasError)
-        XCTAssertFalse(store.gatewayLiveHealthSummary.detailLine.contains("paired-secret"))
-        XCTAssertFalse(store.gatewayLiveHealthSummary.detailLine.contains("Authorization"))
+        XCTAssertNotNil(store.gatewayLiveHealthSummary.lastTransportErrorSummary)
+        for sensitiveFragment in [
+            "paired-secret",
+            "Authorization: Bearer",
+            "open-sesame",
+            "raw-secret",
+            "raw-token",
+            "/Users/a114514",
+            "/private/tmp"
+        ] {
+            XCTAssertFalse(store.gatewayLiveHealthSummary.detailLine.contains(sensitiveFragment))
+            XCTAssertFalse(store.gatewayLiveHealthSummary.latestEventSummary?.contains(sensitiveFragment) ?? true)
+            XCTAssertFalse(store.gatewayLiveHealthSummary.lastTransportErrorSummary?.contains(sensitiveFragment) ?? true)
+        }
     }
 
     func testLiveGatewayHealthSummaryFallsBackWhenNoRequestExists() {
@@ -925,7 +1028,7 @@ private struct MockClawGatewayTransport: ClawGatewayTransport {
     }
 }
 
-private struct FailingClawGatewayTransport: ClawGatewayTransport {
+private struct ReconnectingClawGatewayTransport: ClawGatewayTransport {
     func streamEvents(
         request: ClawGatewayLiveRequest,
         envelopeJSON: String,
@@ -933,7 +1036,85 @@ private struct FailingClawGatewayTransport: ClawGatewayTransport {
         taskID: UUID
     ) -> AsyncThrowingStream<ClawGatewayEvent, Error> {
         AsyncThrowingStream { continuation in
-            continuation.finish(throwing: ClawGatewayTransportError.invalidEndpoint("ws://redacted"))
+            continuation.yield(ClawGatewayLiveClient.liveTransportProgressEvent(
+                taskID: taskID,
+                sessionID: sessionID,
+                sequence: 2,
+                attempt: 1,
+                reconnectCount: 0,
+                pingStatus: "failed",
+                transportErrorSummary: "network_lost",
+                willRetry: true
+            ))
+            continuation.yield(ClawGatewayLiveClient.liveTransportProgressEvent(
+                taskID: taskID,
+                sessionID: sessionID,
+                sequence: 3,
+                attempt: 2,
+                reconnectCount: 1,
+                pingStatus: "ok"
+            ))
+            yieldSimulatedEvents(envelopeJSON: envelopeJSON, sessionID: sessionID, startingSequence: 4, continuation: continuation)
+            continuation.finish()
         }
+    }
+}
+
+private struct PingFailedClawGatewayTransport: ClawGatewayTransport {
+    func streamEvents(
+        request: ClawGatewayLiveRequest,
+        envelopeJSON: String,
+        sessionID: UUID,
+        taskID: UUID
+    ) -> AsyncThrowingStream<ClawGatewayEvent, Error> {
+        AsyncThrowingStream { continuation in
+            continuation.yield(ClawGatewayLiveClient.liveTransportProgressEvent(
+                taskID: taskID,
+                sessionID: sessionID,
+                sequence: 2,
+                attempt: 1,
+                reconnectCount: 0,
+                pingStatus: "failed"
+            ))
+            yieldSimulatedEvents(envelopeJSON: envelopeJSON, sessionID: sessionID, startingSequence: 3, continuation: continuation)
+            continuation.finish()
+        }
+    }
+}
+
+private struct SensitiveFailingClawGatewayTransport: ClawGatewayTransport {
+    func streamEvents(
+        request: ClawGatewayLiveRequest,
+        envelopeJSON: String,
+        sessionID: UUID,
+        taskID: UUID
+    ) -> AsyncThrowingStream<ClawGatewayEvent, Error> {
+        AsyncThrowingStream { continuation in
+            continuation.finish(throwing: ClawGatewayTransportError.invalidEndpoint(
+                "headers={Authorization: Bearer paired-secret} password:open-sesame secret=raw-secret token=raw-token file:///Users/a114514/private.txt workspace=/private/tmp/claw-work"
+            ))
+        }
+    }
+}
+
+private func yieldSimulatedEvents(
+    envelopeJSON: String,
+    sessionID: UUID,
+    startingSequence: Int,
+    continuation: AsyncThrowingStream<ClawGatewayEvent, Error>.Continuation
+) {
+    let decoder = JSONDecoder.clawGateway
+    guard let data = envelopeJSON.data(using: .utf8),
+          let envelope = try? decoder.decode(ClawMobileEnvelope.self, from: data) else {
+        return
+    }
+    let events = ClawGatewayEventStream.simulatedEvents(
+        task: envelope.task,
+        profile: ClawStore.defaultClawGatewayProfile,
+        sessionID: sessionID,
+        startingSequence: startingSequence
+    )
+    for event in events {
+        continuation.yield(event)
     }
 }

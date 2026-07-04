@@ -1697,6 +1697,40 @@ struct ClawGatewayEvent: Identifiable, Equatable, Codable, Sendable {
     }
 }
 
+enum ClawSensitiveTextRedactor {
+    static func redacted(
+        _ text: String,
+        rawEndpoint: String? = nil,
+        safeEndpoint: String? = nil
+    ) -> String {
+        var value = text
+        if let rawEndpoint,
+           rawEndpoint.isEmpty == false,
+           let safeEndpoint,
+           rawEndpoint != safeEndpoint {
+            value = value.replacingOccurrences(of: rawEndpoint, with: safeEndpoint)
+        }
+        let replacements: [(String, String)] = [
+            (#"(?i)\bheaders\s*[:=]\s*\{[^}]*\}"#, "headers=<redacted>"),
+            (#"(?i)\bheaders\s*[:=]\s*[^,\s;。]+"#, "headers=<redacted>"),
+            (#"(?i)\bAuthorization\s*[:=]\s*(Bearer\s+)?[^,\s;}]+"#, "Authorization=<redacted>"),
+            (#"(?i)\bBearer\s+[^,\s;}]+"#, "Bearer <redacted>"),
+            (#"(?i)\b(token|password|secret)\s*[:=]\s*[^,\s;}]+"#, "$1=<redacted>"),
+            (#"file://\S+"#, "file://<redacted>"),
+            (#"(?i)\bworkspace\s*[:=]\s*[^,\s;}]+"#, "workspace=<redacted>"),
+            (#"(/Users|/private|/var|/tmp)/[^\s,;}]+"#, "<path-redacted>")
+        ]
+        for (pattern, replacement) in replacements {
+            value = value.replacingOccurrences(
+                of: pattern,
+                with: replacement,
+                options: .regularExpression
+            )
+        }
+        return value
+    }
+}
+
 struct ClawGatewayLiveHealthSummary: Equatable, Codable, Sendable {
     var endpoint: String
     var transport: String
@@ -1716,6 +1750,11 @@ struct ClawGatewayLiveHealthSummary: Equatable, Codable, Sendable {
     var hasGatewayAck: Bool
     var gatewayConnectedCount: Int
     var hasDuplicateGatewayConnected: Bool
+    var transportAttemptCount: Int
+    var reconnectCount: Int
+    var hasReconnectAttempt: Bool
+    var lastPingSucceeded: Bool?
+    var lastTransportErrorSummary: String?
     var hasFallback: Bool
     var hasError: Bool
     var isCompleted: Bool
@@ -1740,20 +1779,29 @@ struct ClawGatewayLiveHealthSummary: Equatable, Codable, Sendable {
             rawEndpoint: request?.endpoint,
             safeEndpoint: endpoint
         )
+        let transportDiagnostics = transportDiagnostics(
+            in: events,
+            rawEndpoint: request?.endpoint,
+            safeEndpoint: endpoint
+        )
         let gatewayConnectedCount = events.count { $0.kind == .gatewayConnected }
         let hasGatewayAck = events.contains(where: isDesktopGatewayAck)
         let hasFallback = connectionState == .fallbackSimulated || events.contains { $0.kind == .fallbackUsed }
-        let hasError = connectionState == .failed ||
-            latestSession?.status == .blocked ||
-            events.contains { $0.kind == .actionFailed } ||
-            (hasFallback && request?.canAttemptLive == true)
         let isCompleted = connectionState == .completed || latestSession?.status == .completed
+        let hasSessionFailure = latestSession?.status == .blocked || events.contains { $0.kind == .actionFailed }
+        let hasTerminalTransportError = transportDiagnostics.lastErrorSummary != nil &&
+            (connectionState == .failed || hasFallback || hasSessionFailure)
+        let hasError = connectionState == .failed ||
+            hasSessionFailure ||
+            (hasFallback && request?.canAttemptLive == true) ||
+            hasTerminalTransportError
         let compactStatus = makeCompactStatus(
             request: request,
             connectionState: connectionState,
             eventCount: events.count,
             hasGatewayAck: hasGatewayAck,
             gatewayConnectedCount: gatewayConnectedCount,
+            reconnectCount: transportDiagnostics.reconnectCount,
             hasFallback: hasFallback,
             hasError: hasError,
             isCompleted: isCompleted
@@ -1783,6 +1831,11 @@ struct ClawGatewayLiveHealthSummary: Equatable, Codable, Sendable {
             hasGatewayAck: hasGatewayAck,
             gatewayConnectedCount: gatewayConnectedCount,
             hasDuplicateGatewayConnected: gatewayConnectedCount > 1,
+            transportAttemptCount: transportDiagnostics.attemptCount,
+            reconnectCount: transportDiagnostics.reconnectCount,
+            hasReconnectAttempt: transportDiagnostics.reconnectCount > 0,
+            lastPingSucceeded: transportDiagnostics.lastPingSucceeded,
+            lastTransportErrorSummary: transportDiagnostics.lastErrorSummary,
             hasFallback: hasFallback,
             hasError: hasError,
             isCompleted: isCompleted,
@@ -1805,30 +1858,85 @@ struct ClawGatewayLiveHealthSummary: Equatable, Codable, Sendable {
         rawEndpoint: String?,
         safeEndpoint: String
     ) -> String? {
-        var value = summary?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let value = summary?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard value.isEmpty == false else {
             return nil
         }
-        if let rawEndpoint,
-           rawEndpoint.isEmpty == false,
-           rawEndpoint != safeEndpoint {
-            value = value.replacingOccurrences(of: rawEndpoint, with: safeEndpoint)
+        return ClawSensitiveTextRedactor.redacted(
+            value,
+            rawEndpoint: rawEndpoint,
+            safeEndpoint: safeEndpoint
+        )
+    }
+
+    private struct TransportDiagnostics {
+        var attemptCount: Int = 0
+        var reconnectCount: Int = 0
+        var lastPingSucceeded: Bool?
+        var lastErrorSummary: String?
+    }
+
+    private static func transportDiagnostics(
+        in events: [ClawGatewayEvent],
+        rawEndpoint: String?,
+        safeEndpoint: String
+    ) -> TransportDiagnostics {
+        var diagnostics = TransportDiagnostics()
+        for event in events where event.kind == .gatewayConnected || event.kind == .fallbackUsed {
+            let sanitized = safeSummary(
+                event.summary,
+                rawEndpoint: rawEndpoint,
+                safeEndpoint: safeEndpoint
+            ) ?? ""
+            if let attempt = intValue(for: "attempt", in: sanitized) {
+                diagnostics.attemptCount = max(diagnostics.attemptCount, attempt)
+            }
+            if let reconnect = intValue(for: "reconnect", in: sanitized) {
+                diagnostics.reconnectCount = max(diagnostics.reconnectCount, reconnect)
+            }
+            if let ping = stringValue(for: "ping", in: sanitized) {
+                if ping == "ok" {
+                    diagnostics.lastPingSucceeded = true
+                } else if ping == "failed" {
+                    diagnostics.lastPingSucceeded = false
+                }
+            }
+            if let transportError = stringValue(for: "transportError", in: sanitized) {
+                diagnostics.lastErrorSummary = truncateTransportSummary(transportError)
+            }
         }
-        let replacements: [(String, String)] = [
-            (#"Authorization\s*[:=]\s*\S+"#, "Authorization=<redacted>"),
-            (#"Bearer\s+\S+"#, "Bearer <redacted>"),
-            (#"file://\S+"#, "file://<redacted>"),
-            (#"workspace=[^,\s]+"#, "workspace=<redacted>"),
-            (#"(/Users|/private|/var|/tmp)/[^\s,;]+"#, "<path-redacted>")
-        ]
-        for (pattern, replacement) in replacements {
-            value = value.replacingOccurrences(
-                of: pattern,
-                with: replacement,
-                options: .regularExpression
-            )
+        if diagnostics.attemptCount == 0 {
+            diagnostics.attemptCount = events.contains { $0.kind == .gatewayConnected } ? 1 : 0
         }
-        return value
+        return diagnostics
+    }
+
+    private static func intValue(for key: String, in text: String) -> Int? {
+        guard let value = stringValue(for: key, in: text) else {
+            return nil
+        }
+        return Int(value)
+    }
+
+    private static func stringValue(for key: String, in text: String) -> String? {
+        let pattern = #"(?<![A-Za-z0-9_])"# + NSRegularExpression.escapedPattern(for: key) + #"=([^,\s;。]+)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(
+                in: text,
+                range: NSRange(text.startIndex..<text.endIndex, in: text)
+              ),
+              let range = Range(match.range(at: 1), in: text) else {
+            return nil
+        }
+        return String(text[range])
+    }
+
+    private static func truncateTransportSummary(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > 36 else {
+            return trimmed
+        }
+        return String(trimmed.prefix(36)) + "..."
     }
 
     private static func cleanTokenFingerprint(_ fingerprint: String?) -> String? {
@@ -1847,6 +1955,7 @@ struct ClawGatewayLiveHealthSummary: Equatable, Codable, Sendable {
         eventCount: Int,
         hasGatewayAck: Bool,
         gatewayConnectedCount: Int,
+        reconnectCount: Int,
         hasFallback: Bool,
         hasError: Bool,
         isCompleted: Bool
@@ -1865,6 +1974,9 @@ struct ClawGatewayLiveHealthSummary: Equatable, Codable, Sendable {
         }
         switch connectionState {
         case .streaming:
+            if reconnectCount > 0 {
+                return "Live Gateway 已重连 \(reconnectCount) 次，正在同步事件。"
+            }
             if hasGatewayAck {
                 return "正在同步桌面 Gateway 事件，已收到 \(eventCount) 条。"
             }

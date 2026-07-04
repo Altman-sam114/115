@@ -177,11 +177,63 @@ enum LogicSmoke {
                 sequence: 2,
                 kind: .gatewayConnected,
                 summary: "Gateway accepted task from Claw Controller"
+            ),
+            ClawGatewayEvent(
+                sessionID: liveSession.id,
+                taskID: liveSession.taskID,
+                sequence: 3,
+                kind: .gatewayConnected,
+                summary: "Live Gateway WebSocket 已重连 attempt=2 reconnect=1 ping=ok transportError=network_lost"
             )
         ])
         expect(liveProgressStore.gatewayConnectionState == .streaming, "live progress should keep streaming state")
         expect(liveProgressStore.gatewayLiveHealthSummary.hasGatewayAck, "live health should mark gateway ack")
-        expect(liveProgressStore.gatewayLiveHealthSummary.eventCount >= 2, "live health should count session events")
+        expect(liveProgressStore.gatewayLiveHealthSummary.eventCount >= 3, "live health should count session events")
+        expect(liveProgressStore.gatewayLiveHealthSummary.transportAttemptCount == 2, "live health should parse transport attempts")
+        expect(liveProgressStore.gatewayLiveHealthSummary.reconnectCount == 1, "live health should parse reconnect count")
+        expect(liveProgressStore.gatewayLiveHealthSummary.lastPingSucceeded == true, "live health should parse ping status")
+        expect(liveProgressStore.gatewayLiveHealthSummary.lastTransportErrorSummary == "network_lost", "live health should parse safe transport error")
+
+        let sensitiveTaskID = UUID()
+        let sensitiveSessionID = UUID()
+        let sensitiveEndpoint = "ws://user:secret@127.0.0.1:18789/live?token=raw"
+        let sensitiveLiveSummary = ClawGatewayLiveHealthSummary.make(
+            request: ClawGatewayLiveRequest(
+                endpoint: sensitiveEndpoint,
+                tokenFingerprint: "sha256:abc123",
+                headers: ["Authorization": "Bearer paired-secret"],
+                bodyBytes: 128,
+                taskID: sensitiveTaskID,
+                command: "打开浏览器搜索资料",
+                actionCount: 1,
+                canAttemptLive: true,
+                preflightMessage: "Live Gateway request ready"
+            ),
+            connectionState: .streaming,
+            events: [
+                ClawGatewayEvent(
+                    sessionID: sensitiveSessionID,
+                    taskID: sensitiveTaskID,
+                    sequence: 2,
+                    kind: .gatewayConnected,
+                    summary: "Live Gateway WebSocket 将重连。 attempt=2 reconnect=1 ping=failed transportError=headers={Authorization: Bearer paired-secret} password:open-sesame secret=raw-secret token=raw-token file:///Users/a114514/private.txt workspace=/private/tmp/claw-work"
+                )
+            ],
+            latestSession: nil
+        )
+        for sensitiveFragment in [
+            "paired-secret",
+            "Authorization: Bearer",
+            "open-sesame",
+            "raw-secret",
+            "raw-token",
+            "/Users/a114514",
+            "/private/tmp"
+        ] {
+            expect(sensitiveLiveSummary.detailLine.contains(sensitiveFragment) == false, "live health detail should redact \(sensitiveFragment)")
+            expect(sensitiveLiveSummary.latestEventSummary?.contains(sensitiveFragment) == false, "live health latest event should redact \(sensitiveFragment)")
+            expect(sensitiveLiveSummary.lastTransportErrorSummary?.contains(sensitiveFragment) == false, "live health transport error should redact \(sensitiveFragment)")
+        }
 
         let shellPlan = PhoneAgentPlanner.makePlan(
             command: "在项目目录运行测试，失败时导出日志文件",
