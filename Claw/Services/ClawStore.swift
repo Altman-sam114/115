@@ -163,6 +163,7 @@ final class ClawStore: ObservableObject {
             retryableCount: session?.retryableCount ?? 0,
             artifactCount: session?.artifactCount ?? 0,
             artifactKinds: missionRunArtifactKinds(from: session),
+            artifactMetadataReview: missionRunArtifactMetadataReview(from: session),
             agentTraceReview: missionRunAgentTraceReview(from: session),
             gatewayAccessibilityReview: missionRunGatewayAccessibilityReview(from: session),
             gatewayCapabilityReview: missionRunGatewayCapabilityReview(from: session),
@@ -294,6 +295,10 @@ final class ClawStore: ObservableObject {
 
     private func missionRunAgentTraceReview(from session: ClawGatewaySession?) -> ClawAgentTraceReviewSummary? {
         ClawAgentTraceReviewSummary.latest(from: session)
+    }
+
+    private func missionRunArtifactMetadataReview(from session: ClawGatewaySession?) -> ClawGatewayArtifactMetadataReviewSummary? {
+        ClawGatewayArtifactMetadataReviewSummary.latest(from: session)
     }
 
     private func missionRunGatewayAccessibilityReview(from session: ClawGatewaySession?) -> ClawGatewayAccessibilityReviewSummary? {

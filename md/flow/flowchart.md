@@ -31,6 +31,7 @@ flowchart TD
   H --> ART["Artifacts<br/>screenshot、accessibilityTree、browserTrace、fileDiff、commandOutput、agentTrace 证据策略"]
   SNAP --> SART["sessionArtifacts<br/>无 action 绑定的 session 级 artifact"]
   ART --> AXMETA["accessibilityTree metadata<br/>mode、policy、节点数、候选控件、安全标志"]
+  ART --> AMETA["artifact metadata review<br/>覆盖率、脱敏数、安全键值、safety flags"]
   ART --> META["agentTrace artifact metadata<br/>证据分、缺口、下一步、风险、停止原因"]
   H --> EVT["ClawGatewayEvent<br/>actionStarted、artifactStored、completed、failed、approvalRequested"]
   SNAP --> EVT
@@ -41,6 +42,7 @@ flowchart TD
   SMETA --> R
   RMETA --> R
   AXMETA --> R
+  AMETA --> R
   META --> R
   R --> SES["ClawGatewaySession<br/>results、sessionArtifacts、auditTrail、retryable"]
   LREQ --> LHEALTH["ClawGatewayLiveHealthSummary<br/>连接状态、attempt/reconnect/ping、最新事件、fallback/error/completed"]
@@ -48,7 +50,7 @@ flowchart TD
   R --> LHEALTH
   SES --> LHEALTH
   SES --> RREVIEW["ClawGatewayTaskReplayGuardReviewSummary<br/>重复任务安全跳过复核"]
-  LHEALTH --> RUN["ClawMissionRunSummary<br/>派生目标、阶段、主动作、风险、证据、Live health、Gateway 能力、Accessibility、Replay Guard 和 AgentTrace 复核"]
+  LHEALTH --> RUN["ClawMissionRunSummary<br/>派生目标、阶段、主动作、风险、证据、Live health、Artifact metadata、Gateway 能力、Accessibility、Replay Guard 和 AgentTrace 复核"]
   RREVIEW --> RUN
   SES --> RUN
   RUN --> UI["SwiftUI Mission Run / iPad 多栏工作台<br/>展示计划、风险、事件、artifact、审批点、复核摘要"]

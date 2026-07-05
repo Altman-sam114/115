@@ -371,6 +371,23 @@ final class ClawTests: XCTestCase {
         XCTAssertTrue(summary.statusLine.contains("待确认"))
     }
 
+    func testMissionRunSummaryDerivesArtifactMetadataReview() throws {
+        let store = ClawStore(autoScanLocalArtifacts: false)
+
+        store.phoneAgentCommand = "打开浏览器搜索资料并发到 Slack"
+        store.startAutonomousComputerTakeover()
+        store.approveAndContinueAutonomousLoop()
+        let review = try XCTUnwrap(store.missionRunSummary.artifactMetadataReview)
+
+        XCTAssertGreaterThan(review.artifactCount, 0)
+        XCTAssertGreaterThan(review.metadataArtifactCount, 0)
+        XCTAssertGreaterThan(review.redactedArtifactCount, 0)
+        XCTAssertTrue(review.hasMetadata)
+        XCTAssertFalse(review.safeMetadataPairs.isEmpty)
+        XCTAssertTrue(review.compactStatus.contains("metadata"))
+        XCTAssertTrue(review.compactStatus.contains("redacted"))
+    }
+
     func testMissionRunSummaryDerivesGatewayCapabilityReview() throws {
         let store = ClawStore(autoScanLocalArtifacts: false)
 
@@ -568,6 +585,77 @@ final class ClawTests: XCTestCase {
 
         XCTAssertEqual(artifact.kind, .agentTrace)
         XCTAssertNil(artifact.metadata)
+    }
+
+    func testArtifactMetadataReviewParsesMetadataAndRedactsSensitiveValues() throws {
+        let legacyArtifact = ClawGatewayArtifact(
+            kind: .screenshot,
+            title: "screen.png",
+            reference: "file:///tmp/screen.png",
+            isRedacted: true
+        )
+        let metadataArtifact = ClawGatewayArtifact(
+            kind: .browserTrace,
+            title: "browser-trace.json",
+            reference: "file:///private/tmp/browser-trace.json",
+            isRedacted: true,
+            metadata: [
+                "apiKey": "raw-api-key",
+                "cookie": "session=secret-cookie",
+                "Authorization": "Bearer raw-token",
+                "pageText": "private page text",
+                "stdout": "command output secret",
+                "toolArguments": "{\"shellCommand\":\"cat /private/tmp/secret.txt\"}",
+                "workspace": "/private/tmp/claw-work",
+                "mode": "browser-trace",
+                "platform": "darwin",
+                "safetyFlags": "metadata-only,raw-token-omitted"
+            ]
+        )
+        let latestArtifact = ClawGatewayArtifact(
+            kind: .messageDraft,
+            title: "message-draft.txt",
+            reference: "file:///private/tmp/message-draft.txt",
+            isRedacted: false
+        )
+
+        let review = try XCTUnwrap(ClawGatewayArtifactMetadataReviewSummary.latest(from: [legacyArtifact, metadataArtifact, latestArtifact]))
+
+        XCTAssertEqual(review.artifactCount, 3)
+        XCTAssertEqual(review.metadataArtifactCount, 1)
+        XCTAssertEqual(review.redactedArtifactCount, 2)
+        XCTAssertEqual(review.latestKind, .messageDraft)
+        XCTAssertEqual(review.latestTitle, "message-draft.txt")
+        XCTAssertEqual(review.latestMetadataKind, .browserTrace)
+        XCTAssertEqual(review.latestMetadataTitle, "browser-trace.json")
+        XCTAssertFalse(review.isLatestRedacted)
+        XCTAssertTrue(review.hasMetadata)
+        XCTAssertTrue(review.safetyFlags.contains("metadata-only"))
+        XCTAssertTrue(review.safeMetadataPairs.contains { $0.key == "mode" && $0.value == "browser-trace" })
+        XCTAssertTrue(review.safeMetadataPairs.contains { $0.key == "platform" && $0.value == "darwin" })
+        let visibleText = review.safeMetadataPairs
+            .map { "\($0.key)=\($0.value)" }
+            .joined(separator: " ")
+        XCTAssertFalse(visibleText.contains("apiKey"))
+        XCTAssertFalse(visibleText.contains("raw-api-key"))
+        XCTAssertFalse(visibleText.contains("cookie"))
+        XCTAssertFalse(visibleText.contains("secret-cookie"))
+        XCTAssertFalse(visibleText.contains("Authorization"))
+        XCTAssertFalse(visibleText.contains("Bearer"))
+        XCTAssertFalse(visibleText.contains("raw-token"))
+        XCTAssertFalse(visibleText.contains("pageText"))
+        XCTAssertFalse(visibleText.contains("private page text"))
+        XCTAssertFalse(visibleText.contains("stdout"))
+        XCTAssertFalse(visibleText.contains("command output"))
+        XCTAssertFalse(visibleText.contains("toolArguments"))
+        XCTAssertFalse(visibleText.contains("shellCommand"))
+        XCTAssertFalse(visibleText.contains("file://"))
+        XCTAssertFalse(visibleText.contains("/private"))
+        XCTAssertFalse(visibleText.contains("workspace=/"))
+
+        let legacyReview = try XCTUnwrap(ClawGatewayArtifactMetadataReviewSummary.latest(from: [legacyArtifact]))
+        XCTAssertFalse(legacyReview.hasMetadata)
+        XCTAssertTrue(legacyReview.compactStatus.contains("metadata"))
     }
 
     func testClawGatewaySessionDecodesLegacyJSONWithoutSessionArtifacts() throws {

@@ -1367,6 +1367,163 @@ private enum ClawArtifactMetadataParser {
     }
 }
 
+struct ClawArtifactMetadataPair: Equatable, Codable, Sendable {
+    var key: String
+    var value: String
+}
+
+struct ClawGatewayArtifactMetadataReviewSummary: Equatable, Codable, Sendable {
+    var artifactCount: Int
+    var metadataArtifactCount: Int
+    var redactedArtifactCount: Int
+    var latestKind: ClawGatewayArtifactKind
+    var latestTitle: String
+    var latestMetadataKind: ClawGatewayArtifactKind?
+    var latestMetadataTitle: String?
+    var hasMetadata: Bool
+    var safeMetadataPairs: [ClawArtifactMetadataPair]
+    var safetyFlags: [String]
+    var isLatestRedacted: Bool
+
+    var compactStatus: String {
+        guard hasMetadata else {
+            return "已收到 \(latestKind.title) artifact，metadata 待同步。"
+        }
+        let coverage = "metadata \(metadataArtifactCount)/\(artifactCount)"
+        let redacted = "redacted \(redactedArtifactCount)/\(artifactCount)"
+        let metadataSource = latestMetadataKind.map { "\($0.title) \(latestMetadataTitle ?? $0.title)" } ?? "\(latestKind.title) \(latestTitle)"
+        let latest = "\(latestKind.title) \(latestTitle)"
+        return "\(coverage) · \(redacted) · \(latest) · metadata \(metadataSource)"
+    }
+
+    static func latest(from session: ClawGatewaySession?) -> ClawGatewayArtifactMetadataReviewSummary? {
+        guard let session else {
+            return nil
+        }
+        return latest(from: session.allArtifacts)
+    }
+
+    static func latest(from artifacts: [ClawGatewayArtifact]) -> ClawGatewayArtifactMetadataReviewSummary? {
+        guard let latest = artifacts.last else {
+            return nil
+        }
+        let metadataSource = artifacts.last { $0.metadata?.isEmpty == false } ?? latest
+        let metadata = metadataSource.metadata ?? [:]
+        return ClawGatewayArtifactMetadataReviewSummary(
+            artifactCount: artifacts.count,
+            metadataArtifactCount: artifacts.filter { ($0.metadata?.isEmpty == false) }.count,
+            redactedArtifactCount: artifacts.filter(\.isRedacted).count,
+            latestKind: latest.kind,
+            latestTitle: safeMetadataValue(latest.title) ?? latest.kind.title,
+            latestMetadataKind: metadata.isEmpty ? nil : metadataSource.kind,
+            latestMetadataTitle: metadata.isEmpty ? nil : safeMetadataValue(metadataSource.title) ?? metadataSource.kind.title,
+            hasMetadata: metadata.isEmpty == false,
+            safeMetadataPairs: safeMetadataPairs(from: metadata),
+            safetyFlags: safeMetadataList(metadata["safetyFlags"]),
+            isLatestRedacted: latest.isRedacted
+        )
+    }
+
+    private static func safeMetadataPairs(from metadata: [String: String]) -> [ClawArtifactMetadataPair] {
+        metadata.keys.sorted().compactMap { key in
+            guard let pair = safeMetadataPair(key: key, value: metadata[key]) else {
+                return nil
+            }
+            return pair
+        }
+    }
+
+    private static func safeMetadataPair(key: String, value: String?) -> ClawArtifactMetadataPair? {
+        let cleanKey = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard cleanKey.isEmpty == false else {
+            return nil
+        }
+        let lowered = cleanKey.lowercased()
+        guard let safeKey = allowedMetadataKey(lowered) else {
+            return nil
+        }
+        if lowered == "safetyflags" {
+            return nil
+        }
+        guard let safeValue = safeMetadataValue(value) else {
+            return nil
+        }
+        return ClawArtifactMetadataPair(key: safeKey, value: safeValue)
+    }
+
+    private static func allowedMetadataKey(_ lowered: String) -> String? {
+        let keys: [String: String] = [
+            "accessibilitytree": "accessibilityTree",
+            "accessibilitypolicy": "accessibilityPolicy",
+            "actioncount": "actionCount",
+            "actionkinds": "actionKinds",
+            "allowedactionkinds": "allowedActionKinds",
+            "browsercontrolstate": "browserControlState",
+            "browsernetworkstate": "browserNetworkState",
+            "candidatecontrolcount": "candidateControlCount",
+            "decision": "decision",
+            "desktopcontrolstate": "desktopControlState",
+            "digestmatchesfirst": "digestMatchesFirst",
+            "firstsessionid": "firstSessionID",
+            "includeaccessibilitytree": "includeAccessibilityTree",
+            "maxcandidatecontrols": "maxCandidateControls",
+            "mode": "mode",
+            "nodecount": "nodeCount",
+            "originalstatus": "originalStatus",
+            "platform": "platform",
+            "readinesscancontinue": "readinessCanContinue",
+            "readinessscore": "readinessScore",
+            "redaction": "redaction",
+            "replaycount": "replayCount",
+            "replaydigest": "replayDigest",
+            "replayguard": "replayGuard",
+            "risktags": "riskTags",
+            "satisfiedsignals": "satisfiedSignals",
+            "screencapturestate": "screenCaptureState",
+            "selectednextactionkind": "selectedNextActionKind",
+            "selectednextactionrequiresapproval": "selectedNextActionRequiresApproval",
+            "shellstate": "shellState",
+            "snapshotkind": "snapshotKind",
+            "stopreason": "stopReason",
+            "taskid": "taskID",
+            "tokenconfigured": "tokenConfigured",
+            "tokenfingerprint": "tokenFingerprint",
+            "tokenrequired": "tokenRequired",
+            "windowmetadatastate": "windowMetadataState",
+            "workspacestate": "workspaceState"
+        ]
+        return keys[lowered]
+    }
+
+    private static func safeMetadataValue(_ value: String?) -> String? {
+        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
+            return nil
+        }
+        var redacted = ClawSensitiveTextRedactor.redacted(clean)
+        let replacements: [(String, String)] = [
+            (#"(?i)\bAuthorization=<redacted>"#, "header-redacted"),
+            (#"(?i)\bBearer <redacted>"#, "token-redacted"),
+            (#"(?i)\b(token|password|secret)=<redacted>"#, "secret-redacted"),
+            (#"(?i)\bheaders=<redacted>"#, "headers-redacted"),
+            (#"(?i)\bworkspace=<redacted>"#, "workspace-redacted"),
+            (#"file://<redacted>"#, "file-redacted"),
+            (#"<path-redacted>"#, "path-redacted")
+        ]
+        for (pattern, replacement) in replacements {
+            redacted = redacted.replacingOccurrences(
+                of: pattern,
+                with: replacement,
+                options: .regularExpression
+            )
+        }
+        return ClawArtifactMetadataParser.cleanValue(redacted)
+    }
+
+    private static func safeMetadataList(_ value: String?) -> [String] {
+        ClawArtifactMetadataParser.listValue(value).compactMap(safeMetadataValue)
+    }
+}
+
 struct ClawAgentTraceReviewSummary: Equatable, Codable, Sendable {
     var traceCount: Int
     var latestTitle: String
@@ -1726,6 +1883,7 @@ struct ClawMissionRunSummary: Equatable, Codable, Sendable {
     var retryableCount: Int
     var artifactCount: Int
     var artifactKinds: [ClawGatewayArtifactKind]
+    var artifactMetadataReview: ClawGatewayArtifactMetadataReviewSummary?
     var agentTraceReview: ClawAgentTraceReviewSummary?
     var gatewayAccessibilityReview: ClawGatewayAccessibilityReviewSummary?
     var gatewayCapabilityReview: ClawGatewayCapabilityReviewSummary?

@@ -15,12 +15,52 @@
 
 - 项目方向：OpenClaw 式电脑接管智能体，iPhone 作为控制台，桌面 Claw Gateway 作为执行端。
 - 当前 schema：`claw.computer.control.v1`。
-- 当前核心闭环：用户自然语言任务 -> `PhoneAgentPlanner` -> `ClawMobileTask` -> `ClawMobileEnvelope` -> 模拟事件流或带有界重连/ping 可观测性和进程内 task replay guard 的 WebSocket Gateway -> `ClawGatewayEvent` -> session reducer -> Mission Run / Live Gateway 连接健康 / Gateway 能力复核摘要 / Accessibility 复核摘要 / Replay Guard 复核摘要 / AgentTrace 复核 UI / iPad 多栏工作台展示和审批。
+- 当前核心闭环：用户自然语言任务 -> `PhoneAgentPlanner` -> `ClawMobileTask` -> `ClawMobileEnvelope` -> 模拟事件流或带有界重连/ping 可观测性和进程内 task replay guard 的 WebSocket Gateway -> `ClawGatewayEvent` -> session reducer -> Mission Run / Live Gateway 连接健康 / Artifact metadata 复核摘要 / Gateway 能力复核摘要 / Accessibility 复核摘要 / Replay Guard 复核摘要 / AgentTrace 复核 UI / iPad 多栏工作台展示和审批。
 - 当前 Gateway 能力：进程内 task replay guard、session-start 能力快照 `auditLog`、屏幕观察 dry-run/截图/窗口元数据/受控 Accessibility 摘要策略、浏览器 HTML/URL trace、浏览器打开/搜索计划、workspace 文件写入、Shell dry-run/allowlist 执行、结构化提取、桌面 App 审批闸门、带 readiness/checklist/risk/stop/handoff 与安全 metadata 的 `runAgentLoop`/`agentTrace`。
 - 当前协作闭环：默认 `main` 直推，GitHub Actions 生成未加密 `ci-results` 结果包，Agent C 下载并核对 manifest/JUnit/日志后验收。
 - 当前主要遗留：完整 macOS Accessibility bridge、Playwright/browser-use 兼容控制器、真实多轮 agent loop、live Gateway 后台保活/真实心跳协议/配对、完整 artifact 内容复核体验。
 
 ## 历史记录
+
+### v0.17 / 手机端 Artifact metadata 详情复核
+
+日期：2026-07-05
+
+核心变更：
+
+- 新增 `ClawGatewayArtifactMetadataReviewSummary`，手机端只从 Gateway artifact event metadata、kind/title 和脱敏标记派生通用 metadata 复核摘要，不读取 Gateway `file://` payload。
+- `ClawMissionRunSummary` 增加 artifact metadata review，Mission Run、Gateway session card 和单个 result row 展示 artifact 总数、metadata 覆盖率、脱敏数、最近带 metadata artifact、安全键值和 safety flags。
+- 通用 metadata review 会脱敏 raw token、Authorization/header、`toolArguments`、payload/body/content、workspace path、`file://`、命令输出、网页正文、截图内容和草稿正文等敏感字段。
+- XCTest 和 Swift logic smoke 覆盖 metadata 存在、metadata 缺失 fallback、敏感字段脱敏和 Mission Run 派生。
+- 同步 README、协议和 flow/flowchart；本轮不新增 schema/event/action/artifact kind，不修改 Gateway JS，不扩大 Gateway 权限。
+
+关键文件：
+
+- `Claw/Core/ClawModels.swift`
+- `Claw/Services/ClawStore.swift`
+- `Claw/Views/ContentView.swift`
+- `ClawTests/ClawTests.swift`
+- `Tools/LogicSmoke.swift`
+- `README.md`
+- `Docs/claw-mobile-gateway-protocol.md`
+- `md/flow/flow.md`
+- `md/flow/flowchart.md`
+- `md/prompt/v0（核心智能能力）/v0.17（手机端ArtifactMetadata详情复核）.md`
+- `update_log.md`
+
+验证结果：
+
+- Swift logic smoke 编译通过。
+- `.build/claw-logic-smoke` 通过，输出 `Claw logic smoke passed`。
+- `git diff --check` 通过。
+- `ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci-results.yml"); puts "yaml ok"'` 通过，输出 `yaml ok`。
+- 无签名 generic iOS build 通过，输出 `BUILD SUCCEEDED`；本机 CoreSimulator 服务不可用，仅产生 simulator 发现日志，不影响 generic iOS build。
+- 本轮未修改 `Tools/*.mjs`，本地未跑 Gateway JS smoke；push `origin/main` 后由 GitHub Actions 覆盖 Gateway direct/WebSocket smoke、Swift logic smoke 和 xcodebuild，并由 Agent C 下载结果包复判。
+
+遗留事项：
+
+- 当前是手机端 metadata-only 复核，不是完整 artifact JSON viewer，也不读取 Gateway `file://` payload。
+- 完整 artifact payload 复核体验、真实多轮 agent loop、Playwright/browser-use 兼容控制器和完整 Accessibility bridge 仍是后续遗留。
 
 ### v0.16 / 手机端 Accessibility artifact 复核摘要
 

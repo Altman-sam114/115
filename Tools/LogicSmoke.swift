@@ -115,6 +115,15 @@ enum LogicSmoke {
         expect(missionSummary.artifactCount > 0, "mission summary should count gateway artifacts")
         expect(missionSummary.artifactKinds.contains(.browserTrace), "mission summary should summarize artifact kinds")
         expect(missionSummary.artifactKinds.contains(.auditLog), "mission summary should include session-level audit artifacts")
+        if let metadataReview = missionSummary.artifactMetadataReview {
+            expect(metadataReview.artifactCount > 0, "mission summary should derive artifact metadata review")
+            expect(metadataReview.metadataArtifactCount > 0, "artifact metadata review should count metadata artifacts")
+            expect(metadataReview.redactedArtifactCount > 0, "artifact metadata review should count redacted artifacts")
+            expect(metadataReview.hasMetadata, "artifact metadata review should expose metadata")
+            expect(metadataReview.safeMetadataPairs.isEmpty == false, "artifact metadata review should expose safe metadata pairs")
+        } else {
+            failures.append("mission summary should derive artifact metadata review")
+        }
         if let capabilityReview = missionSummary.gatewayCapabilityReview {
             expect(capabilityReview.snapshotCount == 1, "mission summary should count capability snapshots")
             expect(capabilityReview.hasMetadata, "capability review should include metadata")

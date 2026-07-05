@@ -700,6 +700,10 @@ struct ClawMissionRunPanel: View {
                 }
             }
 
+            if let review = summary.artifactMetadataReview {
+                ClawGatewayArtifactMetadataReviewRow(review: review)
+            }
+
             if let review = summary.gatewayCapabilityReview {
                 ClawGatewayCapabilityReviewRow(review: review)
             }
@@ -1231,6 +1235,10 @@ struct ClawGatewaySessionCard: View {
                 PhoneAgentTag(text: "\(session.artifactCount) 证据", icon: "paperclip", tint: .purple)
             }
 
+            if let review = ClawGatewayArtifactMetadataReviewSummary.latest(from: session) {
+                ClawGatewayArtifactMetadataReviewRow(review: review)
+            }
+
             if let review = ClawGatewayCapabilityReviewSummary.latest(from: session) {
                 ClawGatewayCapabilityReviewRow(review: review)
             }
@@ -1379,6 +1387,10 @@ struct ClawGatewayResultRow: View {
                 }
             }
 
+            if let review = ClawGatewayArtifactMetadataReviewSummary.latest(from: result.artifacts) {
+                ClawGatewayArtifactMetadataReviewRow(review: review)
+            }
+
             if let review = ClawAgentTraceReviewSummary.latest(from: result.artifacts) {
                 ClawAgentTraceReviewRow(review: review)
             }
@@ -1389,6 +1401,85 @@ struct ClawGatewayResultRow: View {
         }
         .padding(10)
         .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+struct ClawGatewayArtifactMetadataReviewRow: View {
+    let review: ClawGatewayArtifactMetadataReviewSummary
+
+    private var overviewChips: [(text: String, icon: String, tint: Color)] {
+        [
+            ("metadata \(review.metadataArtifactCount)/\(review.artifactCount)", "doc.badge.gearshape", review.hasMetadata ? .purple : .secondary),
+            ("redacted \(review.redactedArtifactCount)/\(review.artifactCount)", "eye.slash.fill", review.redactedArtifactCount > 0 ? .orange : .secondary),
+            (review.latestKind.title, "paperclip", .purple)
+        ]
+    }
+
+    private var metadataChips: [(text: String, icon: String, tint: Color)] {
+        var items = review.safeMetadataPairs.prefix(4).map { pair in
+            (text: "\(pair.key)=\(pair.value)", icon: "tag.fill", tint: Color.blue)
+        }
+        if items.isEmpty {
+            items.append((text: "metadata 待同步", icon: "hourglass", tint: .secondary))
+        }
+        return items
+    }
+
+    private var safetyChips: [(text: String, icon: String, tint: Color)] {
+        var items = review.safetyFlags.prefix(3).map { flag in
+            (text: flag, icon: "shield.lefthalf.filled.badge.checkmark", tint: Color.purple)
+        }
+        if items.isEmpty {
+            items.append((text: "metadata-only", icon: "doc.text.magnifyingglass", tint: .purple))
+        }
+        return items
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Label("Artifact metadata", systemImage: "doc.text.magnifyingglass")
+                    .font(.footnote.bold())
+                    .foregroundStyle(.primary)
+                PhoneAgentTag(text: "\(review.artifactCount) 条", icon: "number", tint: .purple)
+                PhoneAgentTag(
+                    text: review.isLatestRedacted ? "已脱敏" : "可见",
+                    icon: review.isLatestRedacted ? "eye.slash.fill" : "eye.fill",
+                    tint: review.isLatestRedacted ? .orange : .green
+                )
+                Spacer(minLength: 0)
+            }
+
+            Text(review.compactStatus)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(Array(overviewChips.enumerated()), id: \.offset) { _, chip in
+                        PhoneAgentTag(text: chip.text, icon: chip.icon, tint: chip.tint)
+                    }
+                }
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(Array(metadataChips.enumerated()), id: \.offset) { _, chip in
+                        PhoneAgentTag(text: chip.text, icon: chip.icon, tint: chip.tint)
+                    }
+                }
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(Array(safetyChips.enumerated()), id: \.offset) { _, chip in
+                        PhoneAgentTag(text: chip.text, icon: chip.icon, tint: chip.tint)
+                    }
+                }
+            }
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 
