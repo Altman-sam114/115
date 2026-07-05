@@ -481,6 +481,47 @@ final class ClawTests: XCTestCase {
         XCTAssertTrue(desktopReview.safetyFlags.contains("paste-text-omitted"))
     }
 
+    func testMissionRunSummaryDerivesFileChangeSafetyReview() throws {
+        let store = ClawStore(autoScanLocalArtifacts: false)
+
+        store.phoneAgentCommand = "打开浏览器搜索资料，整理结果并发到 Slack"
+        store.startAutonomousComputerTakeover()
+        store.approveAndContinueAutonomousLoop()
+        let review = try XCTUnwrap(store.missionRunSummary.gatewayFileChangeSafetyReview)
+
+        XCTAssertEqual(review.reviewCount, 1)
+        XCTAssertTrue(review.hasMetadata)
+        XCTAssertEqual(review.mode, "workspace-write")
+        XCTAssertEqual(review.actionKind, "manageFiles")
+        XCTAssertEqual(review.workspacePolicy, "session-workspace-only")
+        XCTAssertEqual(review.workspaceScoped, true)
+        XCTAssertEqual(review.pathEscapeBlocked, false)
+        XCTAssertEqual(review.writeAttempted, true)
+        XCTAssertEqual(review.writeSucceeded, true)
+        XCTAssertEqual(review.createdFileCount, 1)
+        XCTAssertEqual(review.modifiedFileCount, 0)
+        XCTAssertEqual(review.deletedFileCount, 0)
+        XCTAssertEqual(review.requestedPathPresent, true)
+        XCTAssertEqual(review.writeTextPresent, true)
+        XCTAssertEqual(review.rawPathOmitted, true)
+        XCTAssertEqual(review.contentOmitted, true)
+        XCTAssertEqual(review.diffOmitted, true)
+        XCTAssertEqual(review.resultStatus, "succeeded")
+        XCTAssertTrue(review.safetyFlags.contains("metadata-only"))
+        XCTAssertTrue(review.safetyFlags.contains("raw-path-omitted"))
+        XCTAssertTrue(review.safetyFlags.contains("workspace-path-omitted"))
+        XCTAssertTrue(review.safetyFlags.contains("file-content-omitted"))
+        XCTAssertTrue(review.safetyFlags.contains("diff-content-omitted"))
+        XCTAssertTrue(review.compactStatus.contains("session-workspace-only"))
+        XCTAssertTrue(review.compactStatus.contains("created 1"))
+
+        let fileResult = try XCTUnwrap(store.clawGatewaySessions.first?.results.first { $0.actionKind == .manageFiles })
+        let fileReview = try XCTUnwrap(ClawGatewayFileChangeSafetyReviewSummary.latest(from: fileResult.artifacts))
+        XCTAssertEqual(fileReview.mode, "workspace-write")
+        XCTAssertEqual(fileReview.writeSucceeded, true)
+        XCTAssertTrue(fileReview.safetyFlags.contains("session-workspace-only"))
+    }
+
     func testMissionRunSummaryDerivesGatewayCapabilityReview() throws {
         let store = ClawStore(autoScanLocalArtifacts: false)
 
@@ -755,6 +796,32 @@ final class ClawTests: XCTestCase {
         let legacyReview = try XCTUnwrap(ClawGatewayArtifactMetadataReviewSummary.latest(from: [legacyArtifact]))
         XCTAssertFalse(legacyReview.hasMetadata)
         XCTAssertTrue(legacyReview.compactStatus.contains("metadata"))
+
+        let fileChangeArtifact = ClawGatewayArtifact(
+            kind: .fileDiff,
+            title: "file-diff.json",
+            reference: "file:///tmp/file-diff.json",
+            isRedacted: true,
+            metadata: [
+                "fileChangeReview": "workspaceWrite notes/result.txt",
+                "workspacePolicy": "session-workspace-only /private/tmp/workspace",
+                "writeSucceeded": "true secret body",
+                "createdFileCount": "1",
+                "writeTextPresent": "private body",
+                "rawPathOmitted": "true",
+                "safetyFlags": "metadata-only,writePath=notes/result.txt,content=private body,/private/tmp/workspace",
+                "toolArguments": "{\"writePath\":\"notes/result.txt\",\"writeText\":\"private body\"}"
+            ]
+        )
+        let fileChangeMetadataReview = try XCTUnwrap(ClawGatewayArtifactMetadataReviewSummary.latest(from: [fileChangeArtifact]))
+        let fileChangeVisibleText = (fileChangeMetadataReview.safeMetadataPairs.map { "\($0.key)=\($0.value)" } + fileChangeMetadataReview.safetyFlags).joined(separator: " ")
+        XCTAssertTrue(fileChangeMetadataReview.hasMetadata)
+        XCTAssertTrue(fileChangeMetadataReview.safeMetadataPairs.isEmpty)
+        XCTAssertTrue(fileChangeMetadataReview.safetyFlags.isEmpty)
+        XCTAssertFalse(fileChangeVisibleText.contains("notes/result.txt"))
+        XCTAssertFalse(fileChangeVisibleText.contains("private body"))
+        XCTAssertFalse(fileChangeVisibleText.contains("toolArguments"))
+        XCTAssertFalse(fileChangeVisibleText.contains("/private"))
     }
 
     func testClawGatewaySessionDecodesLegacyJSONWithoutSessionArtifacts() throws {
@@ -1034,6 +1101,93 @@ final class ClawTests: XCTestCase {
         XCTAssertFalse(visibleText.contains("file://"))
         XCTAssertFalse(visibleText.contains("https://"))
         XCTAssertFalse(visibleText.contains("/private"))
+        XCTAssertFalse(visibleText.contains("toolArguments"))
+    }
+
+    func testFileChangeSafetyReviewFallsBackAndRedactsSensitiveMetadata() throws {
+        let legacyArtifact = ClawGatewayArtifact(
+            kind: .fileDiff,
+            title: "legacy-file-diff.json",
+            reference: "file:///tmp/legacy-file-diff.json",
+            isRedacted: false
+        )
+        let legacyReview = try XCTUnwrap(ClawGatewayFileChangeSafetyReviewSummary.latest(from: [legacyArtifact]))
+        XCTAssertEqual(legacyReview.reviewCount, 1)
+        XCTAssertFalse(legacyReview.hasMetadata)
+        XCTAssertNil(legacyReview.workspacePolicy)
+        XCTAssertTrue(legacyReview.compactStatus.contains("metadata"))
+
+        let artifact = ClawGatewayArtifact(
+            kind: .fileDiff,
+            title: "file-diff file:///private/tmp/diff.json /Users/alice/project/notes/result.txt",
+            reference: "file:///tmp/file-diff.json",
+            isRedacted: true,
+            metadata: [
+                "fileChangeReview": "workspaceWrite",
+                "mode": "workspace-write Authorization: Bearer raw-token",
+                "actionKind": "manageFiles token=raw-token",
+                "workspacePolicy": "session-workspace-only /private/tmp/workspace",
+                "workspaceScoped": "true",
+                "pathEscapeBlocked": "false",
+                "writeAttempted": "true",
+                "writeSucceeded": "true",
+                "createdFileCount": "1",
+                "modifiedFileCount": "0",
+                "deletedFileCount": "0",
+                "requestedPathPresent": "true",
+                "writeTextPresent": "true",
+                "rawPathOmitted": "true",
+                "contentOmitted": "true",
+                "diffOmitted": "true",
+                "resultStatus": "succeeded file:///private/tmp/log.txt",
+                "safetyFlags": "metadata-only,raw-path-omitted,workspace-path-omitted,file-content-omitted,diff-content-omitted,headers={Authorization: Bearer raw-token},writePath=notes/result.txt,patch=@@ secret,content=private body,/private/tmp/workspace",
+                "toolArguments": "{\"writePath\":\"notes/result.txt\",\"writeText\":\"private body\"}",
+                "workspace": "/private/tmp/workspace",
+                "requestedPath": "notes/result.txt",
+                "diff": "@@ secret"
+            ]
+        )
+
+        let review = try XCTUnwrap(ClawGatewayFileChangeSafetyReviewSummary.latest(from: [artifact]))
+        let visibleText = [
+            review.latestTitle,
+            review.compactStatus,
+            review.mode ?? "",
+            review.actionKind ?? "",
+            review.workspacePolicy ?? "",
+            review.resultStatus ?? "",
+            review.safetyFlags.joined(separator: " ")
+        ].joined(separator: " ")
+
+        XCTAssertTrue(review.hasMetadata)
+        XCTAssertNil(review.mode)
+        XCTAssertNil(review.actionKind)
+        XCTAssertNil(review.workspacePolicy)
+        XCTAssertNil(review.resultStatus)
+        XCTAssertEqual(review.workspaceScoped, true)
+        XCTAssertEqual(review.pathEscapeBlocked, false)
+        XCTAssertEqual(review.writeAttempted, true)
+        XCTAssertEqual(review.writeSucceeded, true)
+        XCTAssertEqual(review.createdFileCount, 1)
+        XCTAssertEqual(review.rawPathOmitted, true)
+        XCTAssertEqual(review.contentOmitted, true)
+        XCTAssertEqual(review.diffOmitted, true)
+        XCTAssertTrue(review.safetyFlags.contains("metadata-only"))
+        XCTAssertTrue(review.safetyFlags.contains("raw-path-omitted"))
+        XCTAssertTrue(review.safetyFlags.contains("workspace-path-omitted"))
+        XCTAssertTrue(review.safetyFlags.contains("file-content-omitted"))
+        XCTAssertTrue(review.safetyFlags.contains("diff-content-omitted"))
+        XCTAssertFalse(visibleText.contains("Authorization"))
+        XCTAssertFalse(visibleText.contains("Bearer"))
+        XCTAssertFalse(visibleText.contains("raw-token"))
+        XCTAssertFalse(visibleText.contains("writePath"))
+        XCTAssertFalse(visibleText.contains("notes/result.txt"))
+        XCTAssertFalse(visibleText.contains("patch"))
+        XCTAssertFalse(visibleText.contains("@@"))
+        XCTAssertFalse(visibleText.contains("private body"))
+        XCTAssertFalse(visibleText.contains("file://"))
+        XCTAssertFalse(visibleText.contains("/private"))
+        XCTAssertFalse(visibleText.contains("/Users"))
         XCTAssertFalse(visibleText.contains("toolArguments"))
     }
 
@@ -1534,7 +1688,9 @@ final class ClawTests: XCTestCase {
         let session = store.clawGatewaySessions[0]
         XCTAssertEqual(session.status, .needsAttention)
         XCTAssertTrue(session.results.contains { $0.actionKind == .runShellCommand && $0.status == .failed && $0.isRetryable })
-        XCTAssertTrue(session.results.contains { $0.actionKind == .manageFiles && $0.artifacts.contains { $0.kind == .fileDiff } })
+        let fileResult = session.results.first { $0.actionKind == .manageFiles }
+        XCTAssertTrue(fileResult?.artifacts.contains { $0.kind == .fileDiff } == true)
+        XCTAssertEqual(ClawGatewayFileChangeSafetyReviewSummary.latest(from: fileResult?.artifacts ?? [])?.writeSucceeded, true)
         XCTAssertTrue(store.lastGatewayEvent.contains("retryable"))
 
         store.retryLatestGatewayFailures()

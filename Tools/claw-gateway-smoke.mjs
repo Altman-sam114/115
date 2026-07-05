@@ -59,6 +59,67 @@ for (const artifact of events.flatMap((event) => event.artifacts || [])) {
   }
 }
 
+const fileDiffArtifact = findArtifactByTitle(events, "fileDiff", "file-diff-2");
+assertFileChangeSafetyMetadata(fileDiffArtifact?.metadata, {
+  mode: "workspace-write",
+  actionKind: "manageFiles",
+  workspacePolicy: "session-workspace-only",
+  workspaceScoped: true,
+  pathEscapeBlocked: false,
+  writeAttempted: true,
+  writeSucceeded: true,
+  createdFileCount: 1,
+  modifiedFileCount: 0,
+  deletedFileCount: 0,
+  requestedPathPresent: true,
+  writeTextPresent: true,
+  rawPathOmitted: true,
+  contentOmitted: true,
+  diffOmitted: true,
+  resultStatus: "succeeded",
+  safetyFlags: ["metadata-only", "tool-arguments-omitted", "raw-path-omitted", "workspace-path-omitted", "file-content-omitted", "diff-content-omitted", "artifact-payload-not-read", "session-workspace-only"],
+}, "websocket file change");
+const pathEscapeArtifact = findArtifactByTitle(events, "auditLog", "file-change-blocked-3");
+assertFileChangeSafetyMetadata(pathEscapeArtifact?.metadata, {
+  mode: "workspace-path-blocked",
+  actionKind: "manageFiles",
+  workspacePolicy: "session-workspace-only",
+  workspaceScoped: false,
+  pathEscapeBlocked: true,
+  writeAttempted: false,
+  writeSucceeded: false,
+  createdFileCount: 0,
+  modifiedFileCount: 0,
+  deletedFileCount: 0,
+  requestedPathPresent: true,
+  writeTextPresent: true,
+  rawPathOmitted: true,
+  contentOmitted: true,
+  diffOmitted: true,
+  resultStatus: "failed",
+  safetyFlags: ["metadata-only", "tool-arguments-omitted", "raw-path-omitted", "workspace-path-omitted", "file-content-omitted", "diff-content-omitted", "artifact-payload-not-read", "session-workspace-only", "path-escape-blocked", "no-file-written"],
+}, "websocket path escape file change");
+const writeFailureArtifact = findArtifactByTitle(events, "auditLog", "file-change-failed-5");
+assertFileChangeSafetyMetadata(writeFailureArtifact?.metadata, {
+  mode: "workspace-write-failed",
+  actionKind: "manageFiles",
+  workspacePolicy: "session-workspace-only",
+  workspaceScoped: true,
+  pathEscapeBlocked: false,
+  writeAttempted: true,
+  writeSucceeded: false,
+  createdFileCount: 0,
+  modifiedFileCount: 0,
+  deletedFileCount: 0,
+  requestedPathPresent: true,
+  writeTextPresent: true,
+  rawPathOmitted: true,
+  contentOmitted: true,
+  diffOmitted: true,
+  resultStatus: "failed",
+  safetyFlags: ["metadata-only", "tool-arguments-omitted", "raw-path-omitted", "workspace-path-omitted", "file-content-omitted", "diff-content-omitted", "artifact-payload-not-read", "session-workspace-only", "write-failed"],
+}, "websocket write failure file change");
+
 const capabilitySnapshot = await assertCapabilitySnapshot(events, {
   allowedActionKinds: envelope.gateway.allowedActionKinds,
   capabilities: {
@@ -278,6 +339,54 @@ function makeEnvelope(rawToken, endpointPort = port) {
             workspaceOnly: "true",
             writePath: "smoke/result.txt",
             writeText: "websocket workspace write verified",
+          },
+        },
+        {
+          id: crypto.randomUUID(),
+          kind: "manageFiles",
+          title: "Block path escape",
+          target: "Desktop Filesystem",
+          instruction: "Reject file writes outside the session workspace",
+          approval: "gatewayApproval",
+          sourceSurface: "clawGateway",
+          handlesSensitiveData: true,
+          inputPreview: "smoke",
+          toolArguments: {
+            workspaceOnly: "true",
+            writePath: "../escape.txt",
+            writeText: "websocket escape write",
+          },
+        },
+        {
+          id: crypto.randomUUID(),
+          kind: "manageFiles",
+          title: "Prepare blocked parent",
+          target: "Desktop Filesystem",
+          instruction: "Create a workspace file that will block a nested write",
+          approval: "gatewayApproval",
+          sourceSurface: "clawGateway",
+          handlesSensitiveData: true,
+          inputPreview: "smoke",
+          toolArguments: {
+            workspaceOnly: "true",
+            writePath: "blocked-parent",
+            writeText: "not a directory",
+          },
+        },
+        {
+          id: crypto.randomUUID(),
+          kind: "manageFiles",
+          title: "Trigger write failure",
+          target: "Desktop Filesystem",
+          instruction: "Attempt a nested write through an existing file",
+          approval: "gatewayApproval",
+          sourceSurface: "clawGateway",
+          handlesSensitiveData: true,
+          inputPreview: "smoke",
+          toolArguments: {
+            workspaceOnly: "true",
+            writePath: "blocked-parent/result.txt",
+            writeText: "should not be written",
           },
         },
         {
@@ -683,6 +792,80 @@ function assertBrowserControlReviewMetadata(metadata, expected, label) {
     "toolArguments",
     "Gateway Smoke Page",
     "Browser trace is available",
+    "https://",
+    "file://",
+    "/sessions/",
+    "stdout",
+    "stderr",
+  ]) {
+    expect(!serialized.includes(forbidden), `${label} metadata leaked ${forbidden}`);
+  }
+}
+
+function assertFileChangeSafetyMetadata(metadata, expected, label) {
+  expect(metadata && typeof metadata === "object", `${label} missing file change metadata`);
+  const allowedKeys = [
+    "actionKind",
+    "contentOmitted",
+    "createdFileCount",
+    "deletedFileCount",
+    "diffOmitted",
+    "fileChangeReview",
+    "mode",
+    "modifiedFileCount",
+    "pathEscapeBlocked",
+    "rawPathOmitted",
+    "requestedPathPresent",
+    "resultStatus",
+    "safetyFlags",
+    "workspacePolicy",
+    "workspaceScoped",
+    "writeAttempted",
+    "writeSucceeded",
+    "writeTextPresent",
+  ].sort();
+  expect(
+    Object.keys(metadata).sort().join(",") === allowedKeys.join(","),
+    `${label} file change metadata includes unexpected keys`,
+  );
+  expect(metadata.fileChangeReview === "workspaceWrite", `${label} file change review metadata mismatch`);
+  expect(metadata.mode === expected.mode, `${label} mode metadata mismatch`);
+  expect(metadata.actionKind === expected.actionKind, `${label} action kind metadata mismatch`);
+  expect(metadata.workspacePolicy === expected.workspacePolicy, `${label} workspace policy metadata mismatch`);
+  expect(metadata.workspaceScoped === String(expected.workspaceScoped), `${label} workspace scope metadata mismatch`);
+  expect(metadata.pathEscapeBlocked === String(expected.pathEscapeBlocked), `${label} path escape metadata mismatch`);
+  expect(metadata.writeAttempted === String(expected.writeAttempted), `${label} write attempt metadata mismatch`);
+  expect(metadata.writeSucceeded === String(expected.writeSucceeded), `${label} write success metadata mismatch`);
+  expect(Number(metadata.createdFileCount) === expected.createdFileCount, `${label} created count metadata mismatch`);
+  expect(Number(metadata.modifiedFileCount) === expected.modifiedFileCount, `${label} modified count metadata mismatch`);
+  expect(Number(metadata.deletedFileCount) === expected.deletedFileCount, `${label} deleted count metadata mismatch`);
+  expect(metadata.requestedPathPresent === String(expected.requestedPathPresent), `${label} requested path presence metadata mismatch`);
+  expect(metadata.writeTextPresent === String(expected.writeTextPresent), `${label} write text presence metadata mismatch`);
+  expect(metadata.rawPathOmitted === String(expected.rawPathOmitted), `${label} raw path omission metadata mismatch`);
+  expect(metadata.contentOmitted === String(expected.contentOmitted), `${label} content omission metadata mismatch`);
+  expect(metadata.diffOmitted === String(expected.diffOmitted), `${label} diff omission metadata mismatch`);
+  expect(metadata.resultStatus === expected.resultStatus, `${label} result status metadata mismatch`);
+  for (const flag of expected.safetyFlags) {
+    expect(metadata.safetyFlags.includes(flag), `${label} missing safety flag ${flag}`);
+  }
+  const serialized = JSON.stringify(metadata);
+  for (const forbidden of [
+    token,
+    "Authorization",
+    "Bearer",
+    "toolArguments",
+    "writePath",
+    "\"requestedPath\"",
+    "websocket workspace write verified",
+	    "smoke/result.txt",
+	    "../escape.txt",
+	    "websocket escape write",
+	    "blocked-parent",
+	    "should not be written",
+	    "not a directory",
+	    "patch",
+    "@@",
+    "diffHunk",
     "https://",
     "file://",
     "/sessions/",

@@ -189,6 +189,32 @@ enum LogicSmoke {
         } else {
             failures.append("desktop result should derive delivery safety review")
         }
+        if let fileChangeReview = missionSummary.gatewayFileChangeSafetyReview {
+            expect(fileChangeReview.reviewCount == 1, "mission summary should count file change artifacts")
+            expect(fileChangeReview.hasMetadata, "file change review should include metadata")
+            expect(fileChangeReview.mode == "workspace-write", "file change review should expose workspace-write mode")
+            expect(fileChangeReview.actionKind == "manageFiles", "file change review should expose manageFiles action")
+            expect(fileChangeReview.workspacePolicy == "session-workspace-only", "file change review should expose workspace policy")
+            expect(fileChangeReview.workspaceScoped == true, "file change review should expose workspace scope")
+            expect(fileChangeReview.writeAttempted == true, "file change review should expose write attempt")
+            expect(fileChangeReview.writeSucceeded == true, "file change review should expose write success")
+            expect(fileChangeReview.createdFileCount == 1, "file change review should count created files")
+            expect(fileChangeReview.rawPathOmitted == true, "file change review should omit raw path")
+            expect(fileChangeReview.contentOmitted == true, "file change review should omit file content")
+            expect(fileChangeReview.diffOmitted == true, "file change review should omit diff content")
+            expect(fileChangeReview.safetyFlags.contains("raw-path-omitted"), "file change review should expose raw path omission flag")
+            expect(fileChangeReview.safetyFlags.contains("session-workspace-only"), "file change review should expose session workspace flag")
+        } else {
+            failures.append("mission summary should derive file change safety review")
+        }
+        if let fileArtifacts = missionStore.clawGatewaySessions.first?.results.first(where: { $0.actionKind == .manageFiles })?.artifacts,
+           let fileReview = ClawGatewayFileChangeSafetyReviewSummary.latest(from: fileArtifacts) {
+            expect(fileReview.mode == "workspace-write", "file result review should expose workspace-write mode")
+            expect(fileReview.writeSucceeded == true, "file result review should expose write success")
+            expect(fileReview.safetyFlags.contains("file-content-omitted"), "file result review should omit file content")
+        } else {
+            failures.append("file result should derive file change safety review")
+        }
         if let capabilityReview = missionSummary.gatewayCapabilityReview {
             expect(capabilityReview.snapshotCount == 1, "mission summary should count capability snapshots")
             expect(capabilityReview.hasMetadata, "capability review should include metadata")
@@ -448,6 +474,70 @@ enum LogicSmoke {
             failures.append("sensitive delivery safety review should be derived")
         }
 
+        let sensitiveFileChange = ClawGatewayArtifact(
+            kind: .fileDiff,
+            title: "file-diff file:///private/tmp/diff.json /Users/alice/project/notes/result.txt",
+            reference: "file:///tmp/file-diff.json",
+            isRedacted: true,
+            metadata: [
+                "fileChangeReview": "workspaceWrite",
+                "mode": "workspace-write Authorization: Bearer raw-token",
+                "actionKind": "manageFiles token=raw-token",
+                "workspacePolicy": "session-workspace-only /private/tmp/workspace",
+                "workspaceScoped": "true",
+                "pathEscapeBlocked": "false",
+                "writeAttempted": "true",
+                "writeSucceeded": "true",
+                "createdFileCount": "1",
+                "modifiedFileCount": "0",
+                "deletedFileCount": "0",
+                "requestedPathPresent": "true",
+                "writeTextPresent": "true",
+                "rawPathOmitted": "true",
+                "contentOmitted": "true",
+                "diffOmitted": "true",
+                "resultStatus": "succeeded file:///private/tmp/log.txt",
+                "safetyFlags": "metadata-only,raw-path-omitted,workspace-path-omitted,file-content-omitted,diff-content-omitted,headers={Authorization: Bearer raw-token},writePath=notes/result.txt,patch=@@ secret,content=private body,/private/tmp/workspace",
+                "toolArguments": "{\"writePath\":\"notes/result.txt\",\"writeText\":\"private body\"}",
+                "workspace": "/private/tmp/workspace",
+                "requestedPath": "notes/result.txt",
+                "diff": "@@ secret"
+            ]
+        )
+        if let sensitiveFileReview = ClawGatewayFileChangeSafetyReviewSummary.latest(from: [sensitiveFileChange]) {
+            let visibleText = [
+                sensitiveFileReview.latestTitle,
+                sensitiveFileReview.compactStatus,
+                sensitiveFileReview.mode ?? "",
+                sensitiveFileReview.actionKind ?? "",
+                sensitiveFileReview.workspacePolicy ?? "",
+                sensitiveFileReview.resultStatus ?? "",
+                sensitiveFileReview.safetyFlags.joined(separator: " ")
+            ].joined(separator: " ")
+            expect(sensitiveFileReview.hasMetadata, "file change review should parse review metadata")
+            expect(sensitiveFileReview.mode == nil, "file change review should reject unsafe mode")
+            expect(sensitiveFileReview.actionKind == nil, "file change review should reject unsafe action kind")
+            expect(sensitiveFileReview.workspacePolicy == nil, "file change review should reject unsafe workspace policy")
+            expect(sensitiveFileReview.resultStatus == nil, "file change review should reject unsafe result status")
+            expect(sensitiveFileReview.writeSucceeded == true, "file change review should keep write success boolean")
+            expect(sensitiveFileReview.createdFileCount == 1, "file change review should keep safe counts")
+            expect(sensitiveFileReview.safetyFlags.contains("raw-path-omitted"), "file change review should expose raw path omission flag")
+            expect(visibleText.contains("Authorization") == false, "file change review should redact Authorization")
+            expect(visibleText.contains("Bearer") == false, "file change review should redact bearer token")
+            expect(visibleText.contains("raw-token") == false, "file change review should redact raw token")
+            expect(visibleText.contains("writePath") == false, "file change review should redact writePath")
+            expect(visibleText.contains("notes/result.txt") == false, "file change review should redact requested path")
+            expect(visibleText.contains("patch") == false, "file change review should redact patch key")
+            expect(visibleText.contains("@@") == false, "file change review should redact diff hunks")
+            expect(visibleText.contains("private body") == false, "file change review should redact file content")
+            expect(visibleText.contains("file://") == false, "file change review should redact file URLs")
+            expect(visibleText.contains("/private") == false, "file change review should redact local paths")
+            expect(visibleText.contains("/Users") == false, "file change review should redact user paths")
+            expect(visibleText.contains("toolArguments") == false, "file change review should redact toolArguments")
+        } else {
+            failures.append("sensitive file change review should be derived")
+        }
+
         let retryMissionStore = ClawStore(autoScanLocalArtifacts: false)
         retryMissionStore.phoneAgentCommand = "在项目目录运行测试，失败时导出日志文件"
         retryMissionStore.startAutonomousComputerTakeover()
@@ -586,6 +676,12 @@ enum LogicSmoke {
             expect(reducedCapabilityReview.allowedActionKinds.contains("controlBrowser"), "capability review should expose action allowlist")
         } else {
             failures.append("reduced fixture should derive gateway capability review")
+        }
+        if let reducedFileChangeReview = ClawGatewayFileChangeSafetyReviewSummary.latest(from: reducedFixture) {
+            expect(reducedFileChangeReview.hasMetadata, "reduced fixture should derive file change metadata")
+            expect(reducedFileChangeReview.writeSucceeded == true, "fixture file change review should expose write success")
+        } else {
+            failures.append("reduced fixture should derive file change safety review")
         }
 
         let replayArtifact = ClawGatewayArtifact(

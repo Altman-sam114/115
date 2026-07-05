@@ -42,6 +42,26 @@ expect(dryRunSnapshot.policies.shell.allowlist.length === 0, "dry-run shell allo
 const dryRunRoot = workspaceFileRoot(dryRunEvents);
 await fs.access(`${dryRunRoot}/notes/result.txt`);
 await fs.access(`${dryRunRoot}/notes/extracted.json`);
+const fileDiffArtifact = findArtifactByTitle(dryRunEvents, "fileDiff", "file-diff-4");
+assertFileChangeSafetyMetadata(fileDiffArtifact?.metadata, {
+  mode: "workspace-write",
+  actionKind: "manageFiles",
+  workspacePolicy: "session-workspace-only",
+  workspaceScoped: true,
+  pathEscapeBlocked: false,
+  writeAttempted: true,
+  writeSucceeded: true,
+  createdFileCount: 1,
+  modifiedFileCount: 0,
+  deletedFileCount: 0,
+  requestedPathPresent: true,
+  writeTextPresent: true,
+  rawPathOmitted: true,
+  contentOmitted: true,
+  diffOmitted: true,
+  resultStatus: "succeeded",
+  safetyFlags: ["metadata-only", "tool-arguments-omitted", "raw-path-omitted", "workspace-path-omitted", "file-content-omitted", "diff-content-omitted", "artifact-payload-not-read", "session-workspace-only"],
+}, "direct file change");
 const browserTraces = await readArtifacts(dryRunEvents, "browserTrace");
 const localBrowserTrace = browserTraces.find((trace) => trace.mode === "local-html" && trace.title === "Smoke Page");
 expect(Boolean(localBrowserTrace), "missing local HTML browser extraction");
@@ -204,6 +224,82 @@ expect(Array.isArray(emptyExtractionTrace?.rows) && emptyExtractionTrace.rows.le
 const emptyExtractionArtifact = findArtifactByTitle(emptyExtractionEvents, "browserTrace", "extracted-data-");
 assertEmptyExtractionCompletenessMetadata(emptyExtractionArtifact?.metadata, emptyExtractionTrace, "empty direct extraction");
 
+const pathEscapeEnvelope = makePathEscapeEnvelope(token);
+const pathEscapeEvents = await runEmitEvents(
+  {
+    CLAW_GATEWAY_TOKEN: token,
+    CLAW_WORKSPACE: `${workspace}-path-escape`,
+  },
+  pathEscapeEnvelope,
+);
+await assertArtifactsExist(pathEscapeEvents);
+expect(pathEscapeEvents.some((event) => event.kind === "actionFailed" && event.actionKind === "manageFiles"), "missing path escape failure event");
+const pathEscapeArtifact = findArtifactByTitle(pathEscapeEvents, "auditLog", "file-change-blocked-");
+assertFileChangeSafetyMetadata(pathEscapeArtifact?.metadata, {
+  mode: "workspace-path-blocked",
+  actionKind: "manageFiles",
+  workspacePolicy: "session-workspace-only",
+  workspaceScoped: false,
+  pathEscapeBlocked: true,
+  writeAttempted: false,
+  writeSucceeded: false,
+  createdFileCount: 0,
+  modifiedFileCount: 0,
+  deletedFileCount: 0,
+  requestedPathPresent: true,
+  writeTextPresent: true,
+  rawPathOmitted: true,
+  contentOmitted: true,
+  diffOmitted: true,
+  resultStatus: "failed",
+  safetyFlags: ["metadata-only", "tool-arguments-omitted", "raw-path-omitted", "workspace-path-omitted", "file-content-omitted", "diff-content-omitted", "artifact-payload-not-read", "session-workspace-only", "path-escape-blocked", "no-file-written"],
+}, "direct path escape file change");
+
+const writeFailureEvents = await runEmitEvents(
+  {
+    CLAW_GATEWAY_TOKEN: token,
+    CLAW_WORKSPACE: `${workspace}-write-failure`,
+  },
+  makeWriteFailureEnvelope(token),
+);
+await assertArtifactsExist(writeFailureEvents);
+expect(writeFailureEvents.some((event) => event.kind === "actionFailed" && event.actionKind === "manageFiles"), "missing write failure event");
+const writeFailureArtifact = findArtifactByTitle(writeFailureEvents, "auditLog", "file-change-failed-");
+assertFileChangeSafetyMetadata(writeFailureArtifact?.metadata, {
+  mode: "workspace-write-failed",
+  actionKind: "manageFiles",
+  workspacePolicy: "session-workspace-only",
+  workspaceScoped: true,
+  pathEscapeBlocked: false,
+  writeAttempted: true,
+  writeSucceeded: false,
+  createdFileCount: 0,
+  modifiedFileCount: 0,
+  deletedFileCount: 0,
+  requestedPathPresent: true,
+  writeTextPresent: true,
+  rawPathOmitted: true,
+  contentOmitted: true,
+  diffOmitted: true,
+  resultStatus: "failed",
+  safetyFlags: ["metadata-only", "tool-arguments-omitted", "raw-path-omitted", "workspace-path-omitted", "file-content-omitted", "diff-content-omitted", "artifact-payload-not-read", "session-workspace-only", "write-failed"],
+}, "direct write failure file change");
+
+const symlinkWorkspace = `${workspace}-symlink-${crypto.randomUUID()}`;
+const symlinkTarget = `/private/tmp/claw-gateway-symlink-target-${crypto.randomUUID()}`;
+await fs.mkdir(symlinkWorkspace, { recursive: true });
+await fs.mkdir(symlinkTarget, { recursive: true });
+await fs.symlink(symlinkTarget, `${symlinkWorkspace}/sessions`, "dir");
+const symlinkFailure = await runEmitEventsExpectFailure(
+  {
+    CLAW_GATEWAY_TOKEN: token,
+    CLAW_WORKSPACE: symlinkWorkspace,
+  },
+  makeWriteFailureEnvelope(token),
+);
+expect(symlinkFailure.stderr.includes("workspace_symlink_blocked"), "workspace symlink failure should report symlink block");
+expect((await fs.readdir(symlinkTarget)).length === 0, "workspace symlink target should not receive Gateway files");
+
 const replayEvents = await runEmitEvents(
   {
     CLAW_GATEWAY_TOKEN: token,
@@ -324,7 +420,7 @@ assertAccessibilityTreeArtifact(accessibilityPolicyArtifact, accessibilityPolicy
   label: "enabled accessibility tree",
 });
 
-console.log(`Claw Gateway direct smoke passed (${dryRunEvents.length + emptyExtractionEvents.length + replayEvents.length + allowlistEvents.length + desktopPolicyEvents.length + browserPolicyEvents.length + accessibilityPolicyEvents.length} events)`);
+console.log(`Claw Gateway direct smoke passed (${dryRunEvents.length + emptyExtractionEvents.length + pathEscapeEvents.length + writeFailureEvents.length + replayEvents.length + allowlistEvents.length + desktopPolicyEvents.length + browserPolicyEvents.length + accessibilityPolicyEvents.length} events)`);
 
 async function runEmitEvents(env, input = envelope) {
   const inputPath = `/private/tmp/claw-gateway-direct-smoke-${crypto.randomUUID()}.json`;
@@ -365,6 +461,34 @@ async function runEmitEvents(env, input = envelope) {
     .split("\n")
     .filter(Boolean)
     .map((line) => JSON.parse(line));
+}
+
+async function runEmitEventsExpectFailure(env, input = envelope) {
+  const inputPath = `/private/tmp/claw-gateway-direct-smoke-${crypto.randomUUID()}.json`;
+  await fs.writeFile(inputPath, JSON.stringify(input), "utf8");
+  const child = spawn(
+    process.execPath,
+    ["Tools/claw-gateway-server.mjs", "--emit-events", inputPath],
+    {
+      env: {
+        ...process.env,
+        ...gatewayPolicyDefaults(),
+        ...env,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => {
+    stdout += chunk.toString("utf8");
+  });
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk.toString("utf8");
+  });
+  const exitCode = await new Promise((resolve) => child.on("close", resolve));
+  expect(exitCode !== 0, "direct smoke expected Gateway failure");
+  return { stdout, stderr };
 }
 
 function groupEventsBySession(events) {
@@ -768,6 +892,80 @@ function assertBrowserControlReviewMetadata(metadata, expected, label) {
   }
 }
 
+function assertFileChangeSafetyMetadata(metadata, expected, label) {
+  expect(metadata && typeof metadata === "object", `${label} missing file change metadata`);
+  const allowedKeys = [
+    "actionKind",
+    "contentOmitted",
+    "createdFileCount",
+    "deletedFileCount",
+    "diffOmitted",
+    "fileChangeReview",
+    "mode",
+    "modifiedFileCount",
+    "pathEscapeBlocked",
+    "rawPathOmitted",
+    "requestedPathPresent",
+    "resultStatus",
+    "safetyFlags",
+    "workspacePolicy",
+    "workspaceScoped",
+    "writeAttempted",
+    "writeSucceeded",
+    "writeTextPresent",
+  ].sort();
+  expect(
+    Object.keys(metadata).sort().join(",") === allowedKeys.join(","),
+    `${label} file change metadata includes unexpected keys`,
+  );
+  expect(metadata.fileChangeReview === "workspaceWrite", `${label} file change review metadata mismatch`);
+  expect(metadata.mode === expected.mode, `${label} mode metadata mismatch`);
+  expect(metadata.actionKind === expected.actionKind, `${label} action kind metadata mismatch`);
+  expect(metadata.workspacePolicy === expected.workspacePolicy, `${label} workspace policy metadata mismatch`);
+  expect(metadata.workspaceScoped === String(expected.workspaceScoped), `${label} workspace scope metadata mismatch`);
+  expect(metadata.pathEscapeBlocked === String(expected.pathEscapeBlocked), `${label} path escape metadata mismatch`);
+  expect(metadata.writeAttempted === String(expected.writeAttempted), `${label} write attempt metadata mismatch`);
+  expect(metadata.writeSucceeded === String(expected.writeSucceeded), `${label} write success metadata mismatch`);
+  expect(Number(metadata.createdFileCount) === expected.createdFileCount, `${label} created count metadata mismatch`);
+  expect(Number(metadata.modifiedFileCount) === expected.modifiedFileCount, `${label} modified count metadata mismatch`);
+  expect(Number(metadata.deletedFileCount) === expected.deletedFileCount, `${label} deleted count metadata mismatch`);
+  expect(metadata.requestedPathPresent === String(expected.requestedPathPresent), `${label} requested path presence metadata mismatch`);
+  expect(metadata.writeTextPresent === String(expected.writeTextPresent), `${label} write text presence metadata mismatch`);
+  expect(metadata.rawPathOmitted === String(expected.rawPathOmitted), `${label} raw path omission metadata mismatch`);
+  expect(metadata.contentOmitted === String(expected.contentOmitted), `${label} content omission metadata mismatch`);
+  expect(metadata.diffOmitted === String(expected.diffOmitted), `${label} diff omission metadata mismatch`);
+  expect(metadata.resultStatus === expected.resultStatus, `${label} result status metadata mismatch`);
+  for (const flag of expected.safetyFlags) {
+    expect(metadata.safetyFlags.includes(flag), `${label} missing safety flag ${flag}`);
+  }
+  const serialized = JSON.stringify(metadata);
+  for (const forbidden of [
+    token,
+    "Authorization",
+    "Bearer",
+    "toolArguments",
+    "writePath",
+    "\"requestedPath\"",
+    "workspace write verified",
+	    "notes/result.txt",
+	    "../escape.txt",
+	    "escape write",
+	    "blocked-parent",
+	    "should not be written",
+	    "not a directory",
+	    "patch",
+    "@@",
+    "diffHunk",
+    "https://",
+    "file://",
+    "/sessions/",
+    "stdout",
+    "stderr",
+  ]) {
+    expect(!serialized.includes(forbidden), `${label} metadata leaked ${forbidden}`);
+  }
+}
+
 function assertDeliverySafetyMetadata(metadata, expected, label) {
   expect(metadata && typeof metadata === "object", `${label} missing delivery metadata`);
   const allowedKeys = [
@@ -1094,6 +1292,116 @@ function makeEmptyExtractionEnvelope(rawToken) {
       createdAt: isoNow(),
     },
     approvalSummary: "empty extraction smoke",
+    auditRequired: true,
+  };
+}
+
+function makePathEscapeEnvelope(rawToken) {
+  const taskID = crypto.randomUUID();
+  return {
+    schemaVersion: "claw.computer.control.v1",
+    sourceApp: "Claw Controller",
+    gateway: {
+      endpoint: "ws://127.0.0.1:18789",
+      deviceName: "smoke",
+      securityMode: "mutualApproval",
+      tokenFingerprint: tokenFingerprint(rawToken),
+      allowedActionKinds: ["manageFiles"],
+      requiresApprovalForSensitiveData: true,
+      auditEnabled: true,
+    },
+    task: {
+      id: taskID,
+      command: "block workspace path escape",
+      summary: "path escape smoke",
+      sourceDevice: "smoke",
+      destinationGateway: "ws://127.0.0.1:18789",
+      actions: [
+        {
+          id: crypto.randomUUID(),
+          kind: "manageFiles",
+          title: "Block path escape",
+          target: "Desktop Filesystem",
+          instruction: "Reject file writes outside the session workspace",
+          approval: "gatewayApproval",
+          sourceSurface: "clawGateway",
+          handlesSensitiveData: true,
+          inputPreview: "smoke",
+          toolArguments: {
+            workspaceOnly: "true",
+            writePath: "../escape.txt",
+            writeText: "escape write",
+          },
+        },
+      ],
+      status: "sent",
+      riskScore: 52,
+      createdAt: isoNow(),
+    },
+    approvalSummary: "path escape smoke",
+    auditRequired: true,
+  };
+}
+
+function makeWriteFailureEnvelope(rawToken) {
+  const taskID = crypto.randomUUID();
+  return {
+    schemaVersion: "claw.computer.control.v1",
+    sourceApp: "Claw Controller",
+    gateway: {
+      endpoint: "ws://127.0.0.1:18789",
+      deviceName: "smoke",
+      securityMode: "mutualApproval",
+      tokenFingerprint: tokenFingerprint(rawToken),
+      allowedActionKinds: ["manageFiles"],
+      requiresApprovalForSensitiveData: true,
+      auditEnabled: true,
+    },
+    task: {
+      id: taskID,
+      command: "record workspace write failure metadata",
+      summary: "write failure smoke",
+      sourceDevice: "smoke",
+      destinationGateway: "ws://127.0.0.1:18789",
+      actions: [
+        {
+          id: crypto.randomUUID(),
+          kind: "manageFiles",
+          title: "Prepare blocked parent",
+          target: "Desktop Filesystem",
+          instruction: "Create a workspace file that will block a nested write",
+          approval: "gatewayApproval",
+          sourceSurface: "clawGateway",
+          handlesSensitiveData: true,
+          inputPreview: "smoke",
+          toolArguments: {
+            workspaceOnly: "true",
+            writePath: "blocked-parent",
+            writeText: "not a directory",
+          },
+        },
+        {
+          id: crypto.randomUUID(),
+          kind: "manageFiles",
+          title: "Trigger write failure",
+          target: "Desktop Filesystem",
+          instruction: "Attempt a nested write through an existing file",
+          approval: "gatewayApproval",
+          sourceSurface: "clawGateway",
+          handlesSensitiveData: true,
+          inputPreview: "smoke",
+          toolArguments: {
+            workspaceOnly: "true",
+            writePath: "blocked-parent/result.txt",
+            writeText: "should not be written",
+          },
+        },
+      ],
+      status: "sent",
+      riskScore: 52,
+      createdAt: isoNow(),
+    },
+    approvalSummary: "write failure smoke",
     auditRequired: true,
   };
 }

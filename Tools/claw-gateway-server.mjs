@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import http from "node:http";
 import crypto from "node:crypto";
+import { constants as fsConstants } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -9,6 +10,14 @@ import { spawn } from "node:child_process";
 const DEFAULT_PORT = 18789;
 const SCHEMA_VERSION = "claw.computer.control.v1";
 const TASK_REPLAY_CACHE_LIMIT = 128;
+
+class GatewayError extends Error {
+  constructor(status, code) {
+    super(code);
+    this.status = status;
+    this.code = code;
+  }
+}
 
 function printHelp() {
   console.log(`usage: node Tools/claw-gateway-server.mjs [--once]
@@ -363,8 +372,7 @@ async function makeGatewayEvents(envelope, config) {
 
 async function buildGatewayEvents(envelope, config, sessionID = crypto.randomUUID()) {
   const task = envelope.task;
-  const sessionWorkspace = path.join(config.workspace, "sessions", sessionID);
-  await fs.mkdir(sessionWorkspace, { recursive: true });
+  const sessionWorkspace = await prepareSessionWorkspace(config.workspace, sessionID);
   const sessionContext = makeSessionContext();
   let sequence = 0;
   const events = [
@@ -457,8 +465,7 @@ async function makeTaskReplayGuardEvents(envelope, config, record) {
   record.lastReplayAt = isoNow();
   const sessionID = crypto.randomUUID();
   const task = envelope.task;
-  const sessionWorkspace = path.join(config.workspace, "sessions", sessionID);
-  await fs.mkdir(sessionWorkspace, { recursive: true });
+  const sessionWorkspace = await prepareSessionWorkspace(config.workspace, sessionID);
   const sessionConfig = {
     ...config,
     sessionWorkspace,
@@ -1890,9 +1897,93 @@ function escapeHTML(text) {
     .replace(/'/g, "&#39;");
 }
 
+function fileChangeReviewMetadata(action, details = {}) {
+  const safetyFlags = [
+    "metadata-only",
+    "tool-arguments-omitted",
+    "raw-path-omitted",
+    "workspace-path-omitted",
+    "file-content-omitted",
+    "diff-content-omitted",
+    "artifact-payload-not-read",
+    "session-workspace-only",
+  ];
+  if (details.pathEscapeBlocked) {
+    safetyFlags.push("path-escape-blocked");
+    safetyFlags.push("no-file-written");
+  }
+  if (details.writeFailed) {
+    safetyFlags.push("write-failed");
+  }
+  return compactMetadata({
+    fileChangeReview: "workspaceWrite",
+    mode: details.mode || "workspace-write",
+    actionKind: action.kind === "manageFiles" ? "manageFiles" : undefined,
+    workspacePolicy: "session-workspace-only",
+    workspaceScoped: !details.pathEscapeBlocked,
+    pathEscapeBlocked: Boolean(details.pathEscapeBlocked),
+    writeAttempted: Boolean(details.writeAttempted),
+    writeSucceeded: Boolean(details.writeSucceeded),
+    createdFileCount: details.createdFileCount,
+    modifiedFileCount: details.modifiedFileCount,
+    deletedFileCount: details.deletedFileCount,
+    requestedPathPresent: Boolean(action.toolArguments?.writePath),
+    writeTextPresent: Boolean(action.toolArguments?.writeText),
+    rawPathOmitted: true,
+    contentOmitted: true,
+    diffOmitted: true,
+    resultStatus: details.resultStatus,
+    safetyFlags,
+  });
+}
+
 async function manageFilesAction(action, index, config) {
   const requestedPath = action.toolArguments?.writePath || `managed-file-${index + 1}.txt`;
-  const markerPath = safeWorkspacePath(config.sessionWorkspace, requestedPath);
+  let markerPath;
+  try {
+    markerPath = safeWorkspacePath(config.sessionWorkspace, requestedPath);
+  } catch (error) {
+    if (error instanceof GatewayError && error.code === "workspace_path_escape_blocked") {
+      const artifacts = [
+        await writeArtifact(
+          "auditLog",
+          `file-change-blocked-${index + 1}.json`,
+          {
+            mode: "workspace-path-blocked",
+            actionKind: action.kind,
+            reason: "workspace_path_escape_blocked",
+            safety: {
+              writeAttempted: false,
+              fileWritten: false,
+              rawPath: "omitted",
+              workspacePath: "omitted",
+              content: "omitted",
+              diff: "omitted",
+            },
+          },
+          true,
+          config,
+          fileChangeReviewMetadata(action, {
+            mode: "workspace-path-blocked",
+            pathEscapeBlocked: true,
+            writeAttempted: false,
+            writeSucceeded: false,
+            createdFileCount: 0,
+            modifiedFileCount: 0,
+            deletedFileCount: 0,
+            resultStatus: "failed",
+          }),
+        ),
+      ];
+      return {
+        status: "failed",
+        summary: `${action.title} blocked: requested file path escaped the session workspace`,
+        artifacts,
+        isRetryable: true,
+      };
+    }
+    throw error;
+  }
   const content =
     action.toolArguments?.writeText ||
     [
@@ -1902,8 +1993,46 @@ async function manageFilesAction(action, index, config) {
       `instruction=${action.instruction}`,
       `toolArguments=${JSON.stringify(action.toolArguments || {})}`,
     ].join("\n");
-  await fs.mkdir(path.dirname(markerPath), { recursive: true });
-  await fs.writeFile(markerPath, content, "utf8");
+  try {
+    await writeWorkspaceTextFile(config.sessionWorkspace, markerPath, content);
+  } catch (error) {
+    const artifacts = [
+      await writeArtifact(
+        "auditLog",
+        `file-change-failed-${index + 1}.json`,
+        {
+          mode: "workspace-write-failed",
+          actionKind: action.kind,
+          reason: "workspace_write_failed",
+          errorCode: error?.code || "write_failed",
+          safety: {
+            rawPath: "omitted",
+            workspacePath: "omitted",
+            content: "omitted",
+            diff: "omitted",
+          },
+        },
+        true,
+        config,
+        fileChangeReviewMetadata(action, {
+          mode: "workspace-write-failed",
+          writeAttempted: true,
+          writeSucceeded: false,
+          createdFileCount: 0,
+          modifiedFileCount: 0,
+          deletedFileCount: 0,
+          writeFailed: true,
+          resultStatus: "failed",
+        }),
+      ),
+    ];
+    return {
+      status: "failed",
+      summary: `${action.title} failed while writing a workspace-scoped file`,
+      artifacts,
+      isRetryable: true,
+    };
+  }
   const artifacts = [
     await writeArtifact(
       "fileDiff",
@@ -1916,6 +2045,15 @@ async function manageFilesAction(action, index, config) {
       },
       false,
       config,
+      fileChangeReviewMetadata(action, {
+        mode: "workspace-write",
+        writeAttempted: true,
+        writeSucceeded: true,
+        createdFileCount: 1,
+        modifiedFileCount: 0,
+        deletedFileCount: 0,
+        resultStatus: "succeeded",
+      }),
     ),
   ];
   return {
@@ -2033,8 +2171,7 @@ async function extractDataAction(action, index, config) {
     sourceArtifacts: summarizeArtifactContext(config.sessionContext),
     rows: contextRows,
   };
-  await fs.mkdir(path.dirname(outputFile), { recursive: true });
-  await fs.writeFile(outputFile, JSON.stringify(extracted, null, 2), "utf8");
+  await writeWorkspaceTextFile(config.sessionWorkspace, outputFile, JSON.stringify(extracted, null, 2));
   const artifacts = [
     await writeArtifact(
       "browserTrace",
@@ -2953,11 +3090,11 @@ function eventKindForStatus(status) {
 }
 
 async function writeArtifact(kind, title, payload, redacted, config, metadata = undefined) {
-  await fs.mkdir(config.sessionWorkspace, { recursive: true });
+  await assertWorkspaceDirectoryPath(config.sessionWorkspace, config.sessionWorkspace);
   const safeTitle = sanitizeTitle(title);
   const filePath = path.join(config.sessionWorkspace, safeTitle);
   const data = typeof payload === "string" ? payload : JSON.stringify(payload, null, 2);
-  await fs.writeFile(filePath, data, "utf8");
+  await writeWorkspaceTextFile(config.sessionWorkspace, filePath, data);
   const artifact = {
     id: crypto.randomUUID(),
     kind,
@@ -3262,6 +3399,87 @@ function safeWorkspacePath(workspace, requestedPath) {
   throw new GatewayError(400, "workspace_path_escape_blocked");
 }
 
+async function prepareSessionWorkspace(workspace, sessionID) {
+  const workspaceRoot = path.resolve(workspace);
+  const sessionsRoot = path.join(workspaceRoot, "sessions");
+  await fs.mkdir(sessionsRoot, { recursive: true });
+  await assertWorkspaceDirectoryPath(workspaceRoot, sessionsRoot);
+  const sessionWorkspace = path.join(sessionsRoot, sanitizeTitle(sessionID));
+  await fs.mkdir(sessionWorkspace, { recursive: true });
+  await assertWorkspaceDirectoryPath(workspaceRoot, sessionWorkspace);
+  return sessionWorkspace;
+}
+
+async function writeWorkspaceTextFile(workspace, resolvedPath, content) {
+  const root = path.resolve(workspace);
+  const filePath = path.resolve(resolvedPath);
+  ensurePathInside(root, filePath);
+  const parent = path.dirname(filePath);
+  await fs.mkdir(parent, { recursive: true });
+  await assertWorkspaceDirectoryPath(root, parent);
+  const handle = await fs.open(
+    filePath,
+    fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC | fsConstants.O_NOFOLLOW,
+    0o600,
+  );
+  try {
+    const stat = await handle.stat();
+    if (!stat.isFile()) {
+      throw new GatewayError(400, "workspace_target_not_file");
+    }
+    await handle.writeFile(content, "utf8");
+  } finally {
+    await handle.close();
+  }
+  await assertWorkspaceFilePath(root, filePath);
+}
+
+async function assertWorkspaceDirectoryPath(workspace, directoryPath) {
+  const root = path.resolve(workspace);
+  const target = path.resolve(directoryPath);
+  ensurePathInside(root, target, true);
+  await assertNoSymlinkComponents(root, target);
+  const [rootReal, targetReal] = await Promise.all([fs.realpath(root), fs.realpath(target)]);
+  ensurePathInside(rootReal, targetReal, true);
+}
+
+async function assertWorkspaceFilePath(workspace, filePath) {
+  const root = path.resolve(workspace);
+  const target = path.resolve(filePath);
+  ensurePathInside(root, target);
+  const [rootReal, targetReal] = await Promise.all([fs.realpath(root), fs.realpath(target)]);
+  ensurePathInside(rootReal, targetReal);
+}
+
+async function assertNoSymlinkComponents(root, target) {
+  const relative = path.relative(root, target);
+  const parts = relative ? relative.split(path.sep).filter(Boolean) : [];
+  let cursor = root;
+  const rootStat = await fs.lstat(root);
+  if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
+    throw new GatewayError(400, "workspace_directory_invalid");
+  }
+  for (const part of parts) {
+    cursor = path.join(cursor, part);
+    const stat = await fs.lstat(cursor);
+    if (stat.isSymbolicLink()) {
+      throw new GatewayError(400, "workspace_symlink_blocked");
+    }
+    if (!stat.isDirectory()) {
+      throw new GatewayError(400, "workspace_directory_invalid");
+    }
+  }
+}
+
+function ensurePathInside(root, target, allowRoot = false) {
+  const resolvedRoot = path.resolve(root);
+  const resolvedTarget = path.resolve(target);
+  if ((allowRoot && resolvedTarget === resolvedRoot) || resolvedTarget.startsWith(`${resolvedRoot}${path.sep}`)) {
+    return;
+  }
+  throw new GatewayError(400, "workspace_path_escape_blocked");
+}
+
 function resolveWorkspace(value) {
   const raw = value && value.trim() ? value.trim() : ".build/claw-gateway-workspace";
   if (raw === "~") {
@@ -3337,12 +3555,4 @@ function errorEvent(error) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-class GatewayError extends Error {
-  constructor(status, code) {
-    super(code);
-    this.status = status;
-    this.code = code;
-  }
 }

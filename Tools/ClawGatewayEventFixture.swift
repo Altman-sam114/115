@@ -194,7 +194,7 @@ enum ClawGatewayEventFixture {
                 artifact(.screenshot, "fixture-browser-\(suffix).png", redacted: true, metadata: browserControlReviewMetadata())
             ]
         case .manageFiles:
-            return [artifact(.fileDiff, "fixture-file-diff-\(suffix).json", redacted: false)]
+            return [artifact(.fileDiff, "fixture-file-diff-\(suffix).json", redacted: false, metadata: fileChangeReviewMetadata())]
         case .runShellCommand:
             return [artifact(.commandOutput, "fixture-shell-\(suffix).log", redacted: true)]
         case .operateDesktopApp:
@@ -240,6 +240,29 @@ enum ClawGatewayEventFixture {
             "timedOut": "false",
             "resultStatus": "succeeded",
             "safetyFlags": "metadata-only,tool-arguments-omitted,url-omitted,search-query-omitted,page-content-omitted,form-fields-omitted,candidate-labels-omitted,artifact-payload-not-read"
+        ]
+    }
+
+    private static func fileChangeReviewMetadata() -> [String: String] {
+        [
+            "fileChangeReview": "workspaceWrite",
+            "mode": "workspace-write",
+            "actionKind": ClawMobileActionKind.manageFiles.rawValue,
+            "workspacePolicy": "session-workspace-only",
+            "workspaceScoped": "true",
+            "pathEscapeBlocked": "false",
+            "writeAttempted": "true",
+            "writeSucceeded": "true",
+            "createdFileCount": "1",
+            "modifiedFileCount": "0",
+            "deletedFileCount": "0",
+            "requestedPathPresent": "true",
+            "writeTextPresent": "true",
+            "rawPathOmitted": "true",
+            "contentOmitted": "true",
+            "diffOmitted": "true",
+            "resultStatus": "succeeded",
+            "safetyFlags": "metadata-only,tool-arguments-omitted,raw-path-omitted,workspace-path-omitted,file-content-omitted,diff-content-omitted,artifact-payload-not-read,session-workspace-only"
         ]
     }
 

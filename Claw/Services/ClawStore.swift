@@ -167,6 +167,7 @@ final class ClawStore: ObservableObject {
             gatewayExtractionCompletenessReview: missionRunGatewayExtractionCompletenessReview(from: session),
             gatewayBrowserControlReview: missionRunGatewayBrowserControlReview(from: session),
             gatewayDeliverySafetyReview: missionRunGatewayDeliverySafetyReview(from: session),
+            gatewayFileChangeSafetyReview: missionRunGatewayFileChangeSafetyReview(from: session),
             agentTraceReview: missionRunAgentTraceReview(from: session),
             gatewayAccessibilityReview: missionRunGatewayAccessibilityReview(from: session),
             gatewayCapabilityReview: missionRunGatewayCapabilityReview(from: session),
@@ -314,6 +315,10 @@ final class ClawStore: ObservableObject {
 
     private func missionRunGatewayDeliverySafetyReview(from session: ClawGatewaySession?) -> ClawGatewayDeliverySafetyReviewSummary? {
         ClawGatewayDeliverySafetyReviewSummary.latest(from: session)
+    }
+
+    private func missionRunGatewayFileChangeSafetyReview(from session: ClawGatewaySession?) -> ClawGatewayFileChangeSafetyReviewSummary? {
+        ClawGatewayFileChangeSafetyReviewSummary.latest(from: session)
     }
 
     private func missionRunGatewayAccessibilityReview(from session: ClawGatewaySession?) -> ClawGatewayAccessibilityReviewSummary? {
@@ -1880,7 +1885,14 @@ enum ClawGatewaySimulator {
                 actionTitle: action.title,
                 status: .succeeded,
                 summary: "文件操作在授权目录内完成，已生成变更清单。",
-                artifacts: [artifact(.fileDiff, "file-diff-\(index + 1).json", redacted: false)]
+                artifacts: [
+                    artifact(
+                        .fileDiff,
+                        "file-diff-\(index + 1).json",
+                        redacted: false,
+                        metadata: fileChangeReviewMetadata()
+                    )
+                ]
             )
         case .runShellCommand:
             return ClawGatewayActionResult(
@@ -2071,6 +2083,29 @@ enum ClawGatewaySimulator {
             "timedOut": "false",
             "resultStatus": resultStatus,
             "safetyFlags": "metadata-only,tool-arguments-omitted,url-omitted,search-query-omitted,page-content-omitted,form-fields-omitted,candidate-labels-omitted,artifact-payload-not-read"
+        ]
+    }
+
+    private static func fileChangeReviewMetadata() -> [String: String] {
+        [
+            "fileChangeReview": "workspaceWrite",
+            "mode": "workspace-write",
+            "actionKind": ClawMobileActionKind.manageFiles.rawValue,
+            "workspacePolicy": "session-workspace-only",
+            "workspaceScoped": "true",
+            "pathEscapeBlocked": "false",
+            "writeAttempted": "true",
+            "writeSucceeded": "true",
+            "createdFileCount": "1",
+            "modifiedFileCount": "0",
+            "deletedFileCount": "0",
+            "requestedPathPresent": "true",
+            "writeTextPresent": "true",
+            "rawPathOmitted": "true",
+            "contentOmitted": "true",
+            "diffOmitted": "true",
+            "resultStatus": "succeeded",
+            "safetyFlags": "metadata-only,tool-arguments-omitted,raw-path-omitted,workspace-path-omitted,file-content-omitted,diff-content-omitted,artifact-payload-not-read,session-workspace-only"
         ]
     }
 

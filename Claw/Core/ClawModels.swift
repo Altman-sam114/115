@@ -1441,6 +1441,9 @@ struct ClawGatewayArtifactMetadataReviewSummary: Equatable, Codable, Sendable {
         }
         let metadataSource = artifacts.last { $0.metadata?.isEmpty == false } ?? latest
         let metadata = metadataSource.metadata ?? [:]
+        let isFileChangeSafetyMetadata = metadata.keys.contains {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "filechangereview"
+        }
         return ClawGatewayArtifactMetadataReviewSummary(
             artifactCount: artifacts.count,
             metadataArtifactCount: artifacts.filter { ($0.metadata?.isEmpty == false) }.count,
@@ -1450,8 +1453,8 @@ struct ClawGatewayArtifactMetadataReviewSummary: Equatable, Codable, Sendable {
             latestMetadataKind: metadata.isEmpty ? nil : metadataSource.kind,
             latestMetadataTitle: metadata.isEmpty ? nil : ClawArtifactMetadataDisplaySanitizer.safeValue(metadataSource.title) ?? metadataSource.kind.title,
             hasMetadata: metadata.isEmpty == false,
-            safeMetadataPairs: safeMetadataPairs(from: metadata),
-            safetyFlags: ClawArtifactMetadataDisplaySanitizer.safeList(metadata["safetyFlags"]),
+            safeMetadataPairs: isFileChangeSafetyMetadata ? [] : safeMetadataPairs(from: metadata),
+            safetyFlags: isFileChangeSafetyMetadata ? [] : ClawArtifactMetadataDisplaySanitizer.safeList(metadata["safetyFlags"]),
             isLatestRedacted: latest.isRedacted
         )
     }
@@ -1933,6 +1936,137 @@ struct ClawGatewayDeliverySafetyReviewSummary: Equatable, Codable, Sendable {
     }
 }
 
+struct ClawGatewayFileChangeSafetyReviewSummary: Equatable, Codable, Sendable {
+    var reviewCount: Int
+    var latestTitle: String
+    var hasMetadata: Bool
+    var mode: String?
+    var actionKind: String?
+    var workspacePolicy: String?
+    var workspaceScoped: Bool?
+    var pathEscapeBlocked: Bool?
+    var writeAttempted: Bool?
+    var writeSucceeded: Bool?
+    var createdFileCount: Int?
+    var modifiedFileCount: Int?
+    var deletedFileCount: Int?
+    var requestedPathPresent: Bool?
+    var writeTextPresent: Bool?
+    var rawPathOmitted: Bool?
+    var contentOmitted: Bool?
+    var diffOmitted: Bool?
+    var resultStatus: String?
+    var safetyFlags: [String]
+    var isRedacted: Bool
+
+    var compactStatus: String {
+        guard hasMetadata else {
+            return "已收到文件变更 artifact，metadata 待同步。"
+        }
+        let scope = workspacePolicy ?? "workspace 待复核"
+        let changes = [
+            createdFileCount.map { "created \($0)" },
+            modifiedFileCount.map { "modified \($0)" },
+            deletedFileCount.map { "deleted \($0)" }
+        ]
+            .compactMap { $0 }
+            .joined(separator: " · ")
+        let status = resultStatus ?? "result 待复核"
+        return "\(scope) · \(changes.isEmpty ? "changes 待复核" : changes) · \(status)"
+    }
+
+    static func latest(from session: ClawGatewaySession?) -> ClawGatewayFileChangeSafetyReviewSummary? {
+        guard let session else {
+            return nil
+        }
+        return latest(from: session.allArtifacts)
+    }
+
+    static func latest(from artifacts: [ClawGatewayArtifact]) -> ClawGatewayFileChangeSafetyReviewSummary? {
+        let fileArtifacts = artifacts.filter(isFileChangeArtifact)
+        guard let latest = fileArtifacts.last else {
+            return nil
+        }
+        let metadata = latest.metadata ?? [:]
+        let hasReviewMetadata = ClawArtifactMetadataParser.cleanValue(metadata["fileChangeReview"]) == "workspaceWrite"
+        return ClawGatewayFileChangeSafetyReviewSummary(
+            reviewCount: fileArtifacts.count,
+            latestTitle: ClawArtifactMetadataDisplaySanitizer.safeValue(latest.title) ?? latest.kind.title,
+            hasMetadata: hasReviewMetadata,
+            mode: allowedMode(metadata["mode"]),
+            actionKind: allowedActionKind(metadata["actionKind"]),
+            workspacePolicy: allowedWorkspacePolicy(metadata["workspacePolicy"]),
+            workspaceScoped: ClawArtifactMetadataParser.boolValue(metadata["workspaceScoped"]),
+            pathEscapeBlocked: ClawArtifactMetadataParser.boolValue(metadata["pathEscapeBlocked"]),
+            writeAttempted: ClawArtifactMetadataParser.boolValue(metadata["writeAttempted"]),
+            writeSucceeded: ClawArtifactMetadataParser.boolValue(metadata["writeSucceeded"]),
+            createdFileCount: ClawArtifactMetadataParser.intValue(metadata["createdFileCount"]),
+            modifiedFileCount: ClawArtifactMetadataParser.intValue(metadata["modifiedFileCount"]),
+            deletedFileCount: ClawArtifactMetadataParser.intValue(metadata["deletedFileCount"]),
+            requestedPathPresent: ClawArtifactMetadataParser.boolValue(metadata["requestedPathPresent"]),
+            writeTextPresent: ClawArtifactMetadataParser.boolValue(metadata["writeTextPresent"]),
+            rawPathOmitted: ClawArtifactMetadataParser.boolValue(metadata["rawPathOmitted"]),
+            contentOmitted: ClawArtifactMetadataParser.boolValue(metadata["contentOmitted"]),
+            diffOmitted: ClawArtifactMetadataParser.boolValue(metadata["diffOmitted"]),
+            resultStatus: allowedResultStatus(metadata["resultStatus"]),
+            safetyFlags: allowedSafetyFlags(metadata["safetyFlags"]),
+            isRedacted: latest.isRedacted
+        )
+    }
+
+    private static func isFileChangeArtifact(_ artifact: ClawGatewayArtifact) -> Bool {
+        ClawArtifactMetadataParser.cleanValue(artifact.metadata?["fileChangeReview"]) == "workspaceWrite" ||
+            artifact.kind == .fileDiff
+    }
+
+    private static func allowedMode(_ value: String?) -> String? {
+        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
+            return nil
+        }
+        let allowed = ["workspace-path-blocked", "workspace-write", "workspace-write-failed"]
+        return allowed.contains(clean) ? clean : nil
+    }
+
+    private static func allowedActionKind(_ value: String?) -> String? {
+        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
+            return nil
+        }
+        return clean == "manageFiles" ? clean : nil
+    }
+
+    private static func allowedWorkspacePolicy(_ value: String?) -> String? {
+        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
+            return nil
+        }
+        return clean == "session-workspace-only" ? clean : nil
+    }
+
+    private static func allowedResultStatus(_ value: String?) -> String? {
+        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
+            return nil
+        }
+        let allowed = ["skipped", "succeeded", "failed"]
+        return allowed.contains(clean) ? clean : nil
+    }
+
+    private static func allowedSafetyFlags(_ value: String?) -> [String] {
+        let allowed = [
+            "artifact-payload-not-read",
+            "diff-content-omitted",
+            "file-content-omitted",
+            "metadata-only",
+            "no-file-written",
+            "path-escape-blocked",
+            "raw-path-omitted",
+            "session-workspace-only",
+            "tool-arguments-omitted",
+            "write-failed",
+            "workspace-path-omitted"
+        ]
+        return ClawArtifactMetadataParser.listValue(value).filter { allowed.contains($0) }
+    }
+}
+
 struct ClawAgentTraceReviewSummary: Equatable, Codable, Sendable {
     var traceCount: Int
     var latestTitle: String
@@ -2240,6 +2374,7 @@ struct ClawMissionRunSummary: Equatable, Codable, Sendable {
     var gatewayExtractionCompletenessReview: ClawGatewayExtractionCompletenessReviewSummary?
     var gatewayBrowserControlReview: ClawGatewayBrowserControlReviewSummary?
     var gatewayDeliverySafetyReview: ClawGatewayDeliverySafetyReviewSummary?
+    var gatewayFileChangeSafetyReview: ClawGatewayFileChangeSafetyReviewSummary?
     var agentTraceReview: ClawAgentTraceReviewSummary?
     var gatewayAccessibilityReview: ClawGatewayAccessibilityReviewSummary?
     var gatewayCapabilityReview: ClawGatewayCapabilityReviewSummary?
