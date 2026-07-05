@@ -139,6 +139,32 @@ enum LogicSmoke {
         } else {
             failures.append("mission summary should derive extraction completeness review")
         }
+        if let browserReview = missionSummary.gatewayBrowserControlReview {
+            expect(browserReview.reviewCount >= 2, "mission summary should count browser control artifacts")
+            expect(browserReview.hasMetadata, "browser control review should include metadata")
+            expect(browserReview.mode == "browser-control-dry-run", "browser control review should expose dry-run mode")
+            expect(browserReview.actionKind == "controlBrowser", "browser control review should expose action kind")
+            expect(browserReview.browserControlPolicy == "dry-run", "browser control review should expose browser policy")
+            expect(browserReview.browserControlRequested == true, "browser control review should expose requested open")
+            expect(browserReview.targetURLPresent == true, "browser control review should expose URL presence without value")
+            expect(browserReview.searchQueryPresent == true, "browser control review should expose search presence without value")
+            expect(browserReview.networkBlocked == false, "browser control review should expose network block state")
+            expect(browserReview.resultStatus == "succeeded", "browser control review should expose result status")
+            expect(browserReview.safetyFlags.contains("url-omitted"), "browser control review should omit URL")
+            expect(browserReview.safetyFlags.contains("search-query-omitted"), "browser control review should omit search query")
+            expect(browserReview.compactStatus.contains("policy dry-run"), "browser control review should summarize policy")
+        } else {
+            failures.append("mission summary should derive browser control review")
+        }
+        if let browserArtifacts = missionStore.clawGatewaySessions.first?.results.first(where: { $0.actionKind == .controlBrowser })?.artifacts,
+           let browserControlReview = ClawGatewayBrowserControlReviewSummary.latest(from: browserArtifacts) {
+            expect(browserControlReview.mode == "browser-control-dry-run", "browser result review should expose dry-run mode")
+            expect(browserControlReview.executed == false, "browser result review should expose execution state")
+            expect(browserControlReview.timedOut == false, "browser result review should expose timeout state")
+            expect(browserControlReview.safetyFlags.contains("candidate-labels-omitted"), "browser result review should omit candidate labels")
+        } else {
+            failures.append("browser result should derive browser control review")
+        }
         if let deliveryReview = missionSummary.gatewayDeliverySafetyReview {
             expect(deliveryReview.reviewCount >= 2, "mission summary should count delivery safety artifacts")
             expect(deliveryReview.hasMetadata, "delivery safety review should include metadata")
@@ -311,6 +337,64 @@ enum LogicSmoke {
             expect(visibleText.contains("toolArguments") == false, "extraction review should redact toolArguments")
         } else {
             failures.append("sensitive extraction review should be derived")
+        }
+
+        let sensitiveBrowserControl = ClawGatewayArtifact(
+            kind: .screenshot,
+            title: "browser-control file:///private/tmp/browser.json https://example.com/private?q=secret",
+            reference: "file:///tmp/browser-control.json",
+            isRedacted: true,
+            metadata: [
+                "browserReview": "controlPlan",
+                "mode": "browser-control-dry-run Authorization: Bearer raw-token",
+                "actionKind": "controlBrowser token=raw-token",
+                "browserControlPolicy": "enabled https://example.com/private",
+                "browserControlRequested": "true",
+                "openInBrowser": "true",
+                "targetURLPresent": "true",
+                "searchQueryPresent": "true",
+                "localHTMLInput": "true",
+                "networkFetchAttempted": "true",
+                "networkBlocked": "true",
+                "appAllowlistEnforced": "true",
+                "hostAllowlistEnforced": "true",
+                "executed": "false",
+                "timedOut": "false",
+                "resultStatus": "failed file:///private/tmp/log.txt",
+                "safetyFlags": "metadata-only,url-omitted,search-query-omitted,page-content-omitted,form-fields-omitted,candidate-labels-omitted,headers={Authorization: Bearer raw-token},searchQuery=secret,html=<input name=password>,candidateLabel=Submit,toolArguments=/private/tmp/input.json",
+                "toolArguments": "{\"url\":\"https://example.com/private\",\"searchQuery\":\"secret\"}"
+            ]
+        )
+        if let sensitiveBrowserReview = ClawGatewayBrowserControlReviewSummary.latest(from: [sensitiveBrowserControl]) {
+            let visibleText = [
+                sensitiveBrowserReview.latestTitle,
+                sensitiveBrowserReview.compactStatus,
+                sensitiveBrowserReview.mode ?? "",
+                sensitiveBrowserReview.actionKind ?? "",
+                sensitiveBrowserReview.browserControlPolicy ?? "",
+                sensitiveBrowserReview.resultStatus ?? "",
+                sensitiveBrowserReview.safetyFlags.joined(separator: " ")
+            ].joined(separator: " ")
+            expect(sensitiveBrowserReview.hasMetadata, "browser control review should parse review metadata")
+            expect(sensitiveBrowserReview.mode == nil, "browser control review should reject unsafe mode")
+            expect(sensitiveBrowserReview.actionKind == nil, "browser control review should reject unsafe action kind")
+            expect(sensitiveBrowserReview.browserControlPolicy == nil, "browser control review should reject unsafe policy")
+            expect(sensitiveBrowserReview.resultStatus == nil, "browser control review should reject unsafe result")
+            expect(sensitiveBrowserReview.targetURLPresent == true, "browser control review should keep URL presence boolean")
+            expect(sensitiveBrowserReview.searchQueryPresent == true, "browser control review should keep search presence boolean")
+            expect(sensitiveBrowserReview.safetyFlags.contains("url-omitted"), "browser control review should expose URL omission flag")
+            expect(visibleText.contains("Authorization") == false, "browser control review should redact Authorization")
+            expect(visibleText.contains("Bearer") == false, "browser control review should redact bearer token")
+            expect(visibleText.contains("raw-token") == false, "browser control review should redact raw token")
+            expect(visibleText.contains("https://") == false, "browser control review should redact web URLs")
+            expect(visibleText.contains("file://") == false, "browser control review should redact file URLs")
+            expect(visibleText.contains("/private") == false, "browser control review should redact local paths")
+            expect(visibleText.contains("toolArguments") == false, "browser control review should redact toolArguments")
+            expect(visibleText.contains("searchQuery") == false, "browser control review should redact raw search key")
+            expect(visibleText.contains("<input") == false, "browser control review should redact HTML")
+            expect(visibleText.contains("candidateLabel") == false, "browser control review should redact candidate labels")
+        } else {
+            failures.append("sensitive browser control review should be derived")
         }
 
         let sensitiveDelivery = ClawGatewayArtifact(

@@ -54,7 +54,7 @@ flowchart TD
   R --> LHEALTH
   SES --> LHEALTH
   SES --> RREVIEW["ClawGatewayTaskReplayGuardReviewSummary<br/>重复任务安全跳过复核"]
-  LHEALTH --> RUN["ClawMissionRunSummary<br/>派生目标、阶段、主动作、风险、证据、Live health、Artifact metadata、提取完整性、Delivery Safety、Gateway 能力、Accessibility、Replay Guard 和 AgentTrace 复核"]
+  LHEALTH --> RUN["ClawMissionRunSummary<br/>派生目标、阶段、主动作、风险、证据、Live health、Artifact metadata、提取完整性、Browser Control、Delivery Safety、Gateway 能力、Accessibility、Replay Guard 和 AgentTrace 复核"]
   RREVIEW --> RUN
   SES --> RUN
   RUN --> UI["SwiftUI Mission Run / iPad 多栏工作台<br/>展示计划、风险、事件、artifact、审批点、复核摘要"]
@@ -80,7 +80,7 @@ flowchart TD
   POL -->|不允许| SKIP["actionSkipped<br/>写 auditLog 说明原因"]
   POL -->|允许| KIND{"action.kind"}
   KIND --> OBS["observeScreen<br/>dry-run、macOS 截图、窗口元数据或受控 Accessibility 摘要"]
-  KIND --> BRO["controlBrowser<br/>HTML/URL trace、浏览器打开/搜索计划"]
+  KIND --> BRO["controlBrowser<br/>HTML/URL trace、浏览器打开/搜索计划和 metadata 复核"]
   KIND --> FILE["manageFiles<br/>workspace 内结构化写文件"]
   KIND --> SH["runShellCommand<br/>结构化命令 dry-run 或 allowlist 执行"]
   KIND --> EXT["extractData<br/>消费已有 artifact 生成结构化数据和完整性 metadata"]

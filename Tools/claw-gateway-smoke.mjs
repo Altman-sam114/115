@@ -80,6 +80,42 @@ const pageTrace = browserTraces.find((trace) => trace.mode === "local-html");
 expect(pageTrace?.title === "Gateway Smoke Page", "missing websocket browser title extraction");
 expect(pageTrace?.tables?.some((table) => table.rows?.some((row) => row.includes("Gateway"))), "missing websocket browser table extraction");
 expect(pageTrace?.forms?.some((form) => form.fields?.some((field) => field.name === "query")), "missing websocket browser form extraction");
+const pageTraceArtifact = findArtifactByTitle(events, "browserTrace", "browser-trace-1");
+assertBrowserControlReviewMetadata(pageTraceArtifact?.metadata, {
+  mode: "browser-control-not-requested",
+  browserControlPolicy: "not-requested",
+  browserControlRequested: false,
+  openInBrowser: false,
+  targetURLPresent: false,
+  searchQueryPresent: false,
+  localHTMLInput: true,
+  networkFetchAttempted: false,
+  networkBlocked: false,
+  appAllowlistEnforced: false,
+  hostAllowlistEnforced: false,
+  executed: false,
+  timedOut: false,
+  resultStatus: "skipped",
+  safetyFlags: ["metadata-only", "tool-arguments-omitted", "url-omitted", "search-query-omitted", "page-content-omitted", "form-fields-omitted", "candidate-labels-omitted", "artifact-payload-not-read"],
+}, "websocket browser trace");
+const pageControlArtifact = findArtifactByTitle(events, "screenshot", "browser-control-1");
+assertBrowserControlReviewMetadata(pageControlArtifact?.metadata, {
+  mode: "browser-control-not-requested",
+  browserControlPolicy: "not-requested",
+  browserControlRequested: false,
+  openInBrowser: false,
+  targetURLPresent: false,
+  searchQueryPresent: false,
+  localHTMLInput: true,
+  networkFetchAttempted: false,
+  networkBlocked: false,
+  appAllowlistEnforced: false,
+  hostAllowlistEnforced: false,
+  executed: false,
+  timedOut: false,
+  resultStatus: "skipped",
+  safetyFlags: ["metadata-only", "tool-arguments-omitted", "url-omitted", "search-query-omitted", "page-content-omitted", "form-fields-omitted", "candidate-labels-omitted", "artifact-payload-not-read"],
+}, "websocket browser control");
 const extractedTrace = browserTraces.find((trace) => trace.mode === "artifact-grounded-extraction");
 expect(Boolean(extractedTrace), "missing websocket artifact-grounded extraction");
 expect(extractedTrace?.sourceArtifacts?.browserTraceCount >= 1, "websocket extraction did not consume browser trace");
@@ -591,6 +627,68 @@ function assertExtractionCompletenessMetadata(metadata, extraction, label) {
   expect(metadata.safetyFlags.includes("row-content-omitted"), `${label} missing row omission safety flag`);
   const serialized = JSON.stringify(metadata);
   for (const forbidden of [token, "Authorization", "Bearer", "toolArguments", "sourcePriority", "Gateway Smoke Page", "https://", "file://", "/sessions/"]) {
+    expect(!serialized.includes(forbidden), `${label} metadata leaked ${forbidden}`);
+  }
+}
+
+function assertBrowserControlReviewMetadata(metadata, expected, label) {
+  expect(metadata && typeof metadata === "object", `${label} missing browser control metadata`);
+  const allowedKeys = [
+    "actionKind",
+    "appAllowlistEnforced",
+    "browserControlPolicy",
+    "browserControlRequested",
+    "browserReview",
+    "executed",
+    "hostAllowlistEnforced",
+    "localHTMLInput",
+    "mode",
+    "networkBlocked",
+    "networkFetchAttempted",
+    "openInBrowser",
+    "resultStatus",
+    "safetyFlags",
+    "searchQueryPresent",
+    "targetURLPresent",
+    "timedOut",
+  ];
+  expect(
+    Object.keys(metadata).sort().join(",") === allowedKeys.join(","),
+    `${label} browser control metadata includes unexpected keys`,
+  );
+  expect(metadata.browserReview === "controlPlan", `${label} browser review metadata mismatch`);
+  expect(metadata.mode === expected.mode, `${label} mode metadata mismatch`);
+  expect(metadata.actionKind === "controlBrowser", `${label} action kind metadata mismatch`);
+  expect(metadata.browserControlPolicy === expected.browserControlPolicy, `${label} browser policy metadata mismatch`);
+  expect(metadata.browserControlRequested === String(expected.browserControlRequested), `${label} request metadata mismatch`);
+  expect(metadata.openInBrowser === String(expected.openInBrowser), `${label} openInBrowser metadata mismatch`);
+  expect(metadata.targetURLPresent === String(expected.targetURLPresent), `${label} URL presence metadata mismatch`);
+  expect(metadata.searchQueryPresent === String(expected.searchQueryPresent), `${label} search presence metadata mismatch`);
+  expect(metadata.localHTMLInput === String(expected.localHTMLInput), `${label} HTML input metadata mismatch`);
+  expect(metadata.networkFetchAttempted === String(expected.networkFetchAttempted), `${label} network fetch metadata mismatch`);
+  expect(metadata.networkBlocked === String(expected.networkBlocked), `${label} network block metadata mismatch`);
+  expect(metadata.appAllowlistEnforced === String(expected.appAllowlistEnforced), `${label} app allowlist metadata mismatch`);
+  expect(metadata.hostAllowlistEnforced === String(expected.hostAllowlistEnforced), `${label} host allowlist metadata mismatch`);
+  expect(metadata.executed === String(expected.executed), `${label} executed metadata mismatch`);
+  expect(metadata.timedOut === String(expected.timedOut), `${label} timeout metadata mismatch`);
+  expect(metadata.resultStatus === expected.resultStatus, `${label} result status metadata mismatch`);
+  for (const flag of expected.safetyFlags) {
+    expect(metadata.safetyFlags.includes(flag), `${label} missing safety flag ${flag}`);
+  }
+  const serialized = JSON.stringify(metadata);
+  for (const forbidden of [
+    token,
+    "Authorization",
+    "Bearer",
+    "toolArguments",
+    "Gateway Smoke Page",
+    "Browser trace is available",
+    "https://",
+    "file://",
+    "/sessions/",
+    "stdout",
+    "stderr",
+  ]) {
     expect(!serialized.includes(forbidden), `${label} metadata leaked ${forbidden}`);
   }
 }

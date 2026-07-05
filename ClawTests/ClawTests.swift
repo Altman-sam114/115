@@ -414,6 +414,41 @@ final class ClawTests: XCTestCase {
         XCTAssertTrue(review.compactStatus.contains("rows 4"))
     }
 
+    func testMissionRunSummaryDerivesBrowserControlReview() throws {
+        let store = ClawStore(autoScanLocalArtifacts: false)
+
+        store.phoneAgentCommand = "打开浏览器搜索资料，整理结果并发到 Slack"
+        store.startAutonomousComputerTakeover()
+        store.approveAndContinueAutonomousLoop()
+        let review = try XCTUnwrap(store.missionRunSummary.gatewayBrowserControlReview)
+
+        XCTAssertGreaterThanOrEqual(review.reviewCount, 2)
+        XCTAssertTrue(review.hasMetadata)
+        XCTAssertEqual(review.mode, "browser-control-dry-run")
+        XCTAssertEqual(review.actionKind, "controlBrowser")
+        XCTAssertEqual(review.browserControlPolicy, "dry-run")
+        XCTAssertEqual(review.browserControlRequested, true)
+        XCTAssertEqual(review.openInBrowser, true)
+        XCTAssertEqual(review.targetURLPresent, true)
+        XCTAssertEqual(review.searchQueryPresent, true)
+        XCTAssertEqual(review.networkFetchAttempted, false)
+        XCTAssertEqual(review.networkBlocked, false)
+        XCTAssertEqual(review.resultStatus, "succeeded")
+        XCTAssertTrue(review.safetyFlags.contains("metadata-only"))
+        XCTAssertTrue(review.safetyFlags.contains("url-omitted"))
+        XCTAssertTrue(review.safetyFlags.contains("search-query-omitted"))
+        XCTAssertTrue(review.safetyFlags.contains("tool-arguments-omitted"))
+        XCTAssertTrue(review.compactStatus.contains("policy dry-run"))
+
+        let browserResult = try XCTUnwrap(store.clawGatewaySessions.first?.results.first { $0.actionKind == .controlBrowser })
+        let browserReview = try XCTUnwrap(ClawGatewayBrowserControlReviewSummary.latest(from: browserResult.artifacts))
+        XCTAssertEqual(browserReview.mode, "browser-control-dry-run")
+        XCTAssertEqual(browserReview.browserControlRequested, true)
+        XCTAssertEqual(browserReview.executed, false)
+        XCTAssertEqual(browserReview.timedOut, false)
+        XCTAssertTrue(browserReview.safetyFlags.contains("candidate-labels-omitted"))
+    }
+
     func testMissionRunSummaryDerivesDeliverySafetyReview() throws {
         let store = ClawStore(autoScanLocalArtifacts: false)
 
@@ -846,6 +881,89 @@ final class ClawTests: XCTestCase {
         let legacyReview = try XCTUnwrap(ClawGatewayExtractionCompletenessReviewSummary.latest(from: [legacyArtifact]))
         XCTAssertFalse(legacyReview.hasMetadata)
         XCTAssertTrue(legacyReview.compactStatus.contains("metadata"))
+    }
+
+    func testBrowserControlReviewFallsBackAndRedactsSensitiveMetadata() throws {
+        let legacyArtifact = ClawGatewayArtifact(
+            kind: .browserTrace,
+            title: "browser-trace-legacy.json",
+            reference: "file:///tmp/browser-trace-legacy.json",
+            isRedacted: false
+        )
+        let legacyReview = try XCTUnwrap(ClawGatewayBrowserControlReviewSummary.latest(from: [legacyArtifact]))
+        XCTAssertEqual(legacyReview.reviewCount, 1)
+        XCTAssertFalse(legacyReview.hasMetadata)
+        XCTAssertNil(legacyReview.browserControlPolicy)
+        XCTAssertTrue(legacyReview.compactStatus.contains("metadata"))
+
+        let artifact = ClawGatewayArtifact(
+            kind: .screenshot,
+            title: "browser-control file:///private/tmp/browser.json https://example.com/private?q=secret",
+            reference: "file:///tmp/browser-control.json",
+            isRedacted: true,
+            metadata: [
+                "browserReview": "controlPlan",
+                "mode": "browser-control-dry-run Authorization: Bearer raw-token",
+                "actionKind": "controlBrowser token=raw-token",
+                "browserControlPolicy": "enabled https://example.com/private",
+                "browserControlRequested": "true",
+                "openInBrowser": "true",
+                "targetURLPresent": "true",
+                "searchQueryPresent": "true",
+                "localHTMLInput": "true",
+                "networkFetchAttempted": "true",
+                "networkBlocked": "true",
+                "appAllowlistEnforced": "true",
+                "hostAllowlistEnforced": "true",
+                "executed": "false",
+                "timedOut": "false",
+                "resultStatus": "failed file:///private/tmp/log.txt",
+                "safetyFlags": "metadata-only,url-omitted,search-query-omitted,page-content-omitted,form-fields-omitted,candidate-labels-omitted,headers={Authorization: Bearer raw-token},searchQuery=secret,html=<input name=password>,candidateLabel=Submit,toolArguments=/private/tmp/input.json",
+                "toolArguments": "{\"url\":\"https://example.com/private\",\"searchQuery\":\"secret\"}"
+            ]
+        )
+
+        let review = try XCTUnwrap(ClawGatewayBrowserControlReviewSummary.latest(from: [artifact]))
+        let visibleText = [
+            review.latestTitle,
+            review.compactStatus,
+            review.mode ?? "",
+            review.actionKind ?? "",
+            review.browserControlPolicy ?? "",
+            review.resultStatus ?? "",
+            review.safetyFlags.joined(separator: " ")
+        ].joined(separator: " ")
+
+        XCTAssertTrue(review.hasMetadata)
+        XCTAssertNil(review.mode)
+        XCTAssertNil(review.actionKind)
+        XCTAssertNil(review.browserControlPolicy)
+        XCTAssertNil(review.resultStatus)
+        XCTAssertEqual(review.browserControlRequested, true)
+        XCTAssertEqual(review.openInBrowser, true)
+        XCTAssertEqual(review.targetURLPresent, true)
+        XCTAssertEqual(review.searchQueryPresent, true)
+        XCTAssertEqual(review.localHTMLInput, true)
+        XCTAssertEqual(review.networkFetchAttempted, true)
+        XCTAssertEqual(review.networkBlocked, true)
+        XCTAssertEqual(review.appAllowlistEnforced, true)
+        XCTAssertEqual(review.hostAllowlistEnforced, true)
+        XCTAssertEqual(review.executed, false)
+        XCTAssertEqual(review.timedOut, false)
+        XCTAssertTrue(review.safetyFlags.contains("metadata-only"))
+        XCTAssertTrue(review.safetyFlags.contains("url-omitted"))
+        XCTAssertTrue(review.safetyFlags.contains("search-query-omitted"))
+        XCTAssertFalse(visibleText.contains("Authorization"))
+        XCTAssertFalse(visibleText.contains("Bearer"))
+        XCTAssertFalse(visibleText.contains("raw-token"))
+        XCTAssertFalse(visibleText.contains("https://"))
+        XCTAssertFalse(visibleText.contains("file://"))
+        XCTAssertFalse(visibleText.contains("/private"))
+        XCTAssertFalse(visibleText.contains("toolArguments"))
+        XCTAssertFalse(visibleText.contains("searchQuery"))
+        XCTAssertFalse(visibleText.contains("secret"))
+        XCTAssertFalse(visibleText.contains("<input"))
+        XCTAssertFalse(visibleText.contains("candidateLabel"))
     }
 
     func testDeliverySafetyReviewFallsBackAndRedactsSensitiveMetadata() throws {

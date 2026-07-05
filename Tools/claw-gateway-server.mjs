@@ -88,6 +88,7 @@ if (process.argv.includes("--emit-events")) {
       console.log(JSON.stringify(event));
     }
   }
+  await flushStdout();
   process.exit(0);
 }
 
@@ -1429,7 +1430,7 @@ async function controlBrowserAction(action, index, config) {
     nextTool: "Attach Playwright or browser-use compatible click/form controller after browser open/search.",
   };
   const artifacts = [
-    await writeArtifact("browserTrace", `browser-trace-${index + 1}.json`, trace, false, config),
+    await writeArtifact("browserTrace", `browser-trace-${index + 1}.json`, trace, false, config, browserControl.metadata),
     browserControl.artifact,
   ];
   return {
@@ -1485,6 +1486,55 @@ async function resolveBrowserInput(action, config) {
   };
 }
 
+function browserControlReviewMetadata(action, browserInput, plan, details = {}) {
+  const browserControlRequested = Boolean(plan?.requested);
+  const networkInputPresent = browserInput?.mode === "network-fetch" ||
+    browserInput?.mode === "network-blocked" ||
+    Boolean(action.toolArguments?.url);
+  const targetURLPresent = Boolean(plan?.targetURL);
+  const searchQueryPresent = Boolean(plan?.searchQuery);
+  const appAllowlistEnforced = Boolean(details.appAllowlistEnforced);
+  const hostAllowlistEnforced = Boolean(details.hostAllowlistEnforced);
+  const safetyFlags = [
+    "metadata-only",
+    "tool-arguments-omitted",
+    "url-omitted",
+    "search-query-omitted",
+    "page-content-omitted",
+    "form-fields-omitted",
+    "candidate-labels-omitted",
+    "artifact-payload-not-read",
+  ];
+  if (networkInputPresent) {
+    safetyFlags.push("network-allowlist-enforced");
+  }
+  if (appAllowlistEnforced) {
+    safetyFlags.push("browser-app-allowlist-enforced");
+  }
+  if (hostAllowlistEnforced) {
+    safetyFlags.push("browser-host-allowlist-enforced");
+  }
+  return compactMetadata({
+    browserReview: "controlPlan",
+    mode: details.mode,
+    actionKind: action.kind === "controlBrowser" ? "controlBrowser" : undefined,
+    browserControlPolicy: details.browserControlPolicy,
+    browserControlRequested,
+    openInBrowser: browserControlRequested,
+    targetURLPresent,
+    searchQueryPresent,
+    localHTMLInput: browserInput?.mode === "local-html",
+    networkFetchAttempted: browserInput?.mode === "network-fetch",
+    networkBlocked: browserInput?.mode === "network-blocked" || details.mode === "browser-control-host-blocked",
+    appAllowlistEnforced,
+    hostAllowlistEnforced,
+    executed: details.executed,
+    timedOut: details.timedOut,
+    resultStatus: details.resultStatus,
+    safetyFlags,
+  });
+}
+
 async function browserControlArtifact(action, index, browserInput, config) {
   const args = action.toolArguments || {};
   const plan = makeBrowserControlPlan(action, args, browserInput);
@@ -1507,11 +1557,19 @@ async function browserControlArtifact(action, index, browserInput, config) {
       browserControlPolicy: "not-requested",
       note: "Browser content extraction ran without requesting desktop browser control.",
     };
+    const metadata = browserControlReviewMetadata(action, browserInput, plan, {
+      mode: payload.mode,
+      browserControlPolicy: payload.browserControlPolicy,
+      executed: false,
+      timedOut: false,
+      resultStatus: "skipped",
+    });
     return {
       status: "skipped",
       summary: "desktop browser control was not requested",
-      artifact: await writeArtifact("screenshot", `browser-control-${index + 1}.json`, payload, true, config),
+      artifact: await writeArtifact("screenshot", `browser-control-${index + 1}.json`, payload, true, config, metadata),
       payload,
+      metadata,
       isRetryable: false,
     };
   }
@@ -1523,11 +1581,19 @@ async function browserControlArtifact(action, index, browserInput, config) {
       browserControlPolicy: "dry-run",
       note: "Set CLAW_ALLOW_BROWSER_CONTROL=1, CLAW_BROWSER_APP_ALLOWLIST, and CLAW_BROWSER_HOST_ALLOWLIST to let the Gateway open/search a desktop browser.",
     };
+    const metadata = browserControlReviewMetadata(action, browserInput, plan, {
+      mode: payload.mode,
+      browserControlPolicy: payload.browserControlPolicy,
+      executed: false,
+      timedOut: false,
+      resultStatus: "succeeded",
+    });
     return {
       status: "succeeded",
       summary: `desktop browser control planned for ${plan.browserApp}`,
-      artifact: await writeArtifact("screenshot", `browser-control-${index + 1}.json`, payload, true, config),
+      artifact: await writeArtifact("screenshot", `browser-control-${index + 1}.json`, payload, true, config, metadata),
       payload,
+      metadata,
       isRetryable: false,
     };
   }
@@ -1539,11 +1605,19 @@ async function browserControlArtifact(action, index, browserInput, config) {
       browserControlPolicy: "enabled",
       note: "Desktop browser control is currently implemented for macOS Gateway hosts through osascript.",
     };
+    const metadata = browserControlReviewMetadata(action, browserInput, plan, {
+      mode: payload.mode,
+      browserControlPolicy: payload.browserControlPolicy,
+      executed: false,
+      timedOut: false,
+      resultStatus: "failed",
+    });
     return {
       status: "failed",
       summary: `${action.title} requires macOS browser control; current platform is ${process.platform}`,
-      artifact: await writeArtifact("screenshot", `browser-control-${index + 1}.json`, payload, true, config),
+      artifact: await writeArtifact("screenshot", `browser-control-${index + 1}.json`, payload, true, config, metadata),
       payload,
+      metadata,
       isRetryable: true,
     };
   }
@@ -1556,11 +1630,20 @@ async function browserControlArtifact(action, index, browserInput, config) {
       appAllowlist: [...config.browserAppAllowlist],
       note: "The requested browser app is not in CLAW_BROWSER_APP_ALLOWLIST.",
     };
+    const metadata = browserControlReviewMetadata(action, browserInput, plan, {
+      mode: payload.mode,
+      browserControlPolicy: payload.browserControlPolicy,
+      appAllowlistEnforced: true,
+      executed: false,
+      timedOut: false,
+      resultStatus: "failed",
+    });
     return {
       status: "failed",
       summary: `${action.title} blocked: browser app '${plan.browserApp}' is not enabled by Gateway policy`,
-      artifact: await writeArtifact("screenshot", `browser-control-${index + 1}.json`, payload, true, config),
+      artifact: await writeArtifact("screenshot", `browser-control-${index + 1}.json`, payload, true, config, metadata),
       payload,
+      metadata,
       isRetryable: true,
     };
   }
@@ -1575,11 +1658,21 @@ async function browserControlArtifact(action, index, browserInput, config) {
         hostAllowlist: [...config.browserHostAllowlist],
         note: "The target URL host is not in CLAW_BROWSER_HOST_ALLOWLIST.",
       };
+      const metadata = browserControlReviewMetadata(action, browserInput, plan, {
+        mode: payload.mode,
+        browserControlPolicy: payload.browserControlPolicy,
+        appAllowlistEnforced: true,
+        hostAllowlistEnforced: true,
+        executed: false,
+        timedOut: false,
+        resultStatus: "failed",
+      });
       return {
         status: "failed",
         summary: `${action.title} blocked: browser host '${url.hostname}' is not enabled by Gateway policy`,
-        artifact: await writeArtifact("screenshot", `browser-control-${index + 1}.json`, payload, true, config),
+        artifact: await writeArtifact("screenshot", `browser-control-${index + 1}.json`, payload, true, config, metadata),
         payload,
+        metadata,
         isRetryable: true,
       };
     }
@@ -1601,13 +1694,23 @@ async function browserControlArtifact(action, index, browserInput, config) {
       ? "Gateway opened or searched in an allowlisted desktop browser."
       : "Browser automation failed before the browser reached the requested state.",
   };
+  const metadata = browserControlReviewMetadata(action, browserInput, plan, {
+    mode: payload.mode,
+    browserControlPolicy: payload.browserControlPolicy,
+    appAllowlistEnforced: true,
+    hostAllowlistEnforced: Boolean(plan.targetURL),
+    executed: payload.executed,
+    timedOut: payload.timedOut,
+    resultStatus: execution.exitCode === 0 ? "succeeded" : "failed",
+  });
   return {
     status: execution.exitCode === 0 ? "succeeded" : "failed",
     summary: execution.exitCode === 0
       ? `${action.title} opened ${plan.browserApp}`
       : `${action.title} failed while opening ${plan.browserApp}: ${normalizeText(execution.stderr || execution.stdout || "osascript failed").slice(0, 160)}`,
-    artifact: await writeArtifact("screenshot", `browser-control-${index + 1}.json`, payload, true, config),
+    artifact: await writeArtifact("screenshot", `browser-control-${index + 1}.json`, payload, true, config, metadata),
     payload,
+    metadata,
     isRetryable: execution.exitCode !== 0,
   };
 }
@@ -2491,6 +2594,12 @@ function metadataValue(value) {
     return value ? "true" : "false";
   }
   return String(value).trim();
+}
+
+function flushStdout() {
+  return new Promise((resolve) => {
+    process.stdout.write("", resolve);
+  });
 }
 
 function parseCSV(value) {

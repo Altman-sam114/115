@@ -165,6 +165,7 @@ final class ClawStore: ObservableObject {
             artifactKinds: missionRunArtifactKinds(from: session),
             artifactMetadataReview: missionRunArtifactMetadataReview(from: session),
             gatewayExtractionCompletenessReview: missionRunGatewayExtractionCompletenessReview(from: session),
+            gatewayBrowserControlReview: missionRunGatewayBrowserControlReview(from: session),
             gatewayDeliverySafetyReview: missionRunGatewayDeliverySafetyReview(from: session),
             agentTraceReview: missionRunAgentTraceReview(from: session),
             gatewayAccessibilityReview: missionRunGatewayAccessibilityReview(from: session),
@@ -305,6 +306,10 @@ final class ClawStore: ObservableObject {
 
     private func missionRunGatewayExtractionCompletenessReview(from session: ClawGatewaySession?) -> ClawGatewayExtractionCompletenessReviewSummary? {
         ClawGatewayExtractionCompletenessReviewSummary.latest(from: session)
+    }
+
+    private func missionRunGatewayBrowserControlReview(from session: ClawGatewaySession?) -> ClawGatewayBrowserControlReviewSummary? {
+        ClawGatewayBrowserControlReviewSummary.latest(from: session)
     }
 
     private func missionRunGatewayDeliverySafetyReview(from session: ClawGatewaySession?) -> ClawGatewayDeliverySafetyReviewSummary? {
@@ -1826,8 +1831,18 @@ enum ClawGatewaySimulator {
                 status: .succeeded,
                 summary: "浏览器流程完成：打开页面、搜索、提取结果并保存轨迹。",
                 artifacts: [
-                    artifact(.browserTrace, "browser-trace-\(index + 1).json", redacted: false),
-                    artifact(.screenshot, "browser-\(index + 1).png", redacted: true)
+                    artifact(
+                        .browserTrace,
+                        "browser-trace-\(index + 1).json",
+                        redacted: false,
+                        metadata: browserControlReviewMetadata(mode: "browser-control-dry-run", resultStatus: "succeeded")
+                    ),
+                    artifact(
+                        .screenshot,
+                        "browser-\(index + 1).png",
+                        redacted: true,
+                        metadata: browserControlReviewMetadata(mode: "browser-control-dry-run", resultStatus: "succeeded")
+                    )
                 ]
             )
         case .operateDesktopApp:
@@ -2031,6 +2046,31 @@ enum ClawGatewaySimulator {
             "messageDraftCount": "0",
             "sourceArtifactKinds": "browserTrace,fileDiff,commandOutput,screenObservation,accessibilityTree",
             "safetyFlags": "metadata-only,row-content-omitted,source-values-omitted,tool-arguments-omitted,artifact-payload-not-read"
+        ]
+    }
+
+    private static func browserControlReviewMetadata(
+        mode: String,
+        resultStatus: String
+    ) -> [String: String] {
+        [
+            "browserReview": "controlPlan",
+            "mode": mode,
+            "actionKind": ClawMobileActionKind.controlBrowser.rawValue,
+            "browserControlPolicy": "dry-run",
+            "browserControlRequested": "true",
+            "openInBrowser": "true",
+            "targetURLPresent": "true",
+            "searchQueryPresent": "true",
+            "localHTMLInput": "false",
+            "networkFetchAttempted": "false",
+            "networkBlocked": "false",
+            "appAllowlistEnforced": "false",
+            "hostAllowlistEnforced": "false",
+            "executed": "false",
+            "timedOut": "false",
+            "resultStatus": resultStatus,
+            "safetyFlags": "metadata-only,tool-arguments-omitted,url-omitted,search-query-omitted,page-content-omitted,form-fields-omitted,candidate-labels-omitted,artifact-payload-not-read"
         ]
     }
 

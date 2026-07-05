@@ -190,8 +190,8 @@ enum ClawGatewayEventFixture {
             ]
         case .controlBrowser:
             return [
-                artifact(.browserTrace, "fixture-browser-\(suffix).json", redacted: false),
-                artifact(.screenshot, "fixture-browser-\(suffix).png", redacted: true)
+                artifact(.browserTrace, "fixture-browser-\(suffix).json", redacted: false, metadata: browserControlReviewMetadata()),
+                artifact(.screenshot, "fixture-browser-\(suffix).png", redacted: true, metadata: browserControlReviewMetadata())
             ]
         case .manageFiles:
             return [artifact(.fileDiff, "fixture-file-diff-\(suffix).json", redacted: false)]
@@ -209,14 +209,38 @@ enum ClawGatewayEventFixture {
     private static func artifact(
         _ kind: ClawGatewayArtifactKind,
         _ title: String,
-        redacted: Bool
+        redacted: Bool,
+        metadata: [String: String]? = nil
     ) -> ClawGatewayArtifact {
         ClawGatewayArtifact(
             kind: kind,
             title: title,
             reference: "\(kind.rawValue)://fixture/\(title)",
-            isRedacted: redacted
+            isRedacted: redacted,
+            metadata: metadata
         )
+    }
+
+    private static func browserControlReviewMetadata() -> [String: String] {
+        [
+            "browserReview": "controlPlan",
+            "mode": "browser-control-dry-run",
+            "actionKind": ClawMobileActionKind.controlBrowser.rawValue,
+            "browserControlPolicy": "dry-run",
+            "browserControlRequested": "true",
+            "openInBrowser": "true",
+            "targetURLPresent": "true",
+            "searchQueryPresent": "true",
+            "localHTMLInput": "false",
+            "networkFetchAttempted": "false",
+            "networkBlocked": "false",
+            "appAllowlistEnforced": "false",
+            "hostAllowlistEnforced": "false",
+            "executed": "false",
+            "timedOut": "false",
+            "resultStatus": "succeeded",
+            "safetyFlags": "metadata-only,tool-arguments-omitted,url-omitted,search-query-omitted,page-content-omitted,form-fields-omitted,candidate-labels-omitted,artifact-payload-not-read"
+        ]
     }
 
     private static func summary(

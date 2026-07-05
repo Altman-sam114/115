@@ -15,12 +15,62 @@
 
 - 项目方向：OpenClaw 式电脑接管智能体，iPhone 作为控制台，桌面 Claw Gateway 作为执行端。
 - 当前 schema：`claw.computer.control.v1`。
-- 当前核心闭环：用户自然语言任务 -> `PhoneAgentPlanner` -> `ClawMobileTask` -> `ClawMobileEnvelope` -> 模拟事件流或带有界重连/ping 可观测性和进程内 task replay guard 的 WebSocket Gateway -> `ClawGatewayEvent` -> session reducer -> Mission Run / Live Gateway 连接健康 / Artifact metadata 复核摘要 / 提取完整性复核摘要 / 草稿最终提交安全复核摘要 / Gateway 能力复核摘要 / Accessibility 复核摘要 / Replay Guard 复核摘要 / AgentTrace 复核 UI / iPad 多栏工作台展示和审批。
-- 当前 Gateway 能力：进程内 task replay guard、session-start 能力快照 `auditLog`、屏幕观察 dry-run/截图/窗口元数据/受控 Accessibility 摘要策略、浏览器 HTML/URL trace、浏览器打开/搜索计划、workspace 文件写入、Shell dry-run/allowlist 执行、带 metadata-only 完整性复核的结构化提取、带 metadata-only 草稿/最终提交安全复核的 messageDraft/桌面 App 审批闸门、带 readiness/checklist/risk/stop/handoff 与安全 metadata 的 `runAgentLoop`/`agentTrace`。
+- 当前核心闭环：用户自然语言任务 -> `PhoneAgentPlanner` -> `ClawMobileTask` -> `ClawMobileEnvelope` -> 模拟事件流或带有界重连/ping 可观测性和进程内 task replay guard 的 WebSocket Gateway -> `ClawGatewayEvent` -> session reducer -> Mission Run / Live Gateway 连接健康 / Artifact metadata 复核摘要 / 提取完整性复核摘要 / 浏览器控制计划复核摘要 / 草稿最终提交安全复核摘要 / Gateway 能力复核摘要 / Accessibility 复核摘要 / Replay Guard 复核摘要 / AgentTrace 复核 UI / iPad 多栏工作台展示和审批。
+- 当前 Gateway 能力：进程内 task replay guard、session-start 能力快照 `auditLog`、屏幕观察 dry-run/截图/窗口元数据/受控 Accessibility 摘要策略、浏览器 HTML/URL trace、带 metadata-only 计划复核的浏览器打开/搜索计划、workspace 文件写入、Shell dry-run/allowlist 执行、带 metadata-only 完整性复核的结构化提取、带 metadata-only 草稿/最终提交安全复核的 messageDraft/桌面 App 审批闸门、带 readiness/checklist/risk/stop/handoff 与安全 metadata 的 `runAgentLoop`/`agentTrace`。
 - 当前协作闭环：默认 `main` 直推，GitHub Actions 生成未加密 `ci-results` 结果包，Agent C 下载并核对 manifest/JUnit/日志后验收。
 - 当前主要遗留：完整 macOS Accessibility bridge、Playwright/browser-use 兼容控制器、真实多轮 agent loop、live Gateway 后台保活/真实心跳协议/配对、完整 artifact 内容复核体验。
 
 ## 历史记录
+
+### v0.21 / 浏览器控制计划复核
+
+日期：2026-07-05
+
+核心变更：
+
+- Gateway `controlBrowser` 的 `browserTrace` 和 `browser-control-*.json` artifact event 增加 metadata-only 的 Browser Control 摘要，覆盖是否请求打开浏览器、URL/search 是否仅以 presence 记录、HTML 输入、network fetch/blocked、app/host allowlist、执行状态和安全 omission flags。
+- 新增 `ClawGatewayBrowserControlReviewSummary`，手机端只从 artifact event metadata 或 legacy browser artifact 派生浏览器控制计划复核摘要，不读取 Gateway `file://` payload。
+- Mission Run、Gateway session card 和单个 result row 展示 Browser Control 复核行；metadata 缺失时降级为“metadata 待同步”，不把抽取或 dry-run 误判为真实浏览器点击。
+- Gateway simulator 和 `Tools/ClawGatewayEventFixture.swift` 同步输出同类安全 metadata，保持模拟、fixture、direct smoke 和 WebSocket smoke 一致。
+- Gateway direct/WebSocket smoke 断言 Browser Control metadata 固定键、策略字段和 omission flags，并确认 metadata 不泄露 raw URL、search query、HTML/page text、form/candidate label、stdout/stderr、token 或 `toolArguments`。
+- Gateway `--emit-events` 在退出前等待 stdout flush，避免 metadata 增多后 direct smoke 偶发截断事件流。
+- XCTest 和 Swift logic smoke 覆盖 Mission Run 派生、legacy metadata fallback、浏览器策略字段和恶意 metadata 脱敏。
+- 同步 README、协议、flow/flowchart 和测试说明；本轮不新增 schema/event/action/artifact kind，不实现真实浏览器点击/表单控制，不扩大 Gateway 权限。
+
+关键文件：
+
+- `Tools/claw-gateway-server.mjs`
+- `Tools/claw-gateway-direct-smoke.mjs`
+- `Tools/claw-gateway-smoke.mjs`
+- `Tools/ClawGatewayEventFixture.swift`
+- `Claw/Core/ClawModels.swift`
+- `Claw/Services/ClawStore.swift`
+- `Claw/Views/ContentView.swift`
+- `ClawTests/ClawTests.swift`
+- `Tools/LogicSmoke.swift`
+- `README.md`
+- `Docs/claw-mobile-gateway-protocol.md`
+- `md/flow/flow.md`
+- `md/flow/flowchart.md`
+- `md/test/test.md`
+- `md/prompt/v0（核心智能能力）/v0.21（浏览器控制计划复核）.md`
+- `update_log.md`
+
+验证结果：
+
+- `node --check Tools/claw-gateway-server.mjs` 通过。
+- `node --check Tools/claw-gateway-direct-smoke.mjs` 通过。
+- `node --check Tools/claw-gateway-smoke.mjs` 通过。
+- Swift logic smoke 编译通过。
+- `.build/claw-logic-smoke` 通过，输出 `Claw logic smoke passed`。
+- `node Tools/claw-gateway-direct-smoke.mjs` 通过，输出 `Claw Gateway direct smoke passed (198 events)`。
+- `node Tools/claw-gateway-smoke.mjs` 在普通沙箱内因 `listen EPERM 127.0.0.1:18879` 被阻断，升级权限后通过，输出 `Claw Gateway smoke passed (51 events)`。
+- 待完成 `git diff --check`、workflow YAML 语法检查、push `origin/main` 和 GitHub Actions artifact 复判。
+
+遗留事项：
+
+- 当前是 metadata-only 浏览器控制计划复核，不是网页正文 viewer、真实点击/表单执行或 Playwright/browser-use 控制器。
+- 完整 macOS Accessibility bridge、浏览器真实点击/表单控制、完整 artifact payload 复核体验和真实多轮 agent loop 仍是后续遗留。
 
 ### v0.20 / 草稿最终提交安全复核
 

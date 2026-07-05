@@ -1510,6 +1510,20 @@ struct ClawGatewayArtifactMetadataReviewSummary: Equatable, Codable, Sendable {
             "allowedkeycount": "allowedKeyCount",
             "blockedkeycount": "blockedKeyCount",
             "blockedsubmitkeycount": "blockedSubmitKeyCount",
+            "browserreview": "browserReview",
+            "browsercontrolpolicy": "browserControlPolicy",
+            "browsercontrolrequested": "browserControlRequested",
+            "openinbrowser": "openInBrowser",
+            "targeturlpresent": "targetURLPresent",
+            "searchquerypresent": "searchQueryPresent",
+            "localhtmlinput": "localHTMLInput",
+            "networkfetchattempted": "networkFetchAttempted",
+            "networkblocked": "networkBlocked",
+            "appallowlistenforced": "appAllowlistEnforced",
+            "hostallowlistenforced": "hostAllowlistEnforced",
+            "executed": "executed",
+            "timedout": "timedOut",
+            "resultstatus": "resultStatus",
             "extractionreview": "extractionReview",
             "filediffcount": "fileDiffCount",
             "firstsessionid": "firstSessionID",
@@ -1647,6 +1661,146 @@ struct ClawGatewayExtractionCompletenessReviewSummary: Equatable, Codable, Senda
             "row-content-omitted",
             "source-values-omitted",
             "tool-arguments-omitted"
+        ]
+        return ClawArtifactMetadataParser.listValue(value).filter { allowed.contains($0) }
+    }
+}
+
+struct ClawGatewayBrowserControlReviewSummary: Equatable, Codable, Sendable {
+    var reviewCount: Int
+    var latestTitle: String
+    var hasMetadata: Bool
+    var mode: String?
+    var actionKind: String?
+    var browserControlPolicy: String?
+    var browserControlRequested: Bool?
+    var openInBrowser: Bool?
+    var targetURLPresent: Bool?
+    var searchQueryPresent: Bool?
+    var localHTMLInput: Bool?
+    var networkFetchAttempted: Bool?
+    var networkBlocked: Bool?
+    var appAllowlistEnforced: Bool?
+    var hostAllowlistEnforced: Bool?
+    var executed: Bool?
+    var timedOut: Bool?
+    var resultStatus: String?
+    var safetyFlags: [String]
+    var isRedacted: Bool
+
+    var compactStatus: String {
+        guard hasMetadata else {
+            return "已收到浏览器控制 artifact，metadata 待同步。"
+        }
+        let policy = browserControlPolicy.map { "policy \($0)" } ?? "policy 待复核"
+        let request = browserControlRequested == true ? "请求打开浏览器" : "未请求打开"
+        let network = networkBlocked == true ? "network blocked" : "network checked"
+        return "\(policy) · \(request) · \(network)"
+    }
+
+    static func latest(from session: ClawGatewaySession?) -> ClawGatewayBrowserControlReviewSummary? {
+        guard let session else {
+            return nil
+        }
+        return latest(from: session.allArtifacts)
+    }
+
+    static func latest(from artifacts: [ClawGatewayArtifact]) -> ClawGatewayBrowserControlReviewSummary? {
+        let browserArtifacts = artifacts.filter(isBrowserControlArtifact)
+        guard let latest = browserArtifacts.last else {
+            return nil
+        }
+        let metadata = latest.metadata ?? [:]
+        let hasReviewMetadata = ClawArtifactMetadataParser.cleanValue(metadata["browserReview"]) == "controlPlan"
+        return ClawGatewayBrowserControlReviewSummary(
+            reviewCount: browserArtifacts.count,
+            latestTitle: ClawArtifactMetadataDisplaySanitizer.safeValue(latest.title) ?? latest.kind.title,
+            hasMetadata: hasReviewMetadata,
+            mode: allowedMode(metadata["mode"]),
+            actionKind: allowedActionKind(metadata["actionKind"]),
+            browserControlPolicy: allowedPolicy(metadata["browserControlPolicy"]),
+            browserControlRequested: ClawArtifactMetadataParser.boolValue(metadata["browserControlRequested"]),
+            openInBrowser: ClawArtifactMetadataParser.boolValue(metadata["openInBrowser"]),
+            targetURLPresent: ClawArtifactMetadataParser.boolValue(metadata["targetURLPresent"]),
+            searchQueryPresent: ClawArtifactMetadataParser.boolValue(metadata["searchQueryPresent"]),
+            localHTMLInput: ClawArtifactMetadataParser.boolValue(metadata["localHTMLInput"]),
+            networkFetchAttempted: ClawArtifactMetadataParser.boolValue(metadata["networkFetchAttempted"]),
+            networkBlocked: ClawArtifactMetadataParser.boolValue(metadata["networkBlocked"]),
+            appAllowlistEnforced: ClawArtifactMetadataParser.boolValue(metadata["appAllowlistEnforced"]),
+            hostAllowlistEnforced: ClawArtifactMetadataParser.boolValue(metadata["hostAllowlistEnforced"]),
+            executed: ClawArtifactMetadataParser.boolValue(metadata["executed"]),
+            timedOut: ClawArtifactMetadataParser.boolValue(metadata["timedOut"]),
+            resultStatus: allowedResultStatus(metadata["resultStatus"]),
+            safetyFlags: allowedSafetyFlags(metadata["safetyFlags"]),
+            isRedacted: latest.isRedacted
+        )
+    }
+
+    private static func isBrowserControlArtifact(_ artifact: ClawGatewayArtifact) -> Bool {
+        if ClawArtifactMetadataParser.cleanValue(artifact.metadata?["browserReview"]) == "controlPlan" {
+            return true
+        }
+        if artifact.kind == .browserTrace && artifact.title.hasPrefix("browser-trace-") {
+            return true
+        }
+        if artifact.kind == .screenshot {
+            return artifact.title.hasPrefix("browser-control-") || artifact.title.hasPrefix("browser-")
+        }
+        return false
+    }
+
+    private static func allowedMode(_ value: String?) -> String? {
+        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
+            return nil
+        }
+        let allowed = [
+            "browser-control-not-requested",
+            "browser-control-dry-run",
+            "browser-control-unavailable",
+            "browser-control-policy-blocked",
+            "browser-control-host-blocked",
+            "browser-control-opened",
+            "browser-control-failed"
+        ]
+        return allowed.contains(clean) ? clean : nil
+    }
+
+    private static func allowedActionKind(_ value: String?) -> String? {
+        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
+            return nil
+        }
+        return clean == "controlBrowser" ? clean : nil
+    }
+
+    private static func allowedPolicy(_ value: String?) -> String? {
+        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
+            return nil
+        }
+        let allowed = ["not-requested", "dry-run", "enabled"]
+        return allowed.contains(clean) ? clean : nil
+    }
+
+    private static func allowedResultStatus(_ value: String?) -> String? {
+        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
+            return nil
+        }
+        let allowed = ["skipped", "succeeded", "failed"]
+        return allowed.contains(clean) ? clean : nil
+    }
+
+    private static func allowedSafetyFlags(_ value: String?) -> [String] {
+        let allowed = [
+            "artifact-payload-not-read",
+            "browser-app-allowlist-enforced",
+            "browser-host-allowlist-enforced",
+            "candidate-labels-omitted",
+            "form-fields-omitted",
+            "metadata-only",
+            "network-allowlist-enforced",
+            "page-content-omitted",
+            "search-query-omitted",
+            "tool-arguments-omitted",
+            "url-omitted"
         ]
         return ClawArtifactMetadataParser.listValue(value).filter { allowed.contains($0) }
     }
@@ -2070,6 +2224,7 @@ struct ClawMissionRunSummary: Equatable, Codable, Sendable {
     var artifactKinds: [ClawGatewayArtifactKind]
     var artifactMetadataReview: ClawGatewayArtifactMetadataReviewSummary?
     var gatewayExtractionCompletenessReview: ClawGatewayExtractionCompletenessReviewSummary?
+    var gatewayBrowserControlReview: ClawGatewayBrowserControlReviewSummary?
     var gatewayDeliverySafetyReview: ClawGatewayDeliverySafetyReviewSummary?
     var agentTraceReview: ClawAgentTraceReviewSummary?
     var gatewayAccessibilityReview: ClawGatewayAccessibilityReviewSummary?
