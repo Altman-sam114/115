@@ -66,7 +66,7 @@
 - `node Tools/claw-gateway-smoke.mjs` 在普通沙箱内因 `listen EPERM 127.0.0.1:18879` 被阻断，升级权限后通过，输出 `Claw Gateway smoke passed (72 events)`。
 - `git diff --check` 通过。
 - `ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci-results.yml"); puts "yaml ok"'` 通过，输出 `yaml ok`。
-- 待 push `origin/main` 后由 GitHub Actions 覆盖 xcodebuild、Swift logic smoke、Gateway direct/WebSocket smoke 和结果包验收。
+- GitHub Actions run `28741888192` attempt `1` 对 commit `eb90f5bdbc327da864c7a5a3fe60852c5334b269` 通过，artifact `claw-ci-v0.2-main-eb90f5bdbc32-run28741888192-attempt1` 已下载到 `/private/tmp/claw-c-review-28741888192/` 并核对 manifest、JUnit、failure summary、Swift/Gateway smoke 和 xcodebuild 日志。
 
 遗留事项：
 
