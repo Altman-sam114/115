@@ -91,17 +91,19 @@ v0.18 起，手机端所有专用 metadata 复核摘要共享同一套 UI 安全
 
 v0.19 起，`extractData` 输出 artifact event 会附带 metadata-only 的提取完整性复核摘要。建议 metadata 键包括 `extractionReview=artifactGrounded`、`mode`、`validateCompleteness`、`rowCount`、`completenessStatus`、`browserTraceCount`、`fileDiffCount`、`commandOutputCount`、`screenObservationCount`、`accessibilityTreeCount`、`messageDraftCount`、`sourceArtifactKinds` 和 `safetyFlags`。手机端可显示提取模式、完整性状态、行数、来源 artifact 计数、来源 kind 和安全标志；不得读取 `file://` payload，不得展示 row 内容、URL/path、命令输出、网页正文、草稿正文、联系人、raw token、Authorization/header、cookie 或 `toolArguments`。metadata 缺失时必须降级为“metadata 待同步”。该摘要不新增 schema 字段、action kind、artifact kind 或 event kind，也不扩大 Gateway 权限。
 
+v0.20 起，`messageDraft` 和 `operateDesktopApp` 相关 artifact event 会附带 metadata-only 的草稿/最终提交安全复核摘要。建议 metadata 键包括 `deliveryReview=finalSubmitGate`、`mode`、`actionKind`、`targetKind`、`finalSubmitRequiresApproval`、`userApprovalRequired`、`draftBodyOmitted`、`pasteTextOmitted`、`submitBlocked`、`allowedKeyCount`、`blockedKeyCount`、`blockedSubmitKeyCount` 和 `safetyFlags`。手机端可显示草稿或桌面动作是否停在最终提交闸门、是否需要用户确认、草稿正文/paste text 是否省略和提交键阻断计数；不得读取 `file://` payload，不得展示草稿正文、粘贴文本、按键原文、URL/path、联系人、raw token、Authorization/header、cookie 或 `toolArguments`。metadata 缺失时必须降级为“metadata 待同步”。该摘要不新增 schema 字段、action kind、artifact kind 或 event kind，也不扩大 Gateway 权限。
+
 v0.11 起，Gateway Session 面板在 Live request 附近展示连接健康摘要。该摘要只存在于手机端 presentation layer：不会写入 `ClawMobileEnvelope`，不会回传给 Gateway，不新增 `ClawGatewayEventKind`、action kind 或 artifact kind，也不读取 Gateway `file://` artifact payload。为了保持 live 状态可解释，手机端收到 `.gatewayConnected`、`.actionStarted`、`.artifactStored`、`.actionCompleted`、`.actionFailed`、`.approvalRequested` 和 `.actionSkipped` 等非终态 live 事件后保持 `streaming`，`.sessionCompleted`、`.fallbackUsed` 和 transport error 仍走终态或 fallback 路径。
 
 失败动作可以标记 `isRetryable`。手机端二次确认后，网关可重试失败动作并把新的 artifact 追加到对应 result。
 
 ## Mission Run Presentation Layer
 
-v0.2 增加的 Mission Run 任务回合摘要只存在于手机端展示层。`ClawMissionRunSummary` 从 `ClawAutonomousLoopState`、最新 `ClawMobileTask` 和最新 `ClawGatewaySession` 派生，用于在电脑接管首屏展示当前目标、阶段、回合进度、下一步主动作、风险分、审批点、阻断数、artifact kind 摘要、Artifact metadata review、Extraction completeness review、最近 AgentTrace 复核摘要、Gateway capability review、Accessibility artifact review、Gateway Replay Guard review 和成功/失败/可重试计数。
+v0.2 增加的 Mission Run 任务回合摘要只存在于手机端展示层。`ClawMissionRunSummary` 从 `ClawAutonomousLoopState`、最新 `ClawMobileTask` 和最新 `ClawGatewaySession` 派生，用于在电脑接管首屏展示当前目标、阶段、回合进度、下一步主动作、风险分、审批点、阻断数、artifact kind 摘要、Artifact metadata review、Extraction completeness review、Delivery Safety review、最近 AgentTrace 复核摘要、Gateway capability review、Accessibility artifact review、Gateway Replay Guard review 和成功/失败/可重试计数。
 
 v0.8 在 iPad/regular horizontal size class 上把同一组 presentation layer 信息重排为多栏复核工作台：左侧为命令输入和 Mission Run 主操作，右侧为计划、Claw 电脑任务、Gateway 会话、事件/envelope、权限和日志。compact iPhone 布局仍保持单栏滚动。
 
-这不是 envelope 字段：Mission Run、Live Gateway health summary、Artifact metadata review、Extraction completeness review、Accessibility artifact review、Replay Guard review 和 iPad 多栏工作台都不写入 `ClawMobileEnvelope`，不改变 `claw.computer.control.v1` schema，不新增 action kind、artifact kind、Gateway event kind，也不扩大桌面 Gateway 的执行权限。桌面端仍只接收结构化 `task.actions[].toolArguments`，手机端仍只负责计划、审批、发送 envelope 和查看事件。手机端展示 Artifact metadata、Extraction completeness、AgentTrace、Gateway capability、Accessibility artifact、Replay Guard 和 Live Gateway health summary 时只读取安全 metadata 或既有事件摘要，不读取 Gateway `file://` artifact 内容；所有专用 metadata review 的 UI 可见字符串必须先经过同一套敏感值脱敏。
+这不是 envelope 字段：Mission Run、Live Gateway health summary、Artifact metadata review、Extraction completeness review、Delivery Safety review、Accessibility artifact review、Replay Guard review 和 iPad 多栏工作台都不写入 `ClawMobileEnvelope`，不改变 `claw.computer.control.v1` schema，不新增 action kind、artifact kind、Gateway event kind，也不扩大桌面 Gateway 的执行权限。桌面端仍只接收结构化 `task.actions[].toolArguments`，手机端仍只负责计划、审批、发送 envelope 和查看事件。手机端展示 Artifact metadata、Extraction completeness、Delivery Safety、AgentTrace、Gateway capability、Accessibility artifact、Replay Guard 和 Live Gateway health summary 时只读取安全 metadata 或既有事件摘要，不读取 Gateway `file://` artifact 内容；所有专用 metadata review 的 UI 可见字符串必须先经过同一套敏感值脱敏。
 
 ## Live Gateway Transport
 
@@ -135,14 +137,15 @@ v0.13 起，桌面 Gateway 原型增加进程内 task replay guard，作为 v0.1
   - `extractData` 会消费同一 session 内的 browser trace、file diff、command output、screen observation 和 accessibility tree artifact，生成 `artifact-grounded-extraction` 结构化结果，并在 artifact event metadata 上附 metadata-only 的完整性复核摘要；metadata 只含计数、状态、source kind 和 safety flags，不含 row 内容、URL/path、命令输出或 `toolArguments`。
   - `runAgentLoop` 会消费同一 session 内的 artifact context，写出 `agentTrace` artifact。v0.6 保留旧字段 `sourceArtifacts`、`evidenceRows`、`observations`、`nextActions`、`safetyGates`，并新增 `readiness`、`decisionChecklist`、`selectedNextAction`、`riskTags`、`stopReason`、`handoffSummary`，用于说明证据分数、满足/缺失信号、当前推荐下一步、风险标签和停在审批/最终提交前的原因。v0.7 会把这些安全摘要压缩成 artifact event 上的可选字符串 `metadata`，供手机端复核；旧事件缺少 metadata 仍合法。这些字段不进入 `ClawMobileEnvelope` schema，也不能作为可执行指令。
   - `observeScreen` 默认 dry-run；设置 `CLAW_ALLOW_SCREEN_CAPTURE=1` 后可在 macOS 上生成真实截图 artifact，设置 `CLAW_ALLOW_WINDOW_METADATA=1` 后可读取前台窗口元数据，设置 `CLAW_ALLOW_ACCESSIBILITY_OBSERVE=1` 后可在授权 macOS Gateway 上通过固定只读 System Events 脚本采集前台 App/窗口和有限候选控件摘要。该摘要只写既有 `accessibilityTree` artifact，不执行点击、输入或任意选择器；无权限或非 macOS 时写入可审计 accessibility-failed/accessibility-unavailable 结果。
-  - `operateDesktopApp` 默认停在审批闸门；设置 `CLAW_ALLOW_DESKTOP_CONTROL=1`、`CLAW_DESKTOP_APP_ALLOWLIST` 和 `CLAW_DESKTOP_KEY_ALLOWLIST` 后，可在 macOS 上聚焦允许的 App、粘贴结构化草稿、执行允许的非提交快捷键，并在最终提交前回到用户确认。
+  - `operateDesktopApp` 默认停在审批闸门；设置 `CLAW_ALLOW_DESKTOP_CONTROL=1`、`CLAW_DESKTOP_APP_ALLOWLIST` 和 `CLAW_DESKTOP_KEY_ALLOWLIST` 后，可在 macOS 上聚焦允许的 App、粘贴结构化草稿、执行允许的非提交快捷键，并在最终提交前回到用户确认。该 handler 会在相关 artifact event metadata 上附 Delivery Safety 摘要，只写最终提交闸门、用户确认、正文/paste 省略和按键计数，不写草稿正文、paste text、按键原文或 `toolArguments`。
+  - `composeMessage`/`composeEmail` 写既有 `messageDraft` artifact 并等待用户确认；v0.20 起会附 Delivery Safety metadata，说明草稿正文已从 metadata 中省略且最终发送需要用户确认，不新增真实发送能力。
 - `Tools/claw-gateway-smoke.mjs`
   - 启动一次性 Gateway 验证正常路径。
   - 额外启动同一进程内可接收两次连接的 Gateway 验证 replay guard。
-  - 验证 `gatewayConnected`、browser/file/shell/extract action result、artifact 文件落盘、browser trace 到结构化提取链路、提取完整性 metadata、重复 envelope 的 `task-replay-guard.json` / `actionSkipped` 和 `sessionCompleted`。
+  - 验证 `gatewayConnected`、browser/file/shell/extract/action draft result、artifact 文件落盘、browser trace 到结构化提取链路、提取完整性 metadata、Delivery Safety metadata、重复 envelope 的 `task-replay-guard.json` / `actionSkipped` 和 `sessionCompleted`。
 - `Tools/claw-gateway-direct-smoke.mjs`
   - 不监听端口，使用 `--emit-events` 直接验证同一套 Gateway handler。
-  - 覆盖 workspace artifact、workspace 文件真实写入、browser trace 到结构化提取链路、提取完整性 metadata、Shell dry-run 阻断、allowlist Shell 真执行、浏览器打开/搜索计划与 allowlist 阻断、同一 `--emit-events` 进程内重复 envelope 的 replay guard，以及桌面 App 控制的审批闸门和 allowlist 阻断。
+  - 覆盖 workspace artifact、workspace 文件真实写入、browser trace 到结构化提取链路、提取完整性 metadata、Delivery Safety metadata、Shell dry-run 阻断、allowlist Shell 真执行、浏览器打开/搜索计划与 allowlist 阻断、同一 `--emit-events` 进程内重复 envelope 的 replay guard，以及桌面 App 控制的审批闸门和 allowlist 阻断。
 - `Tools/ClawGatewayEventFixture.swift`
   - 从 envelope 生成 JSON Lines 事件，用于协议 fixture 和桌面端实现对照。
 
@@ -219,7 +222,7 @@ live gateway 与模拟器共用 `ClawGatewayEvent`，手机端只依赖事件 re
 }
 ```
 
-`ClawGatewayArtifact.metadata` 是可选、字符串化、向后兼容的 artifact review metadata。当前用于 `agentTrace`、capability snapshot、Accessibility、Replay Guard、通用 artifact metadata 和 extraction completeness 的轻量复核摘要。`agentTrace` 建议字段包括：
+`ClawGatewayArtifact.metadata` 是可选、字符串化、向后兼容的 artifact review metadata。当前用于 `agentTrace`、capability snapshot、Accessibility、Replay Guard、通用 artifact metadata、extraction completeness 和 Delivery Safety 的轻量复核摘要。`agentTrace` 建议字段包括：
 
 - `readinessScore`
 - `readinessCanContinue`

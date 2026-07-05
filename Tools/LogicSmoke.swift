@@ -139,6 +139,30 @@ enum LogicSmoke {
         } else {
             failures.append("mission summary should derive extraction completeness review")
         }
+        if let deliveryReview = missionSummary.gatewayDeliverySafetyReview {
+            expect(deliveryReview.reviewCount >= 2, "mission summary should count delivery safety artifacts")
+            expect(deliveryReview.hasMetadata, "delivery safety review should include metadata")
+            expect(deliveryReview.finalSubmitRequiresApproval == true, "delivery safety review should expose final submit gate")
+            expect(deliveryReview.userApprovalRequired == true, "delivery safety review should expose approval requirement")
+            expect(deliveryReview.draftBodyOmitted == true, "delivery safety review should omit draft body")
+            expect(deliveryReview.submitBlocked == true, "delivery safety review should expose submit block")
+            expect(deliveryReview.safetyFlags.contains("metadata-only"), "delivery safety review should expose metadata-only flag")
+            expect(deliveryReview.safetyFlags.contains("final-submit-gated"), "delivery safety review should expose final submit flag")
+            expect(deliveryReview.compactStatus.contains("最终提交"), "delivery safety review should summarize final submit gate")
+        } else {
+            failures.append("mission summary should derive delivery safety review")
+        }
+        if let desktopArtifacts = missionStore.clawGatewaySessions.first?.results.first(where: { $0.actionKind == .operateDesktopApp })?.artifacts,
+           let desktopDeliveryReview = ClawGatewayDeliverySafetyReviewSummary.latest(from: desktopArtifacts) {
+            expect(desktopDeliveryReview.mode == "desktop-control-dry-run", "desktop delivery review should expose dry-run mode")
+            expect(desktopDeliveryReview.actionKind == "operateDesktopApp", "desktop delivery review should expose action kind")
+            expect(desktopDeliveryReview.targetKind == "desktopApp", "desktop delivery review should expose target kind")
+            expect(desktopDeliveryReview.pasteTextOmitted == true, "desktop delivery review should omit paste text")
+            expect(desktopDeliveryReview.blockedSubmitKeyCount == 1, "desktop delivery review should count blocked submit key")
+            expect(desktopDeliveryReview.safetyFlags.contains("paste-text-omitted"), "desktop delivery review should expose paste omission flag")
+        } else {
+            failures.append("desktop result should derive delivery safety review")
+        }
         if let capabilityReview = missionSummary.gatewayCapabilityReview {
             expect(capabilityReview.snapshotCount == 1, "mission summary should count capability snapshots")
             expect(capabilityReview.hasMetadata, "capability review should include metadata")
@@ -287,6 +311,57 @@ enum LogicSmoke {
             expect(visibleText.contains("toolArguments") == false, "extraction review should redact toolArguments")
         } else {
             failures.append("sensitive extraction review should be derived")
+        }
+
+        let sensitiveDelivery = ClawGatewayArtifact(
+            kind: .messageDraft,
+            title: "draft file:///private/tmp/draft.txt https://example.com/private",
+            reference: "file:///tmp/draft.txt",
+            isRedacted: true,
+            metadata: [
+                "deliveryReview": "finalSubmitGate",
+                "mode": "message-draft-pending-approval Authorization: Bearer raw-token",
+                "actionKind": "composeMessage token=raw-token",
+                "targetKind": "message file:///private/tmp/message.txt",
+                "finalSubmitRequiresApproval": "true",
+                "userApprovalRequired": "true",
+                "draftBodyOmitted": "true",
+                "pasteTextOmitted": "false",
+                "submitBlocked": "true",
+                "allowedKeyCount": "0",
+                "blockedKeyCount": "0",
+                "blockedSubmitKeyCount": "0",
+                "safetyFlags": "metadata-only,final-submit-gated,headers={Authorization: Bearer raw-token},draftText=private body,pasteText=secret,keySequence=return,/private/tmp/draft.txt,https://example.com/private",
+                "toolArguments": "{\"draftText\":\"private body\"}"
+            ]
+        )
+        if let sensitiveDeliveryReview = ClawGatewayDeliverySafetyReviewSummary.latest(from: [sensitiveDelivery]) {
+            let visibleText = [
+                sensitiveDeliveryReview.latestTitle,
+                sensitiveDeliveryReview.compactStatus,
+                sensitiveDeliveryReview.mode ?? "",
+                sensitiveDeliveryReview.actionKind ?? "",
+                sensitiveDeliveryReview.targetKind ?? "",
+                sensitiveDeliveryReview.safetyFlags.joined(separator: " ")
+            ].joined(separator: " ")
+            expect(sensitiveDeliveryReview.hasMetadata, "delivery safety review should parse review metadata")
+            expect(sensitiveDeliveryReview.mode == nil, "delivery safety review should reject unsafe mode")
+            expect(sensitiveDeliveryReview.actionKind == nil, "delivery safety review should reject unsafe action kind")
+            expect(sensitiveDeliveryReview.targetKind == nil, "delivery safety review should reject unsafe target kind")
+            expect(sensitiveDeliveryReview.finalSubmitRequiresApproval == true, "delivery safety review should parse final submit boolean")
+            expect(visibleText.contains("Authorization") == false, "delivery safety review should redact Authorization")
+            expect(visibleText.contains("Bearer") == false, "delivery safety review should redact bearer token")
+            expect(visibleText.contains("raw-token") == false, "delivery safety review should redact raw token")
+            expect(visibleText.contains("draftText") == false, "delivery safety review should redact draftText")
+            expect(visibleText.contains("pasteText") == false, "delivery safety review should redact pasteText")
+            expect(visibleText.contains("keySequence") == false, "delivery safety review should redact keySequence")
+            expect(visibleText.contains("private body") == false, "delivery safety review should redact draft body")
+            expect(visibleText.contains("file://") == false, "delivery safety review should redact file URLs")
+            expect(visibleText.contains("https://") == false, "delivery safety review should redact web URLs")
+            expect(visibleText.contains("/private") == false, "delivery safety review should redact local paths")
+            expect(visibleText.contains("toolArguments") == false, "delivery safety review should redact toolArguments")
+        } else {
+            failures.append("sensitive delivery safety review should be derived")
         }
 
         let retryMissionStore = ClawStore(autoScanLocalArtifacts: false)

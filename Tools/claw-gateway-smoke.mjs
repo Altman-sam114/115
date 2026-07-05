@@ -51,6 +51,7 @@ expect(events.some((event) => event.artifacts?.some((artifact) => artifact.kind 
 expect(events.some((event) => event.artifacts?.some((artifact) => artifact.kind === "fileDiff")), "missing fileDiff artifact");
 expect(events.some((event) => event.artifacts?.some((artifact) => artifact.kind === "commandOutput")), "missing commandOutput artifact");
 expect(events.some((event) => event.artifacts?.some((artifact) => artifact.kind === "agentTrace")), "missing agentTrace artifact");
+expect(events.some((event) => event.artifacts?.some((artifact) => artifact.kind === "messageDraft")), "missing messageDraft artifact");
 
 for (const artifact of events.flatMap((event) => event.artifacts || [])) {
   if (artifact.reference?.startsWith("file://")) {
@@ -109,6 +110,21 @@ expect(agentTrace?.nextActions?.some((action) => action.kind === agentTrace?.sel
 expect(agentTrace?.riskTags?.includes("approval-required"), "websocket agent loop should tag approval-gated actions");
 expect(agentTrace?.riskTags?.includes("final-submit-gate") || agentTrace?.stopReason === "final-submit", "websocket agent loop should stop before final delivery");
 expect(typeof agentTrace?.handoffSummary === "string" && agentTrace.handoffSummary.includes(agentTrace.selectedNextAction.kind), "websocket agent loop handoff summary should name selected action");
+const messageDraftArtifact = findArtifactByTitle(events, "messageDraft", "message-draft-");
+assertDeliverySafetyMetadata(messageDraftArtifact?.metadata, {
+  mode: "message-draft-pending-approval",
+  actionKind: "composeMessage",
+  targetKind: "message",
+  finalSubmitRequiresApproval: true,
+  userApprovalRequired: true,
+  draftBodyOmitted: true,
+  pasteTextOmitted: false,
+  submitBlocked: true,
+  allowedKeyCount: 0,
+  blockedKeyCount: 0,
+  blockedSubmitKeyCount: 0,
+  safetyFlags: ["metadata-only", "final-submit-gated", "user-approval-required", "tool-arguments-omitted", "artifact-payload-not-read", "draft-body-omitted"],
+}, "websocket message draft delivery safety");
 
 const replayPort = port + 1;
 const replayServer = spawn(
@@ -178,7 +194,7 @@ function makeEnvelope(rawToken, endpointPort = port) {
       deviceName: "smoke",
       securityMode: "mutualApproval",
       tokenFingerprint: tokenFingerprint(rawToken),
-      allowedActionKinds: ["controlBrowser", "manageFiles", "runShellCommand", "extractData", "runAgentLoop"],
+      allowedActionKinds: ["controlBrowser", "manageFiles", "runShellCommand", "extractData", "runAgentLoop", "composeMessage"],
       requiresApprovalForSensitiveData: true,
       auditEnabled: true,
     },
@@ -279,6 +295,22 @@ function makeEnvelope(rawToken, endpointPort = port) {
             approvalRequiredFor: "externalNetwork,destructiveFileChange",
             stopBeforeDestructiveAction: "true",
             writeTrace: "true",
+          },
+        },
+        {
+          id: crypto.randomUUID(),
+          kind: "composeMessage",
+          title: "Draft websocket follow-up",
+          target: "Slack",
+          instruction: "Create a delivery draft and wait for confirmation",
+          approval: "gatewayApproval",
+          sourceSurface: "composeController",
+          handlesSensitiveData: true,
+          inputPreview: "smoke",
+          toolArguments: {
+            channel: "Slack",
+            recipient: "reviewer",
+            body: "Gateway smoke summary ready for Slack approval.",
           },
         },
       ],
@@ -559,6 +591,60 @@ function assertExtractionCompletenessMetadata(metadata, extraction, label) {
   expect(metadata.safetyFlags.includes("row-content-omitted"), `${label} missing row omission safety flag`);
   const serialized = JSON.stringify(metadata);
   for (const forbidden of [token, "Authorization", "Bearer", "toolArguments", "sourcePriority", "Gateway Smoke Page", "https://", "file://", "/sessions/"]) {
+    expect(!serialized.includes(forbidden), `${label} metadata leaked ${forbidden}`);
+  }
+}
+
+function assertDeliverySafetyMetadata(metadata, expected, label) {
+  expect(metadata && typeof metadata === "object", `${label} missing delivery metadata`);
+  const allowedKeys = [
+    "actionKind",
+    "allowedKeyCount",
+    "blockedKeyCount",
+    "blockedSubmitKeyCount",
+    "deliveryReview",
+    "draftBodyOmitted",
+    "finalSubmitRequiresApproval",
+    "mode",
+    "pasteTextOmitted",
+    "safetyFlags",
+    "submitBlocked",
+    "targetKind",
+    "userApprovalRequired",
+  ];
+  expect(
+    Object.keys(metadata).sort().join(",") === allowedKeys.join(","),
+    `${label} delivery metadata includes unexpected keys`,
+  );
+  expect(metadata.deliveryReview === "finalSubmitGate", `${label} delivery review metadata mismatch`);
+  expect(metadata.mode === expected.mode, `${label} mode metadata mismatch`);
+  expect(metadata.actionKind === expected.actionKind, `${label} action kind metadata mismatch`);
+  expect(metadata.targetKind === expected.targetKind, `${label} target kind metadata mismatch`);
+  expect(metadata.finalSubmitRequiresApproval === String(expected.finalSubmitRequiresApproval), `${label} final submit metadata mismatch`);
+  expect(metadata.userApprovalRequired === String(expected.userApprovalRequired), `${label} approval metadata mismatch`);
+  expect(metadata.draftBodyOmitted === String(expected.draftBodyOmitted), `${label} draft omission metadata mismatch`);
+  expect(metadata.pasteTextOmitted === String(expected.pasteTextOmitted), `${label} paste omission metadata mismatch`);
+  expect(metadata.submitBlocked === String(expected.submitBlocked), `${label} submit blocked metadata mismatch`);
+  expect(Number(metadata.allowedKeyCount) === expected.allowedKeyCount, `${label} allowed key count mismatch`);
+  expect(Number(metadata.blockedKeyCount) === expected.blockedKeyCount, `${label} blocked key count mismatch`);
+  expect(Number(metadata.blockedSubmitKeyCount) === expected.blockedSubmitKeyCount, `${label} blocked submit key count mismatch`);
+  for (const flag of expected.safetyFlags) {
+    expect(metadata.safetyFlags.includes(flag), `${label} missing safety flag ${flag}`);
+  }
+  const serialized = JSON.stringify(metadata);
+  for (const forbidden of [
+    token,
+    "Authorization",
+    "Bearer",
+    "toolArguments",
+    "draftText",
+    "pasteTextPreview",
+    "keySequence",
+    "Gateway smoke summary ready",
+    "https://",
+    "file://",
+    "/sessions/",
+  ]) {
     expect(!serialized.includes(forbidden), `${label} metadata leaked ${forbidden}`);
   }
 }

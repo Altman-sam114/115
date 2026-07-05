@@ -414,6 +414,38 @@ final class ClawTests: XCTestCase {
         XCTAssertTrue(review.compactStatus.contains("rows 4"))
     }
 
+    func testMissionRunSummaryDerivesDeliverySafetyReview() throws {
+        let store = ClawStore(autoScanLocalArtifacts: false)
+
+        store.phoneAgentCommand = "打开浏览器搜索资料，整理结果并发到 Slack"
+        store.startAutonomousComputerTakeover()
+        store.approveAndContinueAutonomousLoop()
+        let review = try XCTUnwrap(store.missionRunSummary.gatewayDeliverySafetyReview)
+
+        XCTAssertGreaterThanOrEqual(review.reviewCount, 2)
+        XCTAssertTrue(review.hasMetadata)
+        XCTAssertEqual(review.finalSubmitRequiresApproval, true)
+        XCTAssertEqual(review.userApprovalRequired, true)
+        XCTAssertEqual(review.draftBodyOmitted, true)
+        XCTAssertEqual(review.submitBlocked, true)
+        XCTAssertTrue(review.safetyFlags.contains("metadata-only"))
+        XCTAssertTrue(review.safetyFlags.contains("final-submit-gated"))
+        XCTAssertTrue(review.safetyFlags.contains("tool-arguments-omitted"))
+        XCTAssertTrue(review.compactStatus.contains("最终提交"))
+        XCTAssertTrue(review.compactStatus.contains("正文省略"))
+
+        let desktopResult = try XCTUnwrap(store.clawGatewaySessions.first?.results.first { $0.actionKind == .operateDesktopApp })
+        let desktopReview = try XCTUnwrap(ClawGatewayDeliverySafetyReviewSummary.latest(from: desktopResult.artifacts))
+        XCTAssertEqual(desktopReview.mode, "desktop-control-dry-run")
+        XCTAssertEqual(desktopReview.actionKind, "operateDesktopApp")
+        XCTAssertEqual(desktopReview.targetKind, "desktopApp")
+        XCTAssertEqual(desktopReview.pasteTextOmitted, true)
+        XCTAssertEqual(desktopReview.allowedKeyCount, 1)
+        XCTAssertEqual(desktopReview.blockedKeyCount, 1)
+        XCTAssertEqual(desktopReview.blockedSubmitKeyCount, 1)
+        XCTAssertTrue(desktopReview.safetyFlags.contains("paste-text-omitted"))
+    }
+
     func testMissionRunSummaryDerivesGatewayCapabilityReview() throws {
         let store = ClawStore(autoScanLocalArtifacts: false)
 
@@ -633,6 +665,9 @@ final class ClawTests: XCTestCase {
                 "stdout": "command output secret",
                 "toolArguments": "{\"shellCommand\":\"cat /private/tmp/secret.txt\"}",
                 "workspace": "/private/tmp/claw-work",
+                "deliveryReview": "finalSubmitGate",
+                "finalSubmitRequiresApproval": "true",
+                "blockedSubmitKeyCount": "1",
                 "mode": "browser-trace",
                 "platform": "darwin",
                 "safetyFlags": "metadata-only,raw-token-omitted"
@@ -659,6 +694,9 @@ final class ClawTests: XCTestCase {
         XCTAssertTrue(review.safetyFlags.contains("metadata-only"))
         XCTAssertTrue(review.safeMetadataPairs.contains { $0.key == "mode" && $0.value == "browser-trace" })
         XCTAssertTrue(review.safeMetadataPairs.contains { $0.key == "platform" && $0.value == "darwin" })
+        XCTAssertTrue(review.safeMetadataPairs.contains { $0.key == "deliveryReview" && $0.value == "finalSubmitGate" })
+        XCTAssertTrue(review.safeMetadataPairs.contains { $0.key == "finalSubmitRequiresApproval" && $0.value == "true" })
+        XCTAssertTrue(review.safeMetadataPairs.contains { $0.key == "blockedSubmitKeyCount" && $0.value == "1" })
         let visibleText = review.safeMetadataPairs
             .map { "\($0.key)=\($0.value)" }
             .joined(separator: " ")
@@ -808,6 +846,77 @@ final class ClawTests: XCTestCase {
         let legacyReview = try XCTUnwrap(ClawGatewayExtractionCompletenessReviewSummary.latest(from: [legacyArtifact]))
         XCTAssertFalse(legacyReview.hasMetadata)
         XCTAssertTrue(legacyReview.compactStatus.contains("metadata"))
+    }
+
+    func testDeliverySafetyReviewFallsBackAndRedactsSensitiveMetadata() throws {
+        let legacyArtifact = ClawGatewayArtifact(
+            kind: .messageDraft,
+            title: "legacy-draft.txt",
+            reference: "file:///tmp/legacy-draft.txt",
+            isRedacted: true
+        )
+        let legacyReview = try XCTUnwrap(ClawGatewayDeliverySafetyReviewSummary.latest(from: [legacyArtifact]))
+        XCTAssertEqual(legacyReview.reviewCount, 1)
+        XCTAssertFalse(legacyReview.hasMetadata)
+        XCTAssertNil(legacyReview.finalSubmitRequiresApproval)
+        XCTAssertTrue(legacyReview.compactStatus.contains("metadata"))
+
+        let artifact = ClawGatewayArtifact(
+            kind: .messageDraft,
+            title: "draft file:///private/tmp/draft.txt https://example.com/private",
+            reference: "file:///tmp/draft.txt",
+            isRedacted: true,
+            metadata: [
+                "deliveryReview": "finalSubmitGate",
+                "mode": "message-draft-pending-approval Authorization: Bearer raw-token",
+                "actionKind": "composeMessage token=raw-token",
+                "targetKind": "message file:///private/tmp/message.txt",
+                "finalSubmitRequiresApproval": "true",
+                "userApprovalRequired": "true",
+                "draftBodyOmitted": "true",
+                "pasteTextOmitted": "false",
+                "submitBlocked": "true",
+                "allowedKeyCount": "0",
+                "blockedKeyCount": "0",
+                "blockedSubmitKeyCount": "0",
+                "safetyFlags": "metadata-only,final-submit-gated,headers={Authorization: Bearer raw-token},draftText=private body,pasteText=secret,keySequence=return,/private/tmp/draft.txt,https://example.com/private",
+                "toolArguments": "{\"draftText\":\"private body\"}"
+            ]
+        )
+
+        let review = try XCTUnwrap(ClawGatewayDeliverySafetyReviewSummary.latest(from: [artifact]))
+        let visibleText = [
+            review.latestTitle,
+            review.compactStatus,
+            review.mode ?? "",
+            review.actionKind ?? "",
+            review.targetKind ?? "",
+            review.safetyFlags.joined(separator: " ")
+        ].joined(separator: " ")
+
+        XCTAssertTrue(review.hasMetadata)
+        XCTAssertNil(review.mode)
+        XCTAssertNil(review.actionKind)
+        XCTAssertNil(review.targetKind)
+        XCTAssertEqual(review.finalSubmitRequiresApproval, true)
+        XCTAssertEqual(review.userApprovalRequired, true)
+        XCTAssertEqual(review.draftBodyOmitted, true)
+        XCTAssertEqual(review.pasteTextOmitted, false)
+        XCTAssertEqual(review.submitBlocked, true)
+        XCTAssertEqual(review.blockedSubmitKeyCount, 0)
+        XCTAssertTrue(review.safetyFlags.contains("metadata-only"))
+        XCTAssertTrue(review.safetyFlags.contains("final-submit-gated"))
+        XCTAssertFalse(visibleText.contains("Authorization"))
+        XCTAssertFalse(visibleText.contains("Bearer"))
+        XCTAssertFalse(visibleText.contains("raw-token"))
+        XCTAssertFalse(visibleText.contains("draftText"))
+        XCTAssertFalse(visibleText.contains("pasteText"))
+        XCTAssertFalse(visibleText.contains("keySequence"))
+        XCTAssertFalse(visibleText.contains("private body"))
+        XCTAssertFalse(visibleText.contains("file://"))
+        XCTAssertFalse(visibleText.contains("https://"))
+        XCTAssertFalse(visibleText.contains("/private"))
+        XCTAssertFalse(visibleText.contains("toolArguments"))
     }
 
     func testAgentTraceReviewRedactsSensitiveMetadata() throws {

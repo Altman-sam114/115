@@ -1995,6 +1995,56 @@ function extractionCompletenessMetadata(extracted) {
   });
 }
 
+function deliverySafetyMetadata(action, details = {}) {
+  const finalSubmitRequiresApproval = Boolean(details.finalSubmitRequiresApproval);
+  const blockedKeys = Array.isArray(details.keyPlan?.blocked) ? details.keyPlan.blocked : [];
+  const blockedSubmitKeyCount = blockedKeys.filter((item) => item?.reason === "final_submit_requires_approval").length;
+  const blockedKeyCount = blockedKeys.length;
+  const allowedKeyCount = Array.isArray(details.keyPlan?.allowed) ? details.keyPlan.allowed.length : 0;
+  const actionKind = ["composeMessage", "composeEmail", "operateDesktopApp"].includes(action.kind)
+    ? action.kind
+    : "operateDesktopApp";
+  const targetKind = action.kind === "composeEmail"
+    ? "email"
+    : action.kind === "operateDesktopApp"
+      ? "desktopApp"
+      : "message";
+  const userApprovalRequired = details.userApprovalRequired !== false;
+  const submitBlocked = finalSubmitRequiresApproval || blockedSubmitKeyCount > 0 || Boolean(details.submitBlocked);
+  const safetyFlags = [
+    "metadata-only",
+    "tool-arguments-omitted",
+    "artifact-payload-not-read",
+  ];
+  if (finalSubmitRequiresApproval || submitBlocked) {
+    safetyFlags.push("final-submit-gated");
+  }
+  if (userApprovalRequired) {
+    safetyFlags.push("user-approval-required");
+  }
+  if (details.draftBodyOmitted) {
+    safetyFlags.push("draft-body-omitted");
+  }
+  if (details.pasteTextOmitted) {
+    safetyFlags.push("paste-text-omitted");
+  }
+  return compactMetadata({
+    deliveryReview: "finalSubmitGate",
+    mode: details.mode,
+    actionKind,
+    targetKind,
+    finalSubmitRequiresApproval,
+    userApprovalRequired,
+    draftBodyOmitted: Boolean(details.draftBodyOmitted),
+    pasteTextOmitted: Boolean(details.pasteTextOmitted),
+    submitBlocked,
+    allowedKeyCount,
+    blockedKeyCount,
+    blockedSubmitKeyCount,
+    safetyFlags,
+  });
+}
+
 async function desktopAppAction(action, index, config) {
   const args = action.toolArguments || {};
   const targetApp = String(args.targetApp || action.target || "").trim();
@@ -2032,6 +2082,13 @@ async function desktopAppAction(action, index, config) {
         },
         true,
         config,
+        deliverySafetyMetadata(action, {
+          mode: "desktop-control-dry-run",
+          finalSubmitRequiresApproval,
+          draftBodyOmitted: true,
+          pasteTextOmitted: Boolean(pasteText),
+          keyPlan,
+        }),
       ),
     ];
     return {
@@ -2055,6 +2112,13 @@ async function desktopAppAction(action, index, config) {
         },
         true,
         config,
+        deliverySafetyMetadata(action, {
+          mode: "desktop-control-unavailable",
+          finalSubmitRequiresApproval,
+          draftBodyOmitted: true,
+          pasteTextOmitted: Boolean(pasteText),
+          keyPlan,
+        }),
       ),
     ];
     return {
@@ -2078,6 +2142,14 @@ async function desktopAppAction(action, index, config) {
         },
         true,
         config,
+        deliverySafetyMetadata(action, {
+          mode: "desktop-control-policy-blocked",
+          finalSubmitRequiresApproval,
+          draftBodyOmitted: true,
+          pasteTextOmitted: Boolean(pasteText),
+          submitBlocked: true,
+          keyPlan,
+        }),
       ),
     ];
     return {
@@ -2102,6 +2174,14 @@ async function desktopAppAction(action, index, config) {
         },
         true,
         config,
+        deliverySafetyMetadata(action, {
+          mode: "desktop-control-policy-blocked",
+          finalSubmitRequiresApproval,
+          draftBodyOmitted: true,
+          pasteTextOmitted: Boolean(pasteText),
+          submitBlocked: true,
+          keyPlan,
+        }),
       ),
     ];
     return {
@@ -2145,6 +2225,17 @@ async function desktopAppAction(action, index, config) {
       },
       true,
       config,
+      deliverySafetyMetadata(action, {
+        mode,
+        finalSubmitRequiresApproval,
+        userApprovalRequired: execution.exitCode === 0
+          ? finalSubmitRequiresApproval || keyPlan.blocked.length > 0
+          : true,
+        draftBodyOmitted: true,
+        pasteTextOmitted: Boolean(pasteText),
+        submitBlocked: finalSubmitRequiresApproval || keyPlan.blocked.length > 0,
+        keyPlan,
+      }),
     ),
   ];
   return {
@@ -2693,6 +2784,14 @@ async function messageDraftAction(action, index, config) {
       ].join("\n"),
       true,
       config,
+      deliverySafetyMetadata(action, {
+        mode: "message-draft-pending-approval",
+        finalSubmitRequiresApproval: true,
+        userApprovalRequired: true,
+        draftBodyOmitted: true,
+        pasteTextOmitted: false,
+        submitBlocked: true,
+      }),
     ),
   ];
   return {

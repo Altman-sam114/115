@@ -33,6 +33,7 @@ flowchart TD
   ART --> AXMETA["accessibilityTree metadata<br/>mode、policy、节点数、候选控件、安全标志"]
   ART --> AMETA["artifact metadata review<br/>覆盖率、脱敏数、安全键值、safety flags"]
   ART --> EXMETA["extractData metadata<br/>完整性状态、row count、来源计数、安全标志"]
+  ART --> DLMETA["delivery safety metadata<br/>最终提交闸门、用户确认、省略状态、按键计数"]
   ART --> META["agentTrace artifact metadata<br/>证据分、缺口、下一步、风险、停止原因、统一脱敏"]
   H --> EVT["ClawGatewayEvent<br/>actionStarted、artifactStored、completed、failed、approvalRequested"]
   SNAP --> EVT
@@ -45,6 +46,7 @@ flowchart TD
   AXMETA --> R
   AMETA --> R
   EXMETA --> R
+  DLMETA --> R
   META --> R
   R --> SES["ClawGatewaySession<br/>results、sessionArtifacts、auditTrail、retryable"]
   LREQ --> LHEALTH["ClawGatewayLiveHealthSummary<br/>连接状态、attempt/reconnect/ping、最新事件、fallback/error/completed"]
@@ -52,7 +54,7 @@ flowchart TD
   R --> LHEALTH
   SES --> LHEALTH
   SES --> RREVIEW["ClawGatewayTaskReplayGuardReviewSummary<br/>重复任务安全跳过复核"]
-  LHEALTH --> RUN["ClawMissionRunSummary<br/>派生目标、阶段、主动作、风险、证据、Live health、Artifact metadata、提取完整性、Gateway 能力、Accessibility、Replay Guard 和 AgentTrace 复核"]
+  LHEALTH --> RUN["ClawMissionRunSummary<br/>派生目标、阶段、主动作、风险、证据、Live health、Artifact metadata、提取完整性、Delivery Safety、Gateway 能力、Accessibility、Replay Guard 和 AgentTrace 复核"]
   RREVIEW --> RUN
   SES --> RUN
   RUN --> UI["SwiftUI Mission Run / iPad 多栏工作台<br/>展示计划、风险、事件、artifact、审批点、复核摘要"]
@@ -82,9 +84,9 @@ flowchart TD
   KIND --> FILE["manageFiles<br/>workspace 内结构化写文件"]
   KIND --> SH["runShellCommand<br/>结构化命令 dry-run 或 allowlist 执行"]
   KIND --> EXT["extractData<br/>消费已有 artifact 生成结构化数据和完整性 metadata"]
-  KIND --> APP["operateDesktopApp<br/>app/key allowlist、最终提交前停止"]
+  KIND --> APP["operateDesktopApp<br/>app/key allowlist、最终提交前停止、delivery metadata"]
   KIND --> AG["runAgentLoop<br/>基于 session artifacts 生成 readiness、checklist、下一步、风险和停止原因"]
-  KIND --> MSG["composeMessage/composeEmail<br/>生成待确认草稿"]
+  KIND --> MSG["composeMessage/composeEmail<br/>生成待确认草稿、delivery metadata"]
   OBS --> CTX["sessionContext<br/>累计 screen、browser、file、shell、message、agent trace"]
   BRO --> CTX
   FILE --> CTX

@@ -22,6 +22,7 @@ expect(dryRunEvents.some((event) => hasArtifact(event, "accessibilityTree")), "m
 expect(dryRunEvents.some((event) => hasArtifact(event, "fileDiff")), "missing fileDiff artifact");
 expect(dryRunEvents.some((event) => hasArtifact(event, "commandOutput")), "missing commandOutput artifact");
 expect(dryRunEvents.some((event) => hasArtifact(event, "agentTrace")), "missing agentTrace artifact");
+expect(dryRunEvents.some((event) => hasArtifact(event, "messageDraft")), "missing messageDraft artifact");
 expect(dryRunEvents.some((event) => event.kind === "approvalRequested" && event.actionKind === "operateDesktopApp"), "missing desktop app approval gate");
 await assertArtifactsExist(dryRunEvents);
 const dryRunSnapshot = await assertCapabilitySnapshot(dryRunEvents, {
@@ -95,6 +96,36 @@ expect(desktopDryRun?.finalSubmitRequiresApproval === true, "desktop app final s
 expect(desktopDryRun?.pasteTextPreview?.includes("Smoke summary ready") === true, "missing desktop app paste preview");
 expect(desktopDryRun?.executableKeys?.includes("command+k"), "missing allowlisted desktop key plan");
 expect(desktopDryRun?.blockedKeys?.some((item) => item.key === "return" && item.reason === "final_submit_requires_approval"), "missing blocked final submit key");
+const desktopDeliveryArtifact = findArtifactByTitle(dryRunEvents, "screenshot", "desktop-app-confirm-");
+assertDeliverySafetyMetadata(desktopDeliveryArtifact?.metadata, {
+  mode: "desktop-control-dry-run",
+  actionKind: "operateDesktopApp",
+  targetKind: "desktopApp",
+  finalSubmitRequiresApproval: true,
+  userApprovalRequired: true,
+  draftBodyOmitted: true,
+  pasteTextOmitted: true,
+  submitBlocked: true,
+  allowedKeyCount: 1,
+  blockedKeyCount: 1,
+  blockedSubmitKeyCount: 1,
+  safetyFlags: ["metadata-only", "final-submit-gated", "user-approval-required", "tool-arguments-omitted", "artifact-payload-not-read", "draft-body-omitted", "paste-text-omitted"],
+}, "desktop app delivery safety");
+const messageDraftArtifact = findArtifactByTitle(dryRunEvents, "messageDraft", "message-draft-");
+assertDeliverySafetyMetadata(messageDraftArtifact?.metadata, {
+  mode: "message-draft-pending-approval",
+  actionKind: "composeMessage",
+  targetKind: "message",
+  finalSubmitRequiresApproval: true,
+  userApprovalRequired: true,
+  draftBodyOmitted: true,
+  pasteTextOmitted: false,
+  submitBlocked: true,
+  allowedKeyCount: 0,
+  blockedKeyCount: 0,
+  blockedSubmitKeyCount: 0,
+  safetyFlags: ["metadata-only", "final-submit-gated", "user-approval-required", "tool-arguments-omitted", "artifact-payload-not-read", "draft-body-omitted"],
+}, "message draft delivery safety");
 const axTrees = await readArtifacts(dryRunEvents, "accessibilityTree");
 expect(axTrees.some((tree) => tree.includeAccessibilityTree === true && tree.maxCandidateControls === 12), "missing accessibility tree metadata");
 const dryRunAccessibilityArtifact = findArtifact(dryRunEvents, "accessibilityTree");
@@ -600,6 +631,60 @@ function assertExtractionCompletenessMetadata(metadata, extraction, label) {
   }
 }
 
+function assertDeliverySafetyMetadata(metadata, expected, label) {
+  expect(metadata && typeof metadata === "object", `${label} missing delivery metadata`);
+  const allowedKeys = [
+    "actionKind",
+    "allowedKeyCount",
+    "blockedKeyCount",
+    "blockedSubmitKeyCount",
+    "deliveryReview",
+    "draftBodyOmitted",
+    "finalSubmitRequiresApproval",
+    "mode",
+    "pasteTextOmitted",
+    "safetyFlags",
+    "submitBlocked",
+    "targetKind",
+    "userApprovalRequired",
+  ];
+  expect(
+    Object.keys(metadata).sort().join(",") === allowedKeys.join(","),
+    `${label} delivery metadata includes unexpected keys`,
+  );
+  expect(metadata.deliveryReview === "finalSubmitGate", `${label} delivery review metadata mismatch`);
+  expect(metadata.mode === expected.mode, `${label} mode metadata mismatch`);
+  expect(metadata.actionKind === expected.actionKind, `${label} action kind metadata mismatch`);
+  expect(metadata.targetKind === expected.targetKind, `${label} target kind metadata mismatch`);
+  expect(metadata.finalSubmitRequiresApproval === String(expected.finalSubmitRequiresApproval), `${label} final submit metadata mismatch`);
+  expect(metadata.userApprovalRequired === String(expected.userApprovalRequired), `${label} approval metadata mismatch`);
+  expect(metadata.draftBodyOmitted === String(expected.draftBodyOmitted), `${label} draft omission metadata mismatch`);
+  expect(metadata.pasteTextOmitted === String(expected.pasteTextOmitted), `${label} paste omission metadata mismatch`);
+  expect(metadata.submitBlocked === String(expected.submitBlocked), `${label} submit blocked metadata mismatch`);
+  expect(Number(metadata.allowedKeyCount) === expected.allowedKeyCount, `${label} allowed key count mismatch`);
+  expect(Number(metadata.blockedKeyCount) === expected.blockedKeyCount, `${label} blocked key count mismatch`);
+  expect(Number(metadata.blockedSubmitKeyCount) === expected.blockedSubmitKeyCount, `${label} blocked submit key count mismatch`);
+  for (const flag of expected.safetyFlags) {
+    expect(metadata.safetyFlags.includes(flag), `${label} missing safety flag ${flag}`);
+  }
+  const serialized = JSON.stringify(metadata);
+  for (const forbidden of [
+    token,
+    "Authorization",
+    "Bearer",
+    "toolArguments",
+    "draftText",
+    "pasteTextPreview",
+    "keySequence",
+    "Smoke summary ready",
+    "https://",
+    "file://",
+    "/sessions/",
+  ]) {
+    expect(!serialized.includes(forbidden), `${label} metadata leaked ${forbidden}`);
+  }
+}
+
 function assertEmptyExtractionCompletenessMetadata(metadata, extraction, label) {
   expect(metadata && typeof metadata === "object", `${label} missing extraction metadata`);
   expect(metadata.extractionReview === "artifactGrounded", `${label} extraction review metadata mismatch`);
@@ -639,7 +724,7 @@ function makeEnvelope(rawToken) {
       deviceName: "smoke",
       securityMode: "mutualApproval",
       tokenFingerprint: tokenFingerprint(rawToken),
-      allowedActionKinds: ["observeScreen", "controlBrowser", "manageFiles", "runShellCommand", "extractData", "operateDesktopApp", "runAgentLoop"],
+      allowedActionKinds: ["observeScreen", "controlBrowser", "manageFiles", "runShellCommand", "extractData", "operateDesktopApp", "runAgentLoop", "composeMessage"],
       requiresApprovalForSensitiveData: true,
       auditEnabled: true,
     },
@@ -799,6 +884,22 @@ function makeEnvelope(rawToken) {
             keySequence: "command+k,return",
             finalSubmitRequiresApproval: "true",
             captureBeforeAfter: "true",
+          },
+        },
+        {
+          id: crypto.randomUUID(),
+          kind: "composeMessage",
+          title: "Draft Slack follow-up",
+          target: "Slack",
+          instruction: "Create a delivery draft and wait for confirmation",
+          approval: "gatewayApproval",
+          sourceSurface: "composeController",
+          handlesSensitiveData: true,
+          inputPreview: "smoke",
+          toolArguments: {
+            channel: "Slack",
+            recipient: "reviewer",
+            body: "Smoke summary ready for Slack approval.",
           },
         },
       ],

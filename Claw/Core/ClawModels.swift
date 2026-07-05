@@ -1498,7 +1498,18 @@ struct ClawGatewayArtifactMetadataReviewSummary: Equatable, Codable, Sendable {
             "completenessstatus": "completenessStatus",
             "decision": "decision",
             "desktopcontrolstate": "desktopControlState",
+            "deliveryreview": "deliveryReview",
             "digestmatchesfirst": "digestMatchesFirst",
+            "actionkind": "actionKind",
+            "targetkind": "targetKind",
+            "finalsubmitrequiresapproval": "finalSubmitRequiresApproval",
+            "userapprovalrequired": "userApprovalRequired",
+            "draftbodyomitted": "draftBodyOmitted",
+            "pastetextomitted": "pasteTextOmitted",
+            "submitblocked": "submitBlocked",
+            "allowedkeycount": "allowedKeyCount",
+            "blockedkeycount": "blockedKeyCount",
+            "blockedsubmitkeycount": "blockedSubmitKeyCount",
             "extractionreview": "extractionReview",
             "filediffcount": "fileDiffCount",
             "firstsessionid": "firstSessionID",
@@ -1636,6 +1647,119 @@ struct ClawGatewayExtractionCompletenessReviewSummary: Equatable, Codable, Senda
             "row-content-omitted",
             "source-values-omitted",
             "tool-arguments-omitted"
+        ]
+        return ClawArtifactMetadataParser.listValue(value).filter { allowed.contains($0) }
+    }
+}
+
+struct ClawGatewayDeliverySafetyReviewSummary: Equatable, Codable, Sendable {
+    var reviewCount: Int
+    var latestTitle: String
+    var hasMetadata: Bool
+    var mode: String?
+    var actionKind: String?
+    var targetKind: String?
+    var finalSubmitRequiresApproval: Bool?
+    var userApprovalRequired: Bool?
+    var draftBodyOmitted: Bool?
+    var pasteTextOmitted: Bool?
+    var submitBlocked: Bool?
+    var allowedKeyCount: Int?
+    var blockedKeyCount: Int?
+    var blockedSubmitKeyCount: Int?
+    var safetyFlags: [String]
+    var isRedacted: Bool
+
+    var compactStatus: String {
+        guard hasMetadata else {
+            return "已收到草稿或桌面提交 artifact，metadata 待同步。"
+        }
+        let gate = finalSubmitRequiresApproval == true || submitBlocked == true ? "最终提交已拦截" : "最终提交待复核"
+        let draft = draftBodyOmitted == true ? "正文省略" : "正文状态待复核"
+        let keys = blockedSubmitKeyCount.map { "submit keys \($0)" } ?? "submit keys 待复核"
+        return "\(gate) · \(draft) · \(keys)"
+    }
+
+    static func latest(from session: ClawGatewaySession?) -> ClawGatewayDeliverySafetyReviewSummary? {
+        guard let session else {
+            return nil
+        }
+        return latest(from: session.allArtifacts)
+    }
+
+    static func latest(from artifacts: [ClawGatewayArtifact]) -> ClawGatewayDeliverySafetyReviewSummary? {
+        let deliveryArtifacts = artifacts.filter(isDeliverySafetyArtifact)
+        guard let latest = deliveryArtifacts.last else {
+            return nil
+        }
+        let metadata = latest.metadata ?? [:]
+        let hasReviewMetadata = ClawArtifactMetadataParser.cleanValue(metadata["deliveryReview"]) == "finalSubmitGate"
+        return ClawGatewayDeliverySafetyReviewSummary(
+            reviewCount: deliveryArtifacts.count,
+            latestTitle: ClawArtifactMetadataDisplaySanitizer.safeValue(latest.title) ?? latest.kind.title,
+            hasMetadata: hasReviewMetadata,
+            mode: allowedMode(metadata["mode"]),
+            actionKind: allowedActionKind(metadata["actionKind"]),
+            targetKind: allowedTargetKind(metadata["targetKind"]),
+            finalSubmitRequiresApproval: ClawArtifactMetadataParser.boolValue(metadata["finalSubmitRequiresApproval"]),
+            userApprovalRequired: ClawArtifactMetadataParser.boolValue(metadata["userApprovalRequired"]),
+            draftBodyOmitted: ClawArtifactMetadataParser.boolValue(metadata["draftBodyOmitted"]),
+            pasteTextOmitted: ClawArtifactMetadataParser.boolValue(metadata["pasteTextOmitted"]),
+            submitBlocked: ClawArtifactMetadataParser.boolValue(metadata["submitBlocked"]),
+            allowedKeyCount: ClawArtifactMetadataParser.intValue(metadata["allowedKeyCount"]),
+            blockedKeyCount: ClawArtifactMetadataParser.intValue(metadata["blockedKeyCount"]),
+            blockedSubmitKeyCount: ClawArtifactMetadataParser.intValue(metadata["blockedSubmitKeyCount"]),
+            safetyFlags: allowedSafetyFlags(metadata["safetyFlags"]),
+            isRedacted: latest.isRedacted
+        )
+    }
+
+    private static func isDeliverySafetyArtifact(_ artifact: ClawGatewayArtifact) -> Bool {
+        ClawArtifactMetadataParser.cleanValue(artifact.metadata?["deliveryReview"]) == "finalSubmitGate" ||
+            artifact.kind == .messageDraft
+    }
+
+    private static func allowedMode(_ value: String?) -> String? {
+        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
+            return nil
+        }
+        let allowed = [
+            "message-draft-pending-approval",
+            "desktop-control-dry-run",
+            "desktop-control-paused",
+            "desktop-control-policy-blocked",
+            "desktop-control-unavailable",
+            "desktop-control-failed",
+            "desktop-control-completed"
+        ]
+        return allowed.contains(clean) ? clean : nil
+    }
+
+    private static func allowedActionKind(_ value: String?) -> String? {
+        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
+            return nil
+        }
+        let allowed = ["composeMessage", "composeEmail", "operateDesktopApp"]
+        return allowed.contains(clean) ? clean : nil
+    }
+
+    private static func allowedTargetKind(_ value: String?) -> String? {
+        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
+            return nil
+        }
+        let allowed = ["message", "email", "desktopApp"]
+        return allowed.contains(clean) ? clean : nil
+    }
+
+    private static func allowedSafetyFlags(_ value: String?) -> [String] {
+        let allowed = [
+            "artifact-payload-not-read",
+            "draft-body-omitted",
+            "final-submit-gated",
+            "metadata-only",
+            "paste-text-omitted",
+            "tool-arguments-omitted",
+            "user-approval-required"
         ]
         return ClawArtifactMetadataParser.listValue(value).filter { allowed.contains($0) }
     }
@@ -1946,6 +2070,7 @@ struct ClawMissionRunSummary: Equatable, Codable, Sendable {
     var artifactKinds: [ClawGatewayArtifactKind]
     var artifactMetadataReview: ClawGatewayArtifactMetadataReviewSummary?
     var gatewayExtractionCompletenessReview: ClawGatewayExtractionCompletenessReviewSummary?
+    var gatewayDeliverySafetyReview: ClawGatewayDeliverySafetyReviewSummary?
     var agentTraceReview: ClawAgentTraceReviewSummary?
     var gatewayAccessibilityReview: ClawGatewayAccessibilityReviewSummary?
     var gatewayCapabilityReview: ClawGatewayCapabilityReviewSummary?

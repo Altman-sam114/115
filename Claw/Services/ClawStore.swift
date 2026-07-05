@@ -165,6 +165,7 @@ final class ClawStore: ObservableObject {
             artifactKinds: missionRunArtifactKinds(from: session),
             artifactMetadataReview: missionRunArtifactMetadataReview(from: session),
             gatewayExtractionCompletenessReview: missionRunGatewayExtractionCompletenessReview(from: session),
+            gatewayDeliverySafetyReview: missionRunGatewayDeliverySafetyReview(from: session),
             agentTraceReview: missionRunAgentTraceReview(from: session),
             gatewayAccessibilityReview: missionRunGatewayAccessibilityReview(from: session),
             gatewayCapabilityReview: missionRunGatewayCapabilityReview(from: session),
@@ -304,6 +305,10 @@ final class ClawStore: ObservableObject {
 
     private func missionRunGatewayExtractionCompletenessReview(from session: ClawGatewaySession?) -> ClawGatewayExtractionCompletenessReviewSummary? {
         ClawGatewayExtractionCompletenessReviewSummary.latest(from: session)
+    }
+
+    private func missionRunGatewayDeliverySafetyReview(from session: ClawGatewaySession?) -> ClawGatewayDeliverySafetyReviewSummary? {
+        ClawGatewayDeliverySafetyReviewSummary.latest(from: session)
     }
 
     private func missionRunGatewayAccessibilityReview(from session: ClawGatewaySession?) -> ClawGatewayAccessibilityReviewSummary? {
@@ -1832,7 +1837,26 @@ enum ClawGatewaySimulator {
                 actionTitle: action.title,
                 status: .waitingForApproval,
                 summary: "桌面 App 已定位到提交/发送前状态，等待用户确认最终动作。",
-                artifacts: [artifact(.screenshot, "app-confirm-\(index + 1).png", redacted: true)]
+                artifacts: [
+                    artifact(
+                        .screenshot,
+                        "app-confirm-\(index + 1).png",
+                        redacted: true,
+                        metadata: deliverySafetyMetadata(
+                            for: action.kind,
+                            mode: "desktop-control-dry-run",
+                            targetKind: "desktopApp",
+                            finalSubmitRequiresApproval: true,
+                            userApprovalRequired: true,
+                            draftBodyOmitted: true,
+                            pasteTextOmitted: true,
+                            submitBlocked: true,
+                            allowedKeyCount: 1,
+                            blockedKeyCount: 1,
+                            blockedSubmitKeyCount: 1
+                        )
+                    )
+                ]
             )
         case .manageFiles:
             return ClawGatewayActionResult(
@@ -1876,7 +1900,26 @@ enum ClawGatewaySimulator {
                 actionTitle: action.title,
                 status: .waitingForApproval,
                 summary: "已生成草稿，最终发送等待用户确认。",
-                artifacts: [artifact(.messageDraft, "draft-\(index + 1).txt", redacted: true)]
+                artifacts: [
+                    artifact(
+                        .messageDraft,
+                        "draft-\(index + 1).txt",
+                        redacted: true,
+                        metadata: deliverySafetyMetadata(
+                            for: action.kind,
+                            mode: "message-draft-pending-approval",
+                            targetKind: action.kind == .composeEmail ? "email" : "message",
+                            finalSubmitRequiresApproval: true,
+                            userApprovalRequired: true,
+                            draftBodyOmitted: true,
+                            pasteTextOmitted: false,
+                            submitBlocked: true,
+                            allowedKeyCount: 0,
+                            blockedKeyCount: 0,
+                            blockedSubmitKeyCount: 0
+                        )
+                    )
+                ]
             )
         case .analyzeLocalContext, .requestPermission, .readContacts, .createReminder, .scheduleNotification, .openExternalURL, .runShortcut, .speechCapture, .backgroundRefresh, .desktopHandoff, .auditLog:
             return ClawGatewayActionResult(
@@ -1988,6 +2031,49 @@ enum ClawGatewaySimulator {
             "messageDraftCount": "0",
             "sourceArtifactKinds": "browserTrace,fileDiff,commandOutput,screenObservation,accessibilityTree",
             "safetyFlags": "metadata-only,row-content-omitted,source-values-omitted,tool-arguments-omitted,artifact-payload-not-read"
+        ]
+    }
+
+    private static func deliverySafetyMetadata(
+        for actionKind: ClawMobileActionKind,
+        mode: String,
+        targetKind: String,
+        finalSubmitRequiresApproval: Bool,
+        userApprovalRequired: Bool,
+        draftBodyOmitted: Bool,
+        pasteTextOmitted: Bool,
+        submitBlocked: Bool,
+        allowedKeyCount: Int,
+        blockedKeyCount: Int,
+        blockedSubmitKeyCount: Int
+    ) -> [String: String] {
+        var safetyFlags = [
+            "metadata-only",
+            "final-submit-gated",
+            "user-approval-required",
+            "tool-arguments-omitted",
+            "artifact-payload-not-read"
+        ]
+        if draftBodyOmitted {
+            safetyFlags.append("draft-body-omitted")
+        }
+        if pasteTextOmitted {
+            safetyFlags.append("paste-text-omitted")
+        }
+        return [
+            "deliveryReview": "finalSubmitGate",
+            "mode": mode,
+            "actionKind": actionKind.rawValue,
+            "targetKind": targetKind,
+            "finalSubmitRequiresApproval": String(finalSubmitRequiresApproval),
+            "userApprovalRequired": String(userApprovalRequired),
+            "draftBodyOmitted": String(draftBodyOmitted),
+            "pasteTextOmitted": String(pasteTextOmitted),
+            "submitBlocked": String(submitBlocked),
+            "allowedKeyCount": String(allowedKeyCount),
+            "blockedKeyCount": String(blockedKeyCount),
+            "blockedSubmitKeyCount": String(blockedSubmitKeyCount),
+            "safetyFlags": safetyFlags.joined(separator: ",")
         ]
     }
 }
