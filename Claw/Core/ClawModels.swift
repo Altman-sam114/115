@@ -1367,6 +1367,37 @@ private enum ClawArtifactMetadataParser {
     }
 }
 
+private enum ClawArtifactMetadataDisplaySanitizer {
+    static func safeValue(_ value: String?) -> String? {
+        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
+            return nil
+        }
+        var redacted = ClawSensitiveTextRedactor.redacted(clean)
+        let replacements: [(String, String)] = [
+            (#"(?i)\bAuthorization=<redacted>"#, "header-redacted"),
+            (#"(?i)\bBearer <redacted>"#, "token-redacted"),
+            (#"(?i)\b(token|password|secret)=<redacted>"#, "secret-redacted"),
+            (#"(?i)\bheaders=<redacted>"#, "headers-redacted"),
+            (#"(?i)\bworkspace=<redacted>"#, "workspace-redacted"),
+            (#"(?i)\btoolArguments\b"#, "structured-arguments-redacted"),
+            (#"file://<redacted>"#, "file-redacted"),
+            (#"<path-redacted>"#, "path-redacted")
+        ]
+        for (pattern, replacement) in replacements {
+            redacted = redacted.replacingOccurrences(
+                of: pattern,
+                with: replacement,
+                options: .regularExpression
+            )
+        }
+        return ClawArtifactMetadataParser.cleanValue(redacted)
+    }
+
+    static func safeList(_ value: String?) -> [String] {
+        ClawArtifactMetadataParser.listValue(value).compactMap(safeValue)
+    }
+}
+
 struct ClawArtifactMetadataPair: Equatable, Codable, Sendable {
     var key: String
     var value: String
@@ -1414,12 +1445,12 @@ struct ClawGatewayArtifactMetadataReviewSummary: Equatable, Codable, Sendable {
             metadataArtifactCount: artifacts.filter { ($0.metadata?.isEmpty == false) }.count,
             redactedArtifactCount: artifacts.filter(\.isRedacted).count,
             latestKind: latest.kind,
-            latestTitle: safeMetadataValue(latest.title) ?? latest.kind.title,
+            latestTitle: ClawArtifactMetadataDisplaySanitizer.safeValue(latest.title) ?? latest.kind.title,
             latestMetadataKind: metadata.isEmpty ? nil : metadataSource.kind,
-            latestMetadataTitle: metadata.isEmpty ? nil : safeMetadataValue(metadataSource.title) ?? metadataSource.kind.title,
+            latestMetadataTitle: metadata.isEmpty ? nil : ClawArtifactMetadataDisplaySanitizer.safeValue(metadataSource.title) ?? metadataSource.kind.title,
             hasMetadata: metadata.isEmpty == false,
             safeMetadataPairs: safeMetadataPairs(from: metadata),
-            safetyFlags: safeMetadataList(metadata["safetyFlags"]),
+            safetyFlags: ClawArtifactMetadataDisplaySanitizer.safeList(metadata["safetyFlags"]),
             isLatestRedacted: latest.isRedacted
         )
     }
@@ -1445,7 +1476,7 @@ struct ClawGatewayArtifactMetadataReviewSummary: Equatable, Codable, Sendable {
         if lowered == "safetyflags" {
             return nil
         }
-        guard let safeValue = safeMetadataValue(value) else {
+        guard let safeValue = ClawArtifactMetadataDisplaySanitizer.safeValue(value) else {
             return nil
         }
         return ClawArtifactMetadataPair(key: safeKey, value: safeValue)
@@ -1495,33 +1526,6 @@ struct ClawGatewayArtifactMetadataReviewSummary: Equatable, Codable, Sendable {
         return keys[lowered]
     }
 
-    private static func safeMetadataValue(_ value: String?) -> String? {
-        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
-            return nil
-        }
-        var redacted = ClawSensitiveTextRedactor.redacted(clean)
-        let replacements: [(String, String)] = [
-            (#"(?i)\bAuthorization=<redacted>"#, "header-redacted"),
-            (#"(?i)\bBearer <redacted>"#, "token-redacted"),
-            (#"(?i)\b(token|password|secret)=<redacted>"#, "secret-redacted"),
-            (#"(?i)\bheaders=<redacted>"#, "headers-redacted"),
-            (#"(?i)\bworkspace=<redacted>"#, "workspace-redacted"),
-            (#"file://<redacted>"#, "file-redacted"),
-            (#"<path-redacted>"#, "path-redacted")
-        ]
-        for (pattern, replacement) in replacements {
-            redacted = redacted.replacingOccurrences(
-                of: pattern,
-                with: replacement,
-                options: .regularExpression
-            )
-        }
-        return ClawArtifactMetadataParser.cleanValue(redacted)
-    }
-
-    private static func safeMetadataList(_ value: String?) -> [String] {
-        ClawArtifactMetadataParser.listValue(value).compactMap(safeMetadataValue)
-    }
 }
 
 struct ClawAgentTraceReviewSummary: Equatable, Codable, Sendable {
@@ -1564,17 +1568,17 @@ struct ClawAgentTraceReviewSummary: Equatable, Codable, Sendable {
         let metadata = latest.metadata ?? [:]
         return ClawAgentTraceReviewSummary(
             traceCount: traces.count,
-            latestTitle: latest.title,
+            latestTitle: ClawArtifactMetadataDisplaySanitizer.safeValue(latest.title) ?? latest.kind.title,
             hasMetadata: metadata.isEmpty == false,
             readinessScore: ClawArtifactMetadataParser.intValue(metadata["readinessScore"]),
             readinessCanContinue: ClawArtifactMetadataParser.boolValue(metadata["readinessCanContinue"]),
-            satisfiedSignals: ClawArtifactMetadataParser.listValue(metadata["satisfiedSignals"]),
-            missingSignals: ClawArtifactMetadataParser.listValue(metadata["missingSignals"]),
-            selectedNextActionKind: ClawArtifactMetadataParser.cleanValue(metadata["selectedNextActionKind"]),
+            satisfiedSignals: ClawArtifactMetadataDisplaySanitizer.safeList(metadata["satisfiedSignals"]),
+            missingSignals: ClawArtifactMetadataDisplaySanitizer.safeList(metadata["missingSignals"]),
+            selectedNextActionKind: ClawArtifactMetadataDisplaySanitizer.safeValue(metadata["selectedNextActionKind"]),
             selectedNextActionRequiresApproval: ClawArtifactMetadataParser.boolValue(metadata["selectedNextActionRequiresApproval"]),
-            riskTags: ClawArtifactMetadataParser.listValue(metadata["riskTags"]),
-            stopReason: ClawArtifactMetadataParser.cleanValue(metadata["stopReason"]),
-            handoffSummary: ClawArtifactMetadataParser.cleanValue(metadata["handoffSummary"]),
+            riskTags: ClawArtifactMetadataDisplaySanitizer.safeList(metadata["riskTags"]),
+            stopReason: ClawArtifactMetadataDisplaySanitizer.safeValue(metadata["stopReason"]),
+            handoffSummary: ClawArtifactMetadataDisplaySanitizer.safeValue(metadata["handoffSummary"]),
             isRedacted: latest.isRedacted
         )
     }
@@ -1629,47 +1633,19 @@ struct ClawGatewayAccessibilityReviewSummary: Equatable, Codable, Sendable {
             ClawArtifactMetadataParser.cleanValue(metadata["mode"]) != nil
         return ClawGatewayAccessibilityReviewSummary(
             treeCount: trees.count,
-            latestTitle: latest.title,
+            latestTitle: ClawArtifactMetadataDisplaySanitizer.safeValue(latest.title) ?? latest.kind.title,
             hasMetadata: hasReviewMetadata,
-            mode: safeMetadataValue(metadata["mode"]),
-            accessibilityPolicy: safeMetadataValue(metadata["accessibilityPolicy"]),
+            mode: ClawArtifactMetadataDisplaySanitizer.safeValue(metadata["mode"]),
+            accessibilityPolicy: ClawArtifactMetadataDisplaySanitizer.safeValue(metadata["accessibilityPolicy"]),
             includeAccessibilityTree: ClawArtifactMetadataParser.boolValue(metadata["includeAccessibilityTree"]),
             maxCandidateControls: ClawArtifactMetadataParser.intValue(metadata["maxCandidateControls"]),
             nodeCount: ClawArtifactMetadataParser.intValue(metadata["nodeCount"]),
             candidateControlCount: ClawArtifactMetadataParser.intValue(metadata["candidateControlCount"]),
-            platform: safeMetadataValue(metadata["platform"]),
-            redaction: safeMetadataValue(metadata["redaction"]),
-            safetyFlags: safeMetadataList(metadata["safetyFlags"]),
+            platform: ClawArtifactMetadataDisplaySanitizer.safeValue(metadata["platform"]),
+            redaction: ClawArtifactMetadataDisplaySanitizer.safeValue(metadata["redaction"]),
+            safetyFlags: ClawArtifactMetadataDisplaySanitizer.safeList(metadata["safetyFlags"]),
             isRedacted: latest.isRedacted
         )
-    }
-
-    private static func safeMetadataValue(_ value: String?) -> String? {
-        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
-            return nil
-        }
-        var redacted = ClawSensitiveTextRedactor.redacted(clean)
-        let replacements: [(String, String)] = [
-            (#"(?i)\bAuthorization=<redacted>"#, "header-redacted"),
-            (#"(?i)\bBearer <redacted>"#, "token-redacted"),
-            (#"(?i)\b(token|password|secret)=<redacted>"#, "secret-redacted"),
-            (#"(?i)\bheaders=<redacted>"#, "headers-redacted"),
-            (#"(?i)\bworkspace=<redacted>"#, "workspace-redacted"),
-            (#"file://<redacted>"#, "file-redacted"),
-            (#"<path-redacted>"#, "path-redacted")
-        ]
-        for (pattern, replacement) in replacements {
-            redacted = redacted.replacingOccurrences(
-                of: pattern,
-                with: replacement,
-                options: .regularExpression
-            )
-        }
-        return ClawArtifactMetadataParser.cleanValue(redacted)
-    }
-
-    private static func safeMetadataList(_ value: String?) -> [String] {
-        ClawArtifactMetadataParser.listValue(value).compactMap(safeMetadataValue)
     }
 }
 
@@ -1720,22 +1696,22 @@ struct ClawGatewayCapabilityReviewSummary: Equatable, Codable, Sendable {
         let metadata = latest.metadata ?? [:]
         return ClawGatewayCapabilityReviewSummary(
             snapshotCount: snapshots.count,
-            latestTitle: latest.title,
+            latestTitle: ClawArtifactMetadataDisplaySanitizer.safeValue(latest.title) ?? latest.kind.title,
             hasMetadata: metadata.isEmpty == false,
             tokenConfigured: ClawArtifactMetadataParser.boolValue(metadata["tokenConfigured"]),
             tokenRequired: ClawArtifactMetadataParser.boolValue(metadata["tokenRequired"]),
-            tokenFingerprint: ClawArtifactMetadataParser.cleanValue(metadata["tokenFingerprint"]),
-            allowedActionKinds: ClawArtifactMetadataParser.listValue(metadata["allowedActionKinds"]),
-            workspaceState: ClawArtifactMetadataParser.cleanValue(metadata["workspaceState"]),
-            shellState: ClawArtifactMetadataParser.cleanValue(metadata["shellState"]),
-            browserControlState: ClawArtifactMetadataParser.cleanValue(metadata["browserControlState"]),
-            browserNetworkState: ClawArtifactMetadataParser.cleanValue(metadata["browserNetworkState"]),
-            screenCaptureState: ClawArtifactMetadataParser.cleanValue(metadata["screenCaptureState"]),
-            windowMetadataState: ClawArtifactMetadataParser.cleanValue(metadata["windowMetadataState"]),
-            accessibilityTreeState: ClawArtifactMetadataParser.cleanValue(metadata["accessibilityTreeState"]),
-            desktopControlState: ClawArtifactMetadataParser.cleanValue(metadata["desktopControlState"]),
-            safetyFlags: ClawArtifactMetadataParser.listValue(metadata["safetyFlags"]),
-            platform: ClawArtifactMetadataParser.cleanValue(metadata["platform"]),
+            tokenFingerprint: ClawArtifactMetadataDisplaySanitizer.safeValue(metadata["tokenFingerprint"]),
+            allowedActionKinds: ClawArtifactMetadataDisplaySanitizer.safeList(metadata["allowedActionKinds"]),
+            workspaceState: ClawArtifactMetadataDisplaySanitizer.safeValue(metadata["workspaceState"]),
+            shellState: ClawArtifactMetadataDisplaySanitizer.safeValue(metadata["shellState"]),
+            browserControlState: ClawArtifactMetadataDisplaySanitizer.safeValue(metadata["browserControlState"]),
+            browserNetworkState: ClawArtifactMetadataDisplaySanitizer.safeValue(metadata["browserNetworkState"]),
+            screenCaptureState: ClawArtifactMetadataDisplaySanitizer.safeValue(metadata["screenCaptureState"]),
+            windowMetadataState: ClawArtifactMetadataDisplaySanitizer.safeValue(metadata["windowMetadataState"]),
+            accessibilityTreeState: ClawArtifactMetadataDisplaySanitizer.safeValue(metadata["accessibilityTreeState"]),
+            desktopControlState: ClawArtifactMetadataDisplaySanitizer.safeValue(metadata["desktopControlState"]),
+            safetyFlags: ClawArtifactMetadataDisplaySanitizer.safeList(metadata["safetyFlags"]),
+            platform: ClawArtifactMetadataDisplaySanitizer.safeValue(metadata["platform"]),
             isRedacted: latest.isRedacted
         )
     }
@@ -1800,18 +1776,18 @@ struct ClawGatewayTaskReplayGuardReviewSummary: Equatable, Codable, Sendable {
         let metadata = latest.metadata ?? [:]
         return ClawGatewayTaskReplayGuardReviewSummary(
             replayCountArtifacts: replayArtifacts.count,
-            latestTitle: latest.title,
+            latestTitle: ClawArtifactMetadataDisplaySanitizer.safeValue(latest.title) ?? latest.kind.title,
             hasMetadata: metadata.isEmpty == false,
-            decision: safeMetadataValue(metadata["decision"]),
-            taskID: safeMetadataValue(metadata["taskID"]),
-            replayDigest: safeMetadataValue(metadata["replayDigest"]),
+            decision: ClawArtifactMetadataDisplaySanitizer.safeValue(metadata["decision"]),
+            taskID: ClawArtifactMetadataDisplaySanitizer.safeValue(metadata["taskID"]),
+            replayDigest: ClawArtifactMetadataDisplaySanitizer.safeValue(metadata["replayDigest"]),
             digestMatchesFirst: ClawArtifactMetadataParser.boolValue(metadata["digestMatchesFirst"]),
-            firstSessionID: safeMetadataValue(metadata["firstSessionID"]),
-            originalStatus: safeMetadataValue(metadata["originalStatus"]),
+            firstSessionID: ClawArtifactMetadataDisplaySanitizer.safeValue(metadata["firstSessionID"]),
+            originalStatus: ClawArtifactMetadataDisplaySanitizer.safeValue(metadata["originalStatus"]),
             replayCount: ClawArtifactMetadataParser.intValue(metadata["replayCount"]),
             actionCount: ClawArtifactMetadataParser.intValue(metadata["actionCount"]),
-            actionKinds: safeMetadataList(metadata["actionKinds"]),
-            safetyFlags: safeMetadataList(metadata["safetyFlags"]),
+            actionKinds: ClawArtifactMetadataDisplaySanitizer.safeList(metadata["actionKinds"]),
+            safetyFlags: ClawArtifactMetadataDisplaySanitizer.safeList(metadata["safetyFlags"]),
             isRedacted: latest.isRedacted
         )
     }
@@ -1822,34 +1798,6 @@ struct ClawGatewayTaskReplayGuardReviewSummary: Equatable, Codable, Sendable {
             artifact.title == "task-replay-guard.json" ||
             ClawArtifactMetadataParser.cleanValue(artifact.metadata?["replayGuard"]) == "taskReplayGuard"
         )
-    }
-
-    private static func safeMetadataValue(_ value: String?) -> String? {
-        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
-            return nil
-        }
-        var redacted = ClawSensitiveTextRedactor.redacted(clean)
-        let replacements: [(String, String)] = [
-            (#"(?i)\bAuthorization=<redacted>"#, "header-redacted"),
-            (#"(?i)\bBearer <redacted>"#, "token-redacted"),
-            (#"(?i)\b(token|password|secret)=<redacted>"#, "secret-redacted"),
-            (#"(?i)\bheaders=<redacted>"#, "headers-redacted"),
-            (#"(?i)\bworkspace=<redacted>"#, "workspace-redacted"),
-            (#"file://<redacted>"#, "file-redacted"),
-            (#"<path-redacted>"#, "path-redacted")
-        ]
-        for (pattern, replacement) in replacements {
-            redacted = redacted.replacingOccurrences(
-                of: pattern,
-                with: replacement,
-                options: .regularExpression
-            )
-        }
-        return ClawArtifactMetadataParser.cleanValue(redacted)
-    }
-
-    private static func safeMetadataList(_ value: String?) -> [String] {
-        ClawArtifactMetadataParser.listValue(value).compactMap(safeMetadataValue)
     }
 
     private func shortIdentifier(_ value: String?) -> String? {
@@ -2097,7 +2045,10 @@ enum ClawSensitiveTextRedactor {
             (#"(?i)\b(token|password|secret)\s*[:=]\s*[^,\s;}]+"#, "$1=<redacted>"),
             (#"file://\S+"#, "file://<redacted>"),
             (#"(?i)\bworkspace\s*[:=]\s*[^,\s;}]+"#, "workspace=<redacted>"),
-            (#"(/Users|/private|/var|/tmp)/[^\s,;}]+"#, "<path-redacted>")
+            (#"(?i)\b[A-Z]:\\[^\s,;}]+"#, "<path-redacted>"),
+            (#"\\\\[^\s\\,;}]+(\\[^\s\\,;}]+)+"#, "<path-redacted>"),
+            (#"~\/[^\s,;}]+"#, "<path-redacted>"),
+            (#"(/Users|/home|/private|/var|/tmp)/[^\s,;}]+"#, "<path-redacted>")
         ]
         for (pattern, replacement) in replacements {
             value = value.replacingOccurrences(

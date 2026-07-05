@@ -161,6 +161,79 @@ enum LogicSmoke {
         } else {
             failures.append("mission summary should derive agent trace review")
         }
+        let sensitiveAgentTrace = ClawGatewayArtifact(
+            kind: .agentTrace,
+            title: "agent-loop file:///private/tmp/trace.json",
+            reference: "file:///tmp/trace.json",
+            isRedacted: true,
+            metadata: [
+                "readinessScore": "51",
+                "selectedNextActionKind": "composeMessage token=raw-token",
+                "riskTags": "headers={Authorization: Bearer raw-token},C:\\Users\\alice\\secret.txt",
+                "stopReason": "final-submit file:///private/tmp/secret.txt /home/alice/secret.txt",
+                "handoffSummary": "Do not expose toolArguments or Authorization: Bearer raw-token from ~/Library/Claw or \\\\server\\share\\claw"
+            ]
+        )
+        if let sensitiveAgentTraceReview = ClawAgentTraceReviewSummary.latest(from: [sensitiveAgentTrace]) {
+            let visibleText = [
+                sensitiveAgentTraceReview.latestTitle,
+                sensitiveAgentTraceReview.compactStatus,
+                sensitiveAgentTraceReview.riskTags.joined(separator: " "),
+                sensitiveAgentTraceReview.stopReason ?? "",
+                sensitiveAgentTraceReview.handoffSummary ?? ""
+            ].joined(separator: " ")
+            expect(visibleText.contains("Authorization") == false, "agent trace review should redact Authorization")
+            expect(visibleText.contains("Bearer") == false, "agent trace review should redact bearer token")
+            expect(visibleText.contains("raw-token") == false, "agent trace review should redact raw token")
+            expect(visibleText.contains("file://") == false, "agent trace review should redact file URLs")
+            expect(visibleText.contains("/private") == false, "agent trace review should redact local paths")
+            expect(visibleText.contains("/home") == false, "agent trace review should redact Linux home paths")
+            expect(visibleText.contains("~/") == false, "agent trace review should redact tilde paths")
+            expect(visibleText.contains("C:\\") == false, "agent trace review should redact Windows drive paths")
+            expect(visibleText.contains("\\\\server") == false, "agent trace review should redact UNC paths")
+            expect(visibleText.contains("toolArguments") == false, "agent trace review should redact toolArguments")
+        } else {
+            failures.append("sensitive agent trace review should be derived")
+        }
+        let sensitiveCapability = ClawGatewayArtifact(
+            kind: .auditLog,
+            title: "gateway-capability file:///private/tmp/snapshot.json",
+            reference: "file:///tmp/snapshot.json",
+            isRedacted: true,
+            metadata: [
+                "snapshotKind": "gatewayCapability",
+                "tokenFingerprint": "Authorization: Bearer raw-token",
+                "allowedActionKinds": "controlBrowser,toolArguments,token=raw-token,C:\\Users\\alice\\secret.txt",
+                "workspaceState": "workspace=/private/tmp/claw-work",
+                "browserNetworkState": "headers={Authorization: Bearer raw-token}",
+                "safetyFlags": "file:///private/tmp/private.txt,headers={Authorization: Bearer raw-token},/home/alice/private.txt",
+                "platform": "darwin /private/tmp/claw-work ~/Library/Claw \\\\server\\share\\claw"
+            ]
+        )
+        if let sensitiveCapabilityReview = ClawGatewayCapabilityReviewSummary.latest(from: [sensitiveCapability]) {
+            let visibleText = [
+                sensitiveCapabilityReview.latestTitle,
+                sensitiveCapabilityReview.compactStatus,
+                sensitiveCapabilityReview.tokenFingerprint ?? "",
+                sensitiveCapabilityReview.allowedActionKinds.joined(separator: " "),
+                sensitiveCapabilityReview.workspaceState ?? "",
+                sensitiveCapabilityReview.browserNetworkState ?? "",
+                sensitiveCapabilityReview.safetyFlags.joined(separator: " "),
+                sensitiveCapabilityReview.platform ?? ""
+            ].joined(separator: " ")
+            expect(visibleText.contains("Authorization") == false, "capability review should redact Authorization")
+            expect(visibleText.contains("Bearer") == false, "capability review should redact bearer token")
+            expect(visibleText.contains("raw-token") == false, "capability review should redact raw token")
+            expect(visibleText.contains("file://") == false, "capability review should redact file URLs")
+            expect(visibleText.contains("/private") == false, "capability review should redact local paths")
+            expect(visibleText.contains("/home") == false, "capability review should redact Linux home paths")
+            expect(visibleText.contains("~/") == false, "capability review should redact tilde paths")
+            expect(visibleText.contains("C:\\") == false, "capability review should redact Windows drive paths")
+            expect(visibleText.contains("\\\\server") == false, "capability review should redact UNC paths")
+            expect(visibleText.contains("toolArguments") == false, "capability review should redact toolArguments")
+        } else {
+            failures.append("sensitive capability review should be derived")
+        }
 
         let retryMissionStore = ClawStore(autoScanLocalArtifacts: false)
         retryMissionStore.phoneAgentCommand = "在项目目录运行测试，失败时导出日志文件"

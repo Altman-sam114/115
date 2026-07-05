@@ -26,13 +26,13 @@ flowchart TD
   RSKIP --> EVT
   RAUD --> RMETA["Replay Guard metadata<br/>replay 次数、动作数、digest match、安全标志"]
   RPLAY -->|"首次"| SNAP["gateway-capability-snapshot.json<br/>session-start auditLog 能力快照"]
-  SNAP --> SMETA["capability snapshot metadata<br/>token 指纹、allowlist、capability 状态、safety flags"]
+  SNAP --> SMETA["capability snapshot metadata<br/>token 指纹、allowlist、capability 状态、safety flags、统一脱敏"]
   RPLAY -->|"首次"| H["Gateway action handlers<br/>屏幕、浏览器、文件、Shell、提取、桌面 App、agent loop"]
   H --> ART["Artifacts<br/>screenshot、accessibilityTree、browserTrace、fileDiff、commandOutput、agentTrace 证据策略"]
   SNAP --> SART["sessionArtifacts<br/>无 action 绑定的 session 级 artifact"]
   ART --> AXMETA["accessibilityTree metadata<br/>mode、policy、节点数、候选控件、安全标志"]
   ART --> AMETA["artifact metadata review<br/>覆盖率、脱敏数、安全键值、safety flags"]
-  ART --> META["agentTrace artifact metadata<br/>证据分、缺口、下一步、风险、停止原因"]
+  ART --> META["agentTrace artifact metadata<br/>证据分、缺口、下一步、风险、停止原因、统一脱敏"]
   H --> EVT["ClawGatewayEvent<br/>actionStarted、artifactStored、completed、failed、approvalRequested"]
   SNAP --> EVT
   SIM --> EVT

@@ -262,10 +262,10 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 - `ClawGatewayLiveHealthSummary`：手机端从 `ClawGatewayLiveRequest`、`ClawGatewayConnectionState`、最新 session 和事件流派生的连接健康摘要；只展示脱敏 endpoint、transport、request path、短 token 指纹、preflight、事件数量、最新事件、attempt、reconnect、ping、脱敏 transport error、fallback/error/completed 和 session 状态，不写入 envelope，不新增协议字段，不做后台保活。
 - `ClawAutonomousLoopState`：自治循环状态。
 - `ClawGatewayArtifactMetadataReviewSummary`：手机端从 Gateway artifact event metadata 派生通用 metadata 复核摘要，只展示 metadata 覆盖率、脱敏计数、最近带 metadata 的 artifact、安全键值和 safety flags，不读取 Gateway `file://` 内容。
-- `ClawGatewayCapabilityReviewSummary`：手机端从 `gateway-capability-snapshot.json` `auditLog` metadata 派生的能力复核摘要，只展示短 token 指纹、allowlist、capability state、`accessibilityTreeState` 和 safety flags，不读取 Gateway `file://` 内容。
-- `ClawGatewayAccessibilityReviewSummary`：手机端从 `accessibilityTree` artifact metadata 派生的观察复核摘要，只展示 mode、policy、节点数、候选控件数、platform、redaction 和 safety flags，不读取 Gateway `file://` 内容。
-- `ClawGatewayTaskReplayGuardReviewSummary`：手机端从 `task-replay-guard.json` `auditLog` metadata 派生的 Replay Guard 复核摘要，只展示重复次数、跳过动作数、短 digest、首次状态和 safety flags，不读取 Gateway `file://` 内容，不声称跨进程 exactly-once。
-- `ClawAgentTraceReviewSummary`：手机端从最近 `agentTrace` artifact metadata 派生的复核摘要，只展示安全字符串摘要，不读取 Gateway `file://` 内容。
+- `ClawGatewayCapabilityReviewSummary`：手机端从 `gateway-capability-snapshot.json` `auditLog` metadata 派生的能力复核摘要，只展示短 token 指纹、allowlist、capability state、`accessibilityTreeState` 和 safety flags，不读取 Gateway `file://` 内容，UI 可见字符串统一走 metadata 脱敏路径。
+- `ClawGatewayAccessibilityReviewSummary`：手机端从 `accessibilityTree` artifact metadata 派生的观察复核摘要，只展示 mode、policy、节点数、候选控件数、platform、redaction 和 safety flags，不读取 Gateway `file://` 内容，UI 可见字符串统一走 metadata 脱敏路径。
+- `ClawGatewayTaskReplayGuardReviewSummary`：手机端从 `task-replay-guard.json` `auditLog` metadata 派生的 Replay Guard 复核摘要，只展示重复次数、跳过动作数、短 digest、首次状态和 safety flags，不读取 Gateway `file://` 内容，不声称跨进程 exactly-once，UI 可见字符串统一走 metadata 脱敏路径。
+- `ClawAgentTraceReviewSummary`：手机端从最近 `agentTrace` artifact metadata 派生的复核摘要，只展示安全字符串摘要，不读取 Gateway `file://` 内容，UI 可见字符串统一走 metadata 脱敏路径。
 - `ClawMissionRunSummary`：手机端 presentation layer 摘要，只从 loop/task/session 派生，不进入 envelope 或 Gateway 协议；iPad 多栏工作台只重排该展示层和既有会话/日志面板，并展示 Artifact metadata、Gateway capability、Accessibility、Replay Guard 和 AgentTrace 复核摘要。
 
 ## 6. 用户入口
@@ -295,7 +295,7 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 - 每个重要 action 都要产生 artifact 或明确失败/跳过原因。
 - 新协议字段必须同步测试和文档。
 - Gateway capability snapshot 只能作为审计复核 artifact，不能新增权限，不能成为执行计划来源，payload 和 metadata 不能包含 raw token、Authorization header、自然语言 instruction、`toolArguments`、网页正文、命令输出、截图内容、草稿正文、联系人或完整 workspace path。
-- `agentTrace` metadata 只能用于手机端复核展示，不能成为执行计划来源，不能放入浏览器正文、命令输出、截图内容、草稿正文、联系人或 token。
+- `agentTrace` metadata 只能用于手机端复核展示，不能成为执行计划来源，不能放入浏览器正文、命令输出、截图内容、草稿正文、联系人或 token；手机端展示前必须统一脱敏 raw token、Authorization/header、`toolArguments`、`file://` 和完整 workspace path。
 - Agent C 验收必须基于 `origin/main` 最新 run 的未加密结果包，不能只看 Agent B 文字汇报。
 - 云端失败默认用 main 追加修复 commit 处理，不默认回滚或引入候选分支。
 - Agent X 只能调度 A/B/C 多轮迭代，不能代替 Agent C 宣布云端 artifact 验收通过。

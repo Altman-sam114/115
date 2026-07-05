@@ -718,6 +718,53 @@ final class ClawTests: XCTestCase {
         XCTAssertTrue(review.compactStatus.contains("metadata"))
     }
 
+    func testAgentTraceReviewRedactsSensitiveMetadata() throws {
+        let artifact = ClawGatewayArtifact(
+            kind: .agentTrace,
+            title: "agent-loop file:///private/tmp/agent-loop.json",
+            reference: "file:///tmp/agent-loop.json",
+            isRedacted: true,
+            metadata: [
+                "readinessScore": "64",
+                "readinessCanContinue": "true",
+                "satisfiedSignals": "browserTrace,Authorization: Bearer raw-token,file:///private/tmp/browser.json,/home/alice/browser.json",
+                "missingSignals": "messageDraft,workspace=/private/tmp/claw-work,~/Library/Claw/state.json",
+                "selectedNextActionKind": "composeMessage token=raw-token",
+                "selectedNextActionRequiresApproval": "true",
+                "riskTags": "final-submit-gate,headers={Authorization: Bearer raw-token},C:\\Users\\alice\\secret.txt",
+                "stopReason": "final-submit file:///private/tmp/secret.txt \\\\server\\share\\secret.txt",
+                "handoffSummary": "Use toolArguments with Authorization: Bearer raw-token in /private/tmp/claw-work and /home/alice/claw"
+            ]
+        )
+
+        let review = try XCTUnwrap(ClawAgentTraceReviewSummary.latest(from: [artifact]))
+        let visibleText = [
+            review.latestTitle,
+            review.compactStatus,
+            review.satisfiedSignals.joined(separator: " "),
+            review.missingSignals.joined(separator: " "),
+            review.selectedNextActionKind ?? "",
+            review.riskTags.joined(separator: " "),
+            review.stopReason ?? "",
+            review.handoffSummary ?? ""
+        ].joined(separator: " ")
+
+        XCTAssertEqual(review.readinessScore, 64)
+        XCTAssertEqual(review.readinessCanContinue, true)
+        XCTAssertEqual(review.selectedNextActionRequiresApproval, true)
+        XCTAssertFalse(visibleText.contains("Authorization"))
+        XCTAssertFalse(visibleText.contains("Bearer"))
+        XCTAssertFalse(visibleText.contains("raw-token"))
+        XCTAssertFalse(visibleText.contains("file://"))
+        XCTAssertFalse(visibleText.contains("/private"))
+        XCTAssertFalse(visibleText.contains("/home"))
+        XCTAssertFalse(visibleText.contains("~/"))
+        XCTAssertFalse(visibleText.contains("C:\\"))
+        XCTAssertFalse(visibleText.contains("\\\\server"))
+        XCTAssertFalse(visibleText.contains("workspace=/"))
+        XCTAssertFalse(visibleText.contains("toolArguments"))
+    }
+
     func testGatewayCapabilityReviewParsesMetadataAndFallsBack() throws {
         let artifact = ClawGatewayArtifact(
             kind: .auditLog,
@@ -766,6 +813,53 @@ final class ClawTests: XCTestCase {
         let legacyReview = try XCTUnwrap(ClawGatewayCapabilityReviewSummary.latest(from: [legacyArtifact]))
         XCTAssertFalse(legacyReview.hasMetadata)
         XCTAssertTrue(legacyReview.compactStatus.contains("metadata"))
+
+        let sensitiveArtifact = ClawGatewayArtifact(
+            kind: .auditLog,
+            title: "gateway-capability file:///private/tmp/snapshot.json",
+            reference: "file:///tmp/sensitive-gateway-capability-snapshot.json",
+            isRedacted: true,
+            metadata: [
+                "snapshotKind": "gatewayCapability",
+                "tokenConfigured": "true",
+                "tokenRequired": "true",
+                "tokenFingerprint": "Authorization: Bearer raw-token",
+                "allowedActionKinds": "controlBrowser,toolArguments,token=raw-token,C:\\Users\\alice\\secret.txt",
+                "workspaceState": "workspace=/private/tmp/claw-work",
+                "shellState": "dry-run file:///private/tmp/shell.log /home/alice/shell.log",
+                "browserControlState": "real",
+                "browserNetworkState": "headers={Authorization: Bearer raw-token}",
+                "screenCaptureState": "dry-run",
+                "windowMetadataState": "dry-run",
+                "accessibilityTreeState": "dry-run",
+                "desktopControlState": "unavailable",
+                "safetyFlags": "allowlists-enforced,headers={Authorization: Bearer raw-token},file:///private/tmp/private.txt,~/Library/Claw/private.txt",
+                "platform": "darwin /private/tmp/claw-work \\\\server\\share\\claw"
+            ]
+        )
+        let sensitiveReview = try XCTUnwrap(ClawGatewayCapabilityReviewSummary.latest(from: [sensitiveArtifact]))
+        let visibleText = [
+            sensitiveReview.latestTitle,
+            sensitiveReview.compactStatus,
+            sensitiveReview.tokenFingerprint ?? "",
+            sensitiveReview.allowedActionKinds.joined(separator: " "),
+            sensitiveReview.workspaceState ?? "",
+            sensitiveReview.shellState ?? "",
+            sensitiveReview.browserNetworkState ?? "",
+            sensitiveReview.safetyFlags.joined(separator: " "),
+            sensitiveReview.platform ?? ""
+        ].joined(separator: " ")
+        XCTAssertFalse(visibleText.contains("Authorization"))
+        XCTAssertFalse(visibleText.contains("Bearer"))
+        XCTAssertFalse(visibleText.contains("raw-token"))
+        XCTAssertFalse(visibleText.contains("file://"))
+        XCTAssertFalse(visibleText.contains("/private"))
+        XCTAssertFalse(visibleText.contains("/home"))
+        XCTAssertFalse(visibleText.contains("~/"))
+        XCTAssertFalse(visibleText.contains("C:\\"))
+        XCTAssertFalse(visibleText.contains("\\\\server"))
+        XCTAssertFalse(visibleText.contains("workspace=/"))
+        XCTAssertFalse(visibleText.contains("toolArguments"))
     }
 
     func testAccessibilityReviewParsesMetadataAndFallsBack() throws {

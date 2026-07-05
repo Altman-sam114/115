@@ -22,6 +22,42 @@
 
 ## 历史记录
 
+### v0.18 / 手机端 Metadata 复核脱敏加固
+
+日期：2026-07-05
+
+核心变更：
+
+- 新增集中 `ClawArtifactMetadataDisplaySanitizer`，统一专用 metadata review 的安全显示路径。
+- AgentTrace、Gateway capability、Accessibility、Replay Guard 和通用 Artifact metadata review 的 UI 可见字段统一脱敏 raw token、Authorization/header、Bearer、`toolArguments`、`file://` 和 workspace path。
+- XCTest 增加恶意 AgentTrace / Gateway capability metadata 脱敏覆盖；Swift logic smoke 增加专用复核摘要敏感值不外显断言。
+- 同步 README、协议和 flow/flowchart；本轮不新增 schema/event/action/artifact kind，不修改 Gateway JS，不扩大 Gateway 权限。
+
+关键文件：
+
+- `Claw/Core/ClawModels.swift`
+- `ClawTests/ClawTests.swift`
+- `Tools/LogicSmoke.swift`
+- `README.md`
+- `Docs/claw-mobile-gateway-protocol.md`
+- `md/flow/flow.md`
+- `md/flow/flowchart.md`
+- `md/prompt/v0（核心智能能力）/v0.18（手机端Metadata复核脱敏加固）.md`
+- `update_log.md`
+
+验证结果：
+
+- Swift logic smoke 编译通过。
+- `.build/claw-logic-smoke` 通过，输出 `Claw logic smoke passed`。
+- `git diff --check` 通过。
+- `ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci-results.yml"); puts "yaml ok"'` 通过，输出 `yaml ok`。
+- 本轮未修改 `Tools/*.mjs`，本地未跑 Gateway JS smoke；push `origin/main` 后由 GitHub Actions 覆盖 Gateway direct/WebSocket smoke、Swift logic smoke 和 xcodebuild，并由 Agent C 下载结果包复判。
+
+遗留事项：
+
+- Artifact 的严格时间顺序仍沿用当前 `sessionArtifacts + results.artifacts` 派生方式；如需修正跨 action/session-level artifact 的“latest”语义，应在后续版本引入带序号或时间戳的 presentation 聚合。
+- 浏览器控制计划复核、提取完整性复核和草稿/最终提交安全复核仍是后续高价值增量。
+
 ### v0.17 / 手机端 Artifact metadata 详情复核
 
 日期：2026-07-05
