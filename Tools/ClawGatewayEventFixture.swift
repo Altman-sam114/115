@@ -196,7 +196,7 @@ enum ClawGatewayEventFixture {
         case .manageFiles:
             return [artifact(.fileDiff, "fixture-file-diff-\(suffix).json", redacted: false, metadata: fileChangeReviewMetadata())]
         case .runShellCommand:
-            return [artifact(.commandOutput, "fixture-shell-\(suffix).log", redacted: true)]
+            return [artifact(.commandOutput, "fixture-shell-\(suffix).log", redacted: true, metadata: shellCommandSafetyMetadata())]
         case .operateDesktopApp:
             return [artifact(.screenshot, "fixture-app-\(suffix).png", redacted: true)]
         case .composeMessage, .composeEmail:
@@ -263,6 +263,32 @@ enum ClawGatewayEventFixture {
             "diffOmitted": "true",
             "resultStatus": "succeeded",
             "safetyFlags": "metadata-only,tool-arguments-omitted,raw-path-omitted,workspace-path-omitted,file-content-omitted,diff-content-omitted,artifact-payload-not-read,session-workspace-only"
+        ]
+    }
+
+    private static func shellCommandSafetyMetadata() -> [String: String] {
+        [
+            "shellReview": "commandSafety",
+            "mode": "shell-policy-blocked",
+            "actionKind": ClawMobileActionKind.runShellCommand.rawValue,
+            "shellPolicy": "dry-run",
+            "structuredCommandPresent": "true",
+            "commandParsed": "true",
+            "allowlistConfigured": "false",
+            "allowlistMatched": "false",
+            "executionAttempted": "false",
+            "executed": "false",
+            "timedOut": "false",
+            "exitCodePresent": "false",
+            "exitCodeZero": "false",
+            "stdoutPresent": "false",
+            "stderrPresent": "false",
+            "commandOmitted": "true",
+            "stdoutOmitted": "true",
+            "stderrOmitted": "true",
+            "cwdOmitted": "true",
+            "resultStatus": "failed",
+            "safetyFlags": "metadata-only,structured-arguments-only,tool-arguments-omitted,command-omitted,stdout-omitted,stderr-omitted,cwd-omitted,shell-allowlist-enforced,dry-run-only,no-command-executed,artifact-payload-not-read"
         ]
     }
 

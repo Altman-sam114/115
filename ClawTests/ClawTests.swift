@@ -391,7 +391,7 @@ final class ClawTests: XCTestCase {
     func testMissionRunSummaryDerivesExtractionCompletenessReview() throws {
         let store = ClawStore(autoScanLocalArtifacts: false)
 
-        store.phoneAgentCommand = "打开浏览器搜索资料，整理结果并发到 Slack"
+        store.phoneAgentCommand = "在项目目录运行测试，失败时导出日志文件"
         store.startAutonomousComputerTakeover()
         store.approveAndContinueAutonomousLoop()
         let review = try XCTUnwrap(store.missionRunSummary.gatewayExtractionCompletenessReview)
@@ -417,7 +417,7 @@ final class ClawTests: XCTestCase {
     func testMissionRunSummaryDerivesBrowserControlReview() throws {
         let store = ClawStore(autoScanLocalArtifacts: false)
 
-        store.phoneAgentCommand = "打开浏览器搜索资料，整理结果并发到 Slack"
+        store.phoneAgentCommand = "在项目目录运行测试，失败时导出日志文件"
         store.startAutonomousComputerTakeover()
         store.approveAndContinueAutonomousLoop()
         let review = try XCTUnwrap(store.missionRunSummary.gatewayBrowserControlReview)
@@ -520,6 +520,46 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(fileReview.mode, "workspace-write")
         XCTAssertEqual(fileReview.writeSucceeded, true)
         XCTAssertTrue(fileReview.safetyFlags.contains("session-workspace-only"))
+    }
+
+    func testMissionRunSummaryDerivesShellCommandSafetyReview() throws {
+        let store = ClawStore(autoScanLocalArtifacts: false)
+
+        store.phoneAgentCommand = "在项目目录运行测试，失败时导出日志文件"
+        store.startAutonomousComputerTakeover()
+        store.approveAndContinueAutonomousLoop()
+        let review = try XCTUnwrap(store.missionRunSummary.gatewayShellCommandSafetyReview)
+
+        XCTAssertEqual(review.reviewCount, 1)
+        XCTAssertTrue(review.hasMetadata)
+        XCTAssertEqual(review.mode, "shell-policy-blocked")
+        XCTAssertEqual(review.actionKind, "runShellCommand")
+        XCTAssertEqual(review.shellPolicy, "dry-run")
+        XCTAssertEqual(review.structuredCommandPresent, true)
+        XCTAssertEqual(review.commandParsed, true)
+        XCTAssertEqual(review.allowlistConfigured, false)
+        XCTAssertEqual(review.allowlistMatched, false)
+        XCTAssertEqual(review.executionAttempted, false)
+        XCTAssertEqual(review.executed, false)
+        XCTAssertEqual(review.exitCodePresent, false)
+        XCTAssertEqual(review.stdoutPresent, false)
+        XCTAssertEqual(review.stderrPresent, false)
+        XCTAssertEqual(review.commandOmitted, true)
+        XCTAssertEqual(review.stdoutOmitted, true)
+        XCTAssertEqual(review.stderrOmitted, true)
+        XCTAssertEqual(review.cwdOmitted, true)
+        XCTAssertEqual(review.resultStatus, "failed")
+        XCTAssertTrue(review.safetyFlags.contains("metadata-only"))
+        XCTAssertTrue(review.safetyFlags.contains("structured-arguments-only"))
+        XCTAssertTrue(review.safetyFlags.contains("shell-allowlist-enforced"))
+        XCTAssertTrue(review.safetyFlags.contains("command-omitted"))
+        XCTAssertTrue(review.compactStatus.contains("policy dry-run"))
+
+        let shellResult = try XCTUnwrap(store.clawGatewaySessions.first?.results.first { $0.actionKind == .runShellCommand })
+        let shellReview = try XCTUnwrap(ClawGatewayShellCommandSafetyReviewSummary.latest(from: shellResult.artifacts))
+        XCTAssertEqual(shellReview.mode, "shell-policy-blocked")
+        XCTAssertEqual(shellReview.executed, false)
+        XCTAssertTrue(shellReview.safetyFlags.contains("stdout-omitted"))
     }
 
     func testMissionRunSummaryDerivesGatewayCapabilityReview() throws {
@@ -1185,6 +1225,89 @@ final class ClawTests: XCTestCase {
         XCTAssertFalse(visibleText.contains("patch"))
         XCTAssertFalse(visibleText.contains("@@"))
         XCTAssertFalse(visibleText.contains("private body"))
+        XCTAssertFalse(visibleText.contains("file://"))
+        XCTAssertFalse(visibleText.contains("/private"))
+        XCTAssertFalse(visibleText.contains("/Users"))
+        XCTAssertFalse(visibleText.contains("toolArguments"))
+    }
+
+    func testShellCommandSafetyReviewFallsBackAndRedactsSensitiveMetadata() throws {
+        let legacyArtifact = ClawGatewayArtifact(
+            kind: .commandOutput,
+            title: "legacy-shell.log",
+            reference: "file:///tmp/legacy-shell.log",
+            isRedacted: true
+        )
+        let legacyReview = try XCTUnwrap(ClawGatewayShellCommandSafetyReviewSummary.latest(from: [legacyArtifact]))
+        XCTAssertEqual(legacyReview.reviewCount, 1)
+        XCTAssertFalse(legacyReview.hasMetadata)
+        XCTAssertNil(legacyReview.shellPolicy)
+        XCTAssertTrue(legacyReview.compactStatus.contains("metadata"))
+
+        let artifact = ClawGatewayArtifact(
+            kind: .commandOutput,
+            title: "shell-output file:///private/tmp/shell.log /Users/alice/project",
+            reference: "file:///tmp/shell-output.log",
+            isRedacted: true,
+            metadata: [
+                "shellReview": "commandSafety",
+                "mode": "shell-executed Authorization: Bearer raw-token",
+                "actionKind": "runShellCommand token=raw-token",
+                "shellPolicy": "allowlist-enabled /private/tmp/workspace",
+                "structuredCommandPresent": "true",
+                "commandParsed": "true",
+                "allowlistConfigured": "true",
+                "allowlistMatched": "true",
+                "executionAttempted": "true",
+                "executed": "true",
+                "timedOut": "false",
+                "exitCodePresent": "true",
+                "exitCodeZero": "true",
+                "stdoutPresent": "true",
+                "stderrPresent": "false",
+                "commandOmitted": "true",
+                "stdoutOmitted": "true",
+                "stderrOmitted": "true",
+                "cwdOmitted": "true",
+                "resultStatus": "succeeded file:///private/tmp/log.txt",
+                "safetyFlags": "metadata-only,command-omitted,stdout-omitted,stderr-omitted,cwd-omitted,headers={Authorization: Bearer raw-token},shellCommand=pwd,stdout=/private/tmp/workspace,toolArguments=/private/tmp/input.json",
+                "shellCommand": "pwd",
+                "stdout": "/private/tmp/workspace",
+                "stderr": "secret stderr",
+                "cwd": "/private/tmp/workspace"
+            ]
+        )
+
+        let review = try XCTUnwrap(ClawGatewayShellCommandSafetyReviewSummary.latest(from: [artifact]))
+        let visibleText = [
+            review.latestTitle,
+            review.compactStatus,
+            review.mode ?? "",
+            review.actionKind ?? "",
+            review.shellPolicy ?? "",
+            review.resultStatus ?? "",
+            review.safetyFlags.joined(separator: " ")
+        ].joined(separator: " ")
+
+        XCTAssertTrue(review.hasMetadata)
+        XCTAssertNil(review.mode)
+        XCTAssertNil(review.actionKind)
+        XCTAssertNil(review.shellPolicy)
+        XCTAssertNil(review.resultStatus)
+        XCTAssertEqual(review.executed, true)
+        XCTAssertEqual(review.exitCodeZero, true)
+        XCTAssertEqual(review.commandOmitted, true)
+        XCTAssertEqual(review.stdoutOmitted, true)
+        XCTAssertEqual(review.stderrOmitted, true)
+        XCTAssertEqual(review.cwdOmitted, true)
+        XCTAssertTrue(review.safetyFlags.contains("command-omitted"))
+        XCTAssertTrue(review.safetyFlags.contains("stdout-omitted"))
+        XCTAssertFalse(visibleText.contains("Authorization"))
+        XCTAssertFalse(visibleText.contains("Bearer"))
+        XCTAssertFalse(visibleText.contains("raw-token"))
+        XCTAssertFalse(visibleText.contains("shellCommand"))
+        XCTAssertFalse(visibleText.contains("pwd"))
+        XCTAssertFalse(visibleText.contains("secret stderr"))
         XCTAssertFalse(visibleText.contains("file://"))
         XCTAssertFalse(visibleText.contains("/private"))
         XCTAssertFalse(visibleText.contains("/Users"))

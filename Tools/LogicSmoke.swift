@@ -215,6 +215,39 @@ enum LogicSmoke {
         } else {
             failures.append("file result should derive file change safety review")
         }
+        let shellReviewStore = ClawStore(autoScanLocalArtifacts: false)
+        shellReviewStore.phoneAgentCommand = "在项目目录运行测试，失败时导出日志文件"
+        shellReviewStore.startAutonomousComputerTakeover()
+        shellReviewStore.approveAndContinueAutonomousLoop()
+        let shellMissionSummary = shellReviewStore.missionRunSummary
+        if let shellReview = shellMissionSummary.gatewayShellCommandSafetyReview {
+            expect(shellReview.reviewCount == 1, "mission summary should count shell command artifacts")
+            expect(shellReview.hasMetadata, "shell safety review should include metadata")
+            expect(shellReview.mode == "shell-policy-blocked", "shell safety review should expose policy blocked mode")
+            expect(shellReview.actionKind == "runShellCommand", "shell safety review should expose action kind")
+            expect(shellReview.shellPolicy == "dry-run", "shell safety review should expose dry-run policy")
+            expect(shellReview.structuredCommandPresent == true, "shell safety review should expose structured command presence")
+            expect(shellReview.commandParsed == true, "shell safety review should expose parse success")
+            expect(shellReview.allowlistMatched == false, "shell safety review should expose allowlist block")
+            expect(shellReview.executionAttempted == false, "shell safety review should expose no execution")
+            expect(shellReview.executed == false, "shell safety review should expose blocked execution")
+            expect(shellReview.commandOmitted == true, "shell safety review should omit command")
+            expect(shellReview.stdoutOmitted == true, "shell safety review should omit stdout")
+            expect(shellReview.stderrOmitted == true, "shell safety review should omit stderr")
+            expect(shellReview.cwdOmitted == true, "shell safety review should omit cwd")
+            expect(shellReview.safetyFlags.contains("shell-allowlist-enforced"), "shell safety review should expose allowlist flag")
+            expect(shellReview.safetyFlags.contains("command-omitted"), "shell safety review should expose command omission")
+        } else {
+            failures.append("mission summary should derive shell command safety review")
+        }
+        if let shellArtifacts = shellReviewStore.clawGatewaySessions.first?.results.first(where: { $0.actionKind == .runShellCommand })?.artifacts,
+           let shellReview = ClawGatewayShellCommandSafetyReviewSummary.latest(from: shellArtifacts) {
+            expect(shellReview.mode == "shell-policy-blocked", "shell result review should expose policy blocked mode")
+            expect(shellReview.executed == false, "shell result review should expose blocked execution")
+            expect(shellReview.safetyFlags.contains("stdout-omitted"), "shell result review should omit stdout")
+        } else {
+            failures.append("shell result should derive shell command safety review")
+        }
         if let capabilityReview = missionSummary.gatewayCapabilityReview {
             expect(capabilityReview.snapshotCount == 1, "mission summary should count capability snapshots")
             expect(capabilityReview.hasMetadata, "capability review should include metadata")
@@ -538,6 +571,73 @@ enum LogicSmoke {
             failures.append("sensitive file change review should be derived")
         }
 
+        let sensitiveShell = ClawGatewayArtifact(
+            kind: .commandOutput,
+            title: "shell-output file:///private/tmp/shell.log /Users/alice/project",
+            reference: "file:///tmp/shell-output.log",
+            isRedacted: true,
+            metadata: [
+                "shellReview": "commandSafety",
+                "mode": "shell-executed Authorization: Bearer raw-token",
+                "actionKind": "runShellCommand token=raw-token",
+                "shellPolicy": "allowlist-enabled /private/tmp/workspace",
+                "structuredCommandPresent": "true",
+                "commandParsed": "true",
+                "allowlistConfigured": "true",
+                "allowlistMatched": "true",
+                "executionAttempted": "true",
+                "executed": "true",
+                "timedOut": "false",
+                "exitCodePresent": "true",
+                "exitCodeZero": "true",
+                "stdoutPresent": "true",
+                "stderrPresent": "false",
+                "commandOmitted": "true",
+                "stdoutOmitted": "true",
+                "stderrOmitted": "true",
+                "cwdOmitted": "true",
+                "resultStatus": "succeeded file:///private/tmp/log.txt",
+                "safetyFlags": "metadata-only,command-omitted,stdout-omitted,stderr-omitted,cwd-omitted,headers={Authorization: Bearer raw-token},shellCommand=pwd,stdout=/private/tmp/workspace,toolArguments=/private/tmp/input.json",
+                "shellCommand": "pwd",
+                "stdout": "/private/tmp/workspace",
+                "stderr": "secret stderr",
+                "cwd": "/private/tmp/workspace"
+            ]
+        )
+        if let sensitiveShellReview = ClawGatewayShellCommandSafetyReviewSummary.latest(from: [sensitiveShell]) {
+            let visibleText = [
+                sensitiveShellReview.latestTitle,
+                sensitiveShellReview.compactStatus,
+                sensitiveShellReview.mode ?? "",
+                sensitiveShellReview.actionKind ?? "",
+                sensitiveShellReview.shellPolicy ?? "",
+                sensitiveShellReview.resultStatus ?? "",
+                sensitiveShellReview.safetyFlags.joined(separator: " ")
+            ].joined(separator: " ")
+            expect(sensitiveShellReview.hasMetadata, "shell safety review should parse review metadata")
+            expect(sensitiveShellReview.mode == nil, "shell safety review should reject unsafe mode")
+            expect(sensitiveShellReview.actionKind == nil, "shell safety review should reject unsafe action kind")
+            expect(sensitiveShellReview.shellPolicy == nil, "shell safety review should reject unsafe policy")
+            expect(sensitiveShellReview.resultStatus == nil, "shell safety review should reject unsafe result status")
+            expect(sensitiveShellReview.executed == true, "shell safety review should keep execution boolean")
+            expect(sensitiveShellReview.exitCodeZero == true, "shell safety review should keep exit code boolean")
+            expect(sensitiveShellReview.commandOmitted == true, "shell safety review should keep command omission")
+            expect(sensitiveShellReview.safetyFlags.contains("command-omitted"), "shell safety review should expose command omission flag")
+            expect(visibleText.contains("Authorization") == false, "shell safety review should redact Authorization")
+            expect(visibleText.contains("Bearer") == false, "shell safety review should redact bearer token")
+            expect(visibleText.contains("raw-token") == false, "shell safety review should redact raw token")
+            expect(visibleText.contains("shellCommand") == false, "shell safety review should redact shellCommand")
+            expect(visibleText.contains("pwd") == false, "shell safety review should redact raw command")
+            expect(visibleText.contains("stdout") == false || visibleText.contains("stdout-omitted"), "shell safety review should only expose stdout omission flag")
+            expect(visibleText.contains("secret stderr") == false, "shell safety review should redact stderr content")
+            expect(visibleText.contains("file://") == false, "shell safety review should redact file URLs")
+            expect(visibleText.contains("/private") == false, "shell safety review should redact local paths")
+            expect(visibleText.contains("/Users") == false, "shell safety review should redact user paths")
+            expect(visibleText.contains("toolArguments") == false, "shell safety review should redact toolArguments")
+        } else {
+            failures.append("sensitive shell command review should be derived")
+        }
+
         let retryMissionStore = ClawStore(autoScanLocalArtifacts: false)
         retryMissionStore.phoneAgentCommand = "在项目目录运行测试，失败时导出日志文件"
         retryMissionStore.startAutonomousComputerTakeover()
@@ -682,6 +782,12 @@ enum LogicSmoke {
             expect(reducedFileChangeReview.writeSucceeded == true, "fixture file change review should expose write success")
         } else {
             failures.append("reduced fixture should derive file change safety review")
+        }
+        if let reducedShellReview = ClawGatewayShellCommandSafetyReviewSummary.latest(from: reducedFixture) {
+            expect(reducedShellReview.hasMetadata, "reduced fixture should derive shell command metadata")
+            expect(reducedShellReview.executed == false, "fixture shell review should expose blocked execution")
+        } else {
+            failures.append("reduced fixture should derive shell command safety review")
         }
 
         let replayArtifact = ClawGatewayArtifact(

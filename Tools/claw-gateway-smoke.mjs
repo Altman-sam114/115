@@ -135,6 +135,25 @@ const capabilitySnapshot = await assertCapabilitySnapshot(events, {
 });
 expect(capabilitySnapshot.envelope.allowedActionKinds.includes("controlBrowser"), "websocket snapshot missing controlBrowser allowlist");
 expect(!capabilitySnapshot.envelope.allowedActionKinds.includes("observeScreen"), "websocket snapshot should match envelope allowlist exactly");
+const shellPolicyArtifact = findArtifactByTitle(events, "commandOutput", "shell-policy-");
+assertShellCommandSafetyMetadata(shellPolicyArtifact?.metadata, {
+  mode: "shell-policy-blocked",
+  actionKind: "runShellCommand",
+  shellPolicy: "dry-run",
+  structuredCommandPresent: true,
+  commandParsed: true,
+  allowlistConfigured: false,
+  allowlistMatched: false,
+  executionAttempted: false,
+  executed: false,
+  timedOut: false,
+  exitCodePresent: false,
+  exitCodeZero: false,
+  stdoutPresent: false,
+  stderrPresent: false,
+  resultStatus: "failed",
+  safetyFlags: ["metadata-only", "structured-arguments-only", "tool-arguments-omitted", "command-omitted", "stdout-omitted", "stderr-omitted", "cwd-omitted", "shell-allowlist-enforced", "dry-run-only", "no-command-executed", "artifact-payload-not-read"],
+}, "websocket shell policy");
 
 const browserTraces = await readArtifacts(events, "browserTrace");
 const pageTrace = browserTraces.find((trace) => trace.mode === "local-html");
@@ -871,6 +890,78 @@ function assertFileChangeSafetyMetadata(metadata, expected, label) {
     "/sessions/",
     "stdout",
     "stderr",
+  ]) {
+    expect(!serialized.includes(forbidden), `${label} metadata leaked ${forbidden}`);
+  }
+}
+
+function assertShellCommandSafetyMetadata(metadata, expected, label) {
+  expect(metadata && typeof metadata === "object", `${label} missing shell safety metadata`);
+  const allowedKeys = [
+    "actionKind",
+    "allowlistConfigured",
+    "allowlistMatched",
+    "commandOmitted",
+    "commandParsed",
+    "cwdOmitted",
+    "executed",
+    "executionAttempted",
+    "exitCodePresent",
+    "exitCodeZero",
+    "mode",
+    "resultStatus",
+    "safetyFlags",
+    "shellPolicy",
+    "shellReview",
+    "stderrOmitted",
+    "stderrPresent",
+    "stdoutOmitted",
+    "stdoutPresent",
+    "structuredCommandPresent",
+    "timedOut",
+  ].sort();
+  expect(
+    Object.keys(metadata).sort().join(",") === allowedKeys.join(","),
+    `${label} shell safety metadata includes unexpected keys`,
+  );
+  expect(metadata.shellReview === "commandSafety", `${label} shell review metadata mismatch`);
+  expect(metadata.mode === expected.mode, `${label} mode metadata mismatch`);
+  expect(metadata.actionKind === expected.actionKind, `${label} action kind metadata mismatch`);
+  expect(metadata.shellPolicy === expected.shellPolicy, `${label} shell policy metadata mismatch`);
+  expect(metadata.structuredCommandPresent === String(expected.structuredCommandPresent), `${label} structured command metadata mismatch`);
+  expect(metadata.commandParsed === String(expected.commandParsed), `${label} command parsed metadata mismatch`);
+  expect(metadata.allowlistConfigured === String(expected.allowlistConfigured), `${label} allowlist configured metadata mismatch`);
+  expect(metadata.allowlistMatched === String(expected.allowlistMatched), `${label} allowlist matched metadata mismatch`);
+  expect(metadata.executionAttempted === String(expected.executionAttempted), `${label} execution attempt metadata mismatch`);
+  expect(metadata.executed === String(expected.executed), `${label} executed metadata mismatch`);
+  expect(metadata.timedOut === String(expected.timedOut), `${label} timeout metadata mismatch`);
+  expect(metadata.exitCodePresent === String(expected.exitCodePresent), `${label} exit code presence metadata mismatch`);
+  expect(metadata.exitCodeZero === String(expected.exitCodeZero), `${label} exit zero metadata mismatch`);
+  expect(metadata.stdoutPresent === String(expected.stdoutPresent), `${label} stdout presence metadata mismatch`);
+  expect(metadata.stderrPresent === String(expected.stderrPresent), `${label} stderr presence metadata mismatch`);
+  expect(metadata.commandOmitted === "true", `${label} command omission metadata mismatch`);
+  expect(metadata.stdoutOmitted === "true", `${label} stdout omission metadata mismatch`);
+  expect(metadata.stderrOmitted === "true", `${label} stderr omission metadata mismatch`);
+  expect(metadata.cwdOmitted === "true", `${label} cwd omission metadata mismatch`);
+  expect(metadata.resultStatus === expected.resultStatus, `${label} result status metadata mismatch`);
+  for (const flag of expected.safetyFlags) {
+    expect(metadata.safetyFlags.includes(flag), `${label} missing safety flag ${flag}`);
+  }
+  const serialized = JSON.stringify(metadata);
+  for (const forbidden of [
+    token,
+    "Authorization",
+    "Bearer",
+    "toolArguments",
+    "shellCommand",
+    "pwd",
+    "Command:",
+    "Allowlist:",
+    "Run a structured command only if policy allows it",
+    "https://",
+    "file://",
+    "/sessions/",
+    ".build/claw-gateway-workspace",
   ]) {
     expect(!serialized.includes(forbidden), `${label} metadata leaked ${forbidden}`);
   }

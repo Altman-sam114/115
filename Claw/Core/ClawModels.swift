@@ -1549,6 +1549,21 @@ struct ClawGatewayArtifactMetadataReviewSummary: Equatable, Codable, Sendable {
             "screenobservationcount": "screenObservationCount",
             "selectednextactionkind": "selectedNextActionKind",
             "selectednextactionrequiresapproval": "selectedNextActionRequiresApproval",
+            "allowlistconfigured": "allowlistConfigured",
+            "allowlistmatched": "allowlistMatched",
+            "commandomitted": "commandOmitted",
+            "commandparsed": "commandParsed",
+            "cwdomitted": "cwdOmitted",
+            "executionattempted": "executionAttempted",
+            "exitcodepresent": "exitCodePresent",
+            "exitcodezero": "exitCodeZero",
+            "shellpolicy": "shellPolicy",
+            "shellreview": "shellReview",
+            "stderrpresent": "stderrPresent",
+            "stderromitted": "stderrOmitted",
+            "stdoutpresent": "stdoutPresent",
+            "stdoutomitted": "stdoutOmitted",
+            "structuredcommandpresent": "structuredCommandPresent",
             "shellstate": "shellState",
             "snapshotkind": "snapshotKind",
             "sourceartifactkinds": "sourceArtifactKinds",
@@ -2067,6 +2082,147 @@ struct ClawGatewayFileChangeSafetyReviewSummary: Equatable, Codable, Sendable {
     }
 }
 
+struct ClawGatewayShellCommandSafetyReviewSummary: Equatable, Codable, Sendable {
+    var reviewCount: Int
+    var latestTitle: String
+    var hasMetadata: Bool
+    var mode: String?
+    var actionKind: String?
+    var shellPolicy: String?
+    var structuredCommandPresent: Bool?
+    var commandParsed: Bool?
+    var allowlistConfigured: Bool?
+    var allowlistMatched: Bool?
+    var executionAttempted: Bool?
+    var executed: Bool?
+    var timedOut: Bool?
+    var exitCodePresent: Bool?
+    var exitCodeZero: Bool?
+    var stdoutPresent: Bool?
+    var stderrPresent: Bool?
+    var commandOmitted: Bool?
+    var stdoutOmitted: Bool?
+    var stderrOmitted: Bool?
+    var cwdOmitted: Bool?
+    var resultStatus: String?
+    var safetyFlags: [String]
+    var isRedacted: Bool
+
+    var compactStatus: String {
+        guard hasMetadata else {
+            return "已收到 Shell 输出 artifact，metadata 待同步。"
+        }
+        let policy = shellPolicy.map { "policy \($0)" } ?? "policy 待复核"
+        let execution: String
+        if executed == true {
+            execution = "executed"
+        } else if executionAttempted == false {
+            execution = "not executed"
+        } else {
+            execution = "execution 待复核"
+        }
+        let result = resultStatus ?? "result 待复核"
+        return "\(policy) · \(execution) · \(result)"
+    }
+
+    static func latest(from session: ClawGatewaySession?) -> ClawGatewayShellCommandSafetyReviewSummary? {
+        guard let session else {
+            return nil
+        }
+        return latest(from: session.allArtifacts)
+    }
+
+    static func latest(from artifacts: [ClawGatewayArtifact]) -> ClawGatewayShellCommandSafetyReviewSummary? {
+        let shellArtifacts = artifacts.filter(isShellCommandSafetyArtifact)
+        guard let latest = shellArtifacts.last else {
+            return nil
+        }
+        let metadata = latest.metadata ?? [:]
+        let hasReviewMetadata = ClawArtifactMetadataParser.cleanValue(metadata["shellReview"]) == "commandSafety"
+        return ClawGatewayShellCommandSafetyReviewSummary(
+            reviewCount: shellArtifacts.count,
+            latestTitle: ClawArtifactMetadataDisplaySanitizer.safeValue(latest.title) ?? latest.kind.title,
+            hasMetadata: hasReviewMetadata,
+            mode: allowedMode(metadata["mode"]),
+            actionKind: allowedActionKind(metadata["actionKind"]),
+            shellPolicy: allowedShellPolicy(metadata["shellPolicy"]),
+            structuredCommandPresent: ClawArtifactMetadataParser.boolValue(metadata["structuredCommandPresent"]),
+            commandParsed: ClawArtifactMetadataParser.boolValue(metadata["commandParsed"]),
+            allowlistConfigured: ClawArtifactMetadataParser.boolValue(metadata["allowlistConfigured"]),
+            allowlistMatched: ClawArtifactMetadataParser.boolValue(metadata["allowlistMatched"]),
+            executionAttempted: ClawArtifactMetadataParser.boolValue(metadata["executionAttempted"]),
+            executed: ClawArtifactMetadataParser.boolValue(metadata["executed"]),
+            timedOut: ClawArtifactMetadataParser.boolValue(metadata["timedOut"]),
+            exitCodePresent: ClawArtifactMetadataParser.boolValue(metadata["exitCodePresent"]),
+            exitCodeZero: ClawArtifactMetadataParser.boolValue(metadata["exitCodeZero"]),
+            stdoutPresent: ClawArtifactMetadataParser.boolValue(metadata["stdoutPresent"]),
+            stderrPresent: ClawArtifactMetadataParser.boolValue(metadata["stderrPresent"]),
+            commandOmitted: ClawArtifactMetadataParser.boolValue(metadata["commandOmitted"]),
+            stdoutOmitted: ClawArtifactMetadataParser.boolValue(metadata["stdoutOmitted"]),
+            stderrOmitted: ClawArtifactMetadataParser.boolValue(metadata["stderrOmitted"]),
+            cwdOmitted: ClawArtifactMetadataParser.boolValue(metadata["cwdOmitted"]),
+            resultStatus: allowedResultStatus(metadata["resultStatus"]),
+            safetyFlags: allowedSafetyFlags(metadata["safetyFlags"]),
+            isRedacted: latest.isRedacted
+        )
+    }
+
+    private static func isShellCommandSafetyArtifact(_ artifact: ClawGatewayArtifact) -> Bool {
+        ClawArtifactMetadataParser.cleanValue(artifact.metadata?["shellReview"]) == "commandSafety" ||
+            artifact.kind == .commandOutput
+    }
+
+    private static func allowedMode(_ value: String?) -> String? {
+        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
+            return nil
+        }
+        let allowed = ["missing-structured-command", "command-parse-failed", "shell-policy-blocked", "shell-executed"]
+        return allowed.contains(clean) ? clean : nil
+    }
+
+    private static func allowedActionKind(_ value: String?) -> String? {
+        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
+            return nil
+        }
+        return clean == "runShellCommand" ? clean : nil
+    }
+
+    private static func allowedShellPolicy(_ value: String?) -> String? {
+        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
+            return nil
+        }
+        let allowed = ["dry-run", "allowlist-required", "allowlist-enabled"]
+        return allowed.contains(clean) ? clean : nil
+    }
+
+    private static func allowedResultStatus(_ value: String?) -> String? {
+        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
+            return nil
+        }
+        let allowed = ["skipped", "succeeded", "failed"]
+        return allowed.contains(clean) ? clean : nil
+    }
+
+    private static func allowedSafetyFlags(_ value: String?) -> [String] {
+        let allowed = [
+            "artifact-payload-not-read",
+            "command-omitted",
+            "cwd-omitted",
+            "dry-run-only",
+            "metadata-only",
+            "natural-language-not-executed",
+            "no-command-executed",
+            "parse-failed",
+            "shell-allowlist-enforced",
+            "stderr-omitted",
+            "stdout-omitted",
+            "structured-arguments-only",
+            "tool-arguments-omitted"
+        ]
+        return ClawArtifactMetadataParser.listValue(value).filter { allowed.contains($0) }
+    }
+}
+
 struct ClawAgentTraceReviewSummary: Equatable, Codable, Sendable {
     var traceCount: Int
     var latestTitle: String
@@ -2375,6 +2531,7 @@ struct ClawMissionRunSummary: Equatable, Codable, Sendable {
     var gatewayBrowserControlReview: ClawGatewayBrowserControlReviewSummary?
     var gatewayDeliverySafetyReview: ClawGatewayDeliverySafetyReviewSummary?
     var gatewayFileChangeSafetyReview: ClawGatewayFileChangeSafetyReviewSummary?
+    var gatewayShellCommandSafetyReview: ClawGatewayShellCommandSafetyReviewSummary?
     var agentTraceReview: ClawAgentTraceReviewSummary?
     var gatewayAccessibilityReview: ClawGatewayAccessibilityReviewSummary?
     var gatewayCapabilityReview: ClawGatewayCapabilityReviewSummary?

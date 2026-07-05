@@ -708,6 +708,10 @@ struct ClawMissionRunPanel: View {
                 ClawGatewayFileChangeSafetyReviewRow(review: review)
             }
 
+            if let review = summary.gatewayShellCommandSafetyReview {
+                ClawGatewayShellCommandSafetyReviewRow(review: review)
+            }
+
             if let review = summary.gatewayExtractionCompletenessReview {
                 ClawGatewayExtractionCompletenessReviewRow(review: review)
             }
@@ -1259,6 +1263,10 @@ struct ClawGatewaySessionCard: View {
                 ClawGatewayFileChangeSafetyReviewRow(review: review)
             }
 
+            if let review = ClawGatewayShellCommandSafetyReviewSummary.latest(from: session) {
+                ClawGatewayShellCommandSafetyReviewRow(review: review)
+            }
+
             if let review = ClawGatewayExtractionCompletenessReviewSummary.latest(from: session) {
                 ClawGatewayExtractionCompletenessReviewRow(review: review)
             }
@@ -1425,6 +1433,10 @@ struct ClawGatewayResultRow: View {
 
             if let review = ClawGatewayFileChangeSafetyReviewSummary.latest(from: result.artifacts) {
                 ClawGatewayFileChangeSafetyReviewRow(review: review)
+            }
+
+            if let review = ClawGatewayShellCommandSafetyReviewSummary.latest(from: result.artifacts) {
+                ClawGatewayShellCommandSafetyReviewRow(review: review)
             }
 
             if let review = ClawGatewayExtractionCompletenessReviewSummary.latest(from: result.artifacts) {
@@ -1674,6 +1686,202 @@ struct ClawGatewayFileChangeSafetyReviewRow: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     ForEach(Array(changeChips.enumerated()), id: \.offset) { _, chip in
+                        PhoneAgentTag(text: chip.text, icon: chip.icon, tint: chip.tint)
+                    }
+                }
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(Array(omissionChips.enumerated()), id: \.offset) { _, chip in
+                        PhoneAgentTag(text: chip.text, icon: chip.icon, tint: chip.tint)
+                    }
+                }
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(Array(safetyChips.enumerated()), id: \.offset) { _, chip in
+                        PhoneAgentTag(text: chip.text, icon: chip.icon, tint: chip.tint)
+                    }
+                }
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+struct ClawGatewayShellCommandSafetyReviewRow: View {
+    let review: ClawGatewayShellCommandSafetyReviewSummary
+
+    private var statusTint: Color {
+        guard review.hasMetadata else {
+            return .secondary
+        }
+        if review.executed == true && review.resultStatus == "succeeded" {
+            return .green
+        }
+        if review.resultStatus == "failed" || review.allowlistMatched == false {
+            return .orange
+        }
+        return .secondary
+    }
+
+    private var policyChips: [(text: String, icon: String, tint: Color)] {
+        guard review.hasMetadata else {
+            return [("metadata 待同步", "hourglass", .secondary)]
+        }
+        var items: [(String, String, Color)] = []
+        if let mode = review.mode {
+            items.append((mode, "terminal.fill", statusTint))
+        }
+        if let shellPolicy = review.shellPolicy {
+            items.append((shellPolicy, "checkmark.shield.fill", shellPolicy == "allowlist-enabled" ? .green : .orange))
+        }
+        if let actionKind = review.actionKind {
+            items.append((actionKind, "doc.text.fill", .blue))
+        }
+        if let resultStatus = review.resultStatus {
+            items.append(("result \(resultStatus)", resultStatus == "succeeded" ? "checkmark.circle.fill" : "exclamationmark.triangle.fill", statusTint))
+        }
+        if items.isEmpty {
+            items.append(("policy 待复核", "hourglass", .secondary))
+        }
+        return items
+    }
+
+    private var executionChips: [(text: String, icon: String, tint: Color)] {
+        guard review.hasMetadata else {
+            return [("execution 待同步", "hourglass", .secondary)]
+        }
+        var items: [(String, String, Color)] = []
+        if let structuredCommandPresent = review.structuredCommandPresent {
+            items.append((structuredCommandPresent ? "structured command" : "no structured command", structuredCommandPresent ? "curlybraces" : "lock.fill", structuredCommandPresent ? .blue : .orange))
+        }
+        if let commandParsed = review.commandParsed {
+            items.append((commandParsed ? "parsed" : "parse blocked", commandParsed ? "checkmark.circle.fill" : "xmark.octagon.fill", commandParsed ? .green : .orange))
+        }
+        if let allowlistMatched = review.allowlistMatched {
+            items.append((allowlistMatched ? "allowlist matched" : "allowlist blocked", allowlistMatched ? "checkmark.shield.fill" : "lock.trianglebadge.exclamationmark.fill", allowlistMatched ? .green : .orange))
+        }
+        if let executionAttempted = review.executionAttempted {
+            items.append((executionAttempted ? "execution attempted" : "not executed", executionAttempted ? "play.circle.fill" : "pause.circle.fill", executionAttempted ? .blue : .orange))
+        }
+        if let executed = review.executed {
+            items.append((executed ? "executed" : "blocked", executed ? "checkmark.circle.fill" : "lock.fill", executed ? .green : .orange))
+        }
+        if items.isEmpty {
+            items.append(("execution 待复核", "hourglass", .secondary))
+        }
+        return items
+    }
+
+    private var outputChips: [(text: String, icon: String, tint: Color)] {
+        guard review.hasMetadata else {
+            return [("output 待同步", "hourglass", .secondary)]
+        }
+        var items: [(String, String, Color)] = []
+        if let exitCodePresent = review.exitCodePresent {
+            items.append((exitCodePresent ? "exit code present" : "no exit code", "number.circle.fill", exitCodePresent ? .blue : .secondary))
+        }
+        if let exitCodeZero = review.exitCodeZero, review.exitCodePresent == true {
+            items.append((exitCodeZero ? "exit zero" : "exit nonzero", exitCodeZero ? "checkmark.circle.fill" : "exclamationmark.triangle.fill", exitCodeZero ? .green : .orange))
+        }
+        if review.stdoutPresent == true {
+            items.append(("stdout present", "text.alignleft", .orange))
+        }
+        if review.stderrPresent == true {
+            items.append(("stderr present", "exclamationmark.bubble.fill", .orange))
+        }
+        if review.timedOut == true {
+            items.append(("timed out", "timer", .orange))
+        }
+        if items.isEmpty {
+            items.append(("output presence none", "eye.slash.fill", .secondary))
+        }
+        return items
+    }
+
+    private var omissionChips: [(text: String, icon: String, tint: Color)] {
+        guard review.hasMetadata else {
+            return [("省略状态待同步", "hourglass", .secondary)]
+        }
+        var items: [(String, String, Color)] = []
+        if review.commandOmitted == true {
+            items.append(("命令省略", "eye.slash.fill", .orange))
+        }
+        if review.stdoutOmitted == true {
+            items.append(("stdout 省略", "eye.slash.fill", .orange))
+        }
+        if review.stderrOmitted == true {
+            items.append(("stderr 省略", "eye.slash.fill", .orange))
+        }
+        if review.cwdOmitted == true {
+            items.append(("cwd 省略", "eye.slash.fill", .orange))
+        }
+        if items.isEmpty {
+            items.append(("省略状态待复核", "hourglass", .secondary))
+        }
+        return items
+    }
+
+    private var safetyChips: [(text: String, icon: String, tint: Color)] {
+        guard review.hasMetadata else {
+            return [(text: "metadata 待同步", icon: "hourglass", tint: .secondary)]
+        }
+        var items = review.safetyFlags.prefix(3).map { flag in
+            (text: flag, icon: "shield.lefthalf.filled.badge.checkmark", tint: Color.purple)
+        }
+        if items.isEmpty {
+            items.append((text: "metadata-only", icon: "doc.text.magnifyingglass", tint: .purple))
+        }
+        return items
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Label("Shell Safety", systemImage: "terminal.fill")
+                    .font(.footnote.bold())
+                    .foregroundStyle(.primary)
+                PhoneAgentTag(text: "\(review.reviewCount) 条", icon: "number", tint: .purple)
+                PhoneAgentTag(
+                    text: review.executed == true ? "executed" : "gated",
+                    icon: review.executed == true ? "checkmark.circle.fill" : "lock.fill",
+                    tint: review.executed == true ? .green : .orange
+                )
+                PhoneAgentTag(
+                    text: review.isRedacted ? "已脱敏" : "metadata-only",
+                    icon: review.isRedacted ? "eye.slash.fill" : "doc.text.magnifyingglass",
+                    tint: review.isRedacted ? .orange : .purple
+                )
+                Spacer(minLength: 0)
+            }
+
+            Text(review.compactStatus)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(Array(policyChips.enumerated()), id: \.offset) { _, chip in
+                        PhoneAgentTag(text: chip.text, icon: chip.icon, tint: chip.tint)
+                    }
+                }
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(Array(executionChips.enumerated()), id: \.offset) { _, chip in
+                        PhoneAgentTag(text: chip.text, icon: chip.icon, tint: chip.tint)
+                    }
+                }
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(Array(outputChips.enumerated()), id: \.offset) { _, chip in
                         PhoneAgentTag(text: chip.text, icon: chip.icon, tint: chip.tint)
                     }
                 }

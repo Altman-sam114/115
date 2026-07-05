@@ -33,6 +33,7 @@ flowchart TD
   ART --> AXMETA["accessibilityTree metadata<br/>mode、policy、节点数、候选控件、安全标志"]
   ART --> AMETA["artifact metadata review<br/>覆盖率、脱敏数、安全键值、safety flags"]
   ART --> FCMETA["file change safety metadata<br/>workspace policy、写入状态、变更计数、省略标志"]
+  ART --> SHMETA["shell command safety metadata<br/>结构化命令、policy、allowlist、执行状态、省略标志"]
   ART --> EXMETA["extractData metadata<br/>完整性状态、row count、来源计数、安全标志"]
   ART --> DLMETA["delivery safety metadata<br/>最终提交闸门、用户确认、省略状态、按键计数"]
   ART --> META["agentTrace artifact metadata<br/>证据分、缺口、下一步、风险、停止原因、统一脱敏"]
@@ -47,6 +48,7 @@ flowchart TD
   AXMETA --> R
   AMETA --> R
   FCMETA --> R
+  SHMETA --> R
   EXMETA --> R
   DLMETA --> R
   META --> R
@@ -56,7 +58,7 @@ flowchart TD
   R --> LHEALTH
   SES --> LHEALTH
   SES --> RREVIEW["ClawGatewayTaskReplayGuardReviewSummary<br/>重复任务安全跳过复核"]
-  LHEALTH --> RUN["ClawMissionRunSummary<br/>派生目标、阶段、主动作、风险、证据、Live health、Artifact metadata、File Change Safety、提取完整性、Browser Control、Delivery Safety、Gateway 能力、Accessibility、Replay Guard 和 AgentTrace 复核"]
+  LHEALTH --> RUN["ClawMissionRunSummary<br/>派生目标、阶段、主动作、风险、证据、Live health、Artifact metadata、File Change Safety、Shell Command Safety、提取完整性、Browser Control、Delivery Safety、Gateway 能力、Accessibility、Replay Guard 和 AgentTrace 复核"]
   RREVIEW --> RUN
   SES --> RUN
   RUN --> UI["SwiftUI Mission Run / iPad 多栏工作台<br/>展示计划、风险、事件、artifact、审批点、复核摘要"]
@@ -84,7 +86,7 @@ flowchart TD
   KIND --> OBS["observeScreen<br/>dry-run、macOS 截图、窗口元数据或受控 Accessibility 摘要"]
   KIND --> BRO["controlBrowser<br/>HTML/URL trace、浏览器打开/搜索计划和 metadata 复核"]
   KIND --> FILE["manageFiles<br/>workspace 内结构化写文件、路径逃逸阻断、File Change Safety metadata"]
-  KIND --> SH["runShellCommand<br/>结构化命令 dry-run 或 allowlist 执行"]
+  KIND --> SH["runShellCommand<br/>结构化命令 dry-run 或 allowlist 执行、Shell Command Safety metadata"]
   KIND --> EXT["extractData<br/>消费已有 artifact 生成结构化数据和完整性 metadata"]
   KIND --> APP["operateDesktopApp<br/>app/key allowlist、最终提交前停止、delivery metadata"]
   KIND --> AG["runAgentLoop<br/>基于 session artifacts 生成 readiness、checklist、下一步、风险和停止原因"]

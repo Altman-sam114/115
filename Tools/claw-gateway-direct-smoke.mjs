@@ -39,6 +39,25 @@ const dryRunSnapshot = await assertCapabilitySnapshot(dryRunEvents, {
   },
 });
 expect(dryRunSnapshot.policies.shell.allowlist.length === 0, "dry-run shell allowlist should be empty");
+const shellPolicyArtifact = findArtifactByTitle(dryRunEvents, "commandOutput", "shell-policy-");
+assertShellCommandSafetyMetadata(shellPolicyArtifact?.metadata, {
+  mode: "shell-policy-blocked",
+  actionKind: "runShellCommand",
+  shellPolicy: "dry-run",
+  structuredCommandPresent: true,
+  commandParsed: true,
+  allowlistConfigured: false,
+  allowlistMatched: false,
+  executionAttempted: false,
+  executed: false,
+  timedOut: false,
+  exitCodePresent: false,
+  exitCodeZero: false,
+  stdoutPresent: false,
+  stderrPresent: false,
+  resultStatus: "failed",
+  safetyFlags: ["metadata-only", "structured-arguments-only", "tool-arguments-omitted", "command-omitted", "stdout-omitted", "stderr-omitted", "cwd-omitted", "shell-allowlist-enforced", "dry-run-only", "no-command-executed", "artifact-payload-not-read"],
+}, "direct shell policy");
 const dryRunRoot = workspaceFileRoot(dryRunEvents);
 await fs.access(`${dryRunRoot}/notes/result.txt`);
 await fs.access(`${dryRunRoot}/notes/extracted.json`);
@@ -337,6 +356,50 @@ const allowlistSnapshot = await assertCapabilitySnapshot(allowlistEvents, {
   },
 });
 expect(allowlistSnapshot.policies.shell.allowlist.includes("pwd"), "shell snapshot missing pwd allowlist");
+const allowlistShellArtifact = findArtifactByTitle(allowlistEvents, "commandOutput", "shell-output-");
+assertShellCommandSafetyMetadata(allowlistShellArtifact?.metadata, {
+  mode: "shell-executed",
+  actionKind: "runShellCommand",
+  shellPolicy: "allowlist-enabled",
+  structuredCommandPresent: true,
+  commandParsed: true,
+  allowlistConfigured: true,
+  allowlistMatched: true,
+  executionAttempted: true,
+  executed: true,
+  timedOut: false,
+  exitCodePresent: true,
+  exitCodeZero: true,
+  stdoutPresent: true,
+  stderrPresent: false,
+  resultStatus: "succeeded",
+  safetyFlags: ["metadata-only", "structured-arguments-only", "tool-arguments-omitted", "command-omitted", "stdout-omitted", "stderr-omitted", "cwd-omitted", "shell-allowlist-enforced", "artifact-payload-not-read"],
+}, "direct shell allowlist");
+
+const missingShellEvents = await runEmitEvents({
+  CLAW_GATEWAY_TOKEN: token,
+  CLAW_WORKSPACE: `${workspace}-missing-shell`,
+}, makeMissingShellEnvelope(token));
+expect(missingShellEvents.some((event) => event.kind === "actionFailed" && event.actionKind === "runShellCommand"), "missing shell command should fail");
+const missingShellArtifact = findArtifactByTitle(missingShellEvents, "commandOutput", "shell-dry-run-");
+assertShellCommandSafetyMetadata(missingShellArtifact?.metadata, {
+  mode: "missing-structured-command",
+  actionKind: "runShellCommand",
+  shellPolicy: "dry-run",
+  structuredCommandPresent: false,
+  commandParsed: false,
+  allowlistConfigured: false,
+  allowlistMatched: false,
+  executionAttempted: false,
+  executed: false,
+  timedOut: false,
+  exitCodePresent: false,
+  exitCodeZero: false,
+  stdoutPresent: false,
+  stderrPresent: false,
+  resultStatus: "failed",
+  safetyFlags: ["metadata-only", "structured-arguments-only", "tool-arguments-omitted", "command-omitted", "stdout-omitted", "stderr-omitted", "cwd-omitted", "natural-language-not-executed", "no-command-executed", "artifact-payload-not-read"],
+}, "direct missing shell");
 
 const desktopPolicyEvents = await runEmitEvents({
   CLAW_GATEWAY_TOKEN: token,
@@ -420,7 +483,7 @@ assertAccessibilityTreeArtifact(accessibilityPolicyArtifact, accessibilityPolicy
   label: "enabled accessibility tree",
 });
 
-console.log(`Claw Gateway direct smoke passed (${dryRunEvents.length + emptyExtractionEvents.length + pathEscapeEvents.length + writeFailureEvents.length + replayEvents.length + allowlistEvents.length + desktopPolicyEvents.length + browserPolicyEvents.length + accessibilityPolicyEvents.length} events)`);
+console.log(`Claw Gateway direct smoke passed (${dryRunEvents.length + emptyExtractionEvents.length + pathEscapeEvents.length + writeFailureEvents.length + replayEvents.length + allowlistEvents.length + missingShellEvents.length + desktopPolicyEvents.length + browserPolicyEvents.length + accessibilityPolicyEvents.length} events)`);
 
 async function runEmitEvents(env, input = envelope) {
   const inputPath = `/private/tmp/claw-gateway-direct-smoke-${crypto.randomUUID()}.json`;
@@ -966,6 +1029,80 @@ function assertFileChangeSafetyMetadata(metadata, expected, label) {
   }
 }
 
+function assertShellCommandSafetyMetadata(metadata, expected, label) {
+  expect(metadata && typeof metadata === "object", `${label} missing shell safety metadata`);
+  const allowedKeys = [
+    "actionKind",
+    "allowlistConfigured",
+    "allowlistMatched",
+    "commandOmitted",
+    "commandParsed",
+    "cwdOmitted",
+    "executed",
+    "executionAttempted",
+    "exitCodePresent",
+    "exitCodeZero",
+    "mode",
+    "resultStatus",
+    "safetyFlags",
+    "shellPolicy",
+    "shellReview",
+    "stderrOmitted",
+    "stderrPresent",
+    "stdoutOmitted",
+    "stdoutPresent",
+    "structuredCommandPresent",
+    "timedOut",
+  ].sort();
+  expect(
+    Object.keys(metadata).sort().join(",") === allowedKeys.join(","),
+    `${label} shell safety metadata includes unexpected keys`,
+  );
+  expect(metadata.shellReview === "commandSafety", `${label} shell review metadata mismatch`);
+  expect(metadata.mode === expected.mode, `${label} mode metadata mismatch`);
+  expect(metadata.actionKind === expected.actionKind, `${label} action kind metadata mismatch`);
+  expect(metadata.shellPolicy === expected.shellPolicy, `${label} shell policy metadata mismatch`);
+  expect(metadata.structuredCommandPresent === String(expected.structuredCommandPresent), `${label} structured command metadata mismatch`);
+  expect(metadata.commandParsed === String(expected.commandParsed), `${label} command parsed metadata mismatch`);
+  expect(metadata.allowlistConfigured === String(expected.allowlistConfigured), `${label} allowlist configured metadata mismatch`);
+  expect(metadata.allowlistMatched === String(expected.allowlistMatched), `${label} allowlist matched metadata mismatch`);
+  expect(metadata.executionAttempted === String(expected.executionAttempted), `${label} execution attempt metadata mismatch`);
+  expect(metadata.executed === String(expected.executed), `${label} executed metadata mismatch`);
+  expect(metadata.timedOut === String(expected.timedOut), `${label} timeout metadata mismatch`);
+  expect(metadata.exitCodePresent === String(expected.exitCodePresent), `${label} exit code presence metadata mismatch`);
+  expect(metadata.exitCodeZero === String(expected.exitCodeZero), `${label} exit zero metadata mismatch`);
+  expect(metadata.stdoutPresent === String(expected.stdoutPresent), `${label} stdout presence metadata mismatch`);
+  expect(metadata.stderrPresent === String(expected.stderrPresent), `${label} stderr presence metadata mismatch`);
+  expect(metadata.commandOmitted === "true", `${label} command omission metadata mismatch`);
+  expect(metadata.stdoutOmitted === "true", `${label} stdout omission metadata mismatch`);
+  expect(metadata.stderrOmitted === "true", `${label} stderr omission metadata mismatch`);
+  expect(metadata.cwdOmitted === "true", `${label} cwd omission metadata mismatch`);
+  expect(metadata.resultStatus === expected.resultStatus, `${label} result status metadata mismatch`);
+  for (const flag of expected.safetyFlags) {
+    expect(metadata.safetyFlags.includes(flag), `${label} missing safety flag ${flag}`);
+  }
+  const serialized = JSON.stringify(metadata);
+  for (const forbidden of [
+    token,
+    "Authorization",
+    "Bearer",
+    "toolArguments",
+    "shellCommand",
+    "pwd",
+    "Command:",
+    "Allowlist:",
+    "Shell action was not executed",
+    "Run a structured command only if policy allows it",
+    "direct missing shell instruction",
+    "https://",
+    "file://",
+    "/sessions/",
+    ".build/claw-gateway-direct-smoke",
+  ]) {
+    expect(!serialized.includes(forbidden), `${label} metadata leaked ${forbidden}`);
+  }
+}
+
 function assertDeliverySafetyMetadata(metadata, expected, label) {
   expect(metadata && typeof metadata === "object", `${label} missing delivery metadata`);
   const allowedKeys = [
@@ -1292,6 +1429,51 @@ function makeEmptyExtractionEnvelope(rawToken) {
       createdAt: isoNow(),
     },
     approvalSummary: "empty extraction smoke",
+    auditRequired: true,
+  };
+}
+
+function makeMissingShellEnvelope(rawToken) {
+  const taskID = crypto.randomUUID();
+  return {
+    schemaVersion: "claw.computer.control.v1",
+    sourceApp: "Claw Controller",
+    gateway: {
+      endpoint: "ws://127.0.0.1:18789",
+      deviceName: "smoke",
+      securityMode: "mutualApproval",
+      tokenFingerprint: tokenFingerprint(rawToken),
+      allowedActionKinds: ["runShellCommand"],
+      requiresApprovalForSensitiveData: true,
+      auditEnabled: true,
+    },
+    task: {
+      id: taskID,
+      command: "missing structured shell command",
+      summary: "missing shell smoke",
+      sourceDevice: "smoke",
+      destinationGateway: "ws://127.0.0.1:18789",
+      actions: [
+        {
+          id: crypto.randomUUID(),
+          kind: "runShellCommand",
+          title: "Reject missing shell command",
+          target: "Desktop Shell",
+          instruction: "direct missing shell instruction",
+          approval: "gatewayApproval",
+          sourceSurface: "clawGateway",
+          handlesSensitiveData: true,
+          inputPreview: "smoke",
+          toolArguments: {
+            cwdPolicy: "workspaceOnly",
+          },
+        },
+      ],
+      status: "sent",
+      riskScore: 64,
+      createdAt: isoNow(),
+    },
+    approvalSummary: "missing shell smoke",
     auditRequired: true,
   };
 }

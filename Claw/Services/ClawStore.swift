@@ -168,6 +168,7 @@ final class ClawStore: ObservableObject {
             gatewayBrowserControlReview: missionRunGatewayBrowserControlReview(from: session),
             gatewayDeliverySafetyReview: missionRunGatewayDeliverySafetyReview(from: session),
             gatewayFileChangeSafetyReview: missionRunGatewayFileChangeSafetyReview(from: session),
+            gatewayShellCommandSafetyReview: missionRunGatewayShellCommandSafetyReview(from: session),
             agentTraceReview: missionRunAgentTraceReview(from: session),
             gatewayAccessibilityReview: missionRunGatewayAccessibilityReview(from: session),
             gatewayCapabilityReview: missionRunGatewayCapabilityReview(from: session),
@@ -319,6 +320,10 @@ final class ClawStore: ObservableObject {
 
     private func missionRunGatewayFileChangeSafetyReview(from session: ClawGatewaySession?) -> ClawGatewayFileChangeSafetyReviewSummary? {
         ClawGatewayFileChangeSafetyReviewSummary.latest(from: session)
+    }
+
+    private func missionRunGatewayShellCommandSafetyReview(from session: ClawGatewaySession?) -> ClawGatewayShellCommandSafetyReviewSummary? {
+        ClawGatewayShellCommandSafetyReviewSummary.latest(from: session)
     }
 
     private func missionRunGatewayAccessibilityReview(from session: ClawGatewaySession?) -> ClawGatewayAccessibilityReviewSummary? {
@@ -1901,7 +1906,14 @@ enum ClawGatewaySimulator {
                 actionTitle: action.title,
                 status: .failed,
                 summary: "命令需要更窄工作目录或白名单确认，已暂停执行。",
-                artifacts: [artifact(.commandOutput, "shell-dry-run-\(index + 1).log", redacted: true)],
+                artifacts: [
+                    artifact(
+                        .commandOutput,
+                        "shell-dry-run-\(index + 1).log",
+                        redacted: true,
+                        metadata: shellCommandSafetyMetadata()
+                    )
+                ],
                 isRetryable: true
             )
         case .extractData:
@@ -2106,6 +2118,32 @@ enum ClawGatewaySimulator {
             "diffOmitted": "true",
             "resultStatus": "succeeded",
             "safetyFlags": "metadata-only,tool-arguments-omitted,raw-path-omitted,workspace-path-omitted,file-content-omitted,diff-content-omitted,artifact-payload-not-read,session-workspace-only"
+        ]
+    }
+
+    private static func shellCommandSafetyMetadata() -> [String: String] {
+        [
+            "shellReview": "commandSafety",
+            "mode": "shell-policy-blocked",
+            "actionKind": ClawMobileActionKind.runShellCommand.rawValue,
+            "shellPolicy": "dry-run",
+            "structuredCommandPresent": "true",
+            "commandParsed": "true",
+            "allowlistConfigured": "false",
+            "allowlistMatched": "false",
+            "executionAttempted": "false",
+            "executed": "false",
+            "timedOut": "false",
+            "exitCodePresent": "false",
+            "exitCodeZero": "false",
+            "stdoutPresent": "false",
+            "stderrPresent": "false",
+            "commandOmitted": "true",
+            "stdoutOmitted": "true",
+            "stderrOmitted": "true",
+            "cwdOmitted": "true",
+            "resultStatus": "failed",
+            "safetyFlags": "metadata-only,structured-arguments-only,tool-arguments-omitted,command-omitted,stdout-omitted,stderr-omitted,cwd-omitted,shell-allowlist-enforced,dry-run-only,no-command-executed,artifact-payload-not-read"
         ]
     }
 

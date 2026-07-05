@@ -1937,6 +1937,64 @@ function fileChangeReviewMetadata(action, details = {}) {
   });
 }
 
+function shellPolicyState(config) {
+  if (!config.allowShell) {
+    return "dry-run";
+  }
+  return config.shellAllowlist?.size > 0 ? "allowlist-enabled" : "allowlist-required";
+}
+
+function shellCommandSafetyMetadata(action, config, details = {}) {
+  const safetyFlags = [
+    "metadata-only",
+    "structured-arguments-only",
+    "tool-arguments-omitted",
+    "command-omitted",
+    "stdout-omitted",
+    "stderr-omitted",
+    "cwd-omitted",
+    "artifact-payload-not-read",
+  ];
+  if (details.noCommandExecuted) {
+    safetyFlags.push("no-command-executed");
+  }
+  if (details.naturalLanguageNotExecuted) {
+    safetyFlags.push("natural-language-not-executed");
+  }
+  if (details.parseFailed) {
+    safetyFlags.push("parse-failed");
+  }
+  if (details.shellAllowlistEnforced) {
+    safetyFlags.push("shell-allowlist-enforced");
+  }
+  if (details.dryRunOnly) {
+    safetyFlags.push("dry-run-only");
+  }
+  return compactMetadata({
+    shellReview: "commandSafety",
+    mode: details.mode,
+    actionKind: action.kind === "runShellCommand" ? "runShellCommand" : undefined,
+    shellPolicy: details.shellPolicy || shellPolicyState(config),
+    structuredCommandPresent: Boolean(details.structuredCommandPresent),
+    commandParsed: Boolean(details.commandParsed),
+    allowlistConfigured: Boolean(config.shellAllowlist?.size > 0),
+    allowlistMatched: Boolean(details.allowlistMatched),
+    executionAttempted: Boolean(details.executionAttempted),
+    executed: Boolean(details.executed),
+    timedOut: Boolean(details.timedOut),
+    exitCodePresent: Boolean(details.exitCodePresent),
+    exitCodeZero: Boolean(details.exitCodeZero),
+    stdoutPresent: Boolean(details.stdoutPresent),
+    stderrPresent: Boolean(details.stderrPresent),
+    commandOmitted: true,
+    stdoutOmitted: true,
+    stderrOmitted: true,
+    cwdOmitted: true,
+    resultStatus: details.resultStatus,
+    safetyFlags,
+  });
+}
+
 async function manageFilesAction(action, index, config) {
   const requestedPath = action.toolArguments?.writePath || `managed-file-${index + 1}.txt`;
   let markerPath;
@@ -2078,6 +2136,16 @@ async function runShellAction(action, index, config) {
         ].join("\n"),
         true,
         config,
+        shellCommandSafetyMetadata(action, config, {
+          mode: "missing-structured-command",
+          structuredCommandPresent: false,
+          commandParsed: false,
+          executionAttempted: false,
+          executed: false,
+          resultStatus: "failed",
+          noCommandExecuted: true,
+          naturalLanguageNotExecuted: true,
+        }),
       ),
     ];
     return {
@@ -2091,7 +2159,23 @@ async function runShellAction(action, index, config) {
   const parsed = parseCommandLine(commandLine);
   if (!parsed) {
     const artifacts = [
-      await writeArtifact("commandOutput", `shell-parse-${index + 1}.log`, `Unable to parse: ${commandLine}`, true, config),
+      await writeArtifact(
+        "commandOutput",
+        `shell-parse-${index + 1}.log`,
+        `Unable to parse: ${commandLine}`,
+        true,
+        config,
+        shellCommandSafetyMetadata(action, config, {
+          mode: "command-parse-failed",
+          structuredCommandPresent: true,
+          commandParsed: false,
+          executionAttempted: false,
+          executed: false,
+          resultStatus: "failed",
+          noCommandExecuted: true,
+          parseFailed: true,
+        }),
+      ),
     ];
     return {
       status: "failed",
@@ -2115,6 +2199,19 @@ async function runShellAction(action, index, config) {
         ].join("\n"),
         true,
         config,
+        shellCommandSafetyMetadata(action, config, {
+          mode: "shell-policy-blocked",
+          shellPolicy: config.allowShell ? "allowlist-required" : "dry-run",
+          structuredCommandPresent: true,
+          commandParsed: true,
+          allowlistMatched: false,
+          executionAttempted: false,
+          executed: false,
+          resultStatus: "failed",
+          noCommandExecuted: true,
+          shellAllowlistEnforced: true,
+          dryRunOnly: !config.allowShell,
+        }),
       ),
     ];
     return {
@@ -2143,6 +2240,22 @@ async function runShellAction(action, index, config) {
       ].join("\n"),
       true,
       config,
+      shellCommandSafetyMetadata(action, config, {
+        mode: "shell-executed",
+        shellPolicy: "allowlist-enabled",
+        structuredCommandPresent: true,
+        commandParsed: true,
+        allowlistMatched: true,
+        executionAttempted: true,
+        executed: true,
+        timedOut: result.timedOut,
+        exitCodePresent: true,
+        exitCodeZero: result.exitCode === 0,
+        stdoutPresent: result.stdout.length > 0,
+        stderrPresent: result.stderr.length > 0,
+        resultStatus: result.exitCode === 0 ? "succeeded" : "failed",
+        shellAllowlistEnforced: true,
+      }),
     ),
   ];
   return {

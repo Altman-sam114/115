@@ -240,8 +240,8 @@ node Tools/claw-gateway-smoke.mjs
 当前基线：
 
 - 完整 Xcode 可用时 `xcodebuild build` 应成功。
-- direct smoke 必须覆盖 artifact 落盘、workspace 文件写入、File Change Safety metadata、路径逃逸阻断审计、workspace 写入失败审计、workspace symlink 阻断、browser trace、Browser Control metadata、结构化提取、Shell dry-run/allowlist、浏览器策略、桌面 App 审批闸门、`agentTrace`。
-- WebSocket smoke 必须启动一次性 Gateway，验证事件闭环、browser/file/shell/extract/agent loop 主链路、File Change Safety metadata、路径逃逸阻断审计、workspace 写入失败审计、Browser Control metadata 和 `sessionCompleted`。
+- direct smoke 必须覆盖 artifact 落盘、workspace 文件写入、File Change Safety metadata、路径逃逸阻断审计、workspace 写入失败审计、workspace symlink 阻断、browser trace、Browser Control metadata、Shell Command Safety metadata、结构化提取、Shell dry-run/allowlist、缺少结构化 Shell 命令阻断、浏览器策略、桌面 App 审批闸门、`agentTrace`。
+- WebSocket smoke 必须启动一次性 Gateway，验证事件闭环、browser/file/shell/extract/agent loop 主链路、File Change Safety metadata、路径逃逸阻断审计、workspace 写入失败审计、Browser Control metadata、Shell Command Safety metadata 和 `sessionCompleted`。
 
 ## 静态检查
 
