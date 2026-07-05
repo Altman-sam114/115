@@ -1693,8 +1693,22 @@ struct ClawGatewayBrowserControlReviewSummary: Equatable, Codable, Sendable {
             return "已收到浏览器控制 artifact，metadata 待同步。"
         }
         let policy = browserControlPolicy.map { "policy \($0)" } ?? "policy 待复核"
-        let request = browserControlRequested == true ? "请求打开浏览器" : "未请求打开"
-        let network = networkBlocked == true ? "network blocked" : "network checked"
+        let request: String
+        if browserControlRequested == true {
+            request = "请求打开浏览器"
+        } else if browserControlRequested == false {
+            request = "未请求打开"
+        } else {
+            request = "打开状态待复核"
+        }
+        let network: String
+        if networkBlocked == true {
+            network = "network blocked"
+        } else if networkBlocked == false {
+            network = "network checked"
+        } else {
+            network = "network 待复核"
+        }
         return "\(policy) · \(request) · \(network)"
     }
 
