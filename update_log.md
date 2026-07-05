@@ -57,8 +57,16 @@
 
 验证结果：
 
-- 本地轻量验证待完成。
-- 待 push `origin/main` 后由 GitHub Actions 覆盖 xcodebuild、Swift logic smoke、Gateway direct/WebSocket smoke 和结果包验收。
+- `node --check Tools/claw-gateway-server.mjs` 通过。
+- `node --check Tools/claw-gateway-direct-smoke.mjs` 通过。
+- `node --check Tools/claw-gateway-smoke.mjs` 通过。
+- Swift logic smoke 编译通过。
+- `.build/claw-logic-smoke` 通过，输出 `Claw logic smoke passed`。
+- `node Tools/claw-gateway-direct-smoke.mjs` 通过，输出 `Claw Gateway direct smoke passed (213 events)`。
+- `node Tools/claw-gateway-smoke.mjs` 在普通沙箱内因 `listen EPERM 127.0.0.1:18879` 被阻断，升级权限后通过，输出 `Claw Gateway smoke passed (72 events)`。
+- `git diff --check` 通过。
+- `ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci-results.yml"); puts "yaml ok"'` 通过，输出 `yaml ok`。
+- GitHub Actions run `28736316020` attempt `1` 对 commit `d78e7728b563fb90a402c382265fed00035b2bf7` 通过，artifact `claw-ci-v0.2-main-d78e7728b563-run28736316020-attempt1` 已下载到 `/private/tmp/claw-c-review-28736316020/` 并核对 manifest、JUnit、failure summary、Swift/Gateway smoke 和 xcodebuild 日志。
 
 遗留事项：
 
