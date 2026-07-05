@@ -1928,16 +1928,7 @@ async function extractDataAction(action, index, config) {
     schema: args.schema || "title:string,source:string,summary:string,confidence:number",
     validateCompleteness: args.validateCompleteness !== "false",
     sourceArtifacts: summarizeArtifactContext(config.sessionContext),
-    rows: contextRows.length > 0
-      ? contextRows
-      : [
-          {
-            title: "Structured result placeholder",
-            source: action.target,
-            summary: "Replace this row with data extracted from browser, file, shell, or screen artifacts.",
-            confidence: 0.5,
-          },
-        ],
+    rows: contextRows,
   };
   await fs.mkdir(path.dirname(outputFile), { recursive: true });
   await fs.writeFile(outputFile, JSON.stringify(extracted, null, 2), "utf8");
@@ -1952,6 +1943,7 @@ async function extractDataAction(action, index, config) {
       },
       false,
       config,
+      extractionCompletenessMetadata(extracted),
     ),
   ];
   return {
@@ -1960,6 +1952,47 @@ async function extractDataAction(action, index, config) {
     artifacts,
     isRetryable: false,
   };
+}
+
+function extractionCompletenessMetadata(extracted) {
+  const sourceArtifacts = extracted.sourceArtifacts || {};
+  const sourceArtifactKinds = [
+    ["browserTrace", sourceArtifacts.browserTraceCount],
+    ["fileDiff", sourceArtifacts.fileDiffCount],
+    ["commandOutput", sourceArtifacts.commandOutputCount],
+    ["screenObservation", sourceArtifacts.screenObservationCount],
+    ["accessibilityTree", sourceArtifacts.accessibilityTreeCount],
+    ["messageDraft", sourceArtifacts.messageDraftCount],
+  ]
+    .filter(([, count]) => Number(count) > 0)
+    .map(([kind]) => kind);
+  const rowCount = Array.isArray(extracted.rows) ? extracted.rows.length : 0;
+  const completenessStatus = rowCount === 0
+    ? "empty"
+    : extracted.mode === "artifact-grounded-extraction" && sourceArtifactKinds.length > 0
+      ? "complete"
+      : "partial";
+  return compactMetadata({
+    extractionReview: "artifactGrounded",
+    mode: extracted.mode,
+    validateCompleteness: extracted.validateCompleteness,
+    rowCount,
+    completenessStatus,
+    browserTraceCount: sourceArtifacts.browserTraceCount,
+    fileDiffCount: sourceArtifacts.fileDiffCount,
+    commandOutputCount: sourceArtifacts.commandOutputCount,
+    screenObservationCount: sourceArtifacts.screenObservationCount,
+    accessibilityTreeCount: sourceArtifacts.accessibilityTreeCount,
+    messageDraftCount: sourceArtifacts.messageDraftCount,
+    sourceArtifactKinds,
+    safetyFlags: [
+      "metadata-only",
+      "row-content-omitted",
+      "source-values-omitted",
+      "tool-arguments-omitted",
+      "artifact-payload-not-read",
+    ],
+  });
 }
 
 async function desktopAppAction(action, index, config) {
@@ -2824,14 +2857,6 @@ function buildExtractionRows(context, sourcePriority, action) {
       default:
         break;
     }
-  }
-  if (rows.length === 0 && action.inputPreview) {
-    rows.push({
-      title: "Input preview",
-      source: action.target,
-      summary: action.inputPreview,
-      confidence: 0.4,
-    });
   }
   return rows.slice(0, 40);
 }

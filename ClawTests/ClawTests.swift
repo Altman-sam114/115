@@ -388,6 +388,32 @@ final class ClawTests: XCTestCase {
         XCTAssertTrue(review.compactStatus.contains("redacted"))
     }
 
+    func testMissionRunSummaryDerivesExtractionCompletenessReview() throws {
+        let store = ClawStore(autoScanLocalArtifacts: false)
+
+        store.phoneAgentCommand = "打开浏览器搜索资料，整理结果并发到 Slack"
+        store.startAutonomousComputerTakeover()
+        store.approveAndContinueAutonomousLoop()
+        let review = try XCTUnwrap(store.missionRunSummary.gatewayExtractionCompletenessReview)
+
+        XCTAssertEqual(review.extractionCount, 1)
+        XCTAssertTrue(review.hasMetadata)
+        XCTAssertEqual(review.mode, "artifact-grounded-extraction")
+        XCTAssertEqual(review.validateCompleteness, true)
+        XCTAssertEqual(review.rowCount, 4)
+        XCTAssertEqual(review.completenessStatus, "complete")
+        XCTAssertEqual(review.browserTraceCount, 1)
+        XCTAssertEqual(review.fileDiffCount, 1)
+        XCTAssertEqual(review.commandOutputCount, 1)
+        XCTAssertEqual(review.screenObservationCount, 1)
+        XCTAssertEqual(review.accessibilityTreeCount, 1)
+        XCTAssertTrue(review.sourceArtifactKinds.contains("browserTrace"))
+        XCTAssertTrue(review.sourceArtifactKinds.contains("fileDiff"))
+        XCTAssertTrue(review.safetyFlags.contains("row-content-omitted"))
+        XCTAssertTrue(review.compactStatus.contains("complete"))
+        XCTAssertTrue(review.compactStatus.contains("rows 4"))
+    }
+
     func testMissionRunSummaryDerivesGatewayCapabilityReview() throws {
         let store = ClawStore(autoScanLocalArtifacts: false)
 
@@ -716,6 +742,72 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(review.latestTitle, "legacy-agent-loop.json")
         XCTAssertTrue(review.isRedacted)
         XCTAssertTrue(review.compactStatus.contains("metadata"))
+    }
+
+    func testExtractionCompletenessReviewParsesMetadataAndRedactsSensitiveValues() throws {
+        let artifact = ClawGatewayArtifact(
+            kind: .browserTrace,
+            title: "extracted-data-1 https://example.com/private-row.json",
+            reference: "file:///tmp/extracted-data-1.json",
+            isRedacted: true,
+            metadata: [
+                "extractionReview": "artifactGrounded",
+                "mode": "artifact-grounded-extraction Authorization: Bearer raw-token",
+                "validateCompleteness": "true",
+                "rowCount": "8",
+                "completenessStatus": "complete file:///private/tmp/secret.json",
+                "browserTraceCount": "2",
+                "fileDiffCount": "1",
+                "commandOutputCount": "1",
+                "screenObservationCount": "1",
+                "accessibilityTreeCount": "1",
+                "messageDraftCount": "0",
+                "sourceArtifactKinds": "browserTrace,fileDiff,commandOutput,toolArguments,/home/alice/private.txt,https://example.com/row",
+                "safetyFlags": "metadata-only,row-content-omitted,headers={Authorization: Bearer raw-token},~/Library/Claw/private.txt,https://example.com/row"
+            ]
+        )
+
+        let review = try XCTUnwrap(ClawGatewayExtractionCompletenessReviewSummary.latest(from: [artifact]))
+        let visibleText = [
+            review.latestTitle,
+            review.compactStatus,
+            review.mode ?? "",
+            review.completenessStatus ?? "",
+            review.sourceArtifactKinds.joined(separator: " "),
+            review.safetyFlags.joined(separator: " ")
+        ].joined(separator: " ")
+
+        XCTAssertEqual(review.extractionCount, 1)
+        XCTAssertTrue(review.hasMetadata)
+        XCTAssertEqual(review.validateCompleteness, true)
+        XCTAssertEqual(review.rowCount, 8)
+        XCTAssertEqual(review.browserTraceCount, 2)
+        XCTAssertEqual(review.fileDiffCount, 1)
+        XCTAssertEqual(review.commandOutputCount, 1)
+        XCTAssertNil(review.mode)
+        XCTAssertNil(review.completenessStatus)
+        XCTAssertTrue(review.sourceArtifactKinds.contains("browserTrace"))
+        XCTAssertFalse(review.sourceArtifactKinds.contains("toolArguments"))
+        XCTAssertFalse(review.safetyFlags.contains { $0.contains("headers") })
+        XCTAssertFalse(visibleText.contains("Authorization"))
+        XCTAssertFalse(visibleText.contains("Bearer"))
+        XCTAssertFalse(visibleText.contains("raw-token"))
+        XCTAssertFalse(visibleText.contains("https://"))
+        XCTAssertFalse(visibleText.contains("file://"))
+        XCTAssertFalse(visibleText.contains("/private"))
+        XCTAssertFalse(visibleText.contains("/home"))
+        XCTAssertFalse(visibleText.contains("~/"))
+        XCTAssertFalse(visibleText.contains("toolArguments"))
+
+        let legacyArtifact = ClawGatewayArtifact(
+            kind: .browserTrace,
+            title: "extracted-data-legacy.json",
+            reference: "file:///tmp/extracted-data-legacy.json",
+            isRedacted: true
+        )
+        let legacyReview = try XCTUnwrap(ClawGatewayExtractionCompletenessReviewSummary.latest(from: [legacyArtifact]))
+        XCTAssertFalse(legacyReview.hasMetadata)
+        XCTAssertTrue(legacyReview.compactStatus.contains("metadata"))
     }
 
     func testAgentTraceReviewRedactsSensitiveMetadata() throws {

@@ -62,6 +62,8 @@ expect(extractedTrace?.sourceArtifacts?.commandOutputCount >= 1, "extraction did
 expect(extractedTrace?.rows?.some((row) => row.title === "Smoke Page"), "extraction missing browser page row");
 expect(extractedTrace?.rows?.some((row) => row.title === "Docs"), "extraction missing browser link row");
 expect(extractedTrace?.rows?.some((row) => row.source?.includes("notes/result.txt")), "extraction missing file row");
+const extractionArtifact = findArtifactByTitle(dryRunEvents, "browserTrace", "extracted-data-");
+assertExtractionCompletenessMetadata(extractionArtifact?.metadata, extractedTrace, "direct extraction");
 const agentTraces = await readArtifacts(dryRunEvents, "agentTrace");
 const agentTrace = agentTraces.find((trace) => trace.mode === "agent-loop-trace");
 expect(Boolean(agentTrace), "missing observe-plan-act-verify agent trace");
@@ -101,6 +103,21 @@ assertAccessibilityTreeArtifact(dryRunAccessibilityArtifact, axTrees[0], {
   policy: "dry-run",
   label: "dry-run accessibility tree",
 });
+
+const emptyExtractionEvents = await runEmitEvents(
+  {
+    CLAW_GATEWAY_TOKEN: token,
+    CLAW_WORKSPACE: `${workspace}-empty-extraction`,
+  },
+  makeEmptyExtractionEnvelope(token),
+);
+await assertArtifactsExist(emptyExtractionEvents);
+const emptyExtractionTraces = await readArtifacts(emptyExtractionEvents, "browserTrace");
+const emptyExtractionTrace = emptyExtractionTraces.find((trace) => trace.mode === "dry-run-extraction" && trace.outputPath === "notes/empty-extracted.json");
+expect(Boolean(emptyExtractionTrace), "missing empty extraction trace");
+expect(Array.isArray(emptyExtractionTrace?.rows) && emptyExtractionTrace.rows.length === 0, "empty extraction should not emit placeholder rows");
+const emptyExtractionArtifact = findArtifactByTitle(emptyExtractionEvents, "browserTrace", "extracted-data-");
+assertEmptyExtractionCompletenessMetadata(emptyExtractionArtifact?.metadata, emptyExtractionTrace, "empty direct extraction");
 
 const replayEvents = await runEmitEvents(
   {
@@ -204,7 +221,7 @@ assertAccessibilityTreeArtifact(accessibilityPolicyArtifact, accessibilityPolicy
   label: "enabled accessibility tree",
 });
 
-console.log(`Claw Gateway direct smoke passed (${dryRunEvents.length + replayEvents.length + allowlistEvents.length + desktopPolicyEvents.length + browserPolicyEvents.length + accessibilityPolicyEvents.length} events)`);
+console.log(`Claw Gateway direct smoke passed (${dryRunEvents.length + emptyExtractionEvents.length + replayEvents.length + allowlistEvents.length + desktopPolicyEvents.length + browserPolicyEvents.length + accessibilityPolicyEvents.length} events)`);
 
 async function runEmitEvents(env, input = envelope) {
   const inputPath = `/private/tmp/claw-gateway-direct-smoke-${crypto.randomUUID()}.json`;
@@ -306,6 +323,12 @@ function findArtifact(events, kind) {
   return events
     .flatMap((event) => event.artifacts || [])
     .find((artifact) => artifact.kind === kind);
+}
+
+function findArtifactByTitle(events, kind, titlePrefix) {
+  return events
+    .flatMap((event) => event.artifacts || [])
+    .find((artifact) => artifact.kind === kind && artifact.title?.startsWith(titlePrefix));
 }
 
 async function assertTaskReplayGuard(events, expectedActionCount, label) {
@@ -538,6 +561,63 @@ function assertAgentTraceMetadata(metadata, trace, label) {
   expect(metadata.handoffSummary === trace.handoffSummary, `${label} handoff summary metadata mismatch`);
 }
 
+function assertExtractionCompletenessMetadata(metadata, extraction, label) {
+  expect(metadata && typeof metadata === "object", `${label} missing extraction metadata`);
+  const allowedKeys = [
+    "accessibilityTreeCount",
+    "browserTraceCount",
+    "commandOutputCount",
+    "completenessStatus",
+    "extractionReview",
+    "fileDiffCount",
+    "messageDraftCount",
+    "mode",
+    "rowCount",
+    "safetyFlags",
+    "screenObservationCount",
+    "sourceArtifactKinds",
+    "validateCompleteness",
+  ];
+  expect(
+    Object.keys(metadata).sort().join(",") === allowedKeys.join(","),
+    `${label} extraction metadata includes unexpected keys`,
+  );
+  expect(metadata.extractionReview === "artifactGrounded", `${label} extraction review metadata mismatch`);
+  expect(metadata.mode === extraction.mode, `${label} mode metadata mismatch`);
+  expect(metadata.validateCompleteness === String(extraction.validateCompleteness), `${label} completeness validation metadata mismatch`);
+  expect(Number(metadata.rowCount) === extraction.rows.length, `${label} row count metadata mismatch`);
+  expect(metadata.completenessStatus === "complete", `${label} completeness status mismatch`);
+  expect(Number(metadata.browserTraceCount) === extraction.sourceArtifacts.browserTraceCount, `${label} browser trace count metadata mismatch`);
+  expect(Number(metadata.fileDiffCount) === extraction.sourceArtifacts.fileDiffCount, `${label} file diff count metadata mismatch`);
+  expect(Number(metadata.commandOutputCount) === extraction.sourceArtifacts.commandOutputCount, `${label} command output count metadata mismatch`);
+  expect(metadata.sourceArtifactKinds.includes("browserTrace"), `${label} missing browserTrace source kind`);
+  expect(metadata.sourceArtifactKinds.includes("fileDiff"), `${label} missing fileDiff source kind`);
+  expect(metadata.sourceArtifactKinds.includes("commandOutput"), `${label} missing commandOutput source kind`);
+  expect(metadata.safetyFlags.includes("row-content-omitted"), `${label} missing row omission safety flag`);
+  const serialized = JSON.stringify(metadata);
+  for (const forbidden of [token, "Authorization", "Bearer", "toolArguments", "sourcePriority", "Smoke Page", "Docs", "notes/result.txt", "https://", "file://", "/sessions/"]) {
+    expect(!serialized.includes(forbidden), `${label} metadata leaked ${forbidden}`);
+  }
+}
+
+function assertEmptyExtractionCompletenessMetadata(metadata, extraction, label) {
+  expect(metadata && typeof metadata === "object", `${label} missing extraction metadata`);
+  expect(metadata.extractionReview === "artifactGrounded", `${label} extraction review metadata mismatch`);
+  expect(metadata.mode === extraction.mode, `${label} mode metadata mismatch`);
+  expect(metadata.validateCompleteness === String(extraction.validateCompleteness), `${label} completeness validation metadata mismatch`);
+  expect(Number(metadata.rowCount) === 0, `${label} row count metadata mismatch`);
+  expect(metadata.completenessStatus === "empty", `${label} completeness status mismatch`);
+  expect(Number(metadata.browserTraceCount) === 0, `${label} browser trace count metadata mismatch`);
+  expect(Number(metadata.fileDiffCount) === 0, `${label} file diff count metadata mismatch`);
+  expect(Number(metadata.commandOutputCount) === 0, `${label} command output count metadata mismatch`);
+  expect(!metadata.sourceArtifactKinds, `${label} source kinds should be omitted when empty`);
+  expect(metadata.safetyFlags.includes("row-content-omitted"), `${label} missing row omission safety flag`);
+  const serialized = JSON.stringify(metadata);
+  for (const forbidden of [token, "Authorization", "Bearer", "toolArguments", "sourcePriority", "Structured result placeholder", "https://", "file://", "/sessions/"]) {
+    expect(!serialized.includes(forbidden), `${label} metadata leaked ${forbidden}`);
+  }
+}
+
 async function readArtifacts(events, kind) {
   const artifacts = events
     .flatMap((event) => event.artifacts || [])
@@ -727,6 +807,55 @@ function makeEnvelope(rawToken) {
       createdAt: isoNow(),
     },
     approvalSummary: "smoke",
+    auditRequired: true,
+  };
+}
+
+function makeEmptyExtractionEnvelope(rawToken) {
+  const taskID = crypto.randomUUID();
+  return {
+    schemaVersion: "claw.computer.control.v1",
+    sourceApp: "Claw Controller",
+    gateway: {
+      endpoint: "ws://127.0.0.1:18789",
+      deviceName: "smoke",
+      securityMode: "mutualApproval",
+      tokenFingerprint: tokenFingerprint(rawToken),
+      allowedActionKinds: ["extractData"],
+      requiresApprovalForSensitiveData: true,
+      auditEnabled: true,
+    },
+    task: {
+      id: taskID,
+      command: "extract without source artifacts",
+      summary: "empty extraction smoke",
+      sourceDevice: "smoke",
+      destinationGateway: "ws://127.0.0.1:18789",
+      actions: [
+        {
+          id: crypto.randomUUID(),
+          kind: "extractData",
+          title: "Extract empty structured result",
+          target: "Desktop Data",
+          instruction: "Extract data when no prior artifacts exist",
+          approval: "gatewayApproval",
+          sourceSurface: "clawGateway",
+          handlesSensitiveData: true,
+          inputPreview: "smoke",
+          toolArguments: {
+            extractionGoal: "collect no rows",
+            sourcePriority: "browserTrace,fileDiff,commandOutput,accessibilityTree",
+            schema: "title:string,source:string,summary:string,confidence:number",
+            outputPath: "notes/empty-extracted.json",
+            validateCompleteness: "true",
+          },
+        },
+      ],
+      status: "sent",
+      riskScore: 32,
+      createdAt: isoNow(),
+    },
+    approvalSummary: "empty extraction smoke",
     auditRequired: true,
   };
 }

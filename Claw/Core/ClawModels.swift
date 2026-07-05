@@ -1381,6 +1381,7 @@ private enum ClawArtifactMetadataDisplaySanitizer {
             (#"(?i)\bworkspace=<redacted>"#, "workspace-redacted"),
             (#"(?i)\btoolArguments\b"#, "structured-arguments-redacted"),
             (#"file://<redacted>"#, "file-redacted"),
+            (#"https?://\S+"#, "url-redacted"),
             (#"<path-redacted>"#, "path-redacted")
         ]
         for (pattern, replacement) in replacements {
@@ -1491,13 +1492,19 @@ struct ClawGatewayArtifactMetadataReviewSummary: Equatable, Codable, Sendable {
             "allowedactionkinds": "allowedActionKinds",
             "browsercontrolstate": "browserControlState",
             "browsernetworkstate": "browserNetworkState",
+            "browsertracecount": "browserTraceCount",
             "candidatecontrolcount": "candidateControlCount",
+            "commandoutputcount": "commandOutputCount",
+            "completenessstatus": "completenessStatus",
             "decision": "decision",
             "desktopcontrolstate": "desktopControlState",
             "digestmatchesfirst": "digestMatchesFirst",
+            "extractionreview": "extractionReview",
+            "filediffcount": "fileDiffCount",
             "firstsessionid": "firstSessionID",
             "includeaccessibilitytree": "includeAccessibilityTree",
             "maxcandidatecontrols": "maxCandidateControls",
+            "messagedraftcount": "messageDraftCount",
             "mode": "mode",
             "nodecount": "nodeCount",
             "originalstatus": "originalStatus",
@@ -1511,21 +1518,127 @@ struct ClawGatewayArtifactMetadataReviewSummary: Equatable, Codable, Sendable {
             "risktags": "riskTags",
             "satisfiedsignals": "satisfiedSignals",
             "screencapturestate": "screenCaptureState",
+            "screenobservationcount": "screenObservationCount",
             "selectednextactionkind": "selectedNextActionKind",
             "selectednextactionrequiresapproval": "selectedNextActionRequiresApproval",
             "shellstate": "shellState",
             "snapshotkind": "snapshotKind",
+            "sourceartifactkinds": "sourceArtifactKinds",
             "stopreason": "stopReason",
             "taskid": "taskID",
             "tokenconfigured": "tokenConfigured",
             "tokenfingerprint": "tokenFingerprint",
             "tokenrequired": "tokenRequired",
+            "validatecompleteness": "validateCompleteness",
             "windowmetadatastate": "windowMetadataState",
             "workspacestate": "workspaceState"
         ]
         return keys[lowered]
     }
 
+}
+
+struct ClawGatewayExtractionCompletenessReviewSummary: Equatable, Codable, Sendable {
+    var extractionCount: Int
+    var latestTitle: String
+    var hasMetadata: Bool
+    var mode: String?
+    var validateCompleteness: Bool?
+    var rowCount: Int?
+    var completenessStatus: String?
+    var browserTraceCount: Int?
+    var fileDiffCount: Int?
+    var commandOutputCount: Int?
+    var screenObservationCount: Int?
+    var accessibilityTreeCount: Int?
+    var messageDraftCount: Int?
+    var sourceArtifactKinds: [String]
+    var safetyFlags: [String]
+    var isRedacted: Bool
+
+    var compactStatus: String {
+        guard hasMetadata else {
+            return "已收到结构化提取结果，metadata 待同步。"
+        }
+        let status = completenessStatus ?? "完整性待复核"
+        let rows = rowCount.map { "rows \($0)" } ?? "rows 待复核"
+        let sources = sourceArtifactKinds.isEmpty ? "sources 待复核" : "sources \(sourceArtifactKinds.count)"
+        return "\(status) · \(rows) · \(sources)"
+    }
+
+    static func latest(from session: ClawGatewaySession?) -> ClawGatewayExtractionCompletenessReviewSummary? {
+        guard let session else {
+            return nil
+        }
+        return latest(from: session.allArtifacts)
+    }
+
+    static func latest(from artifacts: [ClawGatewayArtifact]) -> ClawGatewayExtractionCompletenessReviewSummary? {
+        let extractions = artifacts.filter(isExtractionArtifact)
+        guard let latest = extractions.last else {
+            return nil
+        }
+        let metadata = latest.metadata ?? [:]
+        return ClawGatewayExtractionCompletenessReviewSummary(
+            extractionCount: extractions.count,
+            latestTitle: ClawArtifactMetadataDisplaySanitizer.safeValue(latest.title) ?? latest.kind.title,
+            hasMetadata: metadata.isEmpty == false,
+            mode: allowedMode(metadata["mode"]),
+            validateCompleteness: ClawArtifactMetadataParser.boolValue(metadata["validateCompleteness"]),
+            rowCount: ClawArtifactMetadataParser.intValue(metadata["rowCount"]),
+            completenessStatus: allowedCompletenessStatus(metadata["completenessStatus"]),
+            browserTraceCount: ClawArtifactMetadataParser.intValue(metadata["browserTraceCount"]),
+            fileDiffCount: ClawArtifactMetadataParser.intValue(metadata["fileDiffCount"]),
+            commandOutputCount: ClawArtifactMetadataParser.intValue(metadata["commandOutputCount"]),
+            screenObservationCount: ClawArtifactMetadataParser.intValue(metadata["screenObservationCount"]),
+            accessibilityTreeCount: ClawArtifactMetadataParser.intValue(metadata["accessibilityTreeCount"]),
+            messageDraftCount: ClawArtifactMetadataParser.intValue(metadata["messageDraftCount"]),
+            sourceArtifactKinds: allowedSourceArtifactKinds(metadata["sourceArtifactKinds"]),
+            safetyFlags: allowedSafetyFlags(metadata["safetyFlags"]),
+            isRedacted: latest.isRedacted
+        )
+    }
+
+    private static func isExtractionArtifact(_ artifact: ClawGatewayArtifact) -> Bool {
+        artifact.kind == .browserTrace &&
+        (
+            artifact.title.hasPrefix("extracted-data-") ||
+            ClawArtifactMetadataParser.cleanValue(artifact.metadata?["extractionReview"]) == "artifactGrounded" ||
+            ClawArtifactMetadataParser.cleanValue(artifact.metadata?["mode"]) == "artifact-grounded-extraction"
+        )
+    }
+
+    private static func allowedMode(_ value: String?) -> String? {
+        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
+            return nil
+        }
+        let allowed = ["artifact-grounded-extraction", "dry-run-extraction"]
+        return allowed.contains(clean) ? clean : nil
+    }
+
+    private static func allowedCompletenessStatus(_ value: String?) -> String? {
+        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
+            return nil
+        }
+        let allowed = ["complete", "partial", "empty"]
+        return allowed.contains(clean) ? clean : nil
+    }
+
+    private static func allowedSourceArtifactKinds(_ value: String?) -> [String] {
+        let allowed = ["accessibilityTree", "browserTrace", "commandOutput", "fileDiff", "messageDraft", "screenObservation"]
+        return ClawArtifactMetadataParser.listValue(value).filter { allowed.contains($0) }
+    }
+
+    private static func allowedSafetyFlags(_ value: String?) -> [String] {
+        let allowed = [
+            "artifact-payload-not-read",
+            "metadata-only",
+            "row-content-omitted",
+            "source-values-omitted",
+            "tool-arguments-omitted"
+        ]
+        return ClawArtifactMetadataParser.listValue(value).filter { allowed.contains($0) }
+    }
 }
 
 struct ClawAgentTraceReviewSummary: Equatable, Codable, Sendable {
@@ -1832,6 +1945,7 @@ struct ClawMissionRunSummary: Equatable, Codable, Sendable {
     var artifactCount: Int
     var artifactKinds: [ClawGatewayArtifactKind]
     var artifactMetadataReview: ClawGatewayArtifactMetadataReviewSummary?
+    var gatewayExtractionCompletenessReview: ClawGatewayExtractionCompletenessReviewSummary?
     var agentTraceReview: ClawAgentTraceReviewSummary?
     var gatewayAccessibilityReview: ClawGatewayAccessibilityReviewSummary?
     var gatewayCapabilityReview: ClawGatewayCapabilityReviewSummary?
@@ -2043,6 +2157,7 @@ enum ClawSensitiveTextRedactor {
             (#"(?i)\bAuthorization\s*[:=]\s*(Bearer\s+)?[^,\s;}]+"#, "Authorization=<redacted>"),
             (#"(?i)\bBearer\s+[^,\s;}]+"#, "Bearer <redacted>"),
             (#"(?i)\b(token|password|secret)\s*[:=]\s*[^,\s;}]+"#, "$1=<redacted>"),
+            (#"https?://\S+"#, "url-redacted"),
             (#"file://\S+"#, "file://<redacted>"),
             (#"(?i)\bworkspace\s*[:=]\s*[^,\s;}]+"#, "workspace=<redacted>"),
             (#"(?i)\b[A-Z]:\\[^\s,;}]+"#, "<path-redacted>"),

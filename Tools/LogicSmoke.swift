@@ -103,7 +103,7 @@ enum LogicSmoke {
 
         let missionStore = ClawStore(autoScanLocalArtifacts: false)
         expect(missionStore.missionRunSummary.primaryActionKind == .start, "mission summary should start with a launch action")
-        missionStore.phoneAgentCommand = "打开浏览器搜索资料并发到 Slack"
+        missionStore.phoneAgentCommand = "打开浏览器搜索资料，整理结果并发到 Slack"
         missionStore.startAutonomousComputerTakeover()
         var missionSummary = missionStore.missionRunSummary
         expect(missionSummary.primaryActionKind == .approveAndContinue, "mission summary should stop at approval gate")
@@ -123,6 +123,21 @@ enum LogicSmoke {
             expect(metadataReview.safeMetadataPairs.isEmpty == false, "artifact metadata review should expose safe metadata pairs")
         } else {
             failures.append("mission summary should derive artifact metadata review")
+        }
+        if let extractionReview = missionSummary.gatewayExtractionCompletenessReview {
+            expect(extractionReview.extractionCount == 1, "mission summary should count extraction artifacts")
+            expect(extractionReview.hasMetadata, "extraction review should include metadata")
+            expect(extractionReview.mode == "artifact-grounded-extraction", "extraction review should expose extraction mode")
+            expect(extractionReview.validateCompleteness == true, "extraction review should expose completeness validation")
+            expect(extractionReview.rowCount == 4, "extraction review should expose row count")
+            expect(extractionReview.completenessStatus == "complete", "extraction review should expose complete status")
+            expect(extractionReview.browserTraceCount == 1, "extraction review should expose browser trace count")
+            expect(extractionReview.fileDiffCount == 1, "extraction review should expose file diff count")
+            expect(extractionReview.commandOutputCount == 1, "extraction review should expose command output count")
+            expect(extractionReview.sourceArtifactKinds.contains("browserTrace"), "extraction review should expose source kinds")
+            expect(extractionReview.safetyFlags.contains("row-content-omitted"), "extraction review should expose safety flags")
+        } else {
+            failures.append("mission summary should derive extraction completeness review")
         }
         if let capabilityReview = missionSummary.gatewayCapabilityReview {
             expect(capabilityReview.snapshotCount == 1, "mission summary should count capability snapshots")
@@ -233,6 +248,45 @@ enum LogicSmoke {
             expect(visibleText.contains("toolArguments") == false, "capability review should redact toolArguments")
         } else {
             failures.append("sensitive capability review should be derived")
+        }
+        let sensitiveExtraction = ClawGatewayArtifact(
+            kind: .browserTrace,
+            title: "extracted-data file:///private/tmp/extracted.json https://example.com/private-row.json",
+            reference: "file:///tmp/extracted.json",
+            isRedacted: true,
+            metadata: [
+                "extractionReview": "artifactGrounded",
+                "mode": "artifact-grounded-extraction Authorization: Bearer raw-token",
+                "validateCompleteness": "true",
+                "rowCount": "2",
+                "completenessStatus": "complete file:///private/tmp/secret.json",
+                "browserTraceCount": "1",
+                "fileDiffCount": "1",
+                "commandOutputCount": "1",
+                "sourceArtifactKinds": "browserTrace,toolArguments,/home/alice/private.txt,https://example.com/row",
+                "safetyFlags": "metadata-only,headers={Authorization: Bearer raw-token},~/Library/Claw/private.txt,https://example.com/row"
+            ]
+        )
+        if let sensitiveExtractionReview = ClawGatewayExtractionCompletenessReviewSummary.latest(from: [sensitiveExtraction]) {
+            let visibleText = [
+                sensitiveExtractionReview.latestTitle,
+                sensitiveExtractionReview.compactStatus,
+                sensitiveExtractionReview.mode ?? "",
+                sensitiveExtractionReview.completenessStatus ?? "",
+                sensitiveExtractionReview.sourceArtifactKinds.joined(separator: " "),
+                sensitiveExtractionReview.safetyFlags.joined(separator: " ")
+            ].joined(separator: " ")
+            expect(visibleText.contains("Authorization") == false, "extraction review should redact Authorization")
+            expect(visibleText.contains("Bearer") == false, "extraction review should redact bearer token")
+            expect(visibleText.contains("raw-token") == false, "extraction review should redact raw token")
+            expect(visibleText.contains("https://") == false, "extraction review should redact web URLs")
+            expect(visibleText.contains("file://") == false, "extraction review should redact file URLs")
+            expect(visibleText.contains("/private") == false, "extraction review should redact local paths")
+            expect(visibleText.contains("/home") == false, "extraction review should redact Linux home paths")
+            expect(visibleText.contains("~/") == false, "extraction review should redact tilde paths")
+            expect(visibleText.contains("toolArguments") == false, "extraction review should redact toolArguments")
+        } else {
+            failures.append("sensitive extraction review should be derived")
         }
 
         let retryMissionStore = ClawStore(autoScanLocalArtifacts: false)

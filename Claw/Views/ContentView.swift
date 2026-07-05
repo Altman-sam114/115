@@ -704,6 +704,10 @@ struct ClawMissionRunPanel: View {
                 ClawGatewayArtifactMetadataReviewRow(review: review)
             }
 
+            if let review = summary.gatewayExtractionCompletenessReview {
+                ClawGatewayExtractionCompletenessReviewRow(review: review)
+            }
+
             if let review = summary.gatewayCapabilityReview {
                 ClawGatewayCapabilityReviewRow(review: review)
             }
@@ -1239,6 +1243,10 @@ struct ClawGatewaySessionCard: View {
                 ClawGatewayArtifactMetadataReviewRow(review: review)
             }
 
+            if let review = ClawGatewayExtractionCompletenessReviewSummary.latest(from: session) {
+                ClawGatewayExtractionCompletenessReviewRow(review: review)
+            }
+
             if let review = ClawGatewayCapabilityReviewSummary.latest(from: session) {
                 ClawGatewayCapabilityReviewRow(review: review)
             }
@@ -1391,6 +1399,10 @@ struct ClawGatewayResultRow: View {
                 ClawGatewayArtifactMetadataReviewRow(review: review)
             }
 
+            if let review = ClawGatewayExtractionCompletenessReviewSummary.latest(from: result.artifacts) {
+                ClawGatewayExtractionCompletenessReviewRow(review: review)
+            }
+
             if let review = ClawAgentTraceReviewSummary.latest(from: result.artifacts) {
                 ClawAgentTraceReviewRow(review: review)
             }
@@ -1466,6 +1478,125 @@ struct ClawGatewayArtifactMetadataReviewRow: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     ForEach(Array(metadataChips.enumerated()), id: \.offset) { _, chip in
+                        PhoneAgentTag(text: chip.text, icon: chip.icon, tint: chip.tint)
+                    }
+                }
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(Array(safetyChips.enumerated()), id: \.offset) { _, chip in
+                        PhoneAgentTag(text: chip.text, icon: chip.icon, tint: chip.tint)
+                    }
+                }
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+struct ClawGatewayExtractionCompletenessReviewRow: View {
+    let review: ClawGatewayExtractionCompletenessReviewSummary
+
+    private var statusTint: Color {
+        guard review.hasMetadata else {
+            return .secondary
+        }
+        switch review.completenessStatus {
+        case "complete":
+            return .green
+        case "partial":
+            return .orange
+        case "empty":
+            return .red
+        default:
+            return .secondary
+        }
+    }
+
+    private var sourceChips: [(text: String, icon: String, tint: Color)] {
+        guard review.hasMetadata else {
+            return [("sources 待同步", "hourglass", .secondary)]
+        }
+        var items: [(String, String, Color)] = []
+        if let browserTraceCount = review.browserTraceCount, browserTraceCount > 0 {
+            items.append(("browser \(browserTraceCount)", "safari.fill", .blue))
+        }
+        if let fileDiffCount = review.fileDiffCount, fileDiffCount > 0 {
+            items.append(("file \(fileDiffCount)", "doc.text.fill", .purple))
+        }
+        if let commandOutputCount = review.commandOutputCount, commandOutputCount > 0 {
+            items.append(("shell \(commandOutputCount)", "terminal.fill", .orange))
+        }
+        if let screenObservationCount = review.screenObservationCount, screenObservationCount > 0 {
+            items.append(("screen \(screenObservationCount)", "camera.viewfinder", .blue))
+        }
+        if let accessibilityTreeCount = review.accessibilityTreeCount, accessibilityTreeCount > 0 {
+            items.append(("ax \(accessibilityTreeCount)", "accessibility", .green))
+        }
+        if let messageDraftCount = review.messageDraftCount, messageDraftCount > 0 {
+            items.append(("draft \(messageDraftCount)", "text.bubble.fill", .purple))
+        }
+        if items.isEmpty {
+            items.append(("sources 待同步", "hourglass", .secondary))
+        }
+        return items
+    }
+
+    private var safetyChips: [(text: String, icon: String, tint: Color)] {
+        guard review.hasMetadata else {
+            return [(text: "metadata 待同步", icon: "hourglass", tint: .secondary)]
+        }
+        var items = review.safetyFlags.prefix(3).map { flag in
+            (text: flag, icon: "shield.lefthalf.filled.badge.checkmark", tint: Color.purple)
+        }
+        if items.isEmpty {
+            items.append((text: "metadata-only", icon: "doc.text.magnifyingglass", tint: .purple))
+        }
+        return items
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Label("提取完整性", systemImage: "checklist.checked")
+                    .font(.footnote.bold())
+                    .foregroundStyle(.primary)
+                PhoneAgentTag(text: "\(review.extractionCount) 条", icon: "number", tint: .purple)
+                PhoneAgentTag(
+                    text: review.hasMetadata ? (review.completenessStatus ?? "待复核") : "metadata 待同步",
+                    icon: review.hasMetadata && review.completenessStatus == "complete" ? "checkmark.seal.fill" : "hourglass",
+                    tint: statusTint
+                )
+                Spacer(minLength: 0)
+            }
+
+            Text(review.compactStatus)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    PhoneAgentTag(
+                        text: review.hasMetadata ? "rows \(review.rowCount ?? 0)" : "rows 待同步",
+                        icon: "tablecells.fill",
+                        tint: statusTint
+                    )
+                    PhoneAgentTag(
+                        text: review.hasMetadata ? (review.validateCompleteness == false ? "未校验" : "完整性校验") : "校验待同步",
+                        icon: review.hasMetadata && review.validateCompleteness != false ? "checkmark.shield.fill" : "questionmark.diamond.fill",
+                        tint: review.hasMetadata ? (review.validateCompleteness == false ? .orange : .green) : .secondary
+                    )
+                    if let mode = review.mode {
+                        PhoneAgentTag(text: mode, icon: "doc.text.magnifyingglass", tint: .blue)
+                    }
+                }
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(Array(sourceChips.enumerated()), id: \.offset) { _, chip in
                         PhoneAgentTag(text: chip.text, icon: chip.icon, tint: chip.tint)
                     }
                 }

@@ -85,6 +85,8 @@ expect(extractedTrace?.sourceArtifacts?.browserTraceCount >= 1, "websocket extra
 expect(extractedTrace?.sourceArtifacts?.fileDiffCount >= 1, "websocket extraction did not consume file diff");
 expect(extractedTrace?.sourceArtifacts?.commandOutputCount >= 1, "websocket extraction did not consume command output");
 expect(extractedTrace?.rows?.some((row) => row.title === "Gateway Smoke Page"), "websocket extraction missing page row");
+const extractionArtifact = findArtifactByTitle(events, "browserTrace", "extracted-data-");
+assertExtractionCompletenessMetadata(extractionArtifact?.metadata, extractedTrace, "websocket extraction");
 const agentTraces = await readArtifacts(events, "agentTrace");
 const agentTrace = agentTraces.find((trace) => trace.mode === "agent-loop-trace");
 expect(Boolean(agentTrace), "missing websocket agent loop trace");
@@ -306,6 +308,12 @@ function findArtifact(events, kind) {
     .find((artifact) => artifact.kind === kind);
 }
 
+function findArtifactByTitle(events, kind, titlePrefix) {
+  return events
+    .flatMap((event) => event.artifacts || [])
+    .find((artifact) => artifact.kind === kind && artifact.title?.startsWith(titlePrefix));
+}
+
 function hasArtifact(event, kind) {
   return event.artifacts?.some((artifact) => artifact.kind === kind);
 }
@@ -514,6 +522,45 @@ function assertAgentTraceMetadata(metadata, trace, label) {
   expect(metadata.riskTags === trace.riskTags.join(","), `${label} risk tags metadata mismatch`);
   expect(metadata.stopReason === trace.stopReason, `${label} stop reason metadata mismatch`);
   expect(metadata.handoffSummary === trace.handoffSummary, `${label} handoff summary metadata mismatch`);
+}
+
+function assertExtractionCompletenessMetadata(metadata, extraction, label) {
+  expect(metadata && typeof metadata === "object", `${label} missing extraction metadata`);
+  const allowedKeys = [
+    "accessibilityTreeCount",
+    "browserTraceCount",
+    "commandOutputCount",
+    "completenessStatus",
+    "extractionReview",
+    "fileDiffCount",
+    "messageDraftCount",
+    "mode",
+    "rowCount",
+    "safetyFlags",
+    "screenObservationCount",
+    "sourceArtifactKinds",
+    "validateCompleteness",
+  ];
+  expect(
+    Object.keys(metadata).sort().join(",") === allowedKeys.join(","),
+    `${label} extraction metadata includes unexpected keys`,
+  );
+  expect(metadata.extractionReview === "artifactGrounded", `${label} extraction review metadata mismatch`);
+  expect(metadata.mode === extraction.mode, `${label} mode metadata mismatch`);
+  expect(metadata.validateCompleteness === String(extraction.validateCompleteness), `${label} completeness validation metadata mismatch`);
+  expect(Number(metadata.rowCount) === extraction.rows.length, `${label} row count metadata mismatch`);
+  expect(metadata.completenessStatus === "complete", `${label} completeness status mismatch`);
+  expect(Number(metadata.browserTraceCount) === extraction.sourceArtifacts.browserTraceCount, `${label} browser trace count metadata mismatch`);
+  expect(Number(metadata.fileDiffCount) === extraction.sourceArtifacts.fileDiffCount, `${label} file diff count metadata mismatch`);
+  expect(Number(metadata.commandOutputCount) === extraction.sourceArtifacts.commandOutputCount, `${label} command output count metadata mismatch`);
+  expect(metadata.sourceArtifactKinds.includes("browserTrace"), `${label} missing browserTrace source kind`);
+  expect(metadata.sourceArtifactKinds.includes("fileDiff"), `${label} missing fileDiff source kind`);
+  expect(metadata.sourceArtifactKinds.includes("commandOutput"), `${label} missing commandOutput source kind`);
+  expect(metadata.safetyFlags.includes("row-content-omitted"), `${label} missing row omission safety flag`);
+  const serialized = JSON.stringify(metadata);
+  for (const forbidden of [token, "Authorization", "Bearer", "toolArguments", "sourcePriority", "Gateway Smoke Page", "https://", "file://", "/sessions/"]) {
+    expect(!serialized.includes(forbidden), `${label} metadata leaked ${forbidden}`);
+  }
 }
 
 function connectAndCollectEvents({ host, port, token, envelope }) {

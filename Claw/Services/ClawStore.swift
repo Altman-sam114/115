@@ -164,6 +164,7 @@ final class ClawStore: ObservableObject {
             artifactCount: session?.artifactCount ?? 0,
             artifactKinds: missionRunArtifactKinds(from: session),
             artifactMetadataReview: missionRunArtifactMetadataReview(from: session),
+            gatewayExtractionCompletenessReview: missionRunGatewayExtractionCompletenessReview(from: session),
             agentTraceReview: missionRunAgentTraceReview(from: session),
             gatewayAccessibilityReview: missionRunGatewayAccessibilityReview(from: session),
             gatewayCapabilityReview: missionRunGatewayCapabilityReview(from: session),
@@ -299,6 +300,10 @@ final class ClawStore: ObservableObject {
 
     private func missionRunArtifactMetadataReview(from session: ClawGatewaySession?) -> ClawGatewayArtifactMetadataReviewSummary? {
         ClawGatewayArtifactMetadataReviewSummary.latest(from: session)
+    }
+
+    private func missionRunGatewayExtractionCompletenessReview(from session: ClawGatewaySession?) -> ClawGatewayExtractionCompletenessReviewSummary? {
+        ClawGatewayExtractionCompletenessReviewSummary.latest(from: session)
     }
 
     private func missionRunGatewayAccessibilityReview(from session: ClawGatewaySession?) -> ClawGatewayAccessibilityReviewSummary? {
@@ -1855,7 +1860,14 @@ enum ClawGatewaySimulator {
                 actionTitle: action.title,
                 status: .succeeded,
                 summary: "结构化数据已提取并校验字段完整性。",
-                artifacts: [artifact(.browserTrace, "extracted-data-\(index + 1).json", redacted: false)]
+                artifacts: [
+                    artifact(
+                        .browserTrace,
+                        "extracted-data-\(index + 1).json",
+                        redacted: false,
+                        metadata: extractionCompletenessMetadata()
+                    )
+                ]
             )
         case .composeMessage, .composeEmail:
             return ClawGatewayActionResult(
@@ -1958,6 +1970,24 @@ enum ClawGatewaySimulator {
             "platform": "simulated",
             "redaction": "maskSensitiveText",
             "safetyFlags": "observe-only,values-omitted,password-fields-omitted,action-execution-not-supported,structured-arguments-only"
+        ]
+    }
+
+    private static func extractionCompletenessMetadata() -> [String: String] {
+        [
+            "extractionReview": "artifactGrounded",
+            "mode": "artifact-grounded-extraction",
+            "validateCompleteness": "true",
+            "rowCount": "4",
+            "completenessStatus": "complete",
+            "browserTraceCount": "1",
+            "fileDiffCount": "1",
+            "commandOutputCount": "1",
+            "screenObservationCount": "1",
+            "accessibilityTreeCount": "1",
+            "messageDraftCount": "0",
+            "sourceArtifactKinds": "browserTrace,fileDiff,commandOutput,screenObservation,accessibilityTree",
+            "safetyFlags": "metadata-only,row-content-omitted,source-values-omitted,tool-arguments-omitted,artifact-payload-not-read"
         ]
     }
 }
