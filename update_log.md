@@ -58,7 +58,7 @@
 - `git diff --check` 通过。
 - `ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci-results.yml"); puts "yaml ok"'` 通过，输出 `yaml ok`。
 - 本地无签名 iOS build 通过，输出 `** BUILD SUCCEEDED **`。
-- 待完成 push `origin/main` 和 GitHub Actions artifact 复判。
+- GitHub Actions run `28766837880` attempt `1` 对 commit `7d805ac34775711bb679c772611ebecdd6128d58` 通过，artifact `claw-ci-v0.2-main-7d805ac34775-run28766837880-attempt1` 已下载到 `/private/tmp/claw-c-review-28766837880/` 并核对 manifest、JUnit、failure summary、Swift/Gateway smoke 和 xcodebuild 日志。
 
 遗留事项：
 
