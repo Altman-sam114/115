@@ -167,6 +167,13 @@ enum LogicSmoke {
         expect(idleMacReadiness.metadataPendingCount == 0, "idle mac readiness should not count metadata gaps")
         expect(idleMacReadiness.humanActionCount == 0, "idle mac readiness should not require human action")
         expect(idleMacReadiness.primaryReviewKind == nil, "idle mac readiness should not invent primary focus")
+        let idleActionPreflight = missionStore.missionRunSummary.macGatewayActionPreflightMatrix
+        expect(idleActionPreflight.isReviewable == false, "idle action preflight should not be reviewable")
+        expect(idleActionPreflight.totalCount == 0, "idle action preflight should not count actions")
+        expect(idleActionPreflight.readyCount == 0, "idle action preflight should not count ready actions")
+        expect(idleActionPreflight.blockedCount == 0, "idle action preflight should not count blockers")
+        expect(idleActionPreflight.humanActionCount == 0, "idle action preflight should not require human action")
+        expect(idleActionPreflight.primaryReviewKind == nil, "idle action preflight should not invent primary focus")
         expect(missionStore.missionRunSummary.activeReviewFocus(from: "delivery-safety") == nil, "idle active focus should not resolve")
         missionStore.phoneAgentCommand = "打开浏览器搜索资料，整理结果并发到 Slack"
         missionStore.startAutonomousComputerTakeover()
@@ -190,6 +197,22 @@ enum LogicSmoke {
         expect(
             focusedPreSendApprovalQueue.items.contains { $0.reviewKind == "approval" && $0.isFocused },
             "focused approval queue should mark approval row"
+        )
+        let preSendActionPreflight = missionSummary.macGatewayActionPreflightMatrix
+        expect(preSendActionPreflight.isReviewable, "pre-send action preflight should be reviewable")
+        expect(preSendActionPreflight.totalCount == missionSummary.actionPreflightItems.count, "pre-send action preflight should mirror action rows")
+        expect(preSendActionPreflight.items.map(\.rank) == preSendActionPreflight.items.map(\.rank).sorted(), "pre-send action preflight should preserve action order")
+        expect(preSendActionPreflight.humanActionCount > 0, "pre-send action preflight should surface human gates")
+        expect(preSendActionPreflight.requiresHumanAction, "pre-send action preflight should require human action")
+        expect(
+            preSendActionPreflight.items.contains { $0.reviewKind == "approval" && $0.canFocusReview && $0.requiresHumanAction },
+            "pre-send action preflight should expose approval focus rows"
+        )
+        let focusedPreSendActionPreflight = missionSummary.macGatewayActionPreflightMatrix(focusedOn: "approval")
+        expect(focusedPreSendActionPreflight.focusedReviewKind == "approval", "pre-send action preflight should focus approval")
+        expect(
+            focusedPreSendActionPreflight.items.contains { $0.reviewKind == "approval" && $0.isFocused },
+            "focused pre-send action preflight should mark approval row"
         )
         missionStore.approveAndContinueAutonomousLoop()
         missionSummary = missionStore.missionRunSummary
@@ -294,6 +317,29 @@ enum LogicSmoke {
         expect(
             focusedMacReadiness.items.contains { $0.id == "human-gate" && $0.isFocused },
             "focused mac readiness should mark human gate row"
+        )
+        let actionPreflight = missionSummary.macGatewayActionPreflightMatrix
+        expect(actionPreflight.isReviewable, "action preflight should be reviewable once task exists")
+        expect(actionPreflight.totalCount == missionSummary.actionPreflightItems.count, "action preflight should mirror summary item count")
+        expect(actionPreflight.items.map(\.rank) == actionPreflight.items.map(\.rank).sorted(), "action preflight should preserve action order")
+        expect(actionPreflight.readyCount > 0, "action preflight should count ready actions")
+        expect(actionPreflight.humanActionCount > 0, "action preflight should surface human gates")
+        expect(actionPreflight.requiresHumanAction, "action preflight should require human review")
+        expect(actionPreflight.primaryReviewKind != nil, "action preflight should point to a primary review")
+        expect(
+            actionPreflight.items.contains { $0.actionKindTitle == ClawMobileActionKind.controlBrowser.title && $0.reviewKind == "browser-control" },
+            "action preflight should map browser action to browser review"
+        )
+        expect(
+            actionPreflight.items.contains { $0.actionKindTitle == ClawMobileActionKind.runAgentLoop.title && $0.reviewKind == "agent-trace" },
+            "action preflight should map agent loop action to trace review"
+        )
+        let focusedActionPreflight = missionSummary.macGatewayActionPreflightMatrix(focusedOn: "delivery-safety")
+        expect(focusedActionPreflight.focusedReviewKind == "delivery-safety", "action preflight should record delivery focus")
+        expect(focusedActionPreflight.focusedReviewTitle == "最终提交安全", "action preflight should expose delivery focus title")
+        expect(
+            focusedActionPreflight.items.contains { $0.reviewKind == "delivery-safety" && $0.isFocused },
+            "focused action preflight should mark delivery row"
         )
         let operatorStrip = missionSummary.operatorStrip
         expect(operatorStrip.lanes.map(\.id) == ["gateway", "evidence", "review", "next"], "operator strip should expose stable lanes")
@@ -465,6 +511,39 @@ enum LogicSmoke {
             statusMacReadiness.items.contains { $0.id == "human-gate" && $0.isFocused },
             "status mac readiness should mark human gate row"
         )
+        statusOnlySummary.actionPreflightItems.insert(
+            ClawMissionRunActionPreflightItem(
+                id: "gateway-status-preflight",
+                rank: -1,
+                title: "Gateway 状态",
+                actionKindTitle: "状态复核",
+                approvalTitle: "人工复核",
+                status: "状态待查看",
+                guidance: "状态项没有单独 action 结果。",
+                icon: "server.rack",
+                tone: .info,
+                reviewKind: statusOnlyItem.reviewKind,
+                reviewTitle: statusOnlyItem.title,
+                canFocusReview: true,
+                isFocused: false,
+                hasStructuredArguments: false,
+                hasResult: false,
+                hasMetadata: true,
+                isReady: false,
+                isBlocked: false,
+                isDegraded: false,
+                requiresHumanAction: false,
+                isRetryable: false
+            ),
+            at: 0
+        )
+        let statusActionPreflight = statusOnlySummary.macGatewayActionPreflightMatrix(focusedOn: statusOnlyItem.reviewKind)
+        expect(statusActionPreflight.focusedReviewKind == statusOnlyItem.reviewKind, "status action preflight should keep status focus")
+        expect(statusActionPreflight.focusedReviewTitle == statusOnlyItem.title, "status action preflight should expose status title")
+        expect(
+            statusActionPreflight.items.contains { $0.reviewKind == statusOnlyItem.reviewKind && $0.isFocused },
+            "status action preflight should mark status row"
+        )
         let staleFocusContext = statusOnlySummary.focusContextSummary(focusedOn: "unknown-review-kind")
         expect(staleFocusContext.focusedReviewKind == nil, "stale focus context should not keep an unknown review kind")
         expect(staleFocusContext.canClearFocus, "stale focus context should allow clearing focus")
@@ -484,6 +563,9 @@ enum LogicSmoke {
         let staleMacReadiness = statusOnlySummary.macAgentReadinessBoard(focusedOn: "unknown-review-kind")
         expect(staleMacReadiness.focusedReviewKind == nil, "stale mac readiness should not keep unknown focus")
         expect(staleMacReadiness.items.map(\.id) == ["connection", "capability", "observation", "loop", "human-gate"], "stale mac readiness should keep stable rows")
+        let staleActionPreflight = statusOnlySummary.macGatewayActionPreflightMatrix(focusedOn: "unknown-review-kind")
+        expect(staleActionPreflight.focusedReviewKind == nil, "stale action preflight should not keep unknown focus")
+        expect(staleActionPreflight.totalCount == statusOnlySummary.actionPreflightItems.count, "stale action preflight should keep rows")
         expect(
             missionSummary.detailReviewKinds(focusedOn: nil) == availableDetailKinds,
             "nil focus should show all detail reviews"
@@ -763,6 +845,47 @@ enum LogicSmoke {
             staleMacReadiness.guidance
         ]
         let macReadinessVisibleChunks = macReadinessItemChunks + macReadinessSummaryChunks
+        let actionPreflightItemChunks: [String] = actionPreflight.items.flatMap { item in
+            [
+                item.title,
+                item.actionKindTitle,
+                item.approvalTitle,
+                item.status,
+                item.guidance,
+                item.reviewKind ?? "",
+                item.reviewTitle ?? ""
+            ]
+        }
+        let actionPreflightSummaryChunks: [String] = [
+            idleActionPreflight.title,
+            idleActionPreflight.status,
+            idleActionPreflight.guidance,
+            preSendActionPreflight.title,
+            preSendActionPreflight.status,
+            preSendActionPreflight.guidance,
+            focusedPreSendActionPreflight.title,
+            focusedPreSendActionPreflight.status,
+            focusedPreSendActionPreflight.guidance,
+            actionPreflight.title,
+            actionPreflight.status,
+            actionPreflight.guidance,
+            actionPreflight.primaryReviewKind ?? "",
+            actionPreflight.primaryReviewTitle ?? "",
+            focusedActionPreflight.title,
+            focusedActionPreflight.status,
+            focusedActionPreflight.guidance,
+            focusedActionPreflight.focusedReviewKind ?? "",
+            focusedActionPreflight.focusedReviewTitle ?? "",
+            statusActionPreflight.title,
+            statusActionPreflight.status,
+            statusActionPreflight.guidance,
+            statusActionPreflight.focusedReviewKind ?? "",
+            statusActionPreflight.focusedReviewTitle ?? "",
+            staleActionPreflight.title,
+            staleActionPreflight.status,
+            staleActionPreflight.guidance
+        ]
+        let actionPreflightVisibleChunks = actionPreflightItemChunks + actionPreflightSummaryChunks
         let queueVisibleText = (
             queueVisibleChunks +
                 readinessVisibleChunks +
@@ -773,7 +896,8 @@ enum LogicSmoke {
                 approvalQueueVisibleChunks +
                 payloadLedgerVisibleChunks +
                 focusContextVisibleChunks +
-                macReadinessVisibleChunks
+                macReadinessVisibleChunks +
+                actionPreflightVisibleChunks
         ).joined(separator: " ")
         for forbidden in ["Authorization", "Bearer", "toolArguments", "file://", "/private", "/Users", "/home", "C:\\", "stdout", "stderr", "diff"] {
             expect(queueVisibleText.contains(forbidden) == false, "review priority queue should not expose \(forbidden)")
@@ -972,6 +1096,19 @@ enum LogicSmoke {
             shellMacReadiness.items.contains { $0.id == "human-gate" && $0.isFocused },
             "shell mac readiness should mark shell human gate"
         )
+        let shellActionPreflight = shellMissionSummary.macGatewayActionPreflightMatrix(focusedOn: "shell-safety")
+        expect(shellActionPreflight.isReviewable, "shell action preflight should be reviewable")
+        expect(shellActionPreflight.requiresHumanAction, "shell action preflight should require human review")
+        expect(shellActionPreflight.focusedReviewKind == "shell-safety", "shell action preflight should record shell focus")
+        expect(shellActionPreflight.focusedReviewTitle == "Shell 命令安全", "shell action preflight should expose shell title")
+        expect(
+            shellActionPreflight.items.contains { $0.reviewKind == "shell-safety" && $0.isFocused },
+            "shell action preflight should mark shell row"
+        )
+        expect(
+            shellActionPreflight.items.contains { $0.actionKindTitle == ClawMobileActionKind.runShellCommand.title && $0.isRetryable },
+            "shell action preflight should expose retryable shell result"
+        )
         let shellFocusContext = shellMissionSummary.focusContextSummary(focusedOn: "shell-safety")
         expect(shellFocusContext.focusedReviewKind == "shell-safety", "shell focus context should record shell focus")
         expect(shellFocusContext.focusedReviewTitle == "Shell 命令安全", "shell focus context should expose shell title")
@@ -996,6 +1133,9 @@ enum LogicSmoke {
         }.joined(separator: " ")
         let shellMacReadinessRows = shellMacReadiness.items.map { item in
             "\(item.title) \(item.status) \(item.guidance)"
+        }.joined(separator: " ")
+        let shellActionPreflightRows = shellActionPreflight.items.map { item in
+            "\(item.title) \(item.actionKindTitle) \(item.status) \(item.guidance)"
         }.joined(separator: " ")
         let shellVisibleChunks: [String] = [
             shellReadiness.title,
@@ -1027,6 +1167,10 @@ enum LogicSmoke {
             shellMacReadiness.status,
             shellMacReadiness.guidance,
             shellMacReadinessRows,
+            shellActionPreflight.title,
+            shellActionPreflight.status,
+            shellActionPreflight.guidance,
+            shellActionPreflightRows,
             shellFocusContext.title,
             shellFocusContext.status,
             shellFocusContext.guidance,

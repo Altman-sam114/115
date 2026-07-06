@@ -211,6 +211,11 @@ final class ClawStore: ObservableObject {
                 agentTraceReview: agentTraceReview,
                 reviewPriorityQueue: reviewPriorityQueue
             ),
+            actionPreflightItems: missionRunActionPreflightItems(
+                task: task,
+                session: session,
+                reviewPriorityQueue: reviewPriorityQueue
+            ),
             primaryActionTitle: primaryAction.title,
             primaryActionIcon: primaryAction.icon,
             primaryActionKind: primaryAction.kind,
@@ -593,6 +598,136 @@ final class ClawStore: ObservableObject {
             return "agent-trace"
         default:
             return "gateway-status"
+        }
+    }
+
+    private func missionRunActionPreflightItems(
+        task: ClawMobileTask?,
+        session: ClawGatewaySession?,
+        reviewPriorityQueue: [ClawMissionRunReviewPriorityItem]
+    ) -> [ClawMissionRunActionPreflightItem] {
+        guard let task else {
+            return []
+        }
+
+        let resultsByActionID = Dictionary(uniqueKeysWithValues: (session?.results ?? []).map { ($0.actionID, $0) })
+
+        func canFocus(_ reviewKind: String?) -> Bool {
+            guard let reviewKind else {
+                return false
+            }
+            return ClawMissionRunSummary.detailReviewKindOrder.contains(reviewKind) ||
+                reviewPriorityQueue.contains { $0.reviewKind == reviewKind }
+        }
+
+        func reviewKind(for action: ClawMobileAction, result: ClawGatewayActionResult?) -> String? {
+            if action.approval == .blocked || result?.status == .skipped {
+                return "gateway-status"
+            }
+            if result == nil && (action.approval == .userConfirmation || action.approval == .gatewayApproval) {
+                return "approval"
+            }
+            let kind = self.reviewKind(forActionKind: action.kind)
+            return kind == "gateway-status" ? nil : kind
+        }
+
+        func hasMetadata(_ result: ClawGatewayActionResult?) -> Bool {
+            guard let result else {
+                return false
+            }
+            return result.artifacts.contains { artifact in
+                artifact.metadata?.isEmpty == false
+            }
+        }
+
+        return task.actions.enumerated().map { offset, action in
+            let result = resultsByActionID[action.id]
+            let resultHasMetadata = hasMetadata(result)
+            let requiresHumanAction = action.approval == .userConfirmation ||
+                action.approval == .gatewayApproval ||
+                result?.status == .waitingForApproval
+            let isBlocked = action.approval == .blocked ||
+                result?.status == .failed ||
+                result?.status == .skipped
+            let hasStructuredArguments = action.toolArguments.isEmpty == false
+            let hasResult = result != nil
+            let isDegraded = hasResult && resultHasMetadata == false
+            let isReady = isBlocked == false &&
+                requiresHumanAction == false &&
+                (result == nil ? hasStructuredArguments : (result?.status == .succeeded || result?.status == .running || result?.status == .pending))
+            let reviewKind = reviewKind(for: action, result: result)
+
+            let status: String
+            let guidance: String
+            let tone: ClawMissionRunOperatorLaneTone
+            if action.approval == .blocked {
+                status = "策略阻断"
+                guidance = "Gateway allowlist 未覆盖该动作，需要修改任务或配置。"
+                tone = .danger
+            } else if let result {
+                switch result.status {
+                case .succeeded:
+                    status = "已完成"
+                    guidance = resultHasMetadata ? "Gateway 已回传结果和 metadata，可抽查复核域。" : "Gateway 已完成；等待 action metadata 后再抽查。"
+                    tone = resultHasMetadata ? .success : .info
+                case .failed:
+                    status = "执行失败"
+                    guidance = result.isRetryable ? "该 action 失败且可重试，先复核对应安全摘要。" : "该 action 失败，先复核对应安全摘要。"
+                    tone = .danger
+                case .skipped:
+                    status = "已跳过"
+                    guidance = "Gateway 跳过该 action，需确认策略、重复任务或审批状态。"
+                    tone = .danger
+                case .waitingForApproval:
+                    status = "等待确认"
+                    guidance = "Gateway 正等待人工确认；手机端只显示预检状态。"
+                    tone = .warning
+                case .running:
+                    status = "执行中"
+                    guidance = "Gateway 已接受该 action，等待结果事件和 metadata。"
+                    tone = .info
+                case .pending:
+                    status = "待执行"
+                    guidance = "Gateway 已登记该 action，等待执行事件。"
+                    tone = .info
+                }
+            } else if requiresHumanAction {
+                status = "待人工确认"
+                guidance = "发送或执行前需要用户确认；矩阵不会自动审批。"
+                tone = .warning
+            } else if hasStructuredArguments {
+                status = "可派发"
+                guidance = "结构化 toolArguments 已准备；仍需用户明确发送。"
+                tone = .success
+            } else {
+                status = "参数待确认"
+                guidance = "尚未看到结构化参数，发送前需复核任务转换。"
+                tone = .warning
+            }
+
+            return ClawMissionRunActionPreflightItem(
+                id: action.id.uuidString,
+                rank: offset,
+                title: action.title,
+                actionKindTitle: action.kind.title,
+                approvalTitle: action.approval.title,
+                status: status,
+                guidance: guidance,
+                icon: action.kind.icon,
+                tone: tone,
+                reviewKind: reviewKind,
+                reviewTitle: reviewKind.map(ClawMissionRunSummary.title(forDetailReviewKind:)),
+                canFocusReview: canFocus(reviewKind),
+                isFocused: false,
+                hasStructuredArguments: hasStructuredArguments,
+                hasResult: hasResult,
+                hasMetadata: resultHasMetadata,
+                isReady: isReady,
+                isBlocked: isBlocked,
+                isDegraded: isDegraded,
+                requiresHumanAction: requiresHumanAction,
+                isRetryable: result?.isRetryable ?? false
+            )
         }
     }
 

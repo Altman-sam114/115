@@ -625,6 +625,13 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(idleMacReadiness.metadataPendingCount, 0)
         XCTAssertEqual(idleMacReadiness.humanActionCount, 0)
         XCTAssertNil(idleMacReadiness.primaryReviewKind)
+        let idleActionPreflight = idleStore.missionRunSummary.macGatewayActionPreflightMatrix
+        XCTAssertFalse(idleActionPreflight.isReviewable)
+        XCTAssertEqual(idleActionPreflight.totalCount, 0)
+        XCTAssertEqual(idleActionPreflight.readyCount, 0)
+        XCTAssertEqual(idleActionPreflight.blockedCount, 0)
+        XCTAssertEqual(idleActionPreflight.humanActionCount, 0)
+        XCTAssertNil(idleActionPreflight.primaryReviewKind)
         XCTAssertNil(idleStore.missionRunSummary.activeReviewFocus(from: "delivery-safety"))
 
         let store = ClawStore(autoScanLocalArtifacts: false)
@@ -645,6 +652,16 @@ final class ClawTests: XCTestCase {
         let focusedPreSendApprovalQueue = preSendSummary.approvalQueueSummary(focusedOn: "approval")
         XCTAssertEqual(focusedPreSendApprovalQueue.focusedReviewKind, "approval")
         XCTAssertTrue(focusedPreSendApprovalQueue.items.contains { $0.reviewKind == "approval" && $0.isFocused })
+        let preSendActionPreflight = preSendSummary.macGatewayActionPreflightMatrix
+        XCTAssertTrue(preSendActionPreflight.isReviewable)
+        XCTAssertEqual(preSendActionPreflight.totalCount, preSendSummary.actionPreflightItems.count)
+        XCTAssertEqual(preSendActionPreflight.items.map(\.rank), preSendActionPreflight.items.map(\.rank).sorted())
+        XCTAssertGreaterThan(preSendActionPreflight.humanActionCount, 0)
+        XCTAssertTrue(preSendActionPreflight.requiresHumanAction)
+        XCTAssertTrue(preSendActionPreflight.items.contains { $0.reviewKind == "approval" && $0.canFocusReview && $0.requiresHumanAction })
+        let focusedPreSendActionPreflight = preSendSummary.macGatewayActionPreflightMatrix(focusedOn: "approval")
+        XCTAssertEqual(focusedPreSendActionPreflight.focusedReviewKind, "approval")
+        XCTAssertTrue(focusedPreSendActionPreflight.items.contains { $0.reviewKind == "approval" && $0.isFocused })
 
         store.approveAndContinueAutonomousLoop()
 
@@ -700,6 +717,20 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(focusedMacReadiness.focusedReviewKind, "delivery-safety")
         XCTAssertEqual(focusedMacReadiness.focusedReviewTitle, "最终提交安全")
         XCTAssertTrue(focusedMacReadiness.items.contains { $0.id == "human-gate" && $0.isFocused })
+        let actionPreflight = summary.macGatewayActionPreflightMatrix
+        XCTAssertTrue(actionPreflight.isReviewable)
+        XCTAssertEqual(actionPreflight.totalCount, summary.actionPreflightItems.count)
+        XCTAssertEqual(actionPreflight.items.map(\.rank), actionPreflight.items.map(\.rank).sorted())
+        XCTAssertGreaterThan(actionPreflight.readyCount, 0)
+        XCTAssertGreaterThan(actionPreflight.humanActionCount, 0)
+        XCTAssertTrue(actionPreflight.requiresHumanAction)
+        XCTAssertNotNil(actionPreflight.primaryReviewKind)
+        XCTAssertTrue(actionPreflight.items.contains { $0.actionKindTitle == ClawMobileActionKind.controlBrowser.title && $0.reviewKind == "browser-control" })
+        XCTAssertTrue(actionPreflight.items.contains { $0.actionKindTitle == ClawMobileActionKind.runAgentLoop.title && $0.reviewKind == "agent-trace" })
+        let focusedActionPreflight = summary.macGatewayActionPreflightMatrix(focusedOn: "delivery-safety")
+        XCTAssertEqual(focusedActionPreflight.focusedReviewKind, "delivery-safety")
+        XCTAssertEqual(focusedActionPreflight.focusedReviewTitle, "最终提交安全")
+        XCTAssertTrue(focusedActionPreflight.items.contains { $0.reviewKind == "delivery-safety" && $0.isFocused })
         let operatorStrip = summary.operatorStrip
         XCTAssertEqual(operatorStrip.lanes.map(\.id), ["gateway", "evidence", "review", "next"])
         XCTAssertEqual(operatorStrip.title, "Mission Operator")
@@ -825,6 +856,36 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(statusMacReadiness.focusedReviewKind, statusOnlyItem.reviewKind)
         XCTAssertEqual(statusMacReadiness.focusedReviewTitle, statusOnlyItem.title)
         XCTAssertTrue(statusMacReadiness.items.contains { $0.id == "human-gate" && $0.isFocused })
+        statusOnlySummary.actionPreflightItems.insert(
+            ClawMissionRunActionPreflightItem(
+                id: "gateway-status-preflight",
+                rank: -1,
+                title: "Gateway 状态",
+                actionKindTitle: "状态复核",
+                approvalTitle: "人工复核",
+                status: "状态待查看",
+                guidance: "状态项没有单独 action 结果。",
+                icon: "server.rack",
+                tone: .info,
+                reviewKind: statusOnlyItem.reviewKind,
+                reviewTitle: statusOnlyItem.title,
+                canFocusReview: true,
+                isFocused: false,
+                hasStructuredArguments: false,
+                hasResult: false,
+                hasMetadata: true,
+                isReady: false,
+                isBlocked: false,
+                isDegraded: false,
+                requiresHumanAction: false,
+                isRetryable: false
+            ),
+            at: 0
+        )
+        let statusActionPreflight = statusOnlySummary.macGatewayActionPreflightMatrix(focusedOn: statusOnlyItem.reviewKind)
+        XCTAssertEqual(statusActionPreflight.focusedReviewKind, statusOnlyItem.reviewKind)
+        XCTAssertEqual(statusActionPreflight.focusedReviewTitle, statusOnlyItem.title)
+        XCTAssertTrue(statusActionPreflight.items.contains { $0.reviewKind == statusOnlyItem.reviewKind && $0.isFocused })
         let staleFocusContext = statusOnlySummary.focusContextSummary(focusedOn: "unknown-review-kind")
         XCTAssertNil(staleFocusContext.focusedReviewKind)
         XCTAssertTrue(staleFocusContext.canClearFocus)
@@ -844,6 +905,9 @@ final class ClawTests: XCTestCase {
         let staleMacReadiness = statusOnlySummary.macAgentReadinessBoard(focusedOn: "unknown-review-kind")
         XCTAssertNil(staleMacReadiness.focusedReviewKind)
         XCTAssertEqual(staleMacReadiness.items.map(\.id), ["connection", "capability", "observation", "loop", "human-gate"])
+        let staleActionPreflight = statusOnlySummary.macGatewayActionPreflightMatrix(focusedOn: "unknown-review-kind")
+        XCTAssertNil(staleActionPreflight.focusedReviewKind)
+        XCTAssertEqual(staleActionPreflight.totalCount, statusOnlySummary.actionPreflightItems.count)
         XCTAssertEqual(summary.detailReviewKinds(focusedOn: nil), availableDetailKinds)
         XCTAssertEqual(summary.detailReviewKinds(focusedOn: "delivery-safety"), ["delivery-safety"])
         XCTAssertEqual(summary.detailReviewKinds(focusedOn: "gateway-status"), availableDetailKinds)
@@ -1083,6 +1147,45 @@ final class ClawTests: XCTestCase {
             staleMacReadiness.status,
             staleMacReadiness.guidance
         ]
+        let actionPreflightVisibleChunks = actionPreflight.items.flatMap {
+            [
+                $0.title,
+                $0.actionKindTitle,
+                $0.approvalTitle,
+                $0.status,
+                $0.guidance,
+                $0.reviewKind ?? "",
+                $0.reviewTitle ?? ""
+            ]
+        } + [
+            idleActionPreflight.title,
+            idleActionPreflight.status,
+            idleActionPreflight.guidance,
+            preSendActionPreflight.title,
+            preSendActionPreflight.status,
+            preSendActionPreflight.guidance,
+            focusedPreSendActionPreflight.title,
+            focusedPreSendActionPreflight.status,
+            focusedPreSendActionPreflight.guidance,
+            actionPreflight.title,
+            actionPreflight.status,
+            actionPreflight.guidance,
+            actionPreflight.primaryReviewKind ?? "",
+            actionPreflight.primaryReviewTitle ?? "",
+            focusedActionPreflight.title,
+            focusedActionPreflight.status,
+            focusedActionPreflight.guidance,
+            focusedActionPreflight.focusedReviewKind ?? "",
+            focusedActionPreflight.focusedReviewTitle ?? "",
+            statusActionPreflight.title,
+            statusActionPreflight.status,
+            statusActionPreflight.guidance,
+            statusActionPreflight.focusedReviewKind ?? "",
+            statusActionPreflight.focusedReviewTitle ?? "",
+            staleActionPreflight.title,
+            staleActionPreflight.status,
+            staleActionPreflight.guidance
+        ]
         let visibleText = (
             queueVisibleChunks +
                 readinessVisibleChunks +
@@ -1093,7 +1196,8 @@ final class ClawTests: XCTestCase {
                 approvalQueueVisibleChunks +
                 payloadLedgerVisibleChunks +
                 focusContextVisibleChunks +
-                macReadinessVisibleChunks
+                macReadinessVisibleChunks +
+                actionPreflightVisibleChunks
         ).joined(separator: " ")
         for forbidden in ["Authorization", "Bearer", "toolArguments", "file://", "/private", "/Users", "/home", "C:\\", "stdout", "stderr", "diff"] {
             XCTAssertFalse(visibleText.contains(forbidden), "queue leaked \(forbidden)")
@@ -1148,6 +1252,13 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(shellMacReadiness.focusedReviewKind, "shell-safety")
         XCTAssertEqual(shellMacReadiness.focusedReviewTitle, "Shell 命令安全")
         XCTAssertTrue(shellMacReadiness.items.contains { $0.id == "human-gate" && $0.isFocused })
+        let shellActionPreflight = shellStore.missionRunSummary.macGatewayActionPreflightMatrix(focusedOn: "shell-safety")
+        XCTAssertTrue(shellActionPreflight.isReviewable)
+        XCTAssertTrue(shellActionPreflight.requiresHumanAction)
+        XCTAssertEqual(shellActionPreflight.focusedReviewKind, "shell-safety")
+        XCTAssertEqual(shellActionPreflight.focusedReviewTitle, "Shell 命令安全")
+        XCTAssertTrue(shellActionPreflight.items.contains { $0.reviewKind == "shell-safety" && $0.isFocused })
+        XCTAssertTrue(shellActionPreflight.items.contains { $0.actionKindTitle == ClawMobileActionKind.runShellCommand.title && $0.isRetryable })
         let shellFocusContext = shellStore.missionRunSummary.focusContextSummary(focusedOn: "shell-safety")
         XCTAssertEqual(shellFocusContext.focusedReviewKind, "shell-safety")
         XCTAssertEqual(shellFocusContext.focusedReviewTitle, "Shell 命令安全")
@@ -1194,6 +1305,10 @@ final class ClawTests: XCTestCase {
                 shellMacReadiness.status,
                 shellMacReadiness.guidance,
                 shellMacReadiness.items.map { "\($0.title) \($0.status) \($0.guidance)" }.joined(separator: " "),
+                shellActionPreflight.title,
+                shellActionPreflight.status,
+                shellActionPreflight.guidance,
+                shellActionPreflight.items.map { "\($0.title) \($0.actionKindTitle) \($0.status) \($0.guidance)" }.joined(separator: " "),
                 shellFocusContext.title,
                 shellFocusContext.status,
                 shellFocusContext.guidance,
@@ -1320,6 +1435,7 @@ final class ClawTests: XCTestCase {
             gatewayTaskReplayGuardReview: nil,
             reviewPriorityQueue: [],
             approvalQueue: [],
+            actionPreflightItems: [],
             primaryActionTitle: "继续",
             primaryActionIcon: "arrow.forward.circle.fill",
             primaryActionKind: .continueAfterReview,
@@ -1686,6 +1802,7 @@ final class ClawTests: XCTestCase {
             gatewayTaskReplayGuardReview: nil,
             reviewPriorityQueue: [],
             approvalQueue: [],
+            actionPreflightItems: [],
             primaryActionTitle: "完成",
             primaryActionIcon: "checkmark.circle.fill",
             primaryActionKind: .waitForGateway,

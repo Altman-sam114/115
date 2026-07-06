@@ -15,12 +15,56 @@
 
 - 项目方向：OpenClaw 式电脑接管智能体，iPhone 作为控制台，桌面 Claw Gateway 作为执行端。
 - 当前 schema：`claw.computer.control.v1`。
-- 当前核心闭环：用户自然语言任务 -> `PhoneAgentPlanner` -> `ClawMobileTask` -> `ClawMobileEnvelope` -> 模拟事件流或带有界重连/ping 可观测性和进程内 task replay guard 的 WebSocket Gateway -> `ClawGatewayEvent` -> session reducer -> Mission Run / Operator Strip / Loop 继续态势 / Mac Agent Readiness Board 就绪看板 / Focus Context 聚焦上下文 / Review Detail Dock / Review Trail 复核路径 / Approval Queue 审批队列 / Payload Safety Ledger 载荷安全账本 / Artifact 证据索引 / 复核态势摘要 / 复核优先队列 / 复核聚焦详情 / Live Gateway 连接健康 / Artifact metadata 复核摘要 / 文件变更安全复核摘要 / Shell 命令安全复核摘要 / 提取完整性复核摘要 / 浏览器控制计划复核摘要 / 草稿最终提交安全复核摘要 / Gateway 能力复核摘要 / Accessibility 复核摘要 / Replay Guard 复核摘要 / AgentTrace handoff 复核 UI / iPad 多栏工作台展示和审批。
+- 当前核心闭环：用户自然语言任务 -> `PhoneAgentPlanner` -> `ClawMobileTask` -> `ClawMobileEnvelope` -> 模拟事件流或带有界重连/ping 可观测性和进程内 task replay guard 的 WebSocket Gateway -> `ClawGatewayEvent` -> session reducer -> Mission Run / Operator Strip / Loop 继续态势 / Mac Agent Readiness Board 就绪看板 / Mac Gateway Action Preflight Matrix 动作预检矩阵 / Focus Context 聚焦上下文 / Review Detail Dock / Review Trail 复核路径 / Approval Queue 审批队列 / Payload Safety Ledger 载荷安全账本 / Artifact 证据索引 / 复核态势摘要 / 复核优先队列 / 复核聚焦详情 / Live Gateway 连接健康 / Artifact metadata 复核摘要 / 文件变更安全复核摘要 / Shell 命令安全复核摘要 / 提取完整性复核摘要 / 浏览器控制计划复核摘要 / 草稿最终提交安全复核摘要 / Gateway 能力复核摘要 / Accessibility 复核摘要 / Replay Guard 复核摘要 / AgentTrace handoff 复核 UI / iPad 多栏工作台展示和审批。
 - 当前 Gateway 能力：进程内 task replay guard、session-start 能力快照 `auditLog`、屏幕观察 dry-run/截图/窗口元数据/受控 Accessibility 摘要策略、浏览器 HTML/URL trace、带 metadata-only 计划复核的浏览器打开/搜索计划、workspace 文件写入与 metadata-only 文件变更安全复核、Shell dry-run/allowlist 执行与 metadata-only Shell 命令安全复核、带 metadata-only 完整性复核的结构化提取、带 metadata-only 草稿/最终提交安全复核的 messageDraft/桌面 App 审批闸门、带 readiness/checklist/risk/stop/handoff status、mac 证据质量分层与安全 metadata 的 `runAgentLoop`/`agentTrace`。
 - 当前协作闭环：默认 `main` 直推，GitHub Actions 生成未加密 `ci-results` 结果包，Agent C 下载并核对 manifest/JUnit/日志后验收。
 - 当前主要遗留：完整 macOS Accessibility bridge、Playwright/browser-use 兼容控制器、真实多轮 agent loop、live Gateway 后台保活/真实心跳协议/配对、完整 artifact 内容复核体验。
 
 ## 历史记录
+
+### v0.39 / Mac Gateway Action Preflight Matrix 动作预检矩阵
+
+日期：2026-07-06
+
+核心变更：
+
+- 新增 `ClawMissionRunActionPreflightItem` 和 `ClawMissionRunActionPreflightMatrix`，`ClawMissionRunSummary` 可从当前 task action、actionID 关联的 Gateway result、审批级别、结构化参数 presence 和既有复核域派生 action 级预检矩阵。
+- Matrix 按 action 顺序展示可派发、阻断、metadata 待同步、降级、人工确认和可重试状态；发送前手机审批聚焦 `approval`，发送后 Gateway result 按 action kind 聚焦 Browser/File/Shell/Delivery/AgentTrace 等复核域。
+- compact Mission Run 在 Mac Agent Readiness Board 后展示 Matrix；iPad/mac 右侧 Mission Review Detail Dock 也复用同一 Matrix 和共享聚焦状态。
+- Matrix row 只改变本地聚焦，不执行 Gateway 动作，不审批、不发送、不重试、不自动继续；不读取或展示 action `toolArguments` 原文、artifact `reference`、Gateway `file://` payload、文件内容、命令输出、diff、网页正文或草稿正文。
+- XCTest 和 Swift logic smoke 覆盖 idle、发送前审批聚焦、发送后 action kind 聚焦、状态级聚焦、过期聚焦、Shell 高风险聚焦、可重试状态和敏感字符串不外显。
+- 同步 README、协议、flow/flowchart、测试说明和 Agent A 提示词；本轮不新增 schema/event/action/artifact kind，不改变 Gateway JS 或执行权限。
+
+关键文件：
+
+- `Claw/Core/ClawModels.swift`
+- `Claw/Services/ClawStore.swift`
+- `Claw/Views/ContentView.swift`
+- `ClawTests/ClawTests.swift`
+- `Tools/LogicSmoke.swift`
+- `README.md`
+- `Docs/claw-mobile-gateway-protocol.md`
+- `md/flow/flow.md`
+- `md/flow/flowchart.md`
+- `md/test/test.md`
+- `md/prompt/v0（核心智能能力）/v0.39（MacGatewayActionPreflightMatrix）.md`
+- `update_log.md`
+
+验证结果：
+
+- Swift logic smoke 编译通过。
+- `.build/claw-logic-smoke` 通过，输出 `Claw logic smoke passed`。
+- 本地无签名 iOS build 通过，输出 `** BUILD SUCCEEDED **`；仅有 CoreSimulator 服务不可用警告。
+- 本地无签名 `build-for-testing` 通过，输出 `** TEST BUILD SUCCEEDED **`；仅有 CoreSimulator 服务不可用警告。
+- `git diff --check` 通过。
+- `ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci-results.yml"); puts "yaml ok"'` 通过，输出 `yaml ok`。
+- `plutil -lint Claw.xcodeproj/project.pbxproj` 通过，输出 `OK`。
+- 云端 GitHub Actions artifact 复判待本轮 push 后补齐。
+
+遗留事项：
+
+- 当前 Mac Gateway Action Preflight Matrix 是手机端 presentation-layer 预检矩阵，不是自动执行授权、自动审批、自动安全裁决、完整 Gateway readiness、真实 per-action payload viewer 或 action metadata 证明系统。
+- 完整 macOS Accessibility bridge、Playwright/browser-use 兼容控制器、完整 artifact payload 复核体验和真实多轮 agent loop 仍是后续遗留。
 
 ### v0.38 / Mac Agent Readiness Board 就绪看板
 

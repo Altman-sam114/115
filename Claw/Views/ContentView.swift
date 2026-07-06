@@ -639,6 +639,7 @@ struct ClawMissionRunPanel: View {
         let operatorStrip = summary.operatorStrip(focusedOn: activeFocusedReviewKind)
         let loopContinuation = summary.loopContinuationSummary(focusedOn: activeFocusedReviewKind)
         let macAgentReadiness = summary.macAgentReadinessBoard(focusedOn: activeFocusedReviewKind)
+        let actionPreflightMatrix = summary.macGatewayActionPreflightMatrix(focusedOn: activeFocusedReviewKind)
         let focusContext = summary.focusContextSummary(focusedOn: focusedReviewKind)
         let evidenceTrail = summary.evidenceTrailSummary(focusedOn: activeFocusedReviewKind)
         let approvalQueue = summary.approvalQueueSummary(focusedOn: activeFocusedReviewKind)
@@ -703,6 +704,11 @@ struct ClawMissionRunPanel: View {
 
             ClawMissionMacAgentReadinessBoardView(
                 board: macAgentReadiness,
+                onFocusReviewKind: focusReviewKind
+            )
+
+            ClawMissionMacGatewayActionPreflightMatrixView(
+                matrix: actionPreflightMatrix,
                 onFocusReviewKind: focusReviewKind
             )
 
@@ -853,6 +859,7 @@ struct ClawMissionReviewDetailDockView: View {
         let focusContext = summary.focusContextSummary(focusedOn: focusedReviewKind)
         let evidenceTrail = summary.evidenceTrailSummary(focusedOn: activeFocusedReviewKind)
         let macAgentReadiness = summary.macAgentReadinessBoard(focusedOn: activeFocusedReviewKind)
+        let actionPreflightMatrix = summary.macGatewayActionPreflightMatrix(focusedOn: activeFocusedReviewKind)
         let approvalQueue = summary.approvalQueueSummary(focusedOn: activeFocusedReviewKind)
         let payloadSafetyLedger = summary.payloadSafetyLedger(focusedOn: activeFocusedReviewKind)
 
@@ -899,6 +906,11 @@ struct ClawMissionReviewDetailDockView: View {
             if dock.isReviewable {
                 ClawMissionMacAgentReadinessBoardView(
                     board: macAgentReadiness,
+                    onFocusReviewKind: focusReviewKind
+                )
+
+                ClawMissionMacGatewayActionPreflightMatrixView(
+                    matrix: actionPreflightMatrix,
                     onFocusReviewKind: focusReviewKind
                 )
 
@@ -2244,6 +2256,185 @@ struct ClawMissionMacAgentReadinessItemRow: View {
 
     private var accessibilitySummary: String {
         "\(item.title)，\(item.status)，\(item.guidance)"
+    }
+
+    private var tint: Color {
+        switch item.tone {
+        case .neutral:
+            return .secondary
+        case .info:
+            return .blue
+        case .success:
+            return .green
+        case .warning:
+            return .orange
+        case .danger:
+            return .red
+        }
+    }
+}
+
+struct ClawMissionMacGatewayActionPreflightMatrixView: View {
+    let matrix: ClawMissionRunActionPreflightMatrix
+    let onFocusReviewKind: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Label(matrix.title, systemImage: matrix.icon)
+                    .font(.subheadline.bold())
+                    .foregroundStyle(tint)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Spacer(minLength: 0)
+
+                if let focusedReviewTitle = matrix.focusedReviewTitle {
+                    PhoneAgentTag(text: focusedReviewTitle, icon: "scope", tint: tint)
+                }
+            }
+
+            Text(matrix.status)
+                .font(.footnote.bold())
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(matrix.guidance)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 8) {
+                Label("\(matrix.readyCount) 可派发", systemImage: "checkmark.circle.fill")
+                Label("\(matrix.blockedCount) 阻断", systemImage: "nosign")
+                Label("\(matrix.humanActionCount) 人工", systemImage: "person.crop.circle.badge.checkmark")
+                Label("\(matrix.metadataPendingCount) metadata", systemImage: "doc.badge.clock")
+            }
+            .font(.caption.bold())
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+            if matrix.items.isEmpty == false {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(Array(matrix.items.prefix(5))) { item in
+                        ClawMissionMacGatewayActionPreflightItemRow(
+                            item: item,
+                            onFocusReviewKind: onFocusReviewKind
+                        )
+                    }
+                }
+            }
+        }
+        .padding(10)
+        .background(tint.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(tint.opacity(0.16), lineWidth: 1)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(accessibilitySummary)
+    }
+
+    private var accessibilitySummary: String {
+        "Action 预检矩阵，\(matrix.status)，\(matrix.readyCount) 项可派发，\(matrix.humanActionCount) 项需要人工"
+    }
+
+    private var tint: Color {
+        if matrix.isReviewable == false {
+            return .secondary
+        }
+        if matrix.blockedCount > 0 {
+            return .red
+        }
+        if matrix.requiresHumanAction {
+            return .orange
+        }
+        if matrix.hasMetadataGap || matrix.degradedCount > 0 {
+            return .blue
+        }
+        return .green
+    }
+}
+
+struct ClawMissionMacGatewayActionPreflightItemRow: View {
+    let item: ClawMissionRunActionPreflightItem
+    let onFocusReviewKind: (String) -> Void
+
+    var body: some View {
+        Group {
+            if item.canFocusReview, let reviewKind = item.reviewKind {
+                Button {
+                    onFocusReviewKind(reviewKind)
+                } label: {
+                    rowContent
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("聚焦对应复核项，不执行 Gateway 动作、不审批、不发送")
+                .accessibilityInputLabels(accessibilityInputLabels)
+            } else {
+                rowContent
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(accessibilitySummary)
+    }
+
+    private var rowContent: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: item.isFocused ? "scope" : item.icon)
+                .font(.caption.bold())
+                .frame(width: 28, height: 28)
+                .background(tint.opacity(item.isFocused ? 0.22 : 0.12), in: Circle())
+                .foregroundStyle(tint)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(item.title)
+                    .font(.footnote.bold())
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(item.status)
+                    .font(.caption.bold())
+                    .foregroundStyle(tint)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(item.guidance)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 6) {
+                    PhoneAgentTag(text: item.actionKindTitle, icon: "slider.horizontal.3", tint: .blue)
+                    PhoneAgentTag(text: item.approvalTitle, icon: "checkmark.seal.fill", tint: item.requiresHumanAction ? .orange : .secondary)
+                    if item.isRetryable {
+                        PhoneAgentTag(text: "可重试", icon: "arrow.clockwise.circle.fill", tint: .orange)
+                    }
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .padding(.vertical, 4)
+        .padding(.horizontal, 6)
+        .background(tint.opacity(item.isFocused ? 0.08 : 0), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            if item.isFocused {
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(tint.opacity(0.45), lineWidth: 1)
+            }
+        }
+    }
+
+    private var accessibilityInputLabels: [String] {
+        guard let reviewTitle = item.reviewTitle else {
+            return ["聚焦\(item.title)", "预检\(item.title)"]
+        }
+        return ["聚焦\(reviewTitle)", "预检\(item.title)"]
+    }
+
+    private var accessibilitySummary: String {
+        "\(item.title)，\(item.actionKindTitle)，\(item.status)，\(item.guidance)"
     }
 
     private var tint: Color {

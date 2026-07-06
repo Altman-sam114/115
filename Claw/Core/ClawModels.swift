@@ -1478,6 +1478,53 @@ struct ClawMissionRunMacAgentReadinessBoard: Equatable, Codable, Sendable {
     var items: [ClawMissionRunMacAgentReadinessItem]
 }
 
+struct ClawMissionRunActionPreflightItem: Identifiable, Equatable, Codable, Sendable {
+    var id: String
+    var rank: Int
+    var title: String
+    var actionKindTitle: String
+    var approvalTitle: String
+    var status: String
+    var guidance: String
+    var icon: String
+    var tone: ClawMissionRunOperatorLaneTone
+    var reviewKind: String?
+    var reviewTitle: String?
+    var canFocusReview: Bool
+    var isFocused: Bool
+    var hasStructuredArguments: Bool
+    var hasResult: Bool
+    var hasMetadata: Bool
+    var isReady: Bool
+    var isBlocked: Bool
+    var isDegraded: Bool
+    var requiresHumanAction: Bool
+    var isRetryable: Bool
+}
+
+struct ClawMissionRunActionPreflightMatrix: Equatable, Codable, Sendable {
+    var title: String
+    var status: String
+    var guidance: String
+    var icon: String
+    var totalCount: Int
+    var readyCount: Int
+    var blockedCount: Int
+    var degradedCount: Int
+    var humanActionCount: Int
+    var metadataPendingCount: Int
+    var focusedItemID: String?
+    var focusedReviewKind: String?
+    var focusedReviewTitle: String?
+    var primaryReviewKind: String?
+    var primaryReviewTitle: String?
+    var canFocusPrimaryReview: Bool
+    var requiresHumanAction: Bool
+    var hasMetadataGap: Bool
+    var isReviewable: Bool
+    var items: [ClawMissionRunActionPreflightItem]
+}
+
 struct ClawMissionRunReviewReadinessSummary: Equatable, Codable, Sendable {
     var title: String
     var status: String
@@ -2910,6 +2957,7 @@ struct ClawMissionRunSummary: Equatable, Codable, Sendable {
     var gatewayTaskReplayGuardReview: ClawGatewayTaskReplayGuardReviewSummary?
     var reviewPriorityQueue: [ClawMissionRunReviewPriorityItem]
     var approvalQueue: [ClawMissionRunApprovalQueueItem]
+    var actionPreflightItems: [ClawMissionRunActionPreflightItem]
     var primaryActionTitle: String
     var primaryActionIcon: String
     var primaryActionKind: ClawMissionRunPrimaryActionKind
@@ -3280,6 +3328,120 @@ extension ClawMissionRunSummary {
 
     var macAgentReadinessBoard: ClawMissionRunMacAgentReadinessBoard {
         macAgentReadinessBoard(focusedOn: nil)
+    }
+
+    var macGatewayActionPreflightMatrix: ClawMissionRunActionPreflightMatrix {
+        macGatewayActionPreflightMatrix(focusedOn: nil)
+    }
+
+    func macGatewayActionPreflightMatrix(focusedOn reviewKind: String?) -> ClawMissionRunActionPreflightMatrix {
+        let focusedKind = activeReviewFocus(from: reviewKind)
+        let items = actionPreflightItems.map { item in
+            ClawMissionRunActionPreflightItem(
+                id: item.id,
+                rank: item.rank,
+                title: item.title,
+                actionKindTitle: item.actionKindTitle,
+                approvalTitle: item.approvalTitle,
+                status: item.status,
+                guidance: item.guidance,
+                icon: item.icon,
+                tone: item.tone,
+                reviewKind: item.reviewKind,
+                reviewTitle: item.reviewTitle,
+                canFocusReview: item.canFocusReview,
+                isFocused: item.reviewKind != nil && item.reviewKind == focusedKind,
+                hasStructuredArguments: item.hasStructuredArguments,
+                hasResult: item.hasResult,
+                hasMetadata: item.hasMetadata,
+                isReady: item.isReady,
+                isBlocked: item.isBlocked,
+                isDegraded: item.isDegraded,
+                requiresHumanAction: item.requiresHumanAction,
+                isRetryable: item.isRetryable
+            )
+        }
+        let focusedItem = items.first { item in
+            item.reviewKind != nil && item.reviewKind == focusedKind
+        }
+        let primaryItem = focusedItem ??
+            items.first(where: \.isBlocked) ??
+            items.first(where: \.requiresHumanAction) ??
+            items.first(where: \.isDegraded) ??
+            items.first(where: { $0.hasResult && $0.hasMetadata == false }) ??
+            items.first
+        let readyCount = items.filter(\.isReady).count
+        let blockedCount = items.filter(\.isBlocked).count
+        let degradedCount = items.filter(\.isDegraded).count
+        let humanActionCount = items.filter(\.requiresHumanAction).count
+        let metadataPendingCount = items.filter { $0.hasResult && $0.hasMetadata == false }.count
+        let isReviewable = items.isEmpty == false
+        let requiresHumanAction = humanActionCount > 0 || requiresUserApproval
+        let hasMetadataGap = metadataPendingCount > 0
+
+        let title: String
+        let status: String
+        let guidance: String
+        let icon: String
+        if isReviewable == false {
+            title = "Action 预检矩阵待生成"
+            status = "尚无 Claw 电脑任务"
+            guidance = "生成任务后会按 action 汇总结构化参数、审批、Gateway 结果和 metadata 状态。"
+            icon = "list.bullet.rectangle"
+        } else if let focusedItem {
+            title = "聚焦 Action 预检"
+            status = focusedItem.title
+            guidance = "\(focusedItem.title)：\(focusedItem.guidance)"
+            icon = focusedItem.icon
+        } else if blockedCount > 0 {
+            title = "Action 预检存在阻断"
+            status = "\(blockedCount) 项阻断 · \(humanActionCount) 项需人工"
+            guidance = primaryItem.map { "先看 \($0.title)：\($0.guidance)" } ?? "先处理阻断 action。"
+            icon = "list.bullet.rectangle.portrait.fill"
+        } else if requiresHumanAction {
+            title = "Action 预检等待人工"
+            status = "\(humanActionCount) 项需人工 · \(readyCount)/\(items.count) 可派发"
+            guidance = primaryItem.map { "先确认 \($0.title)：\($0.guidance)" } ?? "先处理人工确认 action。"
+            icon = "person.crop.circle.badge.checkmark"
+        } else if hasMetadataGap {
+            title = "Action 预检 metadata 待同步"
+            status = "\(metadataPendingCount) 项待同步 · \(readyCount)/\(items.count) 可派发"
+            guidance = primaryItem.map { "等待 \($0.title) metadata 后再复核结果。" } ?? "等待 Gateway metadata 后再复核 action 结果。"
+            icon = "doc.badge.clock"
+        } else if degradedCount > 0 {
+            title = "Action 预检需抽查"
+            status = "\(degradedCount) 项降级 · \(readyCount)/\(items.count) 可派发"
+            guidance = primaryItem.map { "抽查 \($0.title)：\($0.guidance)" } ?? "抽查降级 action。"
+            icon = "exclamationmark.magnifyingglass"
+        } else {
+            title = "Action 预检矩阵"
+            status = "\(readyCount)/\(items.count) 项可派发"
+            guidance = "所有 action 只展示结构化预检状态；仍需用户明确发送或继续。"
+            icon = "list.bullet.rectangle"
+        }
+
+        return ClawMissionRunActionPreflightMatrix(
+            title: title,
+            status: status,
+            guidance: guidance,
+            icon: icon,
+            totalCount: items.count,
+            readyCount: readyCount,
+            blockedCount: blockedCount,
+            degradedCount: degradedCount,
+            humanActionCount: humanActionCount,
+            metadataPendingCount: metadataPendingCount,
+            focusedItemID: focusedItem?.id,
+            focusedReviewKind: focusedItem?.reviewKind,
+            focusedReviewTitle: focusedItem?.reviewTitle,
+            primaryReviewKind: primaryItem?.reviewKind,
+            primaryReviewTitle: primaryItem?.reviewTitle,
+            canFocusPrimaryReview: primaryItem?.canFocusReview ?? false,
+            requiresHumanAction: requiresHumanAction,
+            hasMetadataGap: hasMetadataGap,
+            isReviewable: isReviewable,
+            items: items
+        )
     }
 
     func macAgentReadinessBoard(focusedOn reviewKind: String?) -> ClawMissionRunMacAgentReadinessBoard {
@@ -4459,7 +4621,7 @@ extension ClawMissionRunSummary {
         )
     }
 
-    private static func title(forDetailReviewKind reviewKind: String) -> String {
+    static func title(forDetailReviewKind reviewKind: String) -> String {
         switch reviewKind {
         case "artifact-metadata":
             return "Artifact metadata"
