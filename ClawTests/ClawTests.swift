@@ -617,6 +617,14 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(idlePayloadLedger.omissionSignalCount, 0)
         XCTAssertEqual(idlePayloadLedger.metadataPendingCount, 0)
         XCTAssertNil(idlePayloadLedger.primaryReviewKind)
+        let idleMacReadiness = idleStore.missionRunSummary.macAgentReadinessBoard
+        XCTAssertFalse(idleMacReadiness.isReviewable)
+        XCTAssertEqual(idleMacReadiness.items.map(\.id), ["connection", "capability", "observation", "loop", "human-gate"])
+        XCTAssertEqual(idleMacReadiness.readyCount, 0)
+        XCTAssertEqual(idleMacReadiness.blockedCount, 0)
+        XCTAssertEqual(idleMacReadiness.metadataPendingCount, 0)
+        XCTAssertEqual(idleMacReadiness.humanActionCount, 0)
+        XCTAssertNil(idleMacReadiness.primaryReviewKind)
         XCTAssertNil(idleStore.missionRunSummary.activeReviewFocus(from: "delivery-safety"))
 
         let store = ClawStore(autoScanLocalArtifacts: false)
@@ -678,6 +686,20 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(focusedPayloadLedger.focusedReviewKind, "delivery-safety")
         XCTAssertEqual(focusedPayloadLedger.focusedReviewTitle, "最终提交安全")
         XCTAssertTrue(focusedPayloadLedger.items.contains { $0.reviewKind == "delivery-safety" && $0.isFocused })
+        let macReadiness = summary.macAgentReadinessBoard
+        XCTAssertTrue(macReadiness.isReviewable)
+        XCTAssertEqual(macReadiness.items.map(\.id), ["connection", "capability", "observation", "loop", "human-gate"])
+        XCTAssertGreaterThan(macReadiness.readyCount, 0)
+        XCTAssertGreaterThan(macReadiness.humanActionCount, 0)
+        XCTAssertTrue(macReadiness.requiresHumanAction)
+        XCTAssertNotNil(macReadiness.primaryReviewKind)
+        XCTAssertTrue(macReadiness.items.contains { $0.id == "capability" && $0.reviewKind == "gateway-capability" && $0.canFocusReview })
+        XCTAssertTrue(macReadiness.items.contains { $0.id == "observation" && $0.reviewKind == "accessibility" && $0.canFocusReview })
+        XCTAssertTrue(macReadiness.items.contains { $0.id == "loop" && $0.reviewKind == "agent-trace" && $0.canFocusReview })
+        let focusedMacReadiness = summary.macAgentReadinessBoard(focusedOn: "delivery-safety")
+        XCTAssertEqual(focusedMacReadiness.focusedReviewKind, "delivery-safety")
+        XCTAssertEqual(focusedMacReadiness.focusedReviewTitle, "最终提交安全")
+        XCTAssertTrue(focusedMacReadiness.items.contains { $0.id == "human-gate" && $0.isFocused })
         let operatorStrip = summary.operatorStrip
         XCTAssertEqual(operatorStrip.lanes.map(\.id), ["gateway", "evidence", "review", "next"])
         XCTAssertEqual(operatorStrip.title, "Mission Operator")
@@ -799,6 +821,10 @@ final class ClawTests: XCTestCase {
         let statusPayloadLedger = statusOnlySummary.payloadSafetyLedger(focusedOn: statusOnlyItem.reviewKind)
         XCTAssertNil(statusPayloadLedger.focusedReviewKind)
         XCTAssertEqual(statusPayloadLedger.items.map(\.reviewKind), availableDetailKinds)
+        let statusMacReadiness = statusOnlySummary.macAgentReadinessBoard(focusedOn: statusOnlyItem.reviewKind)
+        XCTAssertEqual(statusMacReadiness.focusedReviewKind, statusOnlyItem.reviewKind)
+        XCTAssertEqual(statusMacReadiness.focusedReviewTitle, statusOnlyItem.title)
+        XCTAssertTrue(statusMacReadiness.items.contains { $0.id == "human-gate" && $0.isFocused })
         let staleFocusContext = statusOnlySummary.focusContextSummary(focusedOn: "unknown-review-kind")
         XCTAssertNil(staleFocusContext.focusedReviewKind)
         XCTAssertTrue(staleFocusContext.canClearFocus)
@@ -815,6 +841,9 @@ final class ClawTests: XCTestCase {
         let stalePayloadLedger = statusOnlySummary.payloadSafetyLedger(focusedOn: "unknown-review-kind")
         XCTAssertNil(stalePayloadLedger.focusedReviewKind)
         XCTAssertEqual(stalePayloadLedger.totalCount, availableDetailKinds.count)
+        let staleMacReadiness = statusOnlySummary.macAgentReadinessBoard(focusedOn: "unknown-review-kind")
+        XCTAssertNil(staleMacReadiness.focusedReviewKind)
+        XCTAssertEqual(staleMacReadiness.items.map(\.id), ["connection", "capability", "observation", "loop", "human-gate"])
         XCTAssertEqual(summary.detailReviewKinds(focusedOn: nil), availableDetailKinds)
         XCTAssertEqual(summary.detailReviewKinds(focusedOn: "delivery-safety"), ["delivery-safety"])
         XCTAssertEqual(summary.detailReviewKinds(focusedOn: "gateway-status"), availableDetailKinds)
@@ -1023,7 +1052,49 @@ final class ClawTests: XCTestCase {
             staleDetailDock.status,
             staleDetailDock.guidance
         ]
-        let visibleText = (queueVisibleChunks + readinessVisibleChunks + nextActionVisibleChunks + evidenceVisibleChunks + operatorVisibleChunks + evidenceTrailVisibleChunks + approvalQueueVisibleChunks + payloadLedgerVisibleChunks + focusContextVisibleChunks).joined(separator: " ")
+        let macReadinessVisibleChunks = macReadiness.items.flatMap {
+            [
+                $0.title,
+                $0.status,
+                $0.guidance,
+                $0.reviewKind ?? "",
+                $0.reviewTitle ?? ""
+            ]
+        } + [
+            idleMacReadiness.title,
+            idleMacReadiness.status,
+            idleMacReadiness.guidance,
+            macReadiness.title,
+            macReadiness.status,
+            macReadiness.guidance,
+            macReadiness.primaryReviewKind ?? "",
+            macReadiness.primaryReviewTitle ?? "",
+            focusedMacReadiness.title,
+            focusedMacReadiness.status,
+            focusedMacReadiness.guidance,
+            focusedMacReadiness.focusedReviewKind ?? "",
+            focusedMacReadiness.focusedReviewTitle ?? "",
+            statusMacReadiness.title,
+            statusMacReadiness.status,
+            statusMacReadiness.guidance,
+            statusMacReadiness.focusedReviewKind ?? "",
+            statusMacReadiness.focusedReviewTitle ?? "",
+            staleMacReadiness.title,
+            staleMacReadiness.status,
+            staleMacReadiness.guidance
+        ]
+        let visibleText = (
+            queueVisibleChunks +
+                readinessVisibleChunks +
+                nextActionVisibleChunks +
+                evidenceVisibleChunks +
+                operatorVisibleChunks +
+                evidenceTrailVisibleChunks +
+                approvalQueueVisibleChunks +
+                payloadLedgerVisibleChunks +
+                focusContextVisibleChunks +
+                macReadinessVisibleChunks
+        ).joined(separator: " ")
         for forbidden in ["Authorization", "Bearer", "toolArguments", "file://", "/private", "/Users", "/home", "C:\\", "stdout", "stderr", "diff"] {
             XCTAssertFalse(visibleText.contains(forbidden), "queue leaked \(forbidden)")
         }
@@ -1071,6 +1142,12 @@ final class ClawTests: XCTestCase {
         XCTAssertTrue(shellApprovalQueue.requiresHumanAction)
         XCTAssertTrue(shellApprovalQueue.items.contains { $0.reviewKind == "shell-safety" && $0.isFocused })
         XCTAssertTrue(shellApprovalQueue.items.contains { $0.reviewKind == "shell-safety" && $0.hasMetadata })
+        let shellMacReadiness = shellStore.missionRunSummary.macAgentReadinessBoard(focusedOn: "shell-safety")
+        XCTAssertTrue(shellMacReadiness.isReviewable)
+        XCTAssertTrue(shellMacReadiness.requiresHumanAction)
+        XCTAssertEqual(shellMacReadiness.focusedReviewKind, "shell-safety")
+        XCTAssertEqual(shellMacReadiness.focusedReviewTitle, "Shell 命令安全")
+        XCTAssertTrue(shellMacReadiness.items.contains { $0.id == "human-gate" && $0.isFocused })
         let shellFocusContext = shellStore.missionRunSummary.focusContextSummary(focusedOn: "shell-safety")
         XCTAssertEqual(shellFocusContext.focusedReviewKind, "shell-safety")
         XCTAssertEqual(shellFocusContext.focusedReviewTitle, "Shell 命令安全")
@@ -1113,6 +1190,10 @@ final class ClawTests: XCTestCase {
                 shellApprovalQueue.status,
                 shellApprovalQueue.guidance,
                 shellApprovalQueue.items.map { "\($0.title) \($0.status) \($0.reason)" }.joined(separator: " "),
+                shellMacReadiness.title,
+                shellMacReadiness.status,
+                shellMacReadiness.guidance,
+                shellMacReadiness.items.map { "\($0.title) \($0.status) \($0.guidance)" }.joined(separator: " "),
                 shellFocusContext.title,
                 shellFocusContext.status,
                 shellFocusContext.guidance,

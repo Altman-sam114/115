@@ -159,6 +159,14 @@ enum LogicSmoke {
         expect(idlePayloadLedger.omissionSignalCount == 0, "idle payload ledger should not count omission signals")
         expect(idlePayloadLedger.metadataPendingCount == 0, "idle payload ledger should not count metadata gaps")
         expect(idlePayloadLedger.primaryReviewKind == nil, "idle payload ledger should not invent primary focus")
+        let idleMacReadiness = missionStore.missionRunSummary.macAgentReadinessBoard
+        expect(idleMacReadiness.isReviewable == false, "idle mac readiness should not be reviewable")
+        expect(idleMacReadiness.items.map(\.id) == ["connection", "capability", "observation", "loop", "human-gate"], "idle mac readiness should expose stable rows")
+        expect(idleMacReadiness.readyCount == 0, "idle mac readiness should not count ready rows")
+        expect(idleMacReadiness.blockedCount == 0, "idle mac readiness should not count blockers")
+        expect(idleMacReadiness.metadataPendingCount == 0, "idle mac readiness should not count metadata gaps")
+        expect(idleMacReadiness.humanActionCount == 0, "idle mac readiness should not require human action")
+        expect(idleMacReadiness.primaryReviewKind == nil, "idle mac readiness should not invent primary focus")
         expect(missionStore.missionRunSummary.activeReviewFocus(from: "delivery-safety") == nil, "idle active focus should not resolve")
         missionStore.phoneAgentCommand = "打开浏览器搜索资料，整理结果并发到 Slack"
         missionStore.startAutonomousComputerTakeover()
@@ -260,6 +268,32 @@ enum LogicSmoke {
         expect(
             focusedPayloadLedger.items.contains { $0.reviewKind == "delivery-safety" && $0.isFocused },
             "focused payload ledger should mark delivery row"
+        )
+        let macReadiness = missionSummary.macAgentReadinessBoard
+        expect(macReadiness.isReviewable, "mac readiness should be reviewable once Gateway evidence exists")
+        expect(macReadiness.items.map(\.id) == ["connection", "capability", "observation", "loop", "human-gate"], "mac readiness should expose stable rows")
+        expect(macReadiness.readyCount > 0, "mac readiness should count ready rows")
+        expect(macReadiness.humanActionCount > 0, "mac readiness should surface human gates")
+        expect(macReadiness.requiresHumanAction, "mac readiness should require human review")
+        expect(macReadiness.primaryReviewKind != nil, "mac readiness should point to a primary review")
+        expect(
+            macReadiness.items.contains { $0.id == "capability" && $0.reviewKind == "gateway-capability" && $0.canFocusReview },
+            "mac readiness should expose gateway capability focus"
+        )
+        expect(
+            macReadiness.items.contains { $0.id == "observation" && $0.reviewKind == "accessibility" && $0.canFocusReview },
+            "mac readiness should expose accessibility focus"
+        )
+        expect(
+            macReadiness.items.contains { $0.id == "loop" && $0.reviewKind == "agent-trace" && $0.canFocusReview },
+            "mac readiness should expose agent trace focus"
+        )
+        let focusedMacReadiness = missionSummary.macAgentReadinessBoard(focusedOn: "delivery-safety")
+        expect(focusedMacReadiness.focusedReviewKind == "delivery-safety", "mac readiness should record delivery focus")
+        expect(focusedMacReadiness.focusedReviewTitle == "最终提交安全", "mac readiness should expose delivery focus title")
+        expect(
+            focusedMacReadiness.items.contains { $0.id == "human-gate" && $0.isFocused },
+            "focused mac readiness should mark human gate row"
         )
         let operatorStrip = missionSummary.operatorStrip
         expect(operatorStrip.lanes.map(\.id) == ["gateway", "evidence", "review", "next"], "operator strip should expose stable lanes")
@@ -424,6 +458,13 @@ enum LogicSmoke {
         let statusPayloadLedger = statusOnlySummary.payloadSafetyLedger(focusedOn: statusOnlyItem.reviewKind)
         expect(statusPayloadLedger.focusedReviewKind == nil, "status payload ledger should not focus status-only items")
         expect(statusPayloadLedger.items.map(\.reviewKind) == availableDetailKinds, "status payload ledger should keep all details visible")
+        let statusMacReadiness = statusOnlySummary.macAgentReadinessBoard(focusedOn: statusOnlyItem.reviewKind)
+        expect(statusMacReadiness.focusedReviewKind == statusOnlyItem.reviewKind, "status mac readiness should keep status focus")
+        expect(statusMacReadiness.focusedReviewTitle == statusOnlyItem.title, "status mac readiness should expose status title")
+        expect(
+            statusMacReadiness.items.contains { $0.id == "human-gate" && $0.isFocused },
+            "status mac readiness should mark human gate row"
+        )
         let staleFocusContext = statusOnlySummary.focusContextSummary(focusedOn: "unknown-review-kind")
         expect(staleFocusContext.focusedReviewKind == nil, "stale focus context should not keep an unknown review kind")
         expect(staleFocusContext.canClearFocus, "stale focus context should allow clearing focus")
@@ -440,6 +481,9 @@ enum LogicSmoke {
         let stalePayloadLedger = statusOnlySummary.payloadSafetyLedger(focusedOn: "unknown-review-kind")
         expect(stalePayloadLedger.focusedReviewKind == nil, "stale payload ledger should not keep unknown focus")
         expect(stalePayloadLedger.totalCount == availableDetailKinds.count, "stale payload ledger should keep all rows")
+        let staleMacReadiness = statusOnlySummary.macAgentReadinessBoard(focusedOn: "unknown-review-kind")
+        expect(staleMacReadiness.focusedReviewKind == nil, "stale mac readiness should not keep unknown focus")
+        expect(staleMacReadiness.items.map(\.id) == ["connection", "capability", "observation", "loop", "human-gate"], "stale mac readiness should keep stable rows")
         expect(
             missionSummary.detailReviewKinds(focusedOn: nil) == availableDetailKinds,
             "nil focus should show all detail reviews"
@@ -686,7 +730,51 @@ enum LogicSmoke {
             staleDetailDock.status,
             staleDetailDock.guidance
         ]
-        let queueVisibleText = (queueVisibleChunks + readinessVisibleChunks + nextActionVisibleChunks + evidenceVisibleChunks + operatorVisibleChunks + evidenceTrailVisibleChunks + approvalQueueVisibleChunks + payloadLedgerVisibleChunks + focusContextVisibleChunks).joined(separator: " ")
+        let macReadinessItemChunks: [String] = macReadiness.items.flatMap { item in
+            [
+                item.title,
+                item.status,
+                item.guidance,
+                item.reviewKind ?? "",
+                item.reviewTitle ?? ""
+            ]
+        }
+        let macReadinessSummaryChunks: [String] = [
+            idleMacReadiness.title,
+            idleMacReadiness.status,
+            idleMacReadiness.guidance,
+            macReadiness.title,
+            macReadiness.status,
+            macReadiness.guidance,
+            macReadiness.primaryReviewKind ?? "",
+            macReadiness.primaryReviewTitle ?? "",
+            focusedMacReadiness.title,
+            focusedMacReadiness.status,
+            focusedMacReadiness.guidance,
+            focusedMacReadiness.focusedReviewKind ?? "",
+            focusedMacReadiness.focusedReviewTitle ?? "",
+            statusMacReadiness.title,
+            statusMacReadiness.status,
+            statusMacReadiness.guidance,
+            statusMacReadiness.focusedReviewKind ?? "",
+            statusMacReadiness.focusedReviewTitle ?? "",
+            staleMacReadiness.title,
+            staleMacReadiness.status,
+            staleMacReadiness.guidance
+        ]
+        let macReadinessVisibleChunks = macReadinessItemChunks + macReadinessSummaryChunks
+        let queueVisibleText = (
+            queueVisibleChunks +
+                readinessVisibleChunks +
+                nextActionVisibleChunks +
+                evidenceVisibleChunks +
+                operatorVisibleChunks +
+                evidenceTrailVisibleChunks +
+                approvalQueueVisibleChunks +
+                payloadLedgerVisibleChunks +
+                focusContextVisibleChunks +
+                macReadinessVisibleChunks
+        ).joined(separator: " ")
         for forbidden in ["Authorization", "Bearer", "toolArguments", "file://", "/private", "/Users", "/home", "C:\\", "stdout", "stderr", "diff"] {
             expect(queueVisibleText.contains(forbidden) == false, "review priority queue should not expose \(forbidden)")
         }
@@ -875,6 +963,15 @@ enum LogicSmoke {
             shellApprovalQueue.items.contains { $0.reviewKind == "shell-safety" && $0.hasMetadata },
             "shell approval queue should mark shell metadata ready"
         )
+        let shellMacReadiness = shellMissionSummary.macAgentReadinessBoard(focusedOn: "shell-safety")
+        expect(shellMacReadiness.isReviewable, "shell mac readiness should be reviewable")
+        expect(shellMacReadiness.requiresHumanAction, "shell mac readiness should require human review")
+        expect(shellMacReadiness.focusedReviewKind == "shell-safety", "shell mac readiness should record shell focus")
+        expect(shellMacReadiness.focusedReviewTitle == "Shell 命令安全", "shell mac readiness should expose shell title")
+        expect(
+            shellMacReadiness.items.contains { $0.id == "human-gate" && $0.isFocused },
+            "shell mac readiness should mark shell human gate"
+        )
         let shellFocusContext = shellMissionSummary.focusContextSummary(focusedOn: "shell-safety")
         expect(shellFocusContext.focusedReviewKind == "shell-safety", "shell focus context should record shell focus")
         expect(shellFocusContext.focusedReviewTitle == "Shell 命令安全", "shell focus context should expose shell title")
@@ -896,6 +993,9 @@ enum LogicSmoke {
         }.joined(separator: " ")
         let shellApprovalQueueRows = shellApprovalQueue.items.map { item in
             "\(item.title) \(item.status) \(item.reason)"
+        }.joined(separator: " ")
+        let shellMacReadinessRows = shellMacReadiness.items.map { item in
+            "\(item.title) \(item.status) \(item.guidance)"
         }.joined(separator: " ")
         let shellVisibleChunks: [String] = [
             shellReadiness.title,
@@ -923,6 +1023,10 @@ enum LogicSmoke {
             shellApprovalQueue.status,
             shellApprovalQueue.guidance,
             shellApprovalQueueRows,
+            shellMacReadiness.title,
+            shellMacReadiness.status,
+            shellMacReadiness.guidance,
+            shellMacReadinessRows,
             shellFocusContext.title,
             shellFocusContext.status,
             shellFocusContext.guidance,

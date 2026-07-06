@@ -1439,6 +1439,45 @@ struct ClawMissionRunPayloadSafetyLedgerSummary: Equatable, Codable, Sendable {
     var items: [ClawMissionRunPayloadSafetyLedgerItem]
 }
 
+struct ClawMissionRunMacAgentReadinessItem: Identifiable, Equatable, Codable, Sendable {
+    var id: String
+    var title: String
+    var status: String
+    var guidance: String
+    var icon: String
+    var tone: ClawMissionRunOperatorLaneTone
+    var reviewKind: String?
+    var reviewTitle: String?
+    var canFocusReview: Bool
+    var isFocused: Bool
+    var isReady: Bool
+    var isBlocked: Bool
+    var hasMetadataGap: Bool
+    var requiresHumanAction: Bool
+}
+
+struct ClawMissionRunMacAgentReadinessBoard: Equatable, Codable, Sendable {
+    var title: String
+    var status: String
+    var guidance: String
+    var icon: String
+    var readyCount: Int
+    var blockedCount: Int
+    var metadataPendingCount: Int
+    var humanActionCount: Int
+    var focusedItemID: String?
+    var focusedReviewKind: String?
+    var focusedReviewTitle: String?
+    var primaryReviewKind: String?
+    var primaryReviewTitle: String?
+    var canFocusPrimaryReview: Bool
+    var canContinueLoop: Bool
+    var requiresHumanAction: Bool
+    var hasMetadataGap: Bool
+    var isReviewable: Bool
+    var items: [ClawMissionRunMacAgentReadinessItem]
+}
+
 struct ClawMissionRunReviewReadinessSummary: Equatable, Codable, Sendable {
     var title: String
     var status: String
@@ -3236,6 +3275,336 @@ extension ClawMissionRunSummary {
             hasMetadataGap: hasMetadataGap,
             isReviewable: isReviewable,
             items: items
+        )
+    }
+
+    var macAgentReadinessBoard: ClawMissionRunMacAgentReadinessBoard {
+        macAgentReadinessBoard(focusedOn: nil)
+    }
+
+    func macAgentReadinessBoard(focusedOn reviewKind: String?) -> ClawMissionRunMacAgentReadinessBoard {
+        let focusedKind = activeReviewFocus(from: reviewKind)
+        let loop = loopContinuationSummary(focusedOn: focusedKind)
+        let readiness = reviewReadinessSummary(focusedOn: focusedKind)
+        let approval = approvalQueueSummary(focusedOn: focusedKind)
+        let items = macAgentReadinessItems(
+            focusedOn: focusedKind,
+            loop: loop,
+            readiness: readiness,
+            approval: approval
+        )
+        let focusedItem = items.first { item in
+            item.reviewKind != nil && item.reviewKind == focusedKind
+        }
+        let primaryItem = focusedItem ??
+            items.first(where: \.isBlocked) ??
+            items.first(where: \.requiresHumanAction) ??
+            items.first(where: \.hasMetadataGap) ??
+            items.first(where: { $0.isReady == false }) ??
+            items.first
+        let readyCount = items.filter(\.isReady).count
+        let blockedCount = items.filter(\.isBlocked).count
+        let metadataPendingCount = items.filter(\.hasMetadataGap).count
+        let humanActionCount = items.filter(\.requiresHumanAction).count
+        let isReviewable = artifactCount > 0 ||
+            gatewayCapabilityReview != nil ||
+            gatewayAccessibilityReview != nil ||
+            agentTraceReview != nil ||
+            reviewPriorityQueue.isEmpty == false ||
+            approval.items.isEmpty == false
+        let hasMetadataGap = metadataPendingCount > 0
+        let requiresHumanAction = humanActionCount > 0 || readiness.requiresHumanAction || approval.requiresHumanAction
+
+        let title: String
+        let status: String
+        let guidance: String
+        let icon: String
+        if isReviewable == false {
+            title = "Mac Agent 就绪待生成"
+            status = "尚无 Gateway 证据"
+            guidance = "发送任务后会汇总连接、能力、观察、Loop 和人工闸门。"
+            icon = "desktopcomputer"
+        } else if let focusedItem {
+            title = "聚焦 Mac Agent 就绪"
+            status = focusedItem.title
+            guidance = "\(focusedItem.title)：\(focusedItem.guidance)"
+            icon = focusedItem.icon
+        } else if blockedCount > 0 {
+            title = "Mac Agent 就绪阻断"
+            status = "\(blockedCount) 项阻断 · \(humanActionCount) 项需人工"
+            guidance = primaryItem.map { "先看 \($0.title)：\($0.guidance)" } ?? "先处理阻断项。"
+            icon = "desktopcomputer.trianglebadge.exclamationmark"
+        } else if requiresHumanAction {
+            title = "Mac Agent 等待人工确认"
+            status = "\(humanActionCount) 项需人工 · \(readyCount)/\(items.count) 就绪"
+            guidance = primaryItem.map { "先确认 \($0.title)：\($0.guidance)" } ?? "先处理人工确认项。"
+            icon = "person.crop.circle.badge.checkmark"
+        } else if hasMetadataGap {
+            title = "Mac Agent metadata 待同步"
+            status = "\(metadataPendingCount) 项待同步 · \(readyCount)/\(items.count) 就绪"
+            guidance = primaryItem.map { "等待 \($0.title) metadata 后再判断桌面就绪。" } ?? "等待 Gateway metadata 后再判断桌面就绪。"
+            icon = "doc.badge.clock"
+        } else if loop.canContinueLoop {
+            title = "Mac Agent 可继续"
+            status = "\(readyCount)/\(items.count) 项就绪"
+            guidance = "能力、观察和 Loop 条件已满足；仍需用户明确触发下一轮。"
+            icon = "desktopcomputer.and.arrow.down"
+        } else {
+            title = "Mac Agent 就绪看板"
+            status = "\(readyCount)/\(items.count) 项就绪"
+            guidance = primaryItem.map { "可从 \($0.title) 开始复核。" } ?? "可继续抽查 Gateway readiness。"
+            icon = "desktopcomputer"
+        }
+
+        return ClawMissionRunMacAgentReadinessBoard(
+            title: title,
+            status: status,
+            guidance: guidance,
+            icon: icon,
+            readyCount: readyCount,
+            blockedCount: blockedCount,
+            metadataPendingCount: metadataPendingCount,
+            humanActionCount: humanActionCount,
+            focusedItemID: focusedItem?.id,
+            focusedReviewKind: focusedItem?.reviewKind,
+            focusedReviewTitle: focusedItem?.reviewTitle,
+            primaryReviewKind: primaryItem?.reviewKind,
+            primaryReviewTitle: primaryItem?.reviewTitle,
+            canFocusPrimaryReview: primaryItem?.canFocusReview ?? false,
+            canContinueLoop: loop.canContinueLoop,
+            requiresHumanAction: requiresHumanAction,
+            hasMetadataGap: hasMetadataGap,
+            isReviewable: isReviewable,
+            items: items
+        )
+    }
+
+    private func macAgentReadinessItems(
+        focusedOn focusedKind: String?,
+        loop: ClawMissionRunLoopContinuationSummary,
+        readiness: ClawMissionRunReviewReadinessSummary,
+        approval: ClawMissionRunApprovalQueueSummary
+    ) -> [ClawMissionRunMacAgentReadinessItem] {
+        [
+            macAgentConnectionItem(focusedOn: focusedKind),
+            macAgentCapabilityItem(focusedOn: focusedKind),
+            macAgentObservationItem(focusedOn: focusedKind),
+            macAgentLoopItem(focusedOn: focusedKind, loop: loop),
+            macAgentHumanGateItem(focusedOn: focusedKind, readiness: readiness, approval: approval)
+        ]
+    }
+
+    private func macAgentConnectionItem(focusedOn focusedKind: String?) -> ClawMissionRunMacAgentReadinessItem {
+        let hasGatewayEvidence = artifactCount > 0 || succeededCount > 0 || failedCount > 0 || gatewayCapabilityReview != nil
+        let isBlocked = hasGatewayEvidence && (failedCount > 0 || blockedCount > 0)
+        let status: String
+        let guidance: String
+        let tone: ClawMissionRunOperatorLaneTone
+        if isBlocked {
+            status = "\(failedCount) 失败 · \(blockedCount) 阻断"
+            guidance = "先复核失败或阻断结果，再决定重试或下一轮。"
+            tone = .danger
+        } else if hasGatewayEvidence {
+            status = "\(artifactCount) 个 artifact · \(succeededCount) 成功"
+            guidance = "Gateway 已回传事件和 artifact，可继续核对能力与观察证据。"
+            tone = .success
+        } else {
+            status = "等待 Gateway 事件"
+            guidance = "尚未看到桌面 Gateway 回传；发送任务后再判断连接就绪。"
+            tone = .neutral
+        }
+        return ClawMissionRunMacAgentReadinessItem(
+            id: "connection",
+            title: "连接回执",
+            status: status,
+            guidance: guidance,
+            icon: isBlocked ? "network.slash" : "network",
+            tone: tone,
+            reviewKind: nil,
+            reviewTitle: nil,
+            canFocusReview: false,
+            isFocused: false,
+            isReady: hasGatewayEvidence && isBlocked == false,
+            isBlocked: isBlocked,
+            hasMetadataGap: false,
+            requiresHumanAction: isBlocked
+        )
+    }
+
+    private func macAgentCapabilityItem(focusedOn focusedKind: String?) -> ClawMissionRunMacAgentReadinessItem {
+        let reviewKind = "gateway-capability"
+        let reviewTitle = Self.title(forDetailReviewKind: reviewKind)
+        guard let review = gatewayCapabilityReview else {
+            return ClawMissionRunMacAgentReadinessItem(
+                id: "capability",
+                title: "桌面能力",
+                status: "能力快照待同步",
+                guidance: "等待 Gateway capability snapshot 后确认 workspace、Shell、浏览器和桌面控制策略。",
+                icon: Self.icon(forDetailReviewKind: reviewKind),
+                tone: .neutral,
+                reviewKind: nil,
+                reviewTitle: nil,
+                canFocusReview: false,
+                isFocused: false,
+                isReady: false,
+                isBlocked: false,
+                hasMetadataGap: false,
+                requiresHumanAction: false
+            )
+        }
+        let states = [
+            review.workspaceState,
+            review.shellState,
+            review.browserControlState,
+            review.screenCaptureState,
+            review.windowMetadataState,
+            review.accessibilityTreeState,
+            review.desktopControlState
+        ].compactMap { $0 }
+        let unavailableCount = states.filter { state in
+            state == "unavailable" || state == "disabled" || state == "blocked"
+        }.count
+        let hasMetadataGap = review.hasMetadata == false
+        let isBlocked = unavailableCount > 0
+        let canFocus = focusUsesDetailReview(reviewKind)
+        return ClawMissionRunMacAgentReadinessItem(
+            id: "capability",
+            title: "桌面能力",
+            status: hasMetadataGap ? "metadata 待同步" : review.compactStatus,
+            guidance: isBlocked ? "\(unavailableCount) 项能力不可用；先查看 Gateway 能力复核。" : "已收到 Gateway 能力快照，可复核执行面是否符合策略。",
+            icon: Self.icon(forDetailReviewKind: reviewKind),
+            tone: hasMetadataGap ? .info : (isBlocked ? .warning : .success),
+            reviewKind: reviewKind,
+            reviewTitle: reviewTitle,
+            canFocusReview: canFocus,
+            isFocused: focusedKind == reviewKind,
+            isReady: review.hasMetadata && isBlocked == false,
+            isBlocked: isBlocked,
+            hasMetadataGap: hasMetadataGap,
+            requiresHumanAction: isBlocked || hasMetadataGap
+        )
+    }
+
+    private func macAgentObservationItem(focusedOn focusedKind: String?) -> ClawMissionRunMacAgentReadinessItem {
+        let reviewKind = "accessibility"
+        let reviewTitle = Self.title(forDetailReviewKind: reviewKind)
+        guard let review = gatewayAccessibilityReview else {
+            return ClawMissionRunMacAgentReadinessItem(
+                id: "observation",
+                title: "屏幕观察",
+                status: "观察 metadata 待同步",
+                guidance: "等待 observeScreen 或 Accessibility 摘要后判断可观察性。",
+                icon: Self.icon(forDetailReviewKind: reviewKind),
+                tone: .neutral,
+                reviewKind: nil,
+                reviewTitle: nil,
+                canFocusReview: false,
+                isFocused: false,
+                isReady: false,
+                isBlocked: false,
+                hasMetadataGap: false,
+                requiresHumanAction: false
+            )
+        }
+        let mode = review.mode ?? ""
+        let isBlocked = mode == "unavailable" || mode == "disabled" || mode == "failed"
+        let hasMetadataGap = review.hasMetadata == false
+        let hasObservation = (review.nodeCount ?? 0) > 0 || (review.candidateControlCount ?? 0) > 0 || review.includeAccessibilityTree == true
+        let canFocus = focusUsesDetailReview(reviewKind)
+        return ClawMissionRunMacAgentReadinessItem(
+            id: "observation",
+            title: "屏幕观察",
+            status: hasMetadataGap ? "metadata 待同步" : review.compactStatus,
+            guidance: isBlocked ? "观察能力不可用；先查看 Accessibility 复核。" : "已收到观察摘要，可判断屏幕和候选控件证据质量。",
+            icon: Self.icon(forDetailReviewKind: reviewKind),
+            tone: hasMetadataGap ? .info : (isBlocked ? .warning : .success),
+            reviewKind: reviewKind,
+            reviewTitle: reviewTitle,
+            canFocusReview: canFocus,
+            isFocused: focusedKind == reviewKind,
+            isReady: review.hasMetadata && hasObservation && isBlocked == false,
+            isBlocked: isBlocked,
+            hasMetadataGap: hasMetadataGap,
+            requiresHumanAction: isBlocked || hasMetadataGap
+        )
+    }
+
+    private func macAgentLoopItem(
+        focusedOn focusedKind: String?,
+        loop: ClawMissionRunLoopContinuationSummary
+    ) -> ClawMissionRunMacAgentReadinessItem {
+        let reviewKind = "agent-trace"
+        let reviewTitle = Self.title(forDetailReviewKind: reviewKind)
+        let hasTrace = agentTraceReview != nil
+        let canFocus = loop.canFocusAgentTrace && focusUsesDetailReview(reviewKind)
+        let isBlocked = loop.handoffStatus == "blocked" || (hasTrace && loop.missingSignalCount > 0)
+        return ClawMissionRunMacAgentReadinessItem(
+            id: "loop",
+            title: "Loop 继续",
+            status: hasTrace ? loop.status : "AgentTrace 待生成",
+            guidance: hasTrace ? loop.guidance : "运行 agent loop 后会显示证据分、下一步和交接状态。",
+            icon: loop.icon,
+            tone: loop.hasMetadataGap ? .info : (isBlocked ? .warning : (loop.canContinueLoop ? .success : .neutral)),
+            reviewKind: hasTrace ? reviewKind : nil,
+            reviewTitle: hasTrace ? reviewTitle : nil,
+            canFocusReview: canFocus,
+            isFocused: focusedKind == reviewKind,
+            isReady: loop.canContinueLoop || loop.handoffStatus == "complete",
+            isBlocked: isBlocked,
+            hasMetadataGap: loop.hasMetadataGap,
+            requiresHumanAction: loop.requiresHumanAction
+        )
+    }
+
+    private func macAgentHumanGateItem(
+        focusedOn focusedKind: String?,
+        readiness: ClawMissionRunReviewReadinessSummary,
+        approval: ClawMissionRunApprovalQueueSummary
+    ) -> ClawMissionRunMacAgentReadinessItem {
+        let focusedPriority = reviewPriorityItem(focusedOn: focusedKind)
+        let candidateKind = focusedKind ?? approval.primaryReviewKind ?? readiness.topReviewKind
+        let candidateTitle = focusedPriority?.title ?? approval.primaryReviewTitle ?? readiness.topReviewTitle ?? candidateKind.map(Self.title(forDetailReviewKind:))
+        let canFocus = candidateKind.map { kind in
+            focusUsesDetailReview(kind) || reviewPriorityQueue.contains { $0.reviewKind == kind }
+        } ?? false
+        let hasMetadataGap = readiness.metadataPendingCount > 0 || approval.hasMetadataGap
+        let hasGateEvidence = readiness.isReviewable || approval.isReviewable || reviewPriorityQueue.isEmpty == false
+        let requiresHumanAction = hasGateEvidence && (readiness.requiresHumanAction || approval.requiresHumanAction || requiresUserApproval)
+        let status: String
+        let guidance: String
+        let tone: ClawMissionRunOperatorLaneTone
+        if requiresHumanAction {
+            status = "\(readiness.actionablePriorityCount) 项可行动 · \(approval.actionableCount) 项审批"
+            guidance = candidateTitle.map { "先确认 \($0)，再决定审批、重试或下一轮。" } ?? "先处理人工确认点。"
+            tone = .warning
+        } else if hasMetadataGap {
+            status = "\(readiness.metadataPendingCount) 项 metadata 待同步"
+            guidance = "等待 metadata 完整后再判断是否可继续。"
+            tone = .info
+        } else if readiness.isReviewable || approval.isReviewable {
+            status = "人工闸门已清点"
+            guidance = "当前无可行动确认项；仍需用户明确触发下一轮。"
+            tone = .success
+        } else {
+            status = "等待复核队列"
+            guidance = "发送任务后会汇总审批、阻断和下一步确认点。"
+            tone = .neutral
+        }
+        return ClawMissionRunMacAgentReadinessItem(
+            id: "human-gate",
+            title: "人工闸门",
+            status: status,
+            guidance: guidance,
+            icon: "person.crop.circle.badge.checkmark",
+            tone: tone,
+            reviewKind: candidateKind,
+            reviewTitle: candidateTitle,
+            canFocusReview: canFocus,
+            isFocused: candidateKind != nil && candidateKind == focusedKind,
+            isReady: (readiness.isReviewable || approval.isReviewable) && requiresHumanAction == false && hasMetadataGap == false,
+            isBlocked: false,
+            hasMetadataGap: hasMetadataGap,
+            requiresHumanAction: requiresHumanAction
         )
     }
 

@@ -638,6 +638,7 @@ struct ClawMissionRunPanel: View {
         let nextReviewAction = summary.nextReviewAction(focusedOn: activeFocusedReviewKind)
         let operatorStrip = summary.operatorStrip(focusedOn: activeFocusedReviewKind)
         let loopContinuation = summary.loopContinuationSummary(focusedOn: activeFocusedReviewKind)
+        let macAgentReadiness = summary.macAgentReadinessBoard(focusedOn: activeFocusedReviewKind)
         let focusContext = summary.focusContextSummary(focusedOn: focusedReviewKind)
         let evidenceTrail = summary.evidenceTrailSummary(focusedOn: activeFocusedReviewKind)
         let approvalQueue = summary.approvalQueueSummary(focusedOn: activeFocusedReviewKind)
@@ -697,6 +698,11 @@ struct ClawMissionRunPanel: View {
 
             ClawMissionRunLoopContinuationBriefView(
                 summary: loopContinuation,
+                onFocusReviewKind: focusReviewKind
+            )
+
+            ClawMissionMacAgentReadinessBoardView(
+                board: macAgentReadiness,
                 onFocusReviewKind: focusReviewKind
             )
 
@@ -846,6 +852,7 @@ struct ClawMissionReviewDetailDockView: View {
         let dock = summary.reviewDetailDockSummary(focusedOn: focusedReviewKind)
         let focusContext = summary.focusContextSummary(focusedOn: focusedReviewKind)
         let evidenceTrail = summary.evidenceTrailSummary(focusedOn: activeFocusedReviewKind)
+        let macAgentReadiness = summary.macAgentReadinessBoard(focusedOn: activeFocusedReviewKind)
         let approvalQueue = summary.approvalQueueSummary(focusedOn: activeFocusedReviewKind)
         let payloadSafetyLedger = summary.payloadSafetyLedger(focusedOn: activeFocusedReviewKind)
 
@@ -890,6 +897,11 @@ struct ClawMissionReviewDetailDockView: View {
             }
 
             if dock.isReviewable {
+                ClawMissionMacAgentReadinessBoardView(
+                    board: macAgentReadiness,
+                    onFocusReviewKind: focusReviewKind
+                )
+
                 ClawMissionReviewTrailView(
                     trail: evidenceTrail,
                     onFocusReviewKind: focusReviewKind
@@ -2074,6 +2086,179 @@ struct ClawMissionNextReviewActionView: View {
             return .green
         }
         return .secondary
+    }
+}
+
+struct ClawMissionMacAgentReadinessBoardView: View {
+    let board: ClawMissionRunMacAgentReadinessBoard
+    let onFocusReviewKind: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Label(board.title, systemImage: board.icon)
+                    .font(.subheadline.bold())
+                    .foregroundStyle(tint)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Spacer(minLength: 0)
+
+                if let focusedReviewTitle = board.focusedReviewTitle {
+                    PhoneAgentTag(text: focusedReviewTitle, icon: "scope", tint: tint)
+                }
+            }
+
+            Text(board.status)
+                .font(.footnote.bold())
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(board.guidance)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 8) {
+                Label("\(board.readyCount) 就绪", systemImage: "checkmark.circle.fill")
+                Label("\(board.blockedCount) 阻断", systemImage: "nosign")
+                Label("\(board.humanActionCount) 人工", systemImage: "person.crop.circle.badge.checkmark")
+            }
+            .font(.caption.bold())
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+            if board.items.isEmpty == false {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(board.items) { item in
+                        ClawMissionMacAgentReadinessItemRow(
+                            item: item,
+                            onFocusReviewKind: onFocusReviewKind
+                        )
+                    }
+                }
+            }
+        }
+        .padding(10)
+        .background(tint.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(tint.opacity(0.16), lineWidth: 1)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(accessibilitySummary)
+    }
+
+    private var accessibilitySummary: String {
+        "Mac Agent 就绪看板，\(board.status)，\(board.readyCount) 项就绪，\(board.humanActionCount) 项需要人工"
+    }
+
+    private var tint: Color {
+        if board.isReviewable == false {
+            return .secondary
+        }
+        if board.blockedCount > 0 {
+            return .red
+        }
+        if board.requiresHumanAction {
+            return .orange
+        }
+        if board.hasMetadataGap {
+            return .blue
+        }
+        if board.canContinueLoop {
+            return .green
+        }
+        return .purple
+    }
+}
+
+struct ClawMissionMacAgentReadinessItemRow: View {
+    let item: ClawMissionRunMacAgentReadinessItem
+    let onFocusReviewKind: (String) -> Void
+
+    var body: some View {
+        Group {
+            if item.canFocusReview, let reviewKind = item.reviewKind {
+                Button {
+                    onFocusReviewKind(reviewKind)
+                } label: {
+                    rowContent
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("聚焦对应复核项，不执行 Gateway 动作、不审批、不继续")
+                .accessibilityInputLabels(accessibilityInputLabels)
+            } else {
+                rowContent
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(accessibilitySummary)
+    }
+
+    private var rowContent: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: item.isFocused ? "scope" : item.icon)
+                .font(.caption.bold())
+                .frame(width: 28, height: 28)
+                .background(tint.opacity(item.isFocused ? 0.22 : 0.12), in: Circle())
+                .foregroundStyle(tint)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(item.title)
+                    .font(.footnote.bold())
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(item.status)
+                    .font(.caption.bold())
+                    .foregroundStyle(tint)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(item.guidance)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .padding(.vertical, 4)
+        .padding(.horizontal, 6)
+        .background(tint.opacity(item.isFocused ? 0.08 : 0), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            if item.isFocused {
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(tint.opacity(0.45), lineWidth: 1)
+            }
+        }
+    }
+
+    private var accessibilityInputLabels: [String] {
+        guard let reviewTitle = item.reviewTitle else {
+            return ["聚焦\(item.title)", "复核\(item.title)"]
+        }
+        return ["聚焦\(reviewTitle)", "复核\(reviewTitle)"]
+    }
+
+    private var accessibilitySummary: String {
+        "\(item.title)，\(item.status)，\(item.guidance)"
+    }
+
+    private var tint: Color {
+        switch item.tone {
+        case .neutral:
+            return .secondary
+        case .info:
+            return .blue
+        case .success:
+            return .green
+        case .warning:
+            return .orange
+        case .danger:
+            return .red
+        }
     }
 }
 
