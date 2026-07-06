@@ -130,6 +130,10 @@ enum LogicSmoke {
             idleOperatorStrip.lanes.contains { $0.id == "evidence" && $0.status == "0/0 类覆盖" },
             "idle operator strip should not invent evidence coverage"
         )
+        let idleFocusContext = missionStore.missionRunSummary.focusContextSummary
+        expect(idleFocusContext.isReviewable == false, "idle focus context should not be reviewable")
+        expect(idleFocusContext.canClearFocus == false, "idle focus context should not expose clear focus")
+        expect(idleFocusContext.primaryReviewKind == nil, "idle focus context should not invent a primary review")
         missionStore.phoneAgentCommand = "打开浏览器搜索资料，整理结果并发到 Slack"
         missionStore.startAutonomousComputerTakeover()
         var missionSummary = missionStore.missionRunSummary
@@ -214,6 +218,39 @@ enum LogicSmoke {
             focusedOperatorStrip.lanes.contains { $0.id == "next" && $0.reviewKind == "delivery-safety" && $0.isFocused },
             "operator strip should mark focused next lane"
         )
+        let focusContext = missionSummary.focusContextSummary
+        expect(focusContext.isReviewable, "focus context should be reviewable once Gateway evidence exists")
+        expect(focusContext.canClearFocus == false, "unfocused context should not expose clear focus")
+        expect(focusContext.primaryReviewKind == missionSummary.nextReviewAction.reviewKind, "focus context should point to next detail review")
+        let focusedFocusContext = missionSummary.focusContextSummary(focusedOn: "delivery-safety")
+        expect(focusedFocusContext.focusedReviewKind == "delivery-safety", "focus context should record delivery focus")
+        expect(focusedFocusContext.focusedReviewTitle == "最终提交安全", "focus context should expose delivery title")
+        expect(focusedFocusContext.canFocusDetailReview, "delivery focus context should know it has detail")
+        expect(focusedFocusContext.canClearFocus, "delivery focus context should allow clearing focus")
+        expect(focusedFocusContext.hasEvidence, "delivery focus context should mark evidence coverage")
+        expect(focusedFocusContext.requiresHumanAction, "delivery focus context should surface human review")
+        var statusOnlySummary = missionSummary
+        let statusOnlyItem = ClawMissionRunReviewPriorityItem(
+            id: "gateway-status",
+            rank: 0,
+            severity: .info,
+            title: "Gateway 状态",
+            status: "状态待查看",
+            reason: "状态项没有详细复核 row。",
+            icon: "server.rack",
+            reviewKind: "gateway-status",
+            actionHint: "保持全量详情",
+            isActionable: false,
+            hasMetadata: true
+        )
+        statusOnlySummary.reviewPriorityQueue.insert(statusOnlyItem, at: 0)
+        let statusFocusContext = statusOnlySummary.focusContextSummary(focusedOn: statusOnlyItem.reviewKind)
+        expect(statusFocusContext.focusedReviewKind == statusOnlyItem.reviewKind, "status focus context should record the status item")
+        expect(statusFocusContext.canFocusDetailReview == false, "status focus context should not claim detail focus")
+        expect(statusFocusContext.canClearFocus, "status focus context should allow clearing focus")
+        let staleFocusContext = statusOnlySummary.focusContextSummary(focusedOn: "unknown-review-kind")
+        expect(staleFocusContext.focusedReviewKind == nil, "stale focus context should not keep an unknown review kind")
+        expect(staleFocusContext.canClearFocus, "stale focus context should allow clearing focus")
         expect(
             missionSummary.detailReviewKinds(focusedOn: nil) == availableDetailKinds,
             "nil focus should show all detail reviews"
@@ -345,7 +382,19 @@ enum LogicSmoke {
             operatorStrip.status,
             focusedOperatorStrip.focusedReviewKind ?? ""
         ]
-        let queueVisibleText = (queueVisibleChunks + readinessVisibleChunks + nextActionVisibleChunks + evidenceVisibleChunks + operatorVisibleChunks).joined(separator: " ")
+        let focusContextVisibleChunks = [
+            focusContext.title,
+            focusContext.status,
+            focusContext.guidance,
+            focusContext.primaryReviewKind ?? "",
+            focusContext.primaryButtonTitle ?? "",
+            focusedFocusContext.title,
+            focusedFocusContext.status,
+            focusedFocusContext.guidance,
+            focusedFocusContext.focusedReviewKind ?? "",
+            focusedFocusContext.focusedReviewTitle ?? ""
+        ]
+        let queueVisibleText = (queueVisibleChunks + readinessVisibleChunks + nextActionVisibleChunks + evidenceVisibleChunks + operatorVisibleChunks + focusContextVisibleChunks).joined(separator: " ")
         for forbidden in ["Authorization", "Bearer", "toolArguments", "file://", "/private", "/Users", "/home", "C:\\", "stdout", "stderr", "diff"] {
             expect(queueVisibleText.contains(forbidden) == false, "review priority queue should not expose \(forbidden)")
         }
@@ -505,6 +554,13 @@ enum LogicSmoke {
             shellOperatorStrip.lanes.contains { $0.id == "next" && $0.reviewKind == "shell-safety" && $0.isFocused },
             "shell operator strip should focus shell next lane"
         )
+        let shellFocusContext = shellMissionSummary.focusContextSummary(focusedOn: "shell-safety")
+        expect(shellFocusContext.focusedReviewKind == "shell-safety", "shell focus context should record shell focus")
+        expect(shellFocusContext.focusedReviewTitle == "Shell 命令安全", "shell focus context should expose shell title")
+        expect(shellFocusContext.canFocusDetailReview, "shell focus context should know shell has detail")
+        expect(shellFocusContext.canClearFocus, "shell focus context should allow clearing")
+        expect(shellFocusContext.hasEvidence, "shell focus context should mark shell evidence")
+        expect(shellFocusContext.requiresHumanAction, "shell focus context should require human review")
         expect(
             [
                 shellReadiness.title,
@@ -519,7 +575,11 @@ enum LogicSmoke {
                 shellEvidence.title,
                 shellEvidence.status,
                 shellEvidence.guidance,
-                shellOperatorStrip.status
+                shellOperatorStrip.status,
+                shellFocusContext.title,
+                shellFocusContext.status,
+                shellFocusContext.guidance,
+                shellFocusContext.primaryButtonTitle ?? ""
             ].joined(separator: " ").contains("stdout") == false,
             "shell readiness should not expose stdout"
         )

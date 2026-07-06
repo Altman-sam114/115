@@ -1401,6 +1401,23 @@ struct ClawMissionRunNextReviewAction: Equatable, Codable, Sendable {
     var isReviewable: Bool
 }
 
+struct ClawMissionRunFocusContextSummary: Equatable, Codable, Sendable {
+    var title: String
+    var status: String
+    var guidance: String
+    var icon: String
+    var focusedReviewKind: String?
+    var focusedReviewTitle: String?
+    var primaryReviewKind: String?
+    var primaryButtonTitle: String?
+    var canFocusDetailReview: Bool
+    var canClearFocus: Bool
+    var hasEvidence: Bool
+    var hasMetadataGap: Bool
+    var requiresHumanAction: Bool
+    var isReviewable: Bool
+}
+
 struct ClawMissionRunArtifactEvidenceItem: Identifiable, Equatable, Codable, Sendable {
     var id: String { reviewKind }
     var reviewKind: String
@@ -2808,6 +2825,127 @@ extension ClawMissionRunSummary {
             return false
         }
         return availableDetailReviewKinds.contains(reviewKind)
+    }
+
+    var focusContextSummary: ClawMissionRunFocusContextSummary {
+        focusContextSummary(focusedOn: nil)
+    }
+
+    func focusContextSummary(focusedOn reviewKind: String?) -> ClawMissionRunFocusContextSummary {
+        let priorityItem = reviewPriorityItem(focusedOn: reviewKind)
+        let detailFocused = focusUsesDetailReview(reviewKind)
+        let isKnownFocus = priorityItem != nil || detailFocused
+        let activeFocus = isKnownFocus ? reviewKind : nil
+        let readiness = reviewReadinessSummary(focusedOn: activeFocus)
+        let next = nextReviewAction(focusedOn: activeFocus)
+        let evidence = artifactEvidenceIndex(focusedOn: activeFocus)
+        let focusedEvidenceItem = activeFocus.flatMap { kind in
+            evidence.items.first { $0.reviewKind == kind }
+        }
+
+        if let priorityItem {
+            let hasDetailReview = focusUsesDetailReview(priorityItem.reviewKind)
+            let title = hasDetailReview ? "聚焦复核上下文" : "聚焦状态上下文"
+            let guidance = hasDetailReview
+                ? "当前只显示 \(priorityItem.title) 详细复核；可清除聚焦恢复全量。"
+                : "\(priorityItem.title) 是状态或审批项；详细复核保持全量显示。"
+            return ClawMissionRunFocusContextSummary(
+                title: title,
+                status: priorityItem.status,
+                guidance: guidance,
+                icon: priorityItem.icon,
+                focusedReviewKind: priorityItem.reviewKind,
+                focusedReviewTitle: priorityItem.title,
+                primaryReviewKind: hasDetailReview ? priorityItem.reviewKind : nil,
+                primaryButtonTitle: hasDetailReview ? "查看 \(priorityItem.title) 详情" : nil,
+                canFocusDetailReview: hasDetailReview,
+                canClearFocus: true,
+                hasEvidence: focusedEvidenceItem?.hasEvidence ?? false,
+                hasMetadataGap: priorityItem.hasMetadata == false || focusedEvidenceItem?.metadataReady == false,
+                requiresHumanAction: priorityItem.isActionable || readiness.requiresHumanAction,
+                isReviewable: true
+            )
+        }
+
+        if let reviewKind, detailFocused {
+            let detailTitle = Self.title(forDetailReviewKind: reviewKind)
+            let evidenceItem = evidence.items.first { $0.reviewKind == reviewKind }
+            return ClawMissionRunFocusContextSummary(
+                title: "聚焦详细复核",
+                status: detailTitle,
+                guidance: "当前只显示 \(detailTitle) 安全摘要；可清除聚焦恢复全量。",
+                icon: Self.icon(forDetailReviewKind: reviewKind),
+                focusedReviewKind: reviewKind,
+                focusedReviewTitle: detailTitle,
+                primaryReviewKind: reviewKind,
+                primaryButtonTitle: "查看 \(detailTitle) 详情",
+                canFocusDetailReview: true,
+                canClearFocus: true,
+                hasEvidence: evidenceItem?.hasEvidence ?? false,
+                hasMetadataGap: evidenceItem?.metadataReady == false,
+                requiresHumanAction: readiness.requiresHumanAction,
+                isReviewable: true
+            )
+        }
+
+        if reviewKind != nil {
+            return ClawMissionRunFocusContextSummary(
+                title: "聚焦已更新",
+                status: "复核项不在当前队列",
+                guidance: "当前保留全量详情；可清除聚焦后重新选择复核项。",
+                icon: "scope",
+                focusedReviewKind: nil,
+                focusedReviewTitle: nil,
+                primaryReviewKind: nil,
+                primaryButtonTitle: nil,
+                canFocusDetailReview: false,
+                canClearFocus: true,
+                hasEvidence: false,
+                hasMetadataGap: readiness.metadataPendingCount > 0,
+                requiresHumanAction: readiness.requiresHumanAction,
+                isReviewable: readiness.isReviewable
+            )
+        }
+
+        guard readiness.isReviewable else {
+            return ClawMissionRunFocusContextSummary(
+                title: "聚焦上下文待生成",
+                status: "尚无 Gateway 证据",
+                guidance: "发送任务后可从复核优先队列选择聚焦项。",
+                icon: "tray",
+                focusedReviewKind: nil,
+                focusedReviewTitle: nil,
+                primaryReviewKind: nil,
+                primaryButtonTitle: nil,
+                canFocusDetailReview: false,
+                canClearFocus: false,
+                hasEvidence: false,
+                hasMetadataGap: false,
+                requiresHumanAction: false,
+                isReviewable: false
+            )
+        }
+
+        let primaryKind = next.canFocusDetailReview ? next.reviewKind : nil
+        let primaryEvidenceItem = primaryKind.flatMap { kind in
+            evidence.items.first { $0.reviewKind == kind }
+        }
+        return ClawMissionRunFocusContextSummary(
+            title: "选择复核聚焦",
+            status: "\(readiness.totalPriorityCount) 项复核 · \(readiness.availableDetailReviewCount) 类详情",
+            guidance: next.reviewTitle.map { "建议先看 \($0)：\(next.actionHint ?? next.guidance)" } ?? readiness.guidance,
+            icon: "scope",
+            focusedReviewKind: nil,
+            focusedReviewTitle: nil,
+            primaryReviewKind: primaryKind,
+            primaryButtonTitle: primaryKind == nil ? nil : next.primaryButtonTitle,
+            canFocusDetailReview: primaryKind != nil,
+            canClearFocus: false,
+            hasEvidence: primaryEvidenceItem?.hasEvidence ?? false,
+            hasMetadataGap: next.hasMetadataGap,
+            requiresHumanAction: next.requiresHumanAction,
+            isReviewable: true
+        )
     }
 
     var loopContinuationSummary: ClawMissionRunLoopContinuationSummary {

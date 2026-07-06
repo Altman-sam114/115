@@ -588,6 +588,10 @@ final class ClawTests: XCTestCase {
         XCTAssertNil(idleOperatorStrip.focusedReviewKind)
         XCTAssertTrue(idleOperatorStrip.lanes.allSatisfy { $0.canFocusReview == false })
         XCTAssertTrue(idleOperatorStrip.lanes.contains { $0.id == "evidence" && $0.status == "0/0 类覆盖" })
+        let idleFocusContext = idleStore.missionRunSummary.focusContextSummary
+        XCTAssertFalse(idleFocusContext.isReviewable)
+        XCTAssertFalse(idleFocusContext.canClearFocus)
+        XCTAssertNil(idleFocusContext.primaryReviewKind)
 
         let store = ClawStore(autoScanLocalArtifacts: false)
         store.phoneAgentCommand = "打开浏览器搜索资料，整理结果并发到 Slack"
@@ -629,6 +633,39 @@ final class ClawTests: XCTestCase {
         let focusedOperatorStrip = summary.operatorStrip(focusedOn: "delivery-safety")
         XCTAssertEqual(focusedOperatorStrip.focusedReviewKind, "delivery-safety")
         XCTAssertTrue(focusedOperatorStrip.lanes.contains { $0.id == "next" && $0.reviewKind == "delivery-safety" && $0.isFocused })
+        let focusContext = summary.focusContextSummary
+        XCTAssertTrue(focusContext.isReviewable)
+        XCTAssertFalse(focusContext.canClearFocus)
+        XCTAssertEqual(focusContext.primaryReviewKind, summary.nextReviewAction.reviewKind)
+        let focusedFocusContext = summary.focusContextSummary(focusedOn: "delivery-safety")
+        XCTAssertEqual(focusedFocusContext.focusedReviewKind, "delivery-safety")
+        XCTAssertEqual(focusedFocusContext.focusedReviewTitle, "最终提交安全")
+        XCTAssertTrue(focusedFocusContext.canFocusDetailReview)
+        XCTAssertTrue(focusedFocusContext.canClearFocus)
+        XCTAssertTrue(focusedFocusContext.hasEvidence)
+        XCTAssertTrue(focusedFocusContext.requiresHumanAction)
+        var statusOnlySummary = summary
+        let statusOnlyItem = ClawMissionRunReviewPriorityItem(
+            id: "gateway-status",
+            rank: 0,
+            severity: .info,
+            title: "Gateway 状态",
+            status: "状态待查看",
+            reason: "状态项没有详细复核 row。",
+            icon: "server.rack",
+            reviewKind: "gateway-status",
+            actionHint: "保持全量详情",
+            isActionable: false,
+            hasMetadata: true
+        )
+        statusOnlySummary.reviewPriorityQueue.insert(statusOnlyItem, at: 0)
+        let statusFocusContext = statusOnlySummary.focusContextSummary(focusedOn: statusOnlyItem.reviewKind)
+        XCTAssertEqual(statusFocusContext.focusedReviewKind, statusOnlyItem.reviewKind)
+        XCTAssertFalse(statusFocusContext.canFocusDetailReview)
+        XCTAssertTrue(statusFocusContext.canClearFocus)
+        let staleFocusContext = statusOnlySummary.focusContextSummary(focusedOn: "unknown-review-kind")
+        XCTAssertNil(staleFocusContext.focusedReviewKind)
+        XCTAssertTrue(staleFocusContext.canClearFocus)
         XCTAssertEqual(summary.detailReviewKinds(focusedOn: nil), availableDetailKinds)
         XCTAssertEqual(summary.detailReviewKinds(focusedOn: "delivery-safety"), ["delivery-safety"])
         XCTAssertEqual(summary.detailReviewKinds(focusedOn: "gateway-status"), availableDetailKinds)
@@ -722,7 +759,23 @@ final class ClawTests: XCTestCase {
             operatorStrip.status,
             focusedOperatorStrip.focusedReviewKind ?? ""
         ]
-        let visibleText = (queueVisibleChunks + readinessVisibleChunks + nextActionVisibleChunks + evidenceVisibleChunks + operatorVisibleChunks).joined(separator: " ")
+        let focusContextVisibleChunks = [
+            focusContext.title,
+            focusContext.status,
+            focusContext.guidance,
+            focusContext.primaryReviewKind ?? "",
+            focusContext.primaryButtonTitle ?? "",
+            focusedFocusContext.title,
+            focusedFocusContext.status,
+            focusedFocusContext.guidance,
+            focusedFocusContext.focusedReviewKind ?? "",
+            focusedFocusContext.focusedReviewTitle ?? "",
+            statusFocusContext.title,
+            statusFocusContext.status,
+            statusFocusContext.guidance,
+            statusFocusContext.focusedReviewKind ?? ""
+        ]
+        let visibleText = (queueVisibleChunks + readinessVisibleChunks + nextActionVisibleChunks + evidenceVisibleChunks + operatorVisibleChunks + focusContextVisibleChunks).joined(separator: " ")
         for forbidden in ["Authorization", "Bearer", "toolArguments", "file://", "/private", "/Users", "/home", "C:\\", "stdout", "stderr", "diff"] {
             XCTAssertFalse(visibleText.contains(forbidden), "queue leaked \(forbidden)")
         }
@@ -756,6 +809,13 @@ final class ClawTests: XCTestCase {
         let shellOperatorStrip = shellStore.missionRunSummary.operatorStrip(focusedOn: "shell-safety")
         XCTAssertEqual(shellOperatorStrip.focusedReviewKind, "shell-safety")
         XCTAssertTrue(shellOperatorStrip.lanes.contains { $0.id == "next" && $0.reviewKind == "shell-safety" && $0.isFocused })
+        let shellFocusContext = shellStore.missionRunSummary.focusContextSummary(focusedOn: "shell-safety")
+        XCTAssertEqual(shellFocusContext.focusedReviewKind, "shell-safety")
+        XCTAssertEqual(shellFocusContext.focusedReviewTitle, "Shell 命令安全")
+        XCTAssertTrue(shellFocusContext.canFocusDetailReview)
+        XCTAssertTrue(shellFocusContext.canClearFocus)
+        XCTAssertTrue(shellFocusContext.hasEvidence)
+        XCTAssertTrue(shellFocusContext.requiresHumanAction)
         XCTAssertFalse(
             [
                 shellReadiness.title,
@@ -772,7 +832,11 @@ final class ClawTests: XCTestCase {
                 shellEvidence.guidance,
                 shellEvidenceItem.status,
                 shellEvidenceItem.guidance,
-                shellOperatorStrip.status
+                shellOperatorStrip.status,
+                shellFocusContext.title,
+                shellFocusContext.status,
+                shellFocusContext.guidance,
+                shellFocusContext.primaryButtonTitle ?? ""
             ].joined(separator: " ").contains("stdout")
         )
     }

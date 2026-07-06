@@ -631,6 +631,7 @@ struct ClawMissionRunPanel: View {
         let nextReviewAction = summary.nextReviewAction(focusedOn: activeFocusedReviewKind)
         let operatorStrip = summary.operatorStrip(focusedOn: activeFocusedReviewKind)
         let loopContinuation = summary.loopContinuationSummary(focusedOn: activeFocusedReviewKind)
+        let focusContext = summary.focusContextSummary(focusedOn: focusedReviewKind)
         VStack(alignment: .leading, spacing: 14) {
             SectionHeader(title: "Mission Run", icon: "flag.checkered")
 
@@ -741,10 +742,11 @@ struct ClawMissionRunPanel: View {
                 )
             }
 
-            if let focusedItem = summary.reviewPriorityItem(focusedOn: activeFocusedReviewKind),
-               summary.focusUsesDetailReview(activeFocusedReviewKind) == false {
-                ClawMissionReviewFocusNoticeView(item: focusedItem)
-            }
+            ClawMissionRunFocusContextView(
+                summary: focusContext,
+                onFocusReviewKind: focusReviewKind,
+                onClearFocus: clearFocusedReviewKind
+            )
 
             if let review = summary.artifactMetadataReview,
                summary.shouldShowDetailReview("artifact-metadata", focusedOn: activeFocusedReviewKind) {
@@ -1056,7 +1058,7 @@ struct ClawMissionRunLoopContinuationBriefView: View {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(tint.opacity(0.16), lineWidth: 1)
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
         .accessibilityLabel(accessibilitySummary)
     }
 
@@ -1102,6 +1104,121 @@ struct ClawMissionRunLoopContinuationBriefView: View {
         default:
             return "point.topleft.down.curvedto.point.bottomright.up"
         }
+    }
+}
+
+struct ClawMissionRunFocusContextView: View {
+    let summary: ClawMissionRunFocusContextSummary
+    let onFocusReviewKind: (String) -> Void
+    let onClearFocus: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Label(summary.title, systemImage: summary.icon)
+                    .font(.subheadline.bold())
+                    .foregroundStyle(tint)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                if let focusedReviewTitle = summary.focusedReviewTitle {
+                    PhoneAgentTag(text: focusedReviewTitle, icon: "scope", tint: tint)
+                }
+            }
+
+            Text(summary.status)
+                .font(.footnote.bold())
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(summary.guidance)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 8) {
+                PhoneAgentTag(
+                    text: summary.hasEvidence ? "证据已覆盖" : "证据待确认",
+                    icon: summary.hasEvidence ? "paperclip.circle.fill" : "paperclip",
+                    tint: summary.hasEvidence ? .green : .secondary
+                )
+                PhoneAgentTag(
+                    text: summary.hasMetadataGap ? "metadata 待核" : "metadata 就绪",
+                    icon: summary.hasMetadataGap ? "doc.badge.clock" : "doc.badge.gearshape",
+                    tint: summary.hasMetadataGap ? .blue : .green
+                )
+                PhoneAgentTag(
+                    text: summary.requiresHumanAction ? "需人工" : "可查看",
+                    icon: summary.requiresHumanAction ? "person.crop.circle.badge.exclamationmark.fill" : "checkmark.circle.fill",
+                    tint: summary.requiresHumanAction ? .orange : .secondary
+                )
+            }
+
+            HStack(spacing: 8) {
+                if let reviewKind = summary.primaryReviewKind,
+                   let buttonTitle = summary.primaryButtonTitle,
+                   summary.canFocusDetailReview {
+                    Button {
+                        onFocusReviewKind(reviewKind)
+                    } label: {
+                        Label(buttonTitle, systemImage: "scope")
+                            .font(.footnote.bold())
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(tint)
+                    .accessibilityHint("聚焦对应详细复核，不执行 Gateway 动作")
+                    .accessibilityInputLabels(accessibilityInputLabels)
+                }
+
+                if summary.canClearFocus {
+                    Button("全部", systemImage: "line.3.horizontal.decrease.circle", action: onClearFocus)
+                        .font(.footnote.bold())
+                        .frame(minHeight: 44)
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.blue)
+                        .accessibilityHint("清除聚焦并恢复全量详细复核")
+                        .accessibilityInputLabels(["清除聚焦", "显示全部复核"])
+                }
+            }
+        }
+        .padding(10)
+        .background(tint.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(tint.opacity(0.16), lineWidth: 1)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(accessibilitySummary)
+    }
+
+    private var accessibilityInputLabels: [String] {
+        guard let focusedReviewTitle = summary.focusedReviewTitle else {
+            return ["聚焦复核", "查看详情"]
+        }
+        return ["聚焦\(focusedReviewTitle)", "查看\(focusedReviewTitle)详情"]
+    }
+
+    private var accessibilitySummary: String {
+        if let focusedReviewTitle = summary.focusedReviewTitle {
+            return "聚焦上下文，当前聚焦 \(focusedReviewTitle)，\(summary.status)"
+        }
+        return "聚焦上下文，\(summary.status)"
+    }
+
+    private var tint: Color {
+        if summary.isReviewable == false {
+            return .secondary
+        }
+        if summary.requiresHumanAction {
+            return .orange
+        }
+        if summary.hasMetadataGap {
+            return .blue
+        }
+        if summary.hasEvidence {
+            return .green
+        }
+        return .purple
     }
 }
 
@@ -1286,7 +1403,7 @@ struct ClawMissionNextReviewActionView: View {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(tint.opacity(0.16), lineWidth: 1)
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
         .accessibilityLabel(accessibilitySummary)
     }
 
@@ -1369,7 +1486,7 @@ struct ClawMissionReviewReadinessSummaryView: View {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(tint.opacity(0.18), lineWidth: 1)
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
         .accessibilityLabel(accessibilitySummary)
     }
 
