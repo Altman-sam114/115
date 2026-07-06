@@ -104,6 +104,14 @@ enum LogicSmoke {
         let missionStore = ClawStore(autoScanLocalArtifacts: false)
         expect(missionStore.missionRunSummary.primaryActionKind == .start, "mission summary should start with a launch action")
         expect(missionStore.missionRunSummary.reviewPriorityQueue.isEmpty, "idle mission summary should not invent review priorities")
+        let idleReadiness = missionStore.missionRunSummary.reviewReadinessSummary
+        expect(idleReadiness.totalPriorityCount == 0, "idle readiness should not count review priorities")
+        expect(idleReadiness.actionablePriorityCount == 0, "idle readiness should not count actions")
+        expect(idleReadiness.criticalOrHighCount == 0, "idle readiness should not count high priorities")
+        expect(idleReadiness.metadataPendingCount == 0, "idle readiness should not count metadata gaps")
+        expect(idleReadiness.topReviewKind == nil, "idle readiness should not invent a top review")
+        expect(idleReadiness.isReviewable == false, "idle readiness should not be reviewable")
+        expect(idleReadiness.requiresHumanAction == false, "idle readiness should not require action")
         missionStore.phoneAgentCommand = "打开浏览器搜索资料，整理结果并发到 Slack"
         missionStore.startAutonomousComputerTakeover()
         var missionSummary = missionStore.missionRunSummary
@@ -163,9 +171,45 @@ enum LogicSmoke {
             missionSummary.reviewPriorityItem(focusedOn: "delivery-safety") != nil,
             "focus should resolve a queue item"
         )
+        let readiness = missionSummary.reviewReadinessSummary
+        expect(readiness.totalPriorityCount == missionSummary.reviewPriorityQueue.count, "readiness should count the full priority queue")
+        expect(
+            readiness.actionablePriorityCount == missionSummary.reviewPriorityQueue.filter(\.isActionable).count,
+            "readiness should count actionable priorities"
+        )
+        expect(
+            readiness.criticalOrHighCount == missionSummary.reviewPriorityQueue.filter { $0.severity == .critical || $0.severity == .high }.count,
+            "readiness should count critical and high priorities"
+        )
+        expect(
+            readiness.metadataPendingCount == missionSummary.reviewPriorityQueue.filter { $0.hasMetadata == false }.count,
+            "readiness should count metadata gaps"
+        )
+        expect(
+            readiness.availableDetailReviewCount == availableDetailKinds.count,
+            "readiness should count available detail reviews"
+        )
+        expect(readiness.topReviewKind == missionSummary.reviewPriorityQueue.first?.reviewKind, "readiness should expose the top review kind")
+        expect(readiness.topReviewTitle == missionSummary.reviewPriorityQueue.first?.title, "readiness should expose the top review title")
+        expect(readiness.isReviewable, "readiness should mark sent missions reviewable")
+        expect(readiness.requiresHumanAction, "readiness should surface human review needs")
+        let focusedReadiness = missionSummary.reviewReadinessSummary(focusedOn: "delivery-safety")
+        expect(focusedReadiness.focusedReviewKind == "delivery-safety", "readiness should record focused review kind")
+        expect(focusedReadiness.focusedReviewTitle == "最终提交安全", "readiness should record focused review title")
+        expect(focusedReadiness.focusedHasDetailReview, "readiness should know focused review has a detail row")
         let queueVisibleText = missionSummary.reviewPriorityQueue.map {
             "\($0.title) \($0.status) \($0.reason) \($0.actionHint) \($0.reviewKind)"
-        }.joined(separator: " ") + " " + availableDetailKinds.joined(separator: " ")
+        }.joined(separator: " ") + " " + [
+            availableDetailKinds.joined(separator: " "),
+            readiness.title,
+            readiness.status,
+            readiness.guidance,
+            readiness.topReviewKind ?? "",
+            readiness.topReviewTitle ?? "",
+            readiness.topActionHint ?? "",
+            focusedReadiness.focusedReviewKind ?? "",
+            focusedReadiness.focusedReviewTitle ?? ""
+        ].joined(separator: " ")
         for forbidden in ["Authorization", "Bearer", "toolArguments", "file://", "/private", "/home", "C:\\", "stdout", "stderr"] {
             expect(queueVisibleText.contains(forbidden) == false, "review priority queue should not expose \(forbidden)")
         }
@@ -301,6 +345,18 @@ enum LogicSmoke {
         expect(
             shellMissionSummary.detailReviewKinds(focusedOn: "shell-safety") == ["shell-safety"],
             "shell focus should show shell detail only"
+        )
+        let shellReadiness = shellMissionSummary.reviewReadinessSummary
+        expect(shellReadiness.criticalOrHighCount >= 1, "shell readiness should count high priority shell review")
+        expect(shellReadiness.actionablePriorityCount >= 1, "shell readiness should count actionable shell review")
+        expect(
+            [
+                shellReadiness.title,
+                shellReadiness.status,
+                shellReadiness.guidance,
+                shellReadiness.topActionHint ?? ""
+            ].joined(separator: " ").contains("stdout") == false,
+            "shell readiness should not expose stdout"
         )
         if let shellArtifacts = shellReviewStore.clawGatewaySessions.first?.results.first(where: { $0.actionKind == .runShellCommand })?.artifacts,
            let shellReview = ClawGatewayShellCommandSafetyReviewSummary.latest(from: shellArtifacts) {

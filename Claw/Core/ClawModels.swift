@@ -1366,6 +1366,26 @@ struct ClawMissionRunReviewPriorityItem: Identifiable, Equatable, Codable, Senda
     var hasMetadata: Bool
 }
 
+struct ClawMissionRunReviewReadinessSummary: Equatable, Codable, Sendable {
+    var title: String
+    var status: String
+    var guidance: String
+    var icon: String
+    var totalPriorityCount: Int
+    var actionablePriorityCount: Int
+    var criticalOrHighCount: Int
+    var metadataPendingCount: Int
+    var availableDetailReviewCount: Int
+    var topReviewKind: String?
+    var topReviewTitle: String?
+    var topActionHint: String?
+    var focusedReviewKind: String?
+    var focusedReviewTitle: String?
+    var focusedHasDetailReview: Bool
+    var isReviewable: Bool
+    var requiresHumanAction: Bool
+}
+
 private enum ClawArtifactMetadataParser {
     static func cleanValue(_ value: String?) -> String? {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -2650,6 +2670,79 @@ extension ClawMissionRunSummary {
             return false
         }
         return availableDetailReviewKinds.contains(reviewKind)
+    }
+
+    var reviewReadinessSummary: ClawMissionRunReviewReadinessSummary {
+        reviewReadinessSummary(focusedOn: nil)
+    }
+
+    func reviewReadinessSummary(focusedOn reviewKind: String?) -> ClawMissionRunReviewReadinessSummary {
+        let topItem = reviewPriorityQueue.first
+        let focusedItem = reviewPriorityItem(focusedOn: reviewKind)
+        let actionableCount = reviewPriorityQueue.filter(\.isActionable).count
+        let criticalOrHighCount = reviewPriorityQueue.filter { item in
+            item.severity == .critical || item.severity == .high
+        }.count
+        let metadataPendingCount = reviewPriorityQueue.filter { $0.hasMetadata == false }.count
+        let availableDetailCount = availableDetailReviewKinds.count
+        let isReviewable = reviewPriorityQueue.isEmpty == false || availableDetailCount > 0
+        let requiresHumanAction = isReviewable && (
+            actionableCount > 0 ||
+            criticalOrHighCount > 0 ||
+            requiresUserApproval ||
+            blockedCount > 0 ||
+            failedCount > 0
+        )
+        let title: String
+        let status: String
+        let guidance: String
+        let icon: String
+
+        if isReviewable == false {
+            title = "复核态势待生成"
+            status = "尚无 Gateway 证据"
+            guidance = "发送任务后会汇总复核重点。"
+            icon = "tray"
+        } else if requiresHumanAction {
+            title = "需要人工复核"
+            status = "\(actionableCount) 项可行动 · \(criticalOrHighCount) 项高优先"
+            if let topItem {
+                guidance = "先看 \(topItem.title)：\(topItem.actionHint)"
+            } else {
+                guidance = "先查看审批、阻断和失败动作。"
+            }
+            icon = "person.crop.circle.badge.exclamationmark.fill"
+        } else if metadataPendingCount > 0 {
+            title = "metadata 待同步"
+            status = "\(metadataPendingCount) 项缺少复核 metadata"
+            guidance = "先确认缺失 metadata 的复核项。"
+            icon = "doc.badge.clock"
+        } else {
+            title = "复核态势可检查"
+            status = "\(availableDetailCount) 类详细复核可查看"
+            guidance = topItem.map { "可抽查 \($0.title)：\($0.actionHint)" } ?? "可继续查看详细复核。"
+            icon = "checkmark.seal.fill"
+        }
+
+        return ClawMissionRunReviewReadinessSummary(
+            title: title,
+            status: status,
+            guidance: guidance,
+            icon: icon,
+            totalPriorityCount: reviewPriorityQueue.count,
+            actionablePriorityCount: actionableCount,
+            criticalOrHighCount: criticalOrHighCount,
+            metadataPendingCount: metadataPendingCount,
+            availableDetailReviewCount: availableDetailCount,
+            topReviewKind: topItem?.reviewKind,
+            topReviewTitle: topItem?.title,
+            topActionHint: topItem?.actionHint,
+            focusedReviewKind: focusedItem?.reviewKind,
+            focusedReviewTitle: focusedItem?.title,
+            focusedHasDetailReview: focusUsesDetailReview(focusedItem?.reviewKind),
+            isReviewable: isReviewable,
+            requiresHumanAction: requiresHumanAction
+        )
     }
 }
 

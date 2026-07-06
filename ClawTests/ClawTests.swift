@@ -565,6 +565,14 @@ final class ClawTests: XCTestCase {
     func testMissionRunSummaryDerivesReviewPriorityQueue() throws {
         let idleStore = ClawStore(autoScanLocalArtifacts: false)
         XCTAssertTrue(idleStore.missionRunSummary.reviewPriorityQueue.isEmpty)
+        let idleReadiness = idleStore.missionRunSummary.reviewReadinessSummary
+        XCTAssertEqual(idleReadiness.totalPriorityCount, 0)
+        XCTAssertEqual(idleReadiness.actionablePriorityCount, 0)
+        XCTAssertEqual(idleReadiness.criticalOrHighCount, 0)
+        XCTAssertEqual(idleReadiness.metadataPendingCount, 0)
+        XCTAssertNil(idleReadiness.topReviewKind)
+        XCTAssertFalse(idleReadiness.isReviewable)
+        XCTAssertFalse(idleReadiness.requiresHumanAction)
 
         let store = ClawStore(autoScanLocalArtifacts: false)
         store.phoneAgentCommand = "打开浏览器搜索资料，整理结果并发到 Slack"
@@ -590,10 +598,34 @@ final class ClawTests: XCTestCase {
         XCTAssertFalse(summary.shouldShowDetailReview("artifact-metadata", focusedOn: "delivery-safety"))
         XCTAssertFalse(summary.focusUsesDetailReview("gateway-status"))
         XCTAssertNotNil(summary.reviewPriorityItem(focusedOn: "delivery-safety"))
+        let readiness = summary.reviewReadinessSummary
+        XCTAssertEqual(readiness.totalPriorityCount, queue.count)
+        XCTAssertEqual(readiness.actionablePriorityCount, queue.filter(\.isActionable).count)
+        XCTAssertEqual(readiness.criticalOrHighCount, queue.filter { $0.severity == .critical || $0.severity == .high }.count)
+        XCTAssertEqual(readiness.metadataPendingCount, queue.filter { $0.hasMetadata == false }.count)
+        XCTAssertEqual(readiness.availableDetailReviewCount, availableDetailKinds.count)
+        XCTAssertEqual(readiness.topReviewKind, queue.first?.reviewKind)
+        XCTAssertEqual(readiness.topReviewTitle, queue.first?.title)
+        XCTAssertTrue(readiness.isReviewable)
+        XCTAssertTrue(readiness.requiresHumanAction)
+        let focusedReadiness = summary.reviewReadinessSummary(focusedOn: "delivery-safety")
+        XCTAssertEqual(focusedReadiness.focusedReviewKind, "delivery-safety")
+        XCTAssertEqual(focusedReadiness.focusedReviewTitle, "最终提交安全")
+        XCTAssertTrue(focusedReadiness.focusedHasDetailReview)
 
         let visibleText = queue.map {
             "\($0.title) \($0.status) \($0.reason) \($0.actionHint) \($0.reviewKind)"
-        }.joined(separator: " ") + " " + availableDetailKinds.joined(separator: " ")
+        }.joined(separator: " ") + " " + [
+            availableDetailKinds.joined(separator: " "),
+            readiness.title,
+            readiness.status,
+            readiness.guidance,
+            readiness.topReviewKind ?? "",
+            readiness.topReviewTitle ?? "",
+            readiness.topActionHint ?? "",
+            focusedReadiness.focusedReviewKind ?? "",
+            focusedReadiness.focusedReviewTitle ?? ""
+        ].joined(separator: " ")
         for forbidden in ["Authorization", "Bearer", "toolArguments", "file://", "/private", "/home", "C:\\", "stdout", "stderr"] {
             XCTAssertFalse(visibleText.contains(forbidden), "queue leaked \(forbidden)")
         }
@@ -610,6 +642,17 @@ final class ClawTests: XCTestCase {
         XCTAssertTrue(shellItem.hasMetadata)
         XCTAssertTrue(shellItem.status.contains("policy dry-run"))
         XCTAssertEqual(shellStore.missionRunSummary.detailReviewKinds(focusedOn: "shell-safety"), ["shell-safety"])
+        let shellReadiness = shellStore.missionRunSummary.reviewReadinessSummary
+        XCTAssertGreaterThanOrEqual(shellReadiness.criticalOrHighCount, 1)
+        XCTAssertGreaterThanOrEqual(shellReadiness.actionablePriorityCount, 1)
+        XCTAssertFalse(
+            [
+                shellReadiness.title,
+                shellReadiness.status,
+                shellReadiness.guidance,
+                shellReadiness.topActionHint ?? ""
+            ].joined(separator: " ").contains("stdout")
+        )
     }
 
     func testMissionRunSummaryDerivesGatewayCapabilityReview() throws {

@@ -626,6 +626,7 @@ struct ClawMissionRunPanel: View {
     var body: some View {
         let summary = store.missionRunSummary
         let activeFocusedReviewKind = activeFocusedReviewKind(for: summary)
+        let reviewReadinessSummary = summary.reviewReadinessSummary(focusedOn: activeFocusedReviewKind)
         VStack(alignment: .leading, spacing: 14) {
             SectionHeader(title: "Mission Run", icon: "flag.checkered")
 
@@ -701,6 +702,11 @@ struct ClawMissionRunPanel: View {
                     }
                 }
             }
+
+            ClawMissionReviewReadinessSummaryView(
+                summary: reviewReadinessSummary,
+                onFocusReviewKind: focusReviewKind
+            )
 
             if summary.reviewPriorityQueue.isEmpty == false {
                 ClawMissionReviewPriorityQueueView(
@@ -832,6 +838,82 @@ struct ClawMissionRunPanel: View {
         case .waitForGateway, .inspectBlocked:
             break
         }
+    }
+}
+
+struct ClawMissionReviewReadinessSummaryView: View {
+    let summary: ClawMissionRunReviewReadinessSummary
+    let onFocusReviewKind: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(summary.title, systemImage: summary.icon)
+                .font(.subheadline.bold())
+                .foregroundStyle(tint)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(summary.status)
+                .font(.subheadline)
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(summary.guidance)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Label("\(summary.totalPriorityCount) 项", systemImage: "list.bullet.clipboard.fill")
+                Label("\(summary.actionablePriorityCount) 可行动", systemImage: "arrow.right.circle.fill")
+                Label("\(summary.metadataPendingCount) metadata", systemImage: "doc.badge.clock")
+            }
+            .font(.footnote.bold())
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+            if let topReviewKind = summary.topReviewKind,
+               let topReviewTitle = summary.topReviewTitle {
+                Button {
+                    onFocusReviewKind(topReviewKind)
+                } label: {
+                    Label("聚焦 \(topReviewTitle)", systemImage: "scope")
+                        .font(.footnote.bold())
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(tint)
+                .accessibilityHint("聚焦最高优先复核项")
+                .accessibilityInputLabels(["聚焦\(topReviewTitle)", "复核\(topReviewTitle)"])
+            }
+        }
+        .padding(10)
+        .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(tint.opacity(0.18), lineWidth: 1)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilitySummary)
+    }
+
+    private var accessibilitySummary: String {
+        if let topReviewTitle = summary.topReviewTitle {
+            return "复核态势，\(summary.actionablePriorityCount) 项可行动，最高优先 \(topReviewTitle)"
+        }
+        return "复核态势，\(summary.status)"
+    }
+
+    private var tint: Color {
+        if summary.requiresHumanAction {
+            return .orange
+        }
+        if summary.metadataPendingCount > 0 {
+            return .blue
+        }
+        if summary.isReviewable {
+            return .green
+        }
+        return .secondary
     }
 }
 
