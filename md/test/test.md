@@ -81,7 +81,7 @@ node --check Tools/claw-gateway-smoke.mjs
 - 修改 `Claw/Core/ClawModels.swift`。
 - 修改 `Claw/Services/ClawStore.swift`。
 - 修改 planner、bridge、simulator、event reducer、autonomous loop。
-- 修改 Mission Run presentation summary、复核优先队列、复核聚焦模式、复核态势摘要、下一步复核行动或 SwiftUI 展示派生模型。
+- 修改 Mission Run presentation summary、Artifact 证据索引、复核优先队列、复核聚焦模式、复核态势摘要、下一步复核行动或 SwiftUI 展示派生模型。
 - 修改 `Tools/LogicSmoke.swift`。
 
 本地优先命令：
@@ -243,7 +243,7 @@ node Tools/claw-gateway-smoke.mjs
 - 完整 Xcode 可用时 `xcodebuild build` 应成功。
 - direct smoke 必须覆盖 artifact 落盘、workspace 文件写入、File Change Safety metadata、路径逃逸阻断审计、workspace 写入失败审计、workspace symlink 阻断、browser trace、Browser Control metadata、Shell Command Safety metadata、结构化提取、Shell dry-run/allowlist、缺少结构化 Shell 命令阻断、浏览器策略、桌面 App 审批闸门、`agentTrace`。
 - WebSocket smoke 必须启动一次性 Gateway，验证事件闭环、browser/file/shell/extract/agent loop 主链路、File Change Safety metadata、路径逃逸阻断审计、workspace 写入失败审计、Browser Control metadata、Shell Command Safety metadata 和 `sessionCompleted`。
-- Swift logic smoke 必须覆盖 Mission Run 复核优先队列的空状态、排序稳定、高风险复核项、复核聚焦过滤/回退、复核态势摘要 count 一致性、下一步复核行动和敏感字符串不外显；XCTest 也应覆盖同类 presentation-layer 派生。
+- Swift logic smoke 必须覆盖 Mission Run Artifact 证据索引的空状态、证据类型映射、metadata/redaction count、聚焦状态、复核优先队列的排序稳定、高风险复核项、复核聚焦过滤/回退、复核态势摘要 count 一致性、下一步复核行动和敏感字符串不外显；XCTest 也应覆盖同类 presentation-layer 派生。
 
 ## 静态检查
 

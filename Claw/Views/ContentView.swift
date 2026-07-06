@@ -626,6 +626,7 @@ struct ClawMissionRunPanel: View {
     var body: some View {
         let summary = store.missionRunSummary
         let activeFocusedReviewKind = activeFocusedReviewKind(for: summary)
+        let artifactEvidenceIndex = summary.artifactEvidenceIndex(focusedOn: activeFocusedReviewKind)
         let reviewReadinessSummary = summary.reviewReadinessSummary(focusedOn: activeFocusedReviewKind)
         let nextReviewAction = summary.nextReviewAction(focusedOn: activeFocusedReviewKind)
         VStack(alignment: .leading, spacing: 14) {
@@ -703,6 +704,11 @@ struct ClawMissionRunPanel: View {
                     }
                 }
             }
+
+            ClawMissionArtifactEvidenceIndexView(
+                index: artifactEvidenceIndex,
+                onFocusReviewKind: focusReviewKind
+            )
 
             ClawMissionReviewReadinessSummaryView(
                 summary: reviewReadinessSummary,
@@ -849,6 +855,145 @@ struct ClawMissionRunPanel: View {
         case .waitForGateway, .inspectBlocked:
             break
         }
+    }
+}
+
+struct ClawMissionArtifactEvidenceIndexView: View {
+    let index: ClawMissionRunArtifactEvidenceIndex
+    let onFocusReviewKind: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(index.title, systemImage: index.icon)
+                .font(.subheadline.bold())
+                .foregroundStyle(tint)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(index.status)
+                .font(.footnote.bold())
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(index.guidance)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 8) {
+                Label("\(index.artifactKindCount) 类", systemImage: "paperclip")
+                Label("metadata \(index.metadataArtifactCount)", systemImage: "doc.badge.gearshape")
+                Label("redacted \(index.redactedArtifactCount)", systemImage: "eye.slash.fill")
+            }
+            .font(.caption.bold())
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+            if index.items.isEmpty == false {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(Array(index.items.prefix(4))) { item in
+                        ClawMissionArtifactEvidenceItemRow(
+                            item: item,
+                            onFocusReviewKind: onFocusReviewKind
+                        )
+                    }
+                }
+            }
+        }
+        .padding(10)
+        .background(tint.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(tint.opacity(0.16), lineWidth: 1)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(accessibilitySummary)
+    }
+
+    private var accessibilitySummary: String {
+        if let focusedReviewTitle = index.focusedReviewTitle {
+            return "Artifact 证据索引，\(index.coveredReviewCount) 类复核有证据，当前聚焦 \(focusedReviewTitle)"
+        }
+        return "Artifact 证据索引，\(index.coveredReviewCount) 类复核有证据，\(index.missingReviewCount) 类待同步"
+    }
+
+    private var tint: Color {
+        if index.isReviewable == false {
+            return .secondary
+        }
+        if index.missingReviewCount > 0 {
+            return .blue
+        }
+        return .green
+    }
+}
+
+struct ClawMissionArtifactEvidenceItemRow: View {
+    let item: ClawMissionRunArtifactEvidenceItem
+    let onFocusReviewKind: (String) -> Void
+
+    var body: some View {
+        Button(action: focusItem) {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: item.isFocused ? "scope" : item.icon)
+                    .font(.caption.bold())
+                    .frame(width: 26, height: 26)
+                    .background(tint.opacity(item.isFocused ? 0.2 : 0.12), in: Circle())
+                    .foregroundStyle(tint)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(item.reviewTitle)
+                        .font(.footnote.bold())
+                        .foregroundStyle(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text(item.status)
+                        .font(.caption.bold())
+                        .foregroundStyle(tint)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text(item.guidance)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .padding(.vertical, 4)
+            .padding(.horizontal, 6)
+            .background(tint.opacity(item.isFocused ? 0.08 : 0), in: RoundedRectangle(cornerRadius: 8))
+            .overlay {
+                if item.isFocused {
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(tint.opacity(0.45), lineWidth: 1)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(item.canFocusReview == false)
+        .opacity(item.canFocusReview ? 1 : 0.65)
+        .accessibilityLabel(accessibilitySummary)
+        .accessibilityHint("聚焦对应详细复核，不打开 artifact 内容")
+        .accessibilityInputLabels(["聚焦\(item.reviewTitle)", "复核\(item.reviewTitle)证据"])
+    }
+
+    private func focusItem() {
+        onFocusReviewKind(item.reviewKind)
+    }
+
+    private var accessibilitySummary: String {
+        "Artifact 证据，\(item.reviewTitle)，\(item.status)"
+    }
+
+    private var tint: Color {
+        if item.hasEvidence == false {
+            return .secondary
+        }
+        if item.metadataReady == false {
+            return .blue
+        }
+        return .green
     }
 }
 

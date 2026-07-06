@@ -1401,6 +1401,37 @@ struct ClawMissionRunNextReviewAction: Equatable, Codable, Sendable {
     var isReviewable: Bool
 }
 
+struct ClawMissionRunArtifactEvidenceItem: Identifiable, Equatable, Codable, Sendable {
+    var id: String { reviewKind }
+    var reviewKind: String
+    var reviewTitle: String
+    var status: String
+    var guidance: String
+    var icon: String
+    var artifactKinds: [ClawGatewayArtifactKind]
+    var hasEvidence: Bool
+    var metadataReady: Bool
+    var isFocused: Bool
+    var canFocusReview: Bool
+}
+
+struct ClawMissionRunArtifactEvidenceIndex: Equatable, Codable, Sendable {
+    var title: String
+    var status: String
+    var guidance: String
+    var icon: String
+    var artifactKindCount: Int
+    var metadataArtifactCount: Int
+    var redactedArtifactCount: Int
+    var coveredReviewCount: Int
+    var missingReviewCount: Int
+    var focusedReviewKind: String?
+    var focusedReviewTitle: String?
+    var focusedHasEvidence: Bool
+    var isReviewable: Bool
+    var items: [ClawMissionRunArtifactEvidenceItem]
+}
+
 private enum ClawArtifactMetadataParser {
     static func cleanValue(_ value: String?) -> String? {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -2687,6 +2718,129 @@ extension ClawMissionRunSummary {
         return availableDetailReviewKinds.contains(reviewKind)
     }
 
+    var artifactEvidenceIndex: ClawMissionRunArtifactEvidenceIndex {
+        artifactEvidenceIndex(focusedOn: nil)
+    }
+
+    func artifactEvidenceIndex(focusedOn reviewKind: String?) -> ClawMissionRunArtifactEvidenceIndex {
+        let availableKinds = availableDetailReviewKinds
+        let focusedKind = reviewKind.flatMap { kind in
+            availableKinds.contains(kind) || reviewPriorityQueue.contains { $0.reviewKind == kind } ? kind : nil
+        }
+        let items = availableKinds.map { detailReviewKind in
+            artifactEvidenceItem(for: detailReviewKind, focusedOn: focusedKind)
+        }
+        let coveredCount = items.filter(\.hasEvidence).count
+        let missingCount = max(items.count - coveredCount, 0)
+        let metadataCount = artifactMetadataReview?.metadataArtifactCount ?? 0
+        let redactedCount = artifactMetadataReview?.redactedArtifactCount ?? 0
+        let focusedItem = focusedKind.flatMap { kind in
+            items.first { $0.reviewKind == kind }
+        }
+
+        let title: String
+        let status: String
+        let guidance: String
+        let icon: String
+        if artifactKinds.isEmpty {
+            title = "Artifact 证据待生成"
+            status = "尚无 Gateway artifact"
+            guidance = "发送任务后会索引证据类型和 metadata 覆盖。"
+            icon = "tray"
+        } else if missingCount > 0 {
+            title = "Artifact 证据索引"
+            status = "\(coveredCount)/\(items.count) 类复核有证据"
+            guidance = "优先查看缺少证据或 metadata 的复核项。"
+            icon = "paperclip.badge.ellipsis"
+        } else {
+            title = "Artifact 证据已覆盖"
+            status = "\(artifactKinds.count) 类 artifact · metadata \(metadataCount)/\(artifactCount)"
+            guidance = focusedItem.map { "当前聚焦 \($0.reviewTitle)：\($0.guidance)" } ?? "可继续查看复核态势和详细摘要。"
+            icon = "checkmark.seal.fill"
+        }
+
+        return ClawMissionRunArtifactEvidenceIndex(
+            title: title,
+            status: status,
+            guidance: guidance,
+            icon: icon,
+            artifactKindCount: artifactKinds.count,
+            metadataArtifactCount: metadataCount,
+            redactedArtifactCount: redactedCount,
+            coveredReviewCount: coveredCount,
+            missingReviewCount: missingCount,
+            focusedReviewKind: focusedItem?.reviewKind,
+            focusedReviewTitle: focusedItem?.reviewTitle,
+            focusedHasEvidence: focusedItem?.hasEvidence ?? false,
+            isReviewable: artifactKinds.isEmpty == false || items.isEmpty == false,
+            items: items
+        )
+    }
+
+    private func artifactEvidenceItem(
+        for reviewKind: String,
+        focusedOn focusedReviewKind: String?
+    ) -> ClawMissionRunArtifactEvidenceItem {
+        let expectedKinds = Self.evidenceArtifactKinds(for: reviewKind, availableArtifactKinds: artifactKinds)
+        let matchingKinds = expectedKinds.filter { artifactKinds.contains($0) }
+        let hasEvidence = matchingKinds.isEmpty == false || metadataReady(forDetailReviewKind: reviewKind)
+        let metadataReady = metadataReady(forDetailReviewKind: reviewKind)
+        let reviewTitle = Self.title(forDetailReviewKind: reviewKind)
+        let status: String
+        let guidance: String
+        if hasEvidence {
+            let kindTitles = (matchingKinds.isEmpty ? expectedKinds : matchingKinds)
+                .prefix(3)
+                .map(\.title)
+                .joined(separator: "、")
+            status = metadataReady ? "metadata 已覆盖" : "metadata 待同步"
+            guidance = kindTitles.isEmpty ? "使用安全 metadata 作为复核证据。" : "证据类型：\(kindTitles)。"
+        } else {
+            status = "证据待同步"
+            guidance = "尚未看到对应 artifact 类型。"
+        }
+
+        return ClawMissionRunArtifactEvidenceItem(
+            reviewKind: reviewKind,
+            reviewTitle: reviewTitle,
+            status: status,
+            guidance: guidance,
+            icon: Self.icon(forDetailReviewKind: reviewKind),
+            artifactKinds: matchingKinds.isEmpty ? expectedKinds : matchingKinds,
+            hasEvidence: hasEvidence,
+            metadataReady: metadataReady,
+            isFocused: focusedReviewKind == reviewKind,
+            canFocusReview: focusUsesDetailReview(reviewKind)
+        )
+    }
+
+    private func metadataReady(forDetailReviewKind reviewKind: String) -> Bool {
+        switch reviewKind {
+        case "artifact-metadata":
+            return artifactMetadataReview?.hasMetadata == true
+        case "file-change-safety":
+            return gatewayFileChangeSafetyReview?.hasMetadata == true
+        case "shell-safety":
+            return gatewayShellCommandSafetyReview?.hasMetadata == true
+        case "extraction-completeness":
+            return gatewayExtractionCompletenessReview?.hasMetadata == true
+        case "browser-control":
+            return gatewayBrowserControlReview?.hasMetadata == true
+        case "delivery-safety":
+            return gatewayDeliverySafetyReview?.hasMetadata == true
+        case "gateway-capability":
+            return gatewayCapabilityReview?.hasMetadata == true
+        case "accessibility":
+            return gatewayAccessibilityReview?.hasMetadata == true
+        case "replay-guard":
+            return gatewayTaskReplayGuardReview?.hasMetadata == true
+        case "agent-trace":
+            return agentTraceReview?.hasMetadata == true
+        default:
+            return false
+        }
+    }
+
     var reviewReadinessSummary: ClawMissionRunReviewReadinessSummary {
         reviewReadinessSummary(focusedOn: nil)
     }
@@ -2857,6 +3011,63 @@ extension ClawMissionRunSummary {
             return "AgentTrace"
         default:
             return "详细复核"
+        }
+    }
+
+    private static func icon(forDetailReviewKind reviewKind: String) -> String {
+        switch reviewKind {
+        case "artifact-metadata":
+            return "paperclip.badge.ellipsis"
+        case "file-change-safety":
+            return "folder.badge.gearshape.fill"
+        case "shell-safety":
+            return "terminal.fill"
+        case "extraction-completeness":
+            return "tablecells.fill"
+        case "browser-control":
+            return "safari.fill"
+        case "delivery-safety":
+            return "hand.raised.fill"
+        case "gateway-capability":
+            return "server.rack"
+        case "accessibility":
+            return "accessibility.fill"
+        case "replay-guard":
+            return "rectangle.stack.badge.person.crop.fill"
+        case "agent-trace":
+            return "point.topleft.down.curvedto.point.bottomright.up"
+        default:
+            return "doc.text.magnifyingglass"
+        }
+    }
+
+    private static func evidenceArtifactKinds(
+        for reviewKind: String,
+        availableArtifactKinds: [ClawGatewayArtifactKind]
+    ) -> [ClawGatewayArtifactKind] {
+        switch reviewKind {
+        case "artifact-metadata":
+            return availableArtifactKinds
+        case "file-change-safety":
+            return [.fileDiff]
+        case "shell-safety":
+            return [.commandOutput]
+        case "extraction-completeness":
+            return [.browserTrace, .fileDiff, .commandOutput, .screenshot, .accessibilityTree]
+        case "browser-control":
+            return [.browserTrace]
+        case "delivery-safety":
+            return [.messageDraft]
+        case "gateway-capability":
+            return [.auditLog]
+        case "accessibility":
+            return [.accessibilityTree]
+        case "replay-guard":
+            return [.auditLog]
+        case "agent-trace":
+            return [.agentTrace]
+        default:
+            return []
         }
     }
 }

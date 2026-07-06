@@ -577,6 +577,12 @@ final class ClawTests: XCTestCase {
         XCTAssertFalse(idleNextAction.isReviewable)
         XCTAssertFalse(idleNextAction.requiresHumanAction)
         XCTAssertNil(idleNextAction.reviewKind)
+        let idleEvidence = idleStore.missionRunSummary.artifactEvidenceIndex
+        XCTAssertEqual(idleEvidence.artifactKindCount, 0)
+        XCTAssertEqual(idleEvidence.metadataArtifactCount, 0)
+        XCTAssertEqual(idleEvidence.redactedArtifactCount, 0)
+        XCTAssertEqual(idleEvidence.coveredReviewCount, 0)
+        XCTAssertFalse(idleEvidence.focusedHasEvidence)
 
         let store = ClawStore(autoScanLocalArtifacts: false)
         store.phoneAgentCommand = "打开浏览器搜索资料，整理结果并发到 Slack"
@@ -594,6 +600,20 @@ final class ClawTests: XCTestCase {
         let summary = store.missionRunSummary
         let availableDetailKinds = summary.availableDetailReviewKinds
         XCTAssertFalse(availableDetailKinds.isEmpty)
+        let evidenceIndex = summary.artifactEvidenceIndex
+        XCTAssertEqual(evidenceIndex.artifactKindCount, summary.artifactKinds.count)
+        XCTAssertEqual(evidenceIndex.metadataArtifactCount, summary.artifactMetadataReview?.metadataArtifactCount ?? 0)
+        XCTAssertEqual(evidenceIndex.redactedArtifactCount, summary.artifactMetadataReview?.redactedArtifactCount ?? 0)
+        XCTAssertEqual(evidenceIndex.items.map(\.reviewKind), availableDetailKinds)
+        XCTAssertGreaterThan(evidenceIndex.coveredReviewCount, 0)
+        XCTAssertTrue(evidenceIndex.items.contains { $0.reviewKind == "artifact-metadata" && $0.hasEvidence })
+        XCTAssertTrue(evidenceIndex.items.contains { $0.reviewKind == "browser-control" && $0.artifactKinds.contains(.browserTrace) })
+        XCTAssertTrue(evidenceIndex.items.contains { $0.reviewKind == "delivery-safety" && $0.artifactKinds.contains(.messageDraft) })
+        let focusedEvidenceIndex = summary.artifactEvidenceIndex(focusedOn: "delivery-safety")
+        XCTAssertEqual(focusedEvidenceIndex.focusedReviewKind, "delivery-safety")
+        XCTAssertEqual(focusedEvidenceIndex.focusedReviewTitle, "最终提交安全")
+        XCTAssertTrue(focusedEvidenceIndex.focusedHasEvidence)
+        XCTAssertTrue(focusedEvidenceIndex.items.contains { $0.reviewKind == "delivery-safety" && $0.isFocused })
         XCTAssertEqual(summary.detailReviewKinds(focusedOn: nil), availableDetailKinds)
         XCTAssertEqual(summary.detailReviewKinds(focusedOn: "delivery-safety"), ["delivery-safety"])
         XCTAssertEqual(summary.detailReviewKinds(focusedOn: "gateway-status"), availableDetailKinds)
@@ -659,8 +679,23 @@ final class ClawTests: XCTestCase {
             focusedNextAction.actionHint ?? "",
             focusedNextAction.primaryButtonTitle ?? ""
         ]
-        let visibleText = (queueVisibleChunks + readinessVisibleChunks + nextActionVisibleChunks).joined(separator: " ")
-        for forbidden in ["Authorization", "Bearer", "toolArguments", "file://", "/private", "/home", "C:\\", "stdout", "stderr"] {
+        let evidenceVisibleChunks = evidenceIndex.items.flatMap {
+            [
+                $0.reviewKind,
+                $0.reviewTitle,
+                $0.status,
+                $0.guidance,
+                $0.artifactKinds.map(\.title).joined(separator: " ")
+            ]
+        } + [
+            evidenceIndex.title,
+            evidenceIndex.status,
+            evidenceIndex.guidance,
+            focusedEvidenceIndex.focusedReviewKind ?? "",
+            focusedEvidenceIndex.focusedReviewTitle ?? ""
+        ]
+        let visibleText = (queueVisibleChunks + readinessVisibleChunks + nextActionVisibleChunks + evidenceVisibleChunks).joined(separator: " ")
+        for forbidden in ["Authorization", "Bearer", "toolArguments", "file://", "/private", "/Users", "/home", "C:\\", "stdout", "stderr", "diff"] {
             XCTAssertFalse(visibleText.contains(forbidden), "queue leaked \(forbidden)")
         }
 
@@ -684,6 +719,12 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(shellNextAction.reviewTitle, "Shell 命令安全")
         XCTAssertTrue(shellNextAction.requiresHumanAction)
         XCTAssertTrue(shellNextAction.canFocusDetailReview)
+        let shellEvidence = shellStore.missionRunSummary.artifactEvidenceIndex(focusedOn: "shell-safety")
+        let shellEvidenceItem = try XCTUnwrap(shellEvidence.items.first { $0.reviewKind == "shell-safety" })
+        XCTAssertTrue(shellEvidenceItem.hasEvidence)
+        XCTAssertTrue(shellEvidenceItem.metadataReady)
+        XCTAssertTrue(shellEvidenceItem.artifactKinds.contains(.commandOutput))
+        XCTAssertTrue(shellEvidenceItem.isFocused)
         XCTAssertFalse(
             [
                 shellReadiness.title,
@@ -694,7 +735,12 @@ final class ClawTests: XCTestCase {
                 shellNextAction.status,
                 shellNextAction.guidance,
                 shellNextAction.actionHint ?? "",
-                shellNextAction.primaryButtonTitle ?? ""
+                shellNextAction.primaryButtonTitle ?? "",
+                shellEvidence.title,
+                shellEvidence.status,
+                shellEvidence.guidance,
+                shellEvidenceItem.status,
+                shellEvidenceItem.guidance
             ].joined(separator: " ").contains("stdout")
         )
     }

@@ -116,6 +116,12 @@ enum LogicSmoke {
         expect(idleNextAction.isReviewable == false, "idle next review action should not be reviewable")
         expect(idleNextAction.requiresHumanAction == false, "idle next review action should not require action")
         expect(idleNextAction.reviewKind == nil, "idle next review action should not invent a review kind")
+        let idleEvidence = missionStore.missionRunSummary.artifactEvidenceIndex
+        expect(idleEvidence.artifactKindCount == 0, "idle evidence index should not count artifact kinds")
+        expect(idleEvidence.metadataArtifactCount == 0, "idle evidence index should not count metadata artifacts")
+        expect(idleEvidence.redactedArtifactCount == 0, "idle evidence index should not count redacted artifacts")
+        expect(idleEvidence.coveredReviewCount == 0, "idle evidence index should not invent coverage")
+        expect(idleEvidence.focusedHasEvidence == false, "idle evidence index should not mark focused evidence")
         missionStore.phoneAgentCommand = "打开浏览器搜索资料，整理结果并发到 Slack"
         missionStore.startAutonomousComputerTakeover()
         var missionSummary = missionStore.missionRunSummary
@@ -143,6 +149,38 @@ enum LogicSmoke {
         )
         let availableDetailKinds = missionSummary.availableDetailReviewKinds
         expect(availableDetailKinds.isEmpty == false, "mission summary should expose detail review kinds")
+        let evidenceIndex = missionSummary.artifactEvidenceIndex
+        expect(evidenceIndex.artifactKindCount == missionSummary.artifactKinds.count, "evidence index should count artifact kinds")
+        expect(
+            evidenceIndex.metadataArtifactCount == (missionSummary.artifactMetadataReview?.metadataArtifactCount ?? 0),
+            "evidence index should reuse artifact metadata count"
+        )
+        expect(
+            evidenceIndex.redactedArtifactCount == (missionSummary.artifactMetadataReview?.redactedArtifactCount ?? 0),
+            "evidence index should reuse redacted artifact count"
+        )
+        expect(evidenceIndex.items.map(\.reviewKind) == availableDetailKinds, "evidence index should follow detail review order")
+        expect(evidenceIndex.coveredReviewCount > 0, "evidence index should report covered review kinds")
+        expect(
+            evidenceIndex.items.contains { $0.reviewKind == "artifact-metadata" && $0.hasEvidence },
+            "evidence index should cover artifact metadata"
+        )
+        expect(
+            evidenceIndex.items.contains { $0.reviewKind == "browser-control" && $0.artifactKinds.contains(.browserTrace) },
+            "evidence index should map browser review to browser trace"
+        )
+        expect(
+            evidenceIndex.items.contains { $0.reviewKind == "delivery-safety" && $0.artifactKinds.contains(.messageDraft) },
+            "evidence index should map delivery review to message draft"
+        )
+        let focusedEvidenceIndex = missionSummary.artifactEvidenceIndex(focusedOn: "delivery-safety")
+        expect(focusedEvidenceIndex.focusedReviewKind == "delivery-safety", "evidence index should record focused review kind")
+        expect(focusedEvidenceIndex.focusedReviewTitle == "最终提交安全", "evidence index should record focused review title")
+        expect(focusedEvidenceIndex.focusedHasEvidence, "focused evidence index should mark delivery evidence")
+        expect(
+            focusedEvidenceIndex.items.contains { $0.reviewKind == "delivery-safety" && $0.isFocused },
+            "evidence index should mark focused item"
+        )
         expect(
             missionSummary.detailReviewKinds(focusedOn: nil) == availableDetailKinds,
             "nil focus should show all detail reviews"
@@ -246,8 +284,23 @@ enum LogicSmoke {
             focusedNextAction.actionHint ?? "",
             focusedNextAction.primaryButtonTitle ?? ""
         ]
-        let queueVisibleText = (queueVisibleChunks + readinessVisibleChunks + nextActionVisibleChunks).joined(separator: " ")
-        for forbidden in ["Authorization", "Bearer", "toolArguments", "file://", "/private", "/home", "C:\\", "stdout", "stderr"] {
+        let evidenceVisibleChunks = evidenceIndex.items.flatMap {
+            [
+                $0.reviewKind,
+                $0.reviewTitle,
+                $0.status,
+                $0.guidance,
+                $0.artifactKinds.map(\.title).joined(separator: " ")
+            ]
+        } + [
+            evidenceIndex.title,
+            evidenceIndex.status,
+            evidenceIndex.guidance,
+            focusedEvidenceIndex.focusedReviewKind ?? "",
+            focusedEvidenceIndex.focusedReviewTitle ?? ""
+        ]
+        let queueVisibleText = (queueVisibleChunks + readinessVisibleChunks + nextActionVisibleChunks + evidenceVisibleChunks).joined(separator: " ")
+        for forbidden in ["Authorization", "Bearer", "toolArguments", "file://", "/private", "/Users", "/home", "C:\\", "stdout", "stderr", "diff"] {
             expect(queueVisibleText.contains(forbidden) == false, "review priority queue should not expose \(forbidden)")
         }
         if let metadataReview = missionSummary.artifactMetadataReview {
@@ -391,6 +444,15 @@ enum LogicSmoke {
         expect(shellNextAction.reviewTitle == "Shell 命令安全", "shell next action should expose safe shell title")
         expect(shellNextAction.requiresHumanAction, "shell next action should require human review")
         expect(shellNextAction.canFocusDetailReview, "shell next action should focus shell detail")
+        let shellEvidence = shellMissionSummary.artifactEvidenceIndex(focusedOn: "shell-safety")
+        if let shellEvidenceItem = shellEvidence.items.first(where: { $0.reviewKind == "shell-safety" }) {
+            expect(shellEvidenceItem.hasEvidence, "shell evidence index should mark shell evidence")
+            expect(shellEvidenceItem.metadataReady, "shell evidence index should mark metadata ready")
+            expect(shellEvidenceItem.artifactKinds.contains(.commandOutput), "shell evidence index should map to command output")
+            expect(shellEvidenceItem.isFocused, "shell evidence index should mark focused shell item")
+        } else {
+            failures.append("shell evidence index should include shell safety")
+        }
         expect(
             [
                 shellReadiness.title,
@@ -401,7 +463,10 @@ enum LogicSmoke {
                 shellNextAction.status,
                 shellNextAction.guidance,
                 shellNextAction.actionHint ?? "",
-                shellNextAction.primaryButtonTitle ?? ""
+                shellNextAction.primaryButtonTitle ?? "",
+                shellEvidence.title,
+                shellEvidence.status,
+                shellEvidence.guidance
             ].joined(separator: " ").contains("stdout") == false,
             "shell readiness should not expose stdout"
         )
