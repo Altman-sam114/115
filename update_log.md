@@ -31,6 +31,7 @@
 - 新增 `ClawMissionRunNextReviewAction`，`ClawMissionRunSummary` 通过 computed helper 从当前有效聚焦项、完整复核优先队列和可用 detail review kind 派生下一步人工复核行动。
 - 下一步行动优先使用当前聚焦项，否则使用完整队列最高优先项；没有队列但已有 detail review 时降级为抽查详细复核，完全 idle 时提示等待 Gateway 证据。
 - Mission Run 在复核态势摘要后、复核优先队列前展示下一步复核行动，并提供聚焦按钮复用 v0.25 聚焦机制；compact iPhone 和 iPad regular 工作台复用同一面板。
+- 下一步复核行动的聚焦状态同时接受队列项和已存在的 detail review kind，避免 detail-only fallback 按钮被 presentation 层误判为过期聚焦。
 - 下一步行动只使用固定文案、计数、枚举和已脱敏队列项字段，不读取 Gateway `file://` payload，不展示 raw URL/path/command/stdout/stderr/diff/token/header 或 `toolArguments`。
 - XCTest 和 Swift logic smoke 覆盖 idle、正常任务、聚焦状态、Shell 高优先行动、count/目标一致性和敏感字符串不外显。
 - 同步 README、协议、flow/flowchart、测试说明和 Agent A 提示词；本轮不新增 schema/event/action/artifact kind，不改变 Gateway 权限。

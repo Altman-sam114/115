@@ -795,11 +795,16 @@ struct ClawMissionRunPanel: View {
     }
 
     private func activeFocusedReviewKind(for summary: ClawMissionRunSummary) -> String? {
-        guard let focusedReviewKind,
-              summary.reviewPriorityQueue.contains(where: { $0.reviewKind == focusedReviewKind }) else {
+        guard let focusedReviewKind else {
             return nil
         }
-        return focusedReviewKind
+        if summary.reviewPriorityQueue.contains(where: { $0.reviewKind == focusedReviewKind }) {
+            return focusedReviewKind
+        }
+        if summary.availableDetailReviewKinds.contains(focusedReviewKind) {
+            return focusedReviewKind
+        }
+        return nil
     }
 
     private func focusReviewKind(_ reviewKind: String) {
