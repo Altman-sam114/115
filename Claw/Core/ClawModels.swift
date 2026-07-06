@@ -3815,6 +3815,7 @@ extension ClawMissionRunSummary {
         let focusedCandidate = focusedKind.flatMap { kind in
             candidates.first { $0.reviewKind == kind }
         }
+        let focusedReviewTitle = focusedCandidate?.reviewTitle ?? focusedKind.flatMap(titleForNextStepReviewKind)
         let primaryCandidate = focusedCandidate ??
             candidates.first(where: \.isBlocked) ??
             candidates.first(where: \.requiresHumanAction) ??
@@ -3888,9 +3889,9 @@ extension ClawMissionRunSummary {
             loopCandidateCount: loopCandidateCount,
             focusedCandidateID: focusedCandidate?.id,
             focusedReviewKind: focusedCandidate?.reviewKind,
-            focusedReviewTitle: focusedCandidate?.reviewTitle,
+            focusedReviewTitle: focusedReviewTitle,
             primaryReviewKind: primaryCandidate?.reviewKind,
-            primaryReviewTitle: primaryCandidate?.reviewTitle,
+            primaryReviewTitle: primaryCandidate?.reviewTitle ?? primaryCandidate?.reviewKind.flatMap(titleForNextStepReviewKind),
             canFocusPrimaryReview: primaryCandidate?.canFocusReview ?? false,
             requiresHumanAction: requiresHumanAction,
             hasMetadataGap: hasMetadataGap,
@@ -3913,6 +3914,17 @@ extension ClawMissionRunSummary {
         approval: ClawMissionRunApprovalQueueSummary
     ) -> [ClawMissionRunNextStepCandidate] {
         var candidates: [ClawMissionRunNextStepCandidate] = []
+        let hasMissionEvidence = approval.isReviewable ||
+            loop.isReviewable ||
+            macReadiness.isReviewable ||
+            actionPreflight.isReviewable ||
+            evidenceCoverage.isReviewable ||
+            readiness.totalPriorityCount > 0 ||
+            artifactCount > 0
+
+        guard hasMissionEvidence else {
+            return []
+        }
 
         if approval.isReviewable && (approval.requiresHumanAction || requiresUserApproval) {
             candidates.append(
@@ -4114,6 +4126,29 @@ extension ClawMissionRunSummary {
             reviewPriorityQueue.contains { $0.reviewKind == reviewKind } ||
             approvalQueue.contains { $0.reviewKind == reviewKind && $0.canFocusReview } ||
             actionPreflightItems.contains { $0.reviewKind == reviewKind && $0.canFocusReview }
+    }
+
+    private func titleForNextStepReviewKind(_ reviewKind: String) -> String? {
+        if let priorityTitle = reviewPriorityQueue.first(where: { $0.reviewKind == reviewKind })?.title {
+            return priorityTitle
+        }
+        if let approvalTitle = approvalQueue.first(where: { $0.reviewKind == reviewKind })?.title {
+            return approvalTitle
+        }
+        if let actionTitle = actionPreflightItems.first(where: { $0.reviewKind == reviewKind })?.reviewTitle {
+            return actionTitle
+        }
+        if focusUsesDetailReview(reviewKind) {
+            return Self.title(forDetailReviewKind: reviewKind)
+        }
+        switch reviewKind {
+        case "approval":
+            return "手机审批"
+        case "gateway-status":
+            return "Gateway 状态"
+        default:
+            return nil
+        }
     }
 
     func macAgentReadinessBoard(focusedOn reviewKind: String?) -> ClawMissionRunMacAgentReadinessBoard {
