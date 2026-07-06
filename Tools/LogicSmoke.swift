@@ -598,16 +598,17 @@ enum LogicSmoke {
             staleEvidenceTrail.status,
             staleEvidenceTrail.guidance
         ]
-        let approvalQueueVisibleChunks = approvalQueue.items.flatMap {
+        let approvalQueueItemChunks: [String] = approvalQueue.items.flatMap { item in
             [
-                $0.title,
-                $0.status,
-                $0.reason,
-                $0.reviewKind,
-                $0.actionKindTitle ?? "",
-                $0.approvalTitle ?? ""
+                item.title,
+                item.status,
+                item.reason,
+                item.reviewKind,
+                item.actionKindTitle ?? "",
+                item.approvalTitle ?? ""
             ]
-        } + [
+        }
+        let approvalQueueSummaryChunks: [String] = [
             preSendApprovalQueue.title,
             preSendApprovalQueue.status,
             preSendApprovalQueue.guidance,
@@ -629,14 +630,16 @@ enum LogicSmoke {
             statusApprovalQueue.focusedReviewKind ?? "",
             statusApprovalQueue.focusedReviewTitle ?? ""
         ]
-        let payloadLedgerVisibleChunks = payloadLedger.items.flatMap {
+        let approvalQueueVisibleChunks = approvalQueueItemChunks + approvalQueueSummaryChunks
+        let payloadLedgerItemChunks: [String] = payloadLedger.items.flatMap { item in
             [
-                $0.reviewKind,
-                $0.reviewTitle,
-                $0.status,
-                $0.guidance
+                item.reviewKind,
+                item.reviewTitle,
+                item.status,
+                item.guidance
             ]
-        } + [
+        }
+        let payloadLedgerSummaryChunks: [String] = [
             payloadLedger.title,
             payloadLedger.status,
             payloadLedger.guidance,
@@ -654,6 +657,7 @@ enum LogicSmoke {
             stalePayloadLedger.status,
             stalePayloadLedger.guidance
         ]
+        let payloadLedgerVisibleChunks = payloadLedgerItemChunks + payloadLedgerSummaryChunks
         let focusContextVisibleChunks = [
             focusContext.title,
             focusContext.status,
@@ -884,45 +888,53 @@ enum LogicSmoke {
         expect(shellDetailDock.detailReviewKinds == ["shell-safety"], "shell detail dock should show shell only")
         expect(shellDetailDock.showsFocusedDetailOnly, "shell detail dock should mark single detail mode")
         expect(shellDetailDock.canClearFocus, "shell detail dock should allow clearing")
-        expect(
-            [
-                shellReadiness.title,
-                shellReadiness.status,
-                shellReadiness.guidance,
-                shellReadiness.topActionHint ?? "",
-                shellNextAction.title,
-                shellNextAction.status,
-                shellNextAction.guidance,
-                shellNextAction.actionHint ?? "",
-                shellNextAction.primaryButtonTitle ?? "",
-                shellEvidence.title,
-                shellEvidence.status,
-                shellEvidence.guidance,
-                shellPayloadLedger.title,
-                shellPayloadLedger.status,
-                shellPayloadLedger.guidance,
-                shellPayloadLedger.items.map { "\($0.reviewTitle) \($0.status) \($0.guidance)" }.joined(separator: " "),
-                shellOperatorStrip.status,
-                shellEvidenceTrail.title,
-                shellEvidenceTrail.status,
-                shellEvidenceTrail.guidance,
-                shellEvidenceTrail.steps.map { "\($0.title) \($0.status) \($0.guidance)" }.joined(separator: " "),
-                shellApprovalQueue.title,
-                shellApprovalQueue.status,
-                shellApprovalQueue.guidance,
-                shellApprovalQueue.items.map { "\($0.title) \($0.status) \($0.reason)" }.joined(separator: " "),
-                shellFocusContext.title,
-                shellFocusContext.status,
-                shellFocusContext.guidance,
-                shellFocusContext.primaryButtonTitle ?? "",
-                shellDetailDock.title,
-                shellDetailDock.status,
-                shellDetailDock.guidance,
-                shellDetailDock.activeReviewKind ?? "",
-                shellDetailDock.activeReviewTitle ?? ""
-            ].joined(separator: " ").contains("stdout") == false,
-            "shell readiness should not expose stdout"
-        )
+        let shellPayloadLedgerRows = shellPayloadLedger.items.map { item in
+            "\(item.reviewTitle) \(item.status) \(item.guidance)"
+        }.joined(separator: " ")
+        let shellEvidenceTrailRows = shellEvidenceTrail.steps.map { step in
+            "\(step.title) \(step.status) \(step.guidance)"
+        }.joined(separator: " ")
+        let shellApprovalQueueRows = shellApprovalQueue.items.map { item in
+            "\(item.title) \(item.status) \(item.reason)"
+        }.joined(separator: " ")
+        let shellVisibleChunks: [String] = [
+            shellReadiness.title,
+            shellReadiness.status,
+            shellReadiness.guidance,
+            shellReadiness.topActionHint ?? "",
+            shellNextAction.title,
+            shellNextAction.status,
+            shellNextAction.guidance,
+            shellNextAction.actionHint ?? "",
+            shellNextAction.primaryButtonTitle ?? "",
+            shellEvidence.title,
+            shellEvidence.status,
+            shellEvidence.guidance,
+            shellPayloadLedger.title,
+            shellPayloadLedger.status,
+            shellPayloadLedger.guidance,
+            shellPayloadLedgerRows,
+            shellOperatorStrip.status,
+            shellEvidenceTrail.title,
+            shellEvidenceTrail.status,
+            shellEvidenceTrail.guidance,
+            shellEvidenceTrailRows,
+            shellApprovalQueue.title,
+            shellApprovalQueue.status,
+            shellApprovalQueue.guidance,
+            shellApprovalQueueRows,
+            shellFocusContext.title,
+            shellFocusContext.status,
+            shellFocusContext.guidance,
+            shellFocusContext.primaryButtonTitle ?? "",
+            shellDetailDock.title,
+            shellDetailDock.status,
+            shellDetailDock.guidance,
+            shellDetailDock.activeReviewKind ?? "",
+            shellDetailDock.activeReviewTitle ?? ""
+        ]
+        let shellVisibleText = shellVisibleChunks.joined(separator: " ")
+        expect(shellVisibleText.contains("stdout") == false, "shell readiness should not expose stdout")
         if let shellArtifacts = shellReviewStore.clawGatewaySessions.first?.results.first(where: { $0.actionKind == .runShellCommand })?.artifacts,
            let shellReview = ClawGatewayShellCommandSafetyReviewSummary.latest(from: shellArtifacts) {
             expect(shellReview.mode == "shell-policy-blocked", "shell result review should expose policy blocked mode")
