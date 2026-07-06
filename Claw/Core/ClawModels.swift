@@ -3815,7 +3815,7 @@ extension ClawMissionRunSummary {
         let focusedCandidate = focusedKind.flatMap { kind in
             candidates.first { $0.reviewKind == kind }
         }
-        let focusedReviewTitle = focusedCandidate?.reviewTitle ?? focusedKind.flatMap(titleForNextStepReviewKind)
+        let focusedReviewTitle = focusedKind.flatMap(titleForNextStepReviewKind) ?? focusedCandidate?.reviewTitle
         let primaryCandidate = focusedCandidate ??
             candidates.first(where: \.isBlocked) ??
             candidates.first(where: \.requiresHumanAction) ??
@@ -4129,6 +4129,9 @@ extension ClawMissionRunSummary {
     }
 
     private func titleForNextStepReviewKind(_ reviewKind: String) -> String? {
+        if focusUsesDetailReview(reviewKind) {
+            return Self.title(forDetailReviewKind: reviewKind)
+        }
         if let priorityTitle = reviewPriorityQueue.first(where: { $0.reviewKind == reviewKind })?.title {
             return priorityTitle
         }
@@ -4137,9 +4140,6 @@ extension ClawMissionRunSummary {
         }
         if let actionTitle = actionPreflightItems.first(where: { $0.reviewKind == reviewKind })?.reviewTitle {
             return actionTitle
-        }
-        if focusUsesDetailReview(reviewKind) {
-            return Self.title(forDetailReviewKind: reviewKind)
         }
         switch reviewKind {
         case "approval":
