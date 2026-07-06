@@ -2,7 +2,7 @@
 
 这是一个 SwiftUI iPhone 原型 App，用手机作为 Claw 控制台：用户用自然语言描述电脑任务，App 生成可审批的执行计划和 JSON envelope，真正的浏览器、文件、Shell、桌面 App 操作交给用户自托管的 Claw Gateway 在电脑上执行。
 
-当前版本不下载模型权重，模型保持占位状态。App 已完成 UI、数据流、本地 artifact 导入/扫描/校验、电脑接管规划器、Claw Gateway envelope、事件流 reducer、Mission Run 任务回合面板、Mission Run Operator Strip、Mission Run Loop 继续态势、Mission Run Focus Context 聚焦上下文、Mission Run Artifact 证据索引、Mission Run 复核优先队列、复核聚焦模式、复核态势摘要与下一步复核行动、Artifact metadata 详情复核、文件变更安全复核、提取完整性复核、草稿/最终提交安全复核、AgentTrace handoff 状态、mac 证据质量分层和复核摘要、Gateway 能力复核摘要、Accessibility artifact 复核摘要、Gateway Replay Guard 复核摘要、专用 metadata 复核统一脱敏、Live Gateway 连接健康摘要、有界重连与 ping 可观测性、Gateway 进程内 task replay guard、iPad 多栏复核工作台、Gateway 能力快照审计、macOS Accessibility 观察摘要、WebSocket transport 边界、Shortcuts 入口和 smoke 测试。
+当前版本不下载模型权重，模型保持占位状态。App 已完成 UI、数据流、本地 artifact 导入/扫描/校验、电脑接管规划器、Claw Gateway envelope、事件流 reducer、Mission Run 任务回合面板、Mission Run Operator Strip、Mission Run Loop 继续态势、Mission Run Focus Context 聚焦上下文、Mission Run Review Detail Dock、Mission Run Artifact 证据索引、Mission Run 复核优先队列、复核聚焦模式、复核态势摘要与下一步复核行动、Artifact metadata 详情复核、文件变更安全复核、提取完整性复核、草稿/最终提交安全复核、AgentTrace handoff 状态、mac 证据质量分层和复核摘要、Gateway 能力复核摘要、Accessibility artifact 复核摘要、Gateway Replay Guard 复核摘要、专用 metadata 复核统一脱敏、Live Gateway 连接健康摘要、有界重连与 ping 可观测性、Gateway 进程内 task replay guard、iPad 多栏复核工作台、Gateway 能力快照审计、macOS Accessibility 观察摘要、WebSocket transport 边界、Shortcuts 入口和 smoke 测试。
 
 后续 Codex/Agent 接力开发必须先读 `AGENTS.md`。项目已建立“人工目标 -> Agent A 设计提示词 -> Agent B 在 main 上实现并推送 -> GitHub Actions 云端验证 -> Agent C 下载结果包复判 -> 人工复核 -> 下一轮”的迭代工作流，并准备支持未来由 Agent X 主控多轮调度 A/B/C。核心记忆和规范分布在 `AGENTS.md`、`update_log.md`、`md/test/test.md`、`md/flow/flow.md`、`md/flow/flowchart.md` 和 `md/prompt/`。
 
@@ -36,7 +36,7 @@
 
 这个原型朝 OpenClaw 式电脑智能体迭代：
 
-- 手机端：输入任务、生成计划、用 Mission Run 面板展示当前阶段/下一步/风险/证据、Operator Strip、Loop 继续态势、Focus Context 聚焦上下文、Artifact 证据索引、复核态势摘要、下一步人工复核行动和按风险/可行动性排序的复核优先队列，可聚焦单个队列项查看对应详细复核，审批高风险动作、查看 envelope、Live Gateway 连接健康、Artifact metadata、文件变更安全、提取完整性、草稿/最终提交安全、Gateway 能力、Accessibility、Replay Guard 和 AgentTrace handoff 审计摘要；iPad/宽屏下把命令、Mission Run、计划、Gateway 会话、事件、权限和日志分栏复核。
+- 手机端：输入任务、生成计划、用 Mission Run 面板展示当前阶段/下一步/风险/证据、Operator Strip、Loop 继续态势、Focus Context 聚焦上下文、Artifact 证据索引、复核态势摘要、下一步人工复核行动和按风险/可行动性排序的复核优先队列，可聚焦单个队列项查看对应详细复核，审批高风险动作、查看 envelope、Live Gateway 连接健康、Artifact metadata、文件变更安全、提取完整性、草稿/最终提交安全、Gateway 能力、Accessibility、Replay Guard 和 AgentTrace handoff 审计摘要；iPad/宽屏下把命令、Mission Run、计划、Gateway 会话、事件、权限和日志分栏复核，并在右侧顶部同步显示当前 Mission 复核详情 Dock。
 - 桌面网关：观察屏幕、控制浏览器、操作桌面 App、管理文件、运行受控 Shell、提取数据，并把事件、artifact 和审批请求推回手机端。
 - 安全策略：token 只保留短 SHA-256 指纹；动作走白名单；敏感动作提升审批；Shell/文件/桌面接管默认需要网关确认。
 - 边界：iOS 普通 App 不能静默控制电脑或读取其他 App 私有数据，电脑接管必须发生在用户授权的桌面/自托管网关。
@@ -106,7 +106,7 @@ node Tools/claw-gateway-direct-smoke.mjs
 node Tools/claw-gateway-smoke.mjs
 ```
 
-`direct-smoke` 不监听端口，用 `--emit-events` 直接验证同一套 Gateway handler、workspace artifact、browser trace 到结构化提取链路、Browser Control metadata、File Change Safety metadata、Shell Command Safety metadata、提取完整性 metadata、Delivery Safety metadata、workspace 文件真实写入、路径逃逸阻断、写入失败审计、workspace symlink 阻断、Shell dry-run 阻断、allowlist Shell 真执行、缺少结构化 Shell 命令阻断、浏览器打开/搜索计划与 allowlist 阻断、`agentTrace` 证据充分性/降级证据/缺口/下一步选择/审批停止原因/handoff 状态、artifact metadata 与 trace JSON 关键字段一致性、同一进程内重复 envelope 的 replay guard，以及桌面 App 控制的审批闸门和 allowlist 阻断；Swift logic smoke 还覆盖 Mission Run Operator Strip、Loop 继续态势、Focus Context 聚焦上下文、AgentTrace handoff 状态、Artifact 证据索引、复核优先队列的排序、聚焦过滤、复核态势摘要、下一步复核行动和脱敏断言；`claw-gateway-smoke` 会实际启动 WebSocket server，并覆盖同类 `agentTrace` 证据策略、degraded signal metadata、handoff status metadata 断言、Browser Control metadata、File Change Safety metadata、Shell Command Safety metadata、提取完整性 metadata、Delivery Safety metadata、路径逃逸阻断、写入失败审计和同一 Gateway 进程内两次 WebSocket 连接的 replay guard。
+`direct-smoke` 不监听端口，用 `--emit-events` 直接验证同一套 Gateway handler、workspace artifact、browser trace 到结构化提取链路、Browser Control metadata、File Change Safety metadata、Shell Command Safety metadata、提取完整性 metadata、Delivery Safety metadata、workspace 文件真实写入、路径逃逸阻断、写入失败审计、workspace symlink 阻断、Shell dry-run 阻断、allowlist Shell 真执行、缺少结构化 Shell 命令阻断、浏览器打开/搜索计划与 allowlist 阻断、`agentTrace` 证据充分性/降级证据/缺口/下一步选择/审批停止原因/handoff 状态、artifact metadata 与 trace JSON 关键字段一致性、同一进程内重复 envelope 的 replay guard，以及桌面 App 控制的审批闸门和 allowlist 阻断；Swift logic smoke 还覆盖 Mission Run Operator Strip、Loop 继续态势、Focus Context 聚焦上下文、Review Detail Dock、AgentTrace handoff 状态、Artifact 证据索引、复核优先队列的排序、聚焦过滤、复核态势摘要、下一步复核行动和脱敏断言；`claw-gateway-smoke` 会实际启动 WebSocket server，并覆盖同类 `agentTrace` 证据策略、degraded signal metadata、handoff status metadata 断言、Browser Control metadata、File Change Safety metadata、Shell Command Safety metadata、提取完整性 metadata、Delivery Safety metadata、路径逃逸阻断、写入失败审计和同一 Gateway 进程内两次 WebSocket 连接的 replay guard。
 
 ## 运行
 
@@ -141,6 +141,7 @@ node Tools/claw-gateway-smoke.mjs
 
 ## 完成情况
 
+- 2026-07-06：新增 v0.34 iPad Mission Review Detail Dock。regular iPad/mac 工作台把 Mission Run 聚焦状态提升到左右栏共享，右侧顶部新增 Mission 复核详情 Dock，显示当前聚焦、下一步或全量详细复核 fallback；compact iPhone 保持单栏。Dock 只复用既有 metadata-only 安全摘要和固定文案，不读取 Gateway `file://` payload，不执行 Gateway 动作、不审批、不发送、不重试、不自动继续。本轮不新增 schema/event/action/artifact kind，不扩大 Gateway 权限。
 - 2026-07-06：新增 v0.33 Mission Run Focus Context 聚焦上下文。手机端从当前聚焦项、复核优先队列、Artifact 证据索引、复核态势和下一步复核行动派生聚焦上下文卡，提示当前聚焦是否有 detail row、证据/metadata 状态和清除聚焦入口；按钮只改变本地聚焦，不执行 Gateway 动作、不审批、不发送、不重试、不自动继续。本轮不读取 Gateway `file://` payload，不展示 raw URL/path/command/stdout/stderr/diff/token/header/workspace path 或 `toolArguments`，不新增 schema/event/action/artifact kind，不扩大 Gateway 权限。
 - 2026-07-06：新增 v0.32 Mission Run Loop 继续态势。手机端从安全 AgentTrace metadata 派生 Loop 继续态势卡，汇总 handoff 状态、readiness、满足/降级/缺失证据计数、下一步 action 和审批要求；按钮只能聚焦 AgentTrace 详细复核，不执行发送、审批、重试或自动继续。本轮不读取 Gateway `file://` payload，不展示 raw URL/path/command/stdout/stderr/diff/token/header/workspace path 或 `toolArguments`，不新增 schema/event/action/artifact kind，不扩大 Gateway 权限。
 - 2026-07-06：新增 v0.31 AgentTrace mac 证据质量。Gateway `runAgentLoop` 将输入证据分成 satisfied、degraded 和 missing，dry-run、window metadata、network blocked、failed、unavailable 或 not-requested 证据不再被当成真实可继续证据；metadata 新增安全 `degradedSignals`，不读取 Gateway `file://` payload，不展示 raw URL/path/command/stdout/stderr/diff/token/header 或 `toolArguments`，不新增 schema/event/action/artifact kind，不扩大 Gateway 权限。

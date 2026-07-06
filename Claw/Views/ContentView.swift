@@ -455,13 +455,14 @@ struct PhoneAgentView: View {
 
 struct PhoneAgentCompactLayout: View {
     let examples: [String]
+    @State private var focusedReviewKind: String?
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 PhoneAgentCommandPanel(examples: examples)
 
-                ClawMissionRunPanel()
+                ClawMissionRunPanel(focusedReviewKind: $focusedReviewKind)
 
                 PhoneAgentPlanPanel()
 
@@ -480,6 +481,7 @@ struct PhoneAgentCompactLayout: View {
 
 struct PhoneAgentWorkbenchLayout: View {
     let examples: [String]
+    @State private var focusedReviewKind: String?
 
     var body: some View {
         GeometryReader { proxy in
@@ -489,7 +491,7 @@ struct PhoneAgentWorkbenchLayout: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
                         PhoneAgentCommandPanel(examples: examples)
-                        ClawMissionRunPanel()
+                        ClawMissionRunPanel(focusedReviewKind: $focusedReviewKind)
                     }
                     .padding(.vertical, 16)
                     .padding(.leading, 16)
@@ -501,7 +503,7 @@ struct PhoneAgentWorkbenchLayout: View {
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
-                        PhoneAgentReviewColumn()
+                        PhoneAgentReviewColumn(focusedReviewKind: $focusedReviewKind)
                     }
                     .padding(.vertical, 16)
                     .padding(.trailing, 16)
@@ -513,8 +515,13 @@ struct PhoneAgentWorkbenchLayout: View {
 }
 
 struct PhoneAgentReviewColumn: View {
+    @Binding var focusedReviewKind: String?
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
+            PhoneAgentReviewSection(title: "Mission 复核详情", icon: "sidebar.right") {
+                ClawMissionReviewDetailDockView(focusedReviewKind: $focusedReviewKind)
+            }
             PhoneAgentReviewSection(title: "计划复核", icon: "checklist") {
                 PhoneAgentPlanPanel()
             }
@@ -621,11 +628,11 @@ struct PhoneAgentCommandPanel: View {
 
 struct ClawMissionRunPanel: View {
     @EnvironmentObject private var store: ClawStore
-    @State private var focusedReviewKind: String?
+    @Binding var focusedReviewKind: String?
 
     var body: some View {
         let summary = store.missionRunSummary
-        let activeFocusedReviewKind = activeFocusedReviewKind(for: summary)
+        let activeFocusedReviewKind = summary.activeReviewFocus(from: focusedReviewKind)
         let artifactEvidenceIndex = summary.artifactEvidenceIndex(focusedOn: activeFocusedReviewKind)
         let reviewReadinessSummary = summary.reviewReadinessSummary(focusedOn: activeFocusedReviewKind)
         let nextReviewAction = summary.nextReviewAction(focusedOn: activeFocusedReviewKind)
@@ -748,55 +755,7 @@ struct ClawMissionRunPanel: View {
                 onClearFocus: clearFocusedReviewKind
             )
 
-            if let review = summary.artifactMetadataReview,
-               summary.shouldShowDetailReview("artifact-metadata", focusedOn: activeFocusedReviewKind) {
-                ClawGatewayArtifactMetadataReviewRow(review: review)
-            }
-
-            if let review = summary.gatewayFileChangeSafetyReview,
-               summary.shouldShowDetailReview("file-change-safety", focusedOn: activeFocusedReviewKind) {
-                ClawGatewayFileChangeSafetyReviewRow(review: review)
-            }
-
-            if let review = summary.gatewayShellCommandSafetyReview,
-               summary.shouldShowDetailReview("shell-safety", focusedOn: activeFocusedReviewKind) {
-                ClawGatewayShellCommandSafetyReviewRow(review: review)
-            }
-
-            if let review = summary.gatewayExtractionCompletenessReview,
-               summary.shouldShowDetailReview("extraction-completeness", focusedOn: activeFocusedReviewKind) {
-                ClawGatewayExtractionCompletenessReviewRow(review: review)
-            }
-
-            if let review = summary.gatewayBrowserControlReview,
-               summary.shouldShowDetailReview("browser-control", focusedOn: activeFocusedReviewKind) {
-                ClawGatewayBrowserControlReviewRow(review: review)
-            }
-
-            if let review = summary.gatewayDeliverySafetyReview,
-               summary.shouldShowDetailReview("delivery-safety", focusedOn: activeFocusedReviewKind) {
-                ClawGatewayDeliverySafetyReviewRow(review: review)
-            }
-
-            if let review = summary.gatewayCapabilityReview,
-               summary.shouldShowDetailReview("gateway-capability", focusedOn: activeFocusedReviewKind) {
-                ClawGatewayCapabilityReviewRow(review: review)
-            }
-
-            if let review = summary.gatewayAccessibilityReview,
-               summary.shouldShowDetailReview("accessibility", focusedOn: activeFocusedReviewKind) {
-                ClawGatewayAccessibilityReviewRow(review: review)
-            }
-
-            if let review = summary.gatewayTaskReplayGuardReview,
-               summary.shouldShowDetailReview("replay-guard", focusedOn: activeFocusedReviewKind) {
-                ClawGatewayTaskReplayGuardReviewRow(review: review)
-            }
-
-            if let review = summary.agentTraceReview,
-               summary.shouldShowDetailReview("agent-trace", focusedOn: activeFocusedReviewKind) {
-                ClawAgentTraceReviewRow(review: review)
-            }
+            ClawMissionDetailReviewRows(summary: summary, focusedReviewKind: activeFocusedReviewKind)
 
             Text(summary.statusLine)
                 .font(.footnote)
@@ -812,19 +771,6 @@ struct ClawMissionRunPanel: View {
             .opacity(summary.isPrimaryActionEnabled ? 1 : 0.55)
         }
         .panelCard()
-    }
-
-    private func activeFocusedReviewKind(for summary: ClawMissionRunSummary) -> String? {
-        guard let focusedReviewKind else {
-            return nil
-        }
-        if summary.reviewPriorityQueue.contains(where: { $0.reviewKind == focusedReviewKind }) {
-            return focusedReviewKind
-        }
-        if summary.availableDetailReviewKinds.contains(focusedReviewKind) {
-            return focusedReviewKind
-        }
-        return nil
     }
 
     private func focusReviewKind(_ reviewKind: String) {
@@ -869,6 +815,175 @@ struct ClawMissionRunPanel: View {
         case .waitForGateway, .inspectBlocked:
             break
         }
+    }
+}
+
+struct ClawMissionReviewDetailDockView: View {
+    @EnvironmentObject private var store: ClawStore
+    @Binding var focusedReviewKind: String?
+
+    var body: some View {
+        let summary = store.missionRunSummary
+        let activeFocusedReviewKind = summary.activeReviewFocus(from: focusedReviewKind)
+        let dock = summary.reviewDetailDockSummary(focusedOn: focusedReviewKind)
+        let focusContext = summary.focusContextSummary(focusedOn: focusedReviewKind)
+
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Label(dock.title, systemImage: dock.icon)
+                    .font(.headline)
+                    .foregroundStyle(tint(for: dock))
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Spacer(minLength: 0)
+
+                if let activeReviewTitle = dock.activeReviewTitle {
+                    PhoneAgentTag(text: activeReviewTitle, icon: "scope", tint: tint(for: dock))
+                }
+            }
+
+            Text(dock.status)
+                .font(.subheadline.bold())
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(dock.guidance)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 8) {
+                PhoneAgentTag(
+                    text: dock.showsFocusedDetailOnly ? "单项详情" : "全量详情",
+                    icon: dock.showsFocusedDetailOnly ? "scope" : "rectangle.stack.fill",
+                    tint: dock.showsFocusedDetailOnly ? .purple : .blue
+                )
+                PhoneAgentTag(
+                    text: "\(dock.detailReviewKinds.count) 类",
+                    icon: "doc.text.magnifyingglass",
+                    tint: .purple
+                )
+                if dock.hasStaleFocus {
+                    PhoneAgentTag(text: "聚焦已更新", icon: "arrow.triangle.2.circlepath", tint: .orange)
+                }
+            }
+
+            if dock.isReviewable {
+                ClawMissionRunFocusContextView(
+                    summary: focusContext,
+                    onFocusReviewKind: focusReviewKind,
+                    onClearFocus: clearFocusedReviewKind
+                )
+
+                if dock.detailReviewKinds.isEmpty {
+                    Label("尚无详细复核 row；请先发送任务生成 Gateway 证据。", systemImage: "tray")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    ClawMissionDetailReviewRows(
+                        summary: summary,
+                        focusedReviewKind: activeFocusedReviewKind
+                    )
+                }
+            } else {
+                Label("发送任务后会在这里显示 metadata-only 的安全摘要。", systemImage: "tray")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .panelCard()
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(accessibilitySummary(for: dock))
+    }
+
+    private func focusReviewKind(_ reviewKind: String) {
+        focusedReviewKind = reviewKind
+    }
+
+    private func clearFocusedReviewKind() {
+        focusedReviewKind = nil
+    }
+
+    private func accessibilitySummary(for dock: ClawMissionRunReviewDetailDockSummary) -> String {
+        if let activeReviewTitle = dock.activeReviewTitle {
+            return "Mission 复核详情，当前聚焦 \(activeReviewTitle)，\(dock.status)"
+        }
+        return "Mission 复核详情，\(dock.status)"
+    }
+
+    private func tint(for dock: ClawMissionRunReviewDetailDockSummary) -> Color {
+        if dock.isReviewable == false {
+            return .secondary
+        }
+        if dock.hasStaleFocus {
+            return .orange
+        }
+        if dock.showsFocusedDetailOnly {
+            return .purple
+        }
+        return .blue
+    }
+}
+
+struct ClawMissionDetailReviewRows: View {
+    let summary: ClawMissionRunSummary
+    let focusedReviewKind: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let review = summary.artifactMetadataReview,
+               summary.shouldShowDetailReview("artifact-metadata", focusedOn: focusedReviewKind) {
+                ClawGatewayArtifactMetadataReviewRow(review: review)
+            }
+
+            if let review = summary.gatewayFileChangeSafetyReview,
+               summary.shouldShowDetailReview("file-change-safety", focusedOn: focusedReviewKind) {
+                ClawGatewayFileChangeSafetyReviewRow(review: review)
+            }
+
+            if let review = summary.gatewayShellCommandSafetyReview,
+               summary.shouldShowDetailReview("shell-safety", focusedOn: focusedReviewKind) {
+                ClawGatewayShellCommandSafetyReviewRow(review: review)
+            }
+
+            if let review = summary.gatewayExtractionCompletenessReview,
+               summary.shouldShowDetailReview("extraction-completeness", focusedOn: focusedReviewKind) {
+                ClawGatewayExtractionCompletenessReviewRow(review: review)
+            }
+
+            if let review = summary.gatewayBrowserControlReview,
+               summary.shouldShowDetailReview("browser-control", focusedOn: focusedReviewKind) {
+                ClawGatewayBrowserControlReviewRow(review: review)
+            }
+
+            if let review = summary.gatewayDeliverySafetyReview,
+               summary.shouldShowDetailReview("delivery-safety", focusedOn: focusedReviewKind) {
+                ClawGatewayDeliverySafetyReviewRow(review: review)
+            }
+
+            if let review = summary.gatewayCapabilityReview,
+               summary.shouldShowDetailReview("gateway-capability", focusedOn: focusedReviewKind) {
+                ClawGatewayCapabilityReviewRow(review: review)
+            }
+
+            if let review = summary.gatewayAccessibilityReview,
+               summary.shouldShowDetailReview("accessibility", focusedOn: focusedReviewKind) {
+                ClawGatewayAccessibilityReviewRow(review: review)
+            }
+
+            if let review = summary.gatewayTaskReplayGuardReview,
+               summary.shouldShowDetailReview("replay-guard", focusedOn: focusedReviewKind) {
+                ClawGatewayTaskReplayGuardReviewRow(review: review)
+            }
+
+            if let review = summary.agentTraceReview,
+               summary.shouldShowDetailReview("agent-trace", focusedOn: focusedReviewKind) {
+                ClawAgentTraceReviewRow(review: review)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

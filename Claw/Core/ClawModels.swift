@@ -1418,6 +1418,21 @@ struct ClawMissionRunFocusContextSummary: Equatable, Codable, Sendable {
     var isReviewable: Bool
 }
 
+struct ClawMissionRunReviewDetailDockSummary: Equatable, Codable, Sendable {
+    var title: String
+    var status: String
+    var guidance: String
+    var icon: String
+    var requestedReviewKind: String?
+    var activeReviewKind: String?
+    var activeReviewTitle: String?
+    var detailReviewKinds: [String]
+    var showsFocusedDetailOnly: Bool
+    var canClearFocus: Bool
+    var hasStaleFocus: Bool
+    var isReviewable: Bool
+}
+
 struct ClawMissionRunArtifactEvidenceItem: Identifiable, Equatable, Codable, Sendable {
     var id: String { reviewKind }
     var reviewKind: String
@@ -2799,6 +2814,118 @@ extension ClawMissionRunSummary {
                 return false
             }
         }
+    }
+
+    func activeReviewFocus(from requestedReviewKind: String?) -> String? {
+        guard let requestedReviewKind else {
+            return nil
+        }
+        if reviewPriorityQueue.contains(where: { $0.reviewKind == requestedReviewKind }) {
+            return requestedReviewKind
+        }
+        if availableDetailReviewKinds.contains(requestedReviewKind) {
+            return requestedReviewKind
+        }
+        return nil
+    }
+
+    var reviewDetailDockSummary: ClawMissionRunReviewDetailDockSummary {
+        reviewDetailDockSummary(focusedOn: nil)
+    }
+
+    func reviewDetailDockSummary(focusedOn requestedReviewKind: String?) -> ClawMissionRunReviewDetailDockSummary {
+        let activeReviewKind = activeReviewFocus(from: requestedReviewKind)
+        let detailKinds = detailReviewKinds(focusedOn: activeReviewKind)
+        let focusHasDetail = focusUsesDetailReview(activeReviewKind)
+        let activePriorityItem = reviewPriorityItem(focusedOn: activeReviewKind)
+        let activeReviewTitle = activePriorityItem?.title ?? activeReviewKind.map(Self.title(forDetailReviewKind:))
+        let isReviewable = detailKinds.isEmpty == false || reviewPriorityQueue.isEmpty == false
+        let hasStaleFocus = requestedReviewKind != nil && activeReviewKind == nil
+        let next = nextReviewAction(focusedOn: activeReviewKind)
+
+        if isReviewable == false {
+            return ClawMissionRunReviewDetailDockSummary(
+                title: "Mission 复核详情待生成",
+                status: "尚无 Gateway 证据",
+                guidance: "发送任务后，iPad 工作台会在这里显示当前聚焦复核详情。",
+                icon: "sidebar.right",
+                requestedReviewKind: requestedReviewKind,
+                activeReviewKind: nil,
+                activeReviewTitle: nil,
+                detailReviewKinds: [],
+                showsFocusedDetailOnly: false,
+                canClearFocus: false,
+                hasStaleFocus: hasStaleFocus,
+                isReviewable: false
+            )
+        }
+
+        if hasStaleFocus {
+            return ClawMissionRunReviewDetailDockSummary(
+                title: "Mission 复核详情已更新",
+                status: "\(detailKinds.count) 类详细复核可查看",
+                guidance: "当前聚焦项不在最新复核队列；右侧保持全量详情，可清除后重新选择。",
+                icon: "scope",
+                requestedReviewKind: requestedReviewKind,
+                activeReviewKind: nil,
+                activeReviewTitle: nil,
+                detailReviewKinds: detailKinds,
+                showsFocusedDetailOnly: false,
+                canClearFocus: true,
+                hasStaleFocus: true,
+                isReviewable: true
+            )
+        }
+
+        if let activeReviewKind, let activeReviewTitle {
+            if focusHasDetail {
+                return ClawMissionRunReviewDetailDockSummary(
+                    title: "Mission 聚焦详情",
+                    status: activeReviewTitle,
+                    guidance: "右侧只显示 \(activeReviewTitle) 安全摘要；左侧 Mission Run 可清除聚焦恢复全量。",
+                    icon: "sidebar.right",
+                    requestedReviewKind: requestedReviewKind,
+                    activeReviewKind: activeReviewKind,
+                    activeReviewTitle: activeReviewTitle,
+                    detailReviewKinds: detailKinds,
+                    showsFocusedDetailOnly: detailKinds.count == 1,
+                    canClearFocus: true,
+                    hasStaleFocus: false,
+                    isReviewable: true
+                )
+            }
+
+            return ClawMissionRunReviewDetailDockSummary(
+                title: "Mission 状态聚焦",
+                status: activeReviewTitle,
+                guidance: "\(activeReviewTitle) 没有单独详情 row；右侧保持全量安全摘要。",
+                icon: "sidebar.right",
+                requestedReviewKind: requestedReviewKind,
+                activeReviewKind: activeReviewKind,
+                activeReviewTitle: activeReviewTitle,
+                detailReviewKinds: detailKinds,
+                showsFocusedDetailOnly: false,
+                canClearFocus: true,
+                hasStaleFocus: false,
+                isReviewable: true
+            )
+        }
+
+        let guidance = next.reviewTitle.map { "建议先聚焦 \($0)：\(next.actionHint ?? next.guidance)" } ?? "从左侧复核优先队列选择一项，右侧会同步显示对应详情。"
+        return ClawMissionRunReviewDetailDockSummary(
+            title: "Mission 复核详情",
+            status: "\(detailKinds.count) 类详细复核可查看",
+            guidance: guidance,
+            icon: "sidebar.right",
+            requestedReviewKind: requestedReviewKind,
+            activeReviewKind: nil,
+            activeReviewTitle: nil,
+            detailReviewKinds: detailKinds,
+            showsFocusedDetailOnly: false,
+            canClearFocus: false,
+            hasStaleFocus: false,
+            isReviewable: true
+        )
     }
 
     func detailReviewKinds(focusedOn reviewKind: String?) -> [String] {

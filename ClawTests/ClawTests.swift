@@ -592,6 +592,11 @@ final class ClawTests: XCTestCase {
         XCTAssertFalse(idleFocusContext.isReviewable)
         XCTAssertFalse(idleFocusContext.canClearFocus)
         XCTAssertNil(idleFocusContext.primaryReviewKind)
+        let idleDetailDock = idleStore.missionRunSummary.reviewDetailDockSummary
+        XCTAssertFalse(idleDetailDock.isReviewable)
+        XCTAssertFalse(idleDetailDock.canClearFocus)
+        XCTAssertTrue(idleDetailDock.detailReviewKinds.isEmpty)
+        XCTAssertNil(idleStore.missionRunSummary.activeReviewFocus(from: "delivery-safety"))
 
         let store = ClawStore(autoScanLocalArtifacts: false)
         store.phoneAgentCommand = "打开浏览器搜索资料，整理结果并发到 Slack"
@@ -644,6 +649,20 @@ final class ClawTests: XCTestCase {
         XCTAssertTrue(focusedFocusContext.canClearFocus)
         XCTAssertTrue(focusedFocusContext.hasEvidence)
         XCTAssertTrue(focusedFocusContext.requiresHumanAction)
+        let detailDock = summary.reviewDetailDockSummary
+        XCTAssertTrue(detailDock.isReviewable)
+        XCTAssertEqual(detailDock.detailReviewKinds, availableDetailKinds)
+        XCTAssertFalse(detailDock.showsFocusedDetailOnly)
+        XCTAssertFalse(detailDock.canClearFocus)
+        XCTAssertNil(detailDock.activeReviewKind)
+        XCTAssertEqual(summary.activeReviewFocus(from: "delivery-safety"), "delivery-safety")
+        let focusedDetailDock = summary.reviewDetailDockSummary(focusedOn: "delivery-safety")
+        XCTAssertEqual(focusedDetailDock.activeReviewKind, "delivery-safety")
+        XCTAssertEqual(focusedDetailDock.activeReviewTitle, "最终提交安全")
+        XCTAssertEqual(focusedDetailDock.detailReviewKinds, ["delivery-safety"])
+        XCTAssertTrue(focusedDetailDock.showsFocusedDetailOnly)
+        XCTAssertTrue(focusedDetailDock.canClearFocus)
+        XCTAssertFalse(focusedDetailDock.hasStaleFocus)
         var statusOnlySummary = summary
         let statusOnlyItem = ClawMissionRunReviewPriorityItem(
             id: "gateway-status",
@@ -663,9 +682,23 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(statusFocusContext.focusedReviewKind, statusOnlyItem.reviewKind)
         XCTAssertFalse(statusFocusContext.canFocusDetailReview)
         XCTAssertTrue(statusFocusContext.canClearFocus)
+        XCTAssertEqual(statusOnlySummary.activeReviewFocus(from: statusOnlyItem.reviewKind), statusOnlyItem.reviewKind)
+        let statusDetailDock = statusOnlySummary.reviewDetailDockSummary(focusedOn: statusOnlyItem.reviewKind)
+        XCTAssertEqual(statusDetailDock.activeReviewKind, statusOnlyItem.reviewKind)
+        XCTAssertEqual(statusDetailDock.activeReviewTitle, statusOnlyItem.title)
+        XCTAssertEqual(statusDetailDock.detailReviewKinds, availableDetailKinds)
+        XCTAssertFalse(statusDetailDock.showsFocusedDetailOnly)
+        XCTAssertTrue(statusDetailDock.canClearFocus)
         let staleFocusContext = statusOnlySummary.focusContextSummary(focusedOn: "unknown-review-kind")
         XCTAssertNil(staleFocusContext.focusedReviewKind)
         XCTAssertTrue(staleFocusContext.canClearFocus)
+        XCTAssertNil(statusOnlySummary.activeReviewFocus(from: "unknown-review-kind"))
+        let staleDetailDock = statusOnlySummary.reviewDetailDockSummary(focusedOn: "unknown-review-kind")
+        XCTAssertNil(staleDetailDock.activeReviewKind)
+        XCTAssertEqual(staleDetailDock.detailReviewKinds, availableDetailKinds)
+        XCTAssertFalse(staleDetailDock.showsFocusedDetailOnly)
+        XCTAssertTrue(staleDetailDock.canClearFocus)
+        XCTAssertTrue(staleDetailDock.hasStaleFocus)
         XCTAssertEqual(summary.detailReviewKinds(focusedOn: nil), availableDetailKinds)
         XCTAssertEqual(summary.detailReviewKinds(focusedOn: "delivery-safety"), ["delivery-safety"])
         XCTAssertEqual(summary.detailReviewKinds(focusedOn: "gateway-status"), availableDetailKinds)
@@ -773,7 +806,23 @@ final class ClawTests: XCTestCase {
             statusFocusContext.title,
             statusFocusContext.status,
             statusFocusContext.guidance,
-            statusFocusContext.focusedReviewKind ?? ""
+            statusFocusContext.focusedReviewKind ?? "",
+            detailDock.title,
+            detailDock.status,
+            detailDock.guidance,
+            focusedDetailDock.title,
+            focusedDetailDock.status,
+            focusedDetailDock.guidance,
+            focusedDetailDock.activeReviewKind ?? "",
+            focusedDetailDock.activeReviewTitle ?? "",
+            statusDetailDock.title,
+            statusDetailDock.status,
+            statusDetailDock.guidance,
+            statusDetailDock.activeReviewKind ?? "",
+            statusDetailDock.activeReviewTitle ?? "",
+            staleDetailDock.title,
+            staleDetailDock.status,
+            staleDetailDock.guidance
         ]
         let visibleText = (queueVisibleChunks + readinessVisibleChunks + nextActionVisibleChunks + evidenceVisibleChunks + operatorVisibleChunks + focusContextVisibleChunks).joined(separator: " ")
         for forbidden in ["Authorization", "Bearer", "toolArguments", "file://", "/private", "/Users", "/home", "C:\\", "stdout", "stderr", "diff"] {
@@ -816,6 +865,12 @@ final class ClawTests: XCTestCase {
         XCTAssertTrue(shellFocusContext.canClearFocus)
         XCTAssertTrue(shellFocusContext.hasEvidence)
         XCTAssertTrue(shellFocusContext.requiresHumanAction)
+        let shellDetailDock = shellStore.missionRunSummary.reviewDetailDockSummary(focusedOn: "shell-safety")
+        XCTAssertEqual(shellDetailDock.activeReviewKind, "shell-safety")
+        XCTAssertEqual(shellDetailDock.activeReviewTitle, "Shell 命令安全")
+        XCTAssertEqual(shellDetailDock.detailReviewKinds, ["shell-safety"])
+        XCTAssertTrue(shellDetailDock.showsFocusedDetailOnly)
+        XCTAssertTrue(shellDetailDock.canClearFocus)
         XCTAssertFalse(
             [
                 shellReadiness.title,
@@ -836,7 +891,12 @@ final class ClawTests: XCTestCase {
                 shellFocusContext.title,
                 shellFocusContext.status,
                 shellFocusContext.guidance,
-                shellFocusContext.primaryButtonTitle ?? ""
+                shellFocusContext.primaryButtonTitle ?? "",
+                shellDetailDock.title,
+                shellDetailDock.status,
+                shellDetailDock.guidance,
+                shellDetailDock.activeReviewKind ?? "",
+                shellDetailDock.activeReviewTitle ?? ""
             ].joined(separator: " ").contains("stdout")
         )
     }

@@ -134,6 +134,11 @@ enum LogicSmoke {
         expect(idleFocusContext.isReviewable == false, "idle focus context should not be reviewable")
         expect(idleFocusContext.canClearFocus == false, "idle focus context should not expose clear focus")
         expect(idleFocusContext.primaryReviewKind == nil, "idle focus context should not invent a primary review")
+        let idleDetailDock = missionStore.missionRunSummary.reviewDetailDockSummary
+        expect(idleDetailDock.isReviewable == false, "idle detail dock should not be reviewable")
+        expect(idleDetailDock.canClearFocus == false, "idle detail dock should not expose clear focus")
+        expect(idleDetailDock.detailReviewKinds.isEmpty, "idle detail dock should not invent detail rows")
+        expect(missionStore.missionRunSummary.activeReviewFocus(from: "delivery-safety") == nil, "idle active focus should not resolve")
         missionStore.phoneAgentCommand = "打开浏览器搜索资料，整理结果并发到 Slack"
         missionStore.startAutonomousComputerTakeover()
         var missionSummary = missionStore.missionRunSummary
@@ -229,6 +234,20 @@ enum LogicSmoke {
         expect(focusedFocusContext.canClearFocus, "delivery focus context should allow clearing focus")
         expect(focusedFocusContext.hasEvidence, "delivery focus context should mark evidence coverage")
         expect(focusedFocusContext.requiresHumanAction, "delivery focus context should surface human review")
+        let detailDock = missionSummary.reviewDetailDockSummary
+        expect(detailDock.isReviewable, "detail dock should be reviewable once Gateway evidence exists")
+        expect(detailDock.detailReviewKinds == availableDetailKinds, "unfocused detail dock should show all details")
+        expect(detailDock.showsFocusedDetailOnly == false, "unfocused detail dock should not claim a single detail")
+        expect(detailDock.canClearFocus == false, "unfocused detail dock should not expose clear focus")
+        expect(detailDock.activeReviewKind == nil, "unfocused detail dock should not invent active focus")
+        expect(missionSummary.activeReviewFocus(from: "delivery-safety") == "delivery-safety", "active focus should resolve delivery detail")
+        let focusedDetailDock = missionSummary.reviewDetailDockSummary(focusedOn: "delivery-safety")
+        expect(focusedDetailDock.activeReviewKind == "delivery-safety", "focused detail dock should record delivery focus")
+        expect(focusedDetailDock.activeReviewTitle == "最终提交安全", "focused detail dock should expose delivery title")
+        expect(focusedDetailDock.detailReviewKinds == ["delivery-safety"], "focused detail dock should show delivery only")
+        expect(focusedDetailDock.showsFocusedDetailOnly, "focused detail dock should mark single detail mode")
+        expect(focusedDetailDock.canClearFocus, "focused detail dock should allow clearing")
+        expect(focusedDetailDock.hasStaleFocus == false, "focused detail dock should not mark stale focus")
         var statusOnlySummary = missionSummary
         let statusOnlyItem = ClawMissionRunReviewPriorityItem(
             id: "gateway-status",
@@ -248,9 +267,23 @@ enum LogicSmoke {
         expect(statusFocusContext.focusedReviewKind == statusOnlyItem.reviewKind, "status focus context should record the status item")
         expect(statusFocusContext.canFocusDetailReview == false, "status focus context should not claim detail focus")
         expect(statusFocusContext.canClearFocus, "status focus context should allow clearing focus")
+        expect(statusOnlySummary.activeReviewFocus(from: statusOnlyItem.reviewKind) == statusOnlyItem.reviewKind, "status focus should remain an active focus")
+        let statusDetailDock = statusOnlySummary.reviewDetailDockSummary(focusedOn: statusOnlyItem.reviewKind)
+        expect(statusDetailDock.activeReviewKind == statusOnlyItem.reviewKind, "status detail dock should record status focus")
+        expect(statusDetailDock.activeReviewTitle == statusOnlyItem.title, "status detail dock should expose status title")
+        expect(statusDetailDock.detailReviewKinds == availableDetailKinds, "status detail dock should keep all details visible")
+        expect(statusDetailDock.showsFocusedDetailOnly == false, "status detail dock should not filter details")
+        expect(statusDetailDock.canClearFocus, "status detail dock should allow clearing")
         let staleFocusContext = statusOnlySummary.focusContextSummary(focusedOn: "unknown-review-kind")
         expect(staleFocusContext.focusedReviewKind == nil, "stale focus context should not keep an unknown review kind")
         expect(staleFocusContext.canClearFocus, "stale focus context should allow clearing focus")
+        expect(statusOnlySummary.activeReviewFocus(from: "unknown-review-kind") == nil, "stale active focus should not resolve")
+        let staleDetailDock = statusOnlySummary.reviewDetailDockSummary(focusedOn: "unknown-review-kind")
+        expect(staleDetailDock.activeReviewKind == nil, "stale detail dock should not keep an unknown focus")
+        expect(staleDetailDock.detailReviewKinds == availableDetailKinds, "stale detail dock should keep all details visible")
+        expect(staleDetailDock.showsFocusedDetailOnly == false, "stale detail dock should not filter details")
+        expect(staleDetailDock.canClearFocus, "stale detail dock should allow clearing")
+        expect(staleDetailDock.hasStaleFocus, "stale detail dock should mark stale focus")
         expect(
             missionSummary.detailReviewKinds(focusedOn: nil) == availableDetailKinds,
             "nil focus should show all detail reviews"
@@ -392,7 +425,23 @@ enum LogicSmoke {
             focusedFocusContext.status,
             focusedFocusContext.guidance,
             focusedFocusContext.focusedReviewKind ?? "",
-            focusedFocusContext.focusedReviewTitle ?? ""
+            focusedFocusContext.focusedReviewTitle ?? "",
+            detailDock.title,
+            detailDock.status,
+            detailDock.guidance,
+            focusedDetailDock.title,
+            focusedDetailDock.status,
+            focusedDetailDock.guidance,
+            focusedDetailDock.activeReviewKind ?? "",
+            focusedDetailDock.activeReviewTitle ?? "",
+            statusDetailDock.title,
+            statusDetailDock.status,
+            statusDetailDock.guidance,
+            statusDetailDock.activeReviewKind ?? "",
+            statusDetailDock.activeReviewTitle ?? "",
+            staleDetailDock.title,
+            staleDetailDock.status,
+            staleDetailDock.guidance
         ]
         let queueVisibleText = (queueVisibleChunks + readinessVisibleChunks + nextActionVisibleChunks + evidenceVisibleChunks + operatorVisibleChunks + focusContextVisibleChunks).joined(separator: " ")
         for forbidden in ["Authorization", "Bearer", "toolArguments", "file://", "/private", "/Users", "/home", "C:\\", "stdout", "stderr", "diff"] {
@@ -561,6 +610,12 @@ enum LogicSmoke {
         expect(shellFocusContext.canClearFocus, "shell focus context should allow clearing")
         expect(shellFocusContext.hasEvidence, "shell focus context should mark shell evidence")
         expect(shellFocusContext.requiresHumanAction, "shell focus context should require human review")
+        let shellDetailDock = shellMissionSummary.reviewDetailDockSummary(focusedOn: "shell-safety")
+        expect(shellDetailDock.activeReviewKind == "shell-safety", "shell detail dock should record shell focus")
+        expect(shellDetailDock.activeReviewTitle == "Shell 命令安全", "shell detail dock should expose shell title")
+        expect(shellDetailDock.detailReviewKinds == ["shell-safety"], "shell detail dock should show shell only")
+        expect(shellDetailDock.showsFocusedDetailOnly, "shell detail dock should mark single detail mode")
+        expect(shellDetailDock.canClearFocus, "shell detail dock should allow clearing")
         expect(
             [
                 shellReadiness.title,
@@ -579,7 +634,12 @@ enum LogicSmoke {
                 shellFocusContext.title,
                 shellFocusContext.status,
                 shellFocusContext.guidance,
-                shellFocusContext.primaryButtonTitle ?? ""
+                shellFocusContext.primaryButtonTitle ?? "",
+                shellDetailDock.title,
+                shellDetailDock.status,
+                shellDetailDock.guidance,
+                shellDetailDock.activeReviewKind ?? "",
+                shellDetailDock.activeReviewTitle ?? ""
             ].joined(separator: " ").contains("stdout") == false,
             "shell readiness should not expose stdout"
         )
