@@ -627,6 +627,7 @@ struct ClawMissionRunPanel: View {
         let summary = store.missionRunSummary
         let activeFocusedReviewKind = activeFocusedReviewKind(for: summary)
         let reviewReadinessSummary = summary.reviewReadinessSummary(focusedOn: activeFocusedReviewKind)
+        let nextReviewAction = summary.nextReviewAction(focusedOn: activeFocusedReviewKind)
         VStack(alignment: .leading, spacing: 14) {
             SectionHeader(title: "Mission Run", icon: "flag.checkered")
 
@@ -705,6 +706,11 @@ struct ClawMissionRunPanel: View {
 
             ClawMissionReviewReadinessSummaryView(
                 summary: reviewReadinessSummary,
+                onFocusReviewKind: focusReviewKind
+            )
+
+            ClawMissionNextReviewActionView(
+                action: nextReviewAction,
                 onFocusReviewKind: focusReviewKind
             )
 
@@ -838,6 +844,80 @@ struct ClawMissionRunPanel: View {
         case .waitForGateway, .inspectBlocked:
             break
         }
+    }
+}
+
+struct ClawMissionNextReviewActionView: View {
+    let action: ClawMissionRunNextReviewAction
+    let onFocusReviewKind: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(action.title, systemImage: action.icon)
+                .font(.subheadline.bold())
+                .foregroundStyle(tint)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(action.status)
+                .font(.footnote.bold())
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(action.guidance)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let reviewKind = action.reviewKind,
+               let primaryButtonTitle = action.primaryButtonTitle {
+                Button {
+                    onFocusReviewKind(reviewKind)
+                } label: {
+                    Label(primaryButtonTitle, systemImage: action.canFocusDetailReview ? "scope" : "info.circle.fill")
+                        .font(.footnote.bold())
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(tint)
+                .accessibilityHint(action.canFocusDetailReview ? "聚焦下一步详细复核" : "聚焦状态项并保留全量详情")
+                .accessibilityInputLabels(accessibilityInputLabels)
+            }
+        }
+        .padding(10)
+        .background(tint.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(tint.opacity(0.16), lineWidth: 1)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilitySummary)
+    }
+
+    private var accessibilityInputLabels: [String] {
+        guard let reviewTitle = action.reviewTitle else {
+            return ["下一步复核"]
+        }
+        return ["下一步复核\(reviewTitle)", "聚焦\(reviewTitle)"]
+    }
+
+    private var accessibilitySummary: String {
+        if let reviewTitle = action.reviewTitle {
+            return "下一步复核行动，\(reviewTitle)，\(action.status)"
+        }
+        return "下一步复核行动，\(action.status)"
+    }
+
+    private var tint: Color {
+        if action.requiresHumanAction {
+            return .orange
+        }
+        if action.hasMetadataGap {
+            return .blue
+        }
+        if action.isReviewable {
+            return .green
+        }
+        return .secondary
     }
 }
 

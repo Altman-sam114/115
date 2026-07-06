@@ -112,6 +112,10 @@ enum LogicSmoke {
         expect(idleReadiness.topReviewKind == nil, "idle readiness should not invent a top review")
         expect(idleReadiness.isReviewable == false, "idle readiness should not be reviewable")
         expect(idleReadiness.requiresHumanAction == false, "idle readiness should not require action")
+        let idleNextAction = missionStore.missionRunSummary.nextReviewAction
+        expect(idleNextAction.isReviewable == false, "idle next review action should not be reviewable")
+        expect(idleNextAction.requiresHumanAction == false, "idle next review action should not require action")
+        expect(idleNextAction.reviewKind == nil, "idle next review action should not invent a review kind")
         missionStore.phoneAgentCommand = "打开浏览器搜索资料，整理结果并发到 Slack"
         missionStore.startAutonomousComputerTakeover()
         var missionSummary = missionStore.missionRunSummary
@@ -193,10 +197,25 @@ enum LogicSmoke {
         expect(readiness.topReviewTitle == missionSummary.reviewPriorityQueue.first?.title, "readiness should expose the top review title")
         expect(readiness.isReviewable, "readiness should mark sent missions reviewable")
         expect(readiness.requiresHumanAction, "readiness should surface human review needs")
+        let nextAction = missionSummary.nextReviewAction
+        expect(nextAction.reviewKind == missionSummary.reviewPriorityQueue.first?.reviewKind, "next review action should target top priority")
+        expect(nextAction.reviewTitle == missionSummary.reviewPriorityQueue.first?.title, "next review action should expose top priority title")
+        expect(nextAction.actionHint == missionSummary.reviewPriorityQueue.first?.actionHint, "next review action should reuse top action hint")
+        expect(nextAction.isReviewable, "next review action should mark sent missions reviewable")
+        expect(nextAction.requiresHumanAction, "next review action should surface human review needs")
         let focusedReadiness = missionSummary.reviewReadinessSummary(focusedOn: "delivery-safety")
         expect(focusedReadiness.focusedReviewKind == "delivery-safety", "readiness should record focused review kind")
         expect(focusedReadiness.focusedReviewTitle == "最终提交安全", "readiness should record focused review title")
         expect(focusedReadiness.focusedHasDetailReview, "readiness should know focused review has a detail row")
+        let focusedNextAction = missionSummary.nextReviewAction(focusedOn: "delivery-safety")
+        expect(focusedNextAction.reviewKind == "delivery-safety", "focused next action should target delivery safety")
+        expect(focusedNextAction.reviewTitle == "最终提交安全", "focused next action should expose delivery title")
+        expect(focusedNextAction.canFocusDetailReview, "focused next action should know delivery has a detail row")
+        let staleFocusNextAction = missionSummary.nextReviewAction(focusedOn: "gateway-status")
+        expect(
+            staleFocusNextAction.reviewKind == missionSummary.reviewPriorityQueue.first?.reviewKind,
+            "stale status focus should fall back to the top priority"
+        )
         let queueVisibleChunks = missionSummary.reviewPriorityQueue.map {
             "\($0.title) \($0.status) \($0.reason) \($0.actionHint) \($0.reviewKind)"
         }
@@ -211,7 +230,23 @@ enum LogicSmoke {
             focusedReadiness.focusedReviewKind ?? "",
             focusedReadiness.focusedReviewTitle ?? ""
         ]
-        let queueVisibleText = (queueVisibleChunks + readinessVisibleChunks).joined(separator: " ")
+        let nextActionVisibleChunks = [
+            nextAction.title,
+            nextAction.status,
+            nextAction.guidance,
+            nextAction.reviewKind ?? "",
+            nextAction.reviewTitle ?? "",
+            nextAction.actionHint ?? "",
+            nextAction.primaryButtonTitle ?? "",
+            focusedNextAction.title,
+            focusedNextAction.status,
+            focusedNextAction.guidance,
+            focusedNextAction.reviewKind ?? "",
+            focusedNextAction.reviewTitle ?? "",
+            focusedNextAction.actionHint ?? "",
+            focusedNextAction.primaryButtonTitle ?? ""
+        ]
+        let queueVisibleText = (queueVisibleChunks + readinessVisibleChunks + nextActionVisibleChunks).joined(separator: " ")
         for forbidden in ["Authorization", "Bearer", "toolArguments", "file://", "/private", "/home", "C:\\", "stdout", "stderr"] {
             expect(queueVisibleText.contains(forbidden) == false, "review priority queue should not expose \(forbidden)")
         }
@@ -351,12 +386,22 @@ enum LogicSmoke {
         let shellReadiness = shellMissionSummary.reviewReadinessSummary
         expect(shellReadiness.criticalOrHighCount >= 1, "shell readiness should count high priority shell review")
         expect(shellReadiness.actionablePriorityCount >= 1, "shell readiness should count actionable shell review")
+        let shellNextAction = shellMissionSummary.nextReviewAction(focusedOn: "shell-safety")
+        expect(shellNextAction.reviewKind == "shell-safety", "shell next action should focus shell safety")
+        expect(shellNextAction.reviewTitle == "Shell 命令安全", "shell next action should expose safe shell title")
+        expect(shellNextAction.requiresHumanAction, "shell next action should require human review")
+        expect(shellNextAction.canFocusDetailReview, "shell next action should focus shell detail")
         expect(
             [
                 shellReadiness.title,
                 shellReadiness.status,
                 shellReadiness.guidance,
-                shellReadiness.topActionHint ?? ""
+                shellReadiness.topActionHint ?? "",
+                shellNextAction.title,
+                shellNextAction.status,
+                shellNextAction.guidance,
+                shellNextAction.actionHint ?? "",
+                shellNextAction.primaryButtonTitle ?? ""
             ].joined(separator: " ").contains("stdout") == false,
             "shell readiness should not expose stdout"
         )

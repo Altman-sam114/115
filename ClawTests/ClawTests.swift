@@ -573,6 +573,10 @@ final class ClawTests: XCTestCase {
         XCTAssertNil(idleReadiness.topReviewKind)
         XCTAssertFalse(idleReadiness.isReviewable)
         XCTAssertFalse(idleReadiness.requiresHumanAction)
+        let idleNextAction = idleStore.missionRunSummary.nextReviewAction
+        XCTAssertFalse(idleNextAction.isReviewable)
+        XCTAssertFalse(idleNextAction.requiresHumanAction)
+        XCTAssertNil(idleNextAction.reviewKind)
 
         let store = ClawStore(autoScanLocalArtifacts: false)
         store.phoneAgentCommand = "打开浏览器搜索资料，整理结果并发到 Slack"
@@ -608,10 +612,22 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(readiness.topReviewTitle, queue.first?.title)
         XCTAssertTrue(readiness.isReviewable)
         XCTAssertTrue(readiness.requiresHumanAction)
+        let nextAction = summary.nextReviewAction
+        XCTAssertEqual(nextAction.reviewKind, queue.first?.reviewKind)
+        XCTAssertEqual(nextAction.reviewTitle, queue.first?.title)
+        XCTAssertEqual(nextAction.actionHint, queue.first?.actionHint)
+        XCTAssertTrue(nextAction.isReviewable)
+        XCTAssertTrue(nextAction.requiresHumanAction)
         let focusedReadiness = summary.reviewReadinessSummary(focusedOn: "delivery-safety")
         XCTAssertEqual(focusedReadiness.focusedReviewKind, "delivery-safety")
         XCTAssertEqual(focusedReadiness.focusedReviewTitle, "最终提交安全")
         XCTAssertTrue(focusedReadiness.focusedHasDetailReview)
+        let focusedNextAction = summary.nextReviewAction(focusedOn: "delivery-safety")
+        XCTAssertEqual(focusedNextAction.reviewKind, "delivery-safety")
+        XCTAssertEqual(focusedNextAction.reviewTitle, "最终提交安全")
+        XCTAssertTrue(focusedNextAction.canFocusDetailReview)
+        let staleFocusNextAction = summary.nextReviewAction(focusedOn: "gateway-status")
+        XCTAssertEqual(staleFocusNextAction.reviewKind, queue.first?.reviewKind)
 
         let queueVisibleChunks = queue.map {
             "\($0.title) \($0.status) \($0.reason) \($0.actionHint) \($0.reviewKind)"
@@ -627,7 +643,23 @@ final class ClawTests: XCTestCase {
             focusedReadiness.focusedReviewKind ?? "",
             focusedReadiness.focusedReviewTitle ?? ""
         ]
-        let visibleText = (queueVisibleChunks + readinessVisibleChunks).joined(separator: " ")
+        let nextActionVisibleChunks = [
+            nextAction.title,
+            nextAction.status,
+            nextAction.guidance,
+            nextAction.reviewKind ?? "",
+            nextAction.reviewTitle ?? "",
+            nextAction.actionHint ?? "",
+            nextAction.primaryButtonTitle ?? "",
+            focusedNextAction.title,
+            focusedNextAction.status,
+            focusedNextAction.guidance,
+            focusedNextAction.reviewKind ?? "",
+            focusedNextAction.reviewTitle ?? "",
+            focusedNextAction.actionHint ?? "",
+            focusedNextAction.primaryButtonTitle ?? ""
+        ]
+        let visibleText = (queueVisibleChunks + readinessVisibleChunks + nextActionVisibleChunks).joined(separator: " ")
         for forbidden in ["Authorization", "Bearer", "toolArguments", "file://", "/private", "/home", "C:\\", "stdout", "stderr"] {
             XCTAssertFalse(visibleText.contains(forbidden), "queue leaked \(forbidden)")
         }
@@ -647,12 +679,22 @@ final class ClawTests: XCTestCase {
         let shellReadiness = shellStore.missionRunSummary.reviewReadinessSummary
         XCTAssertGreaterThanOrEqual(shellReadiness.criticalOrHighCount, 1)
         XCTAssertGreaterThanOrEqual(shellReadiness.actionablePriorityCount, 1)
+        let shellNextAction = shellStore.missionRunSummary.nextReviewAction(focusedOn: "shell-safety")
+        XCTAssertEqual(shellNextAction.reviewKind, "shell-safety")
+        XCTAssertEqual(shellNextAction.reviewTitle, "Shell 命令安全")
+        XCTAssertTrue(shellNextAction.requiresHumanAction)
+        XCTAssertTrue(shellNextAction.canFocusDetailReview)
         XCTAssertFalse(
             [
                 shellReadiness.title,
                 shellReadiness.status,
                 shellReadiness.guidance,
-                shellReadiness.topActionHint ?? ""
+                shellReadiness.topActionHint ?? "",
+                shellNextAction.title,
+                shellNextAction.status,
+                shellNextAction.guidance,
+                shellNextAction.actionHint ?? "",
+                shellNextAction.primaryButtonTitle ?? ""
             ].joined(separator: " ").contains("stdout")
         )
     }

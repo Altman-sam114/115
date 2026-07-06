@@ -22,6 +22,48 @@
 
 ## 历史记录
 
+### v0.27 / Mission Run 下一步复核行动
+
+日期：2026-07-06
+
+核心变更：
+
+- 新增 `ClawMissionRunNextReviewAction`，`ClawMissionRunSummary` 通过 computed helper 从当前有效聚焦项、完整复核优先队列和可用 detail review kind 派生下一步人工复核行动。
+- 下一步行动优先使用当前聚焦项，否则使用完整队列最高优先项；没有队列但已有 detail review 时降级为抽查详细复核，完全 idle 时提示等待 Gateway 证据。
+- Mission Run 在复核态势摘要后、复核优先队列前展示下一步复核行动，并提供聚焦按钮复用 v0.25 聚焦机制；compact iPhone 和 iPad regular 工作台复用同一面板。
+- 下一步行动只使用固定文案、计数、枚举和已脱敏队列项字段，不读取 Gateway `file://` payload，不展示 raw URL/path/command/stdout/stderr/diff/token/header 或 `toolArguments`。
+- XCTest 和 Swift logic smoke 覆盖 idle、正常任务、聚焦状态、Shell 高优先行动、count/目标一致性和敏感字符串不外显。
+- 同步 README、协议、flow/flowchart、测试说明和 Agent A 提示词；本轮不新增 schema/event/action/artifact kind，不改变 Gateway 权限。
+
+关键文件：
+
+- `Claw/Core/ClawModels.swift`
+- `Claw/Views/ContentView.swift`
+- `ClawTests/ClawTests.swift`
+- `Tools/LogicSmoke.swift`
+- `README.md`
+- `Docs/claw-mobile-gateway-protocol.md`
+- `md/flow/flow.md`
+- `md/flow/flowchart.md`
+- `md/test/test.md`
+- `md/prompt/v0（核心智能能力）/v0.27（MissionRun下一步复核行动）.md`
+- `update_log.md`
+
+验证结果：
+
+- Swift logic smoke 编译通过。
+- `.build/claw-logic-smoke` 通过，输出 `Claw logic smoke passed`。
+- 本地无签名 iOS build 通过，输出 `** BUILD SUCCEEDED **`。
+- `git diff --check` 通过。
+- `ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci-results.yml"); puts "yaml ok"'` 通过，输出 `yaml ok`。
+- `node --check Tools/claw-gateway-server.mjs`、`node --check Tools/claw-gateway-direct-smoke.mjs`、`node --check Tools/claw-gateway-smoke.mjs` 通过。
+- GitHub Actions 结果包复判待本轮 push 后补齐。
+
+遗留事项：
+
+- 当前下一步复核行动是手机端 presentation-layer 引导，不是自动安全裁决、自动执行计划、恶意检测、完整 payload viewer 或自动修复器。
+- 完整 macOS Accessibility bridge、浏览器真实点击/表单控制、完整 artifact payload 复核体验和真实多轮 agent loop 仍是后续遗留。
+
 ### v0.26 / Mission Run 复核态势摘要
 
 日期：2026-07-06

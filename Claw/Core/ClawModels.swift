@@ -1386,6 +1386,21 @@ struct ClawMissionRunReviewReadinessSummary: Equatable, Codable, Sendable {
     var requiresHumanAction: Bool
 }
 
+struct ClawMissionRunNextReviewAction: Equatable, Codable, Sendable {
+    var title: String
+    var status: String
+    var guidance: String
+    var icon: String
+    var reviewKind: String?
+    var reviewTitle: String?
+    var actionHint: String?
+    var primaryButtonTitle: String?
+    var canFocusDetailReview: Bool
+    var requiresHumanAction: Bool
+    var hasMetadataGap: Bool
+    var isReviewable: Bool
+}
+
 private enum ClawArtifactMetadataParser {
     static func cleanValue(_ value: String?) -> String? {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -2743,6 +2758,106 @@ extension ClawMissionRunSummary {
             isReviewable: isReviewable,
             requiresHumanAction: requiresHumanAction
         )
+    }
+
+    var nextReviewAction: ClawMissionRunNextReviewAction {
+        nextReviewAction(focusedOn: nil)
+    }
+
+    func nextReviewAction(focusedOn reviewKind: String?) -> ClawMissionRunNextReviewAction {
+        let readiness = reviewReadinessSummary(focusedOn: reviewKind)
+        let focusedItem = reviewPriorityItem(focusedOn: reviewKind)
+        let targetItem = focusedItem ?? reviewPriorityQueue.first
+
+        if let targetItem {
+            let canFocusDetail = focusUsesDetailReview(targetItem.reviewKind)
+            let title = focusedItem == nil ? "下一步复核" : "继续聚焦复核"
+            let guidance: String
+            let primaryButtonTitle: String
+
+            if canFocusDetail {
+                guidance = "查看 \(targetItem.title) 详情：\(targetItem.actionHint)"
+                primaryButtonTitle = "聚焦 \(targetItem.title)"
+            } else {
+                guidance = "\(targetItem.title) 是状态或审批项；保留全量详情并查看相关提示。"
+                primaryButtonTitle = "聚焦 \(targetItem.title)"
+            }
+
+            return ClawMissionRunNextReviewAction(
+                title: title,
+                status: targetItem.status,
+                guidance: guidance,
+                icon: targetItem.icon,
+                reviewKind: targetItem.reviewKind,
+                reviewTitle: targetItem.title,
+                actionHint: targetItem.actionHint,
+                primaryButtonTitle: primaryButtonTitle,
+                canFocusDetailReview: canFocusDetail,
+                requiresHumanAction: targetItem.isActionable || readiness.requiresHumanAction,
+                hasMetadataGap: targetItem.hasMetadata == false || readiness.metadataPendingCount > 0,
+                isReviewable: true
+            )
+        }
+
+        if let firstDetailReviewKind = availableDetailReviewKinds.first {
+            let detailTitle = Self.title(forDetailReviewKind: firstDetailReviewKind)
+            return ClawMissionRunNextReviewAction(
+                title: "下一步复核",
+                status: "\(readiness.availableDetailReviewCount) 类详细复核可查看",
+                guidance: "可先抽查 \(detailTitle) 的安全摘要。",
+                icon: "doc.text.magnifyingglass",
+                reviewKind: firstDetailReviewKind,
+                reviewTitle: detailTitle,
+                actionHint: "抽查详细复核",
+                primaryButtonTitle: "聚焦 \(detailTitle)",
+                canFocusDetailReview: true,
+                requiresHumanAction: readiness.requiresHumanAction,
+                hasMetadataGap: readiness.metadataPendingCount > 0,
+                isReviewable: true
+            )
+        }
+
+        return ClawMissionRunNextReviewAction(
+            title: "下一步复核待生成",
+            status: "尚无 Gateway 证据",
+            guidance: "发送任务后会给出下一步人工复核行动。",
+            icon: "tray",
+            reviewKind: nil,
+            reviewTitle: nil,
+            actionHint: nil,
+            primaryButtonTitle: nil,
+            canFocusDetailReview: false,
+            requiresHumanAction: false,
+            hasMetadataGap: false,
+            isReviewable: false
+        )
+    }
+
+    private static func title(forDetailReviewKind reviewKind: String) -> String {
+        switch reviewKind {
+        case "artifact-metadata":
+            return "Artifact metadata"
+        case "file-change-safety":
+            return "文件变更安全"
+        case "shell-safety":
+            return "Shell 命令安全"
+        case "extraction-completeness":
+            return "提取完整性"
+        case "browser-control":
+            return "浏览器控制"
+        case "delivery-safety":
+            return "最终提交安全"
+        case "gateway-capability":
+            return "Gateway 能力"
+        case "accessibility":
+            return "Accessibility 观察"
+        case "replay-guard":
+            return "Replay Guard"
+        case "agent-trace":
+            return "AgentTrace"
+        default:
+            return "详细复核"
+        }
     }
 }
 
