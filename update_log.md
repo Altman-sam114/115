@@ -58,6 +58,7 @@
 - `ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci-results.yml"); puts "yaml ok"'` 通过，输出 `yaml ok`。
 - `node --check Tools/claw-gateway-server.mjs`、`node --check Tools/claw-gateway-direct-smoke.mjs`、`node --check Tools/claw-gateway-smoke.mjs` 通过。
 - GitHub Actions run `28768979862` attempt `1` 对 commit `cf894226dedadeaada8121ca6fe19e85f2cdc5a6` 通过，artifact `claw-ci-v0.2-main-cf894226deda-run28768979862-attempt1` 已下载到 `/private/tmp/claw-c-review-28768979862/` 并核对 manifest、JUnit、failure summary、Swift/Gateway smoke、node/plutil/git diff check 和 xcodebuild 日志。
+- GitHub Actions run `28769138272` attempt `1` 对验证记录 commit `e2ea7265692ba3a11b5de45dbd6d56335923b5b0` 失败，failure summary 指向 `swift-logic-smoke`；日志显示 `Tools/LogicSmoke.swift` 中复核态势脱敏断言的长字符串表达式触发 Swift 编译器 type-check 超时，已通过拆分中间数组追加修复。
 
 遗留事项：
 

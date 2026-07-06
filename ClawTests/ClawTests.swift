@@ -613,9 +613,10 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(focusedReadiness.focusedReviewTitle, "最终提交安全")
         XCTAssertTrue(focusedReadiness.focusedHasDetailReview)
 
-        let visibleText = queue.map {
+        let queueVisibleChunks = queue.map {
             "\($0.title) \($0.status) \($0.reason) \($0.actionHint) \($0.reviewKind)"
-        }.joined(separator: " ") + " " + [
+        }
+        let readinessVisibleChunks = [
             availableDetailKinds.joined(separator: " "),
             readiness.title,
             readiness.status,
@@ -625,7 +626,8 @@ final class ClawTests: XCTestCase {
             readiness.topActionHint ?? "",
             focusedReadiness.focusedReviewKind ?? "",
             focusedReadiness.focusedReviewTitle ?? ""
-        ].joined(separator: " ")
+        ]
+        let visibleText = (queueVisibleChunks + readinessVisibleChunks).joined(separator: " ")
         for forbidden in ["Authorization", "Bearer", "toolArguments", "file://", "/private", "/home", "C:\\", "stdout", "stderr"] {
             XCTAssertFalse(visibleText.contains(forbidden), "queue leaked \(forbidden)")
         }

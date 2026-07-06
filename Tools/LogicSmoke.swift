@@ -197,9 +197,10 @@ enum LogicSmoke {
         expect(focusedReadiness.focusedReviewKind == "delivery-safety", "readiness should record focused review kind")
         expect(focusedReadiness.focusedReviewTitle == "最终提交安全", "readiness should record focused review title")
         expect(focusedReadiness.focusedHasDetailReview, "readiness should know focused review has a detail row")
-        let queueVisibleText = missionSummary.reviewPriorityQueue.map {
+        let queueVisibleChunks = missionSummary.reviewPriorityQueue.map {
             "\($0.title) \($0.status) \($0.reason) \($0.actionHint) \($0.reviewKind)"
-        }.joined(separator: " ") + " " + [
+        }
+        let readinessVisibleChunks = [
             availableDetailKinds.joined(separator: " "),
             readiness.title,
             readiness.status,
@@ -209,7 +210,8 @@ enum LogicSmoke {
             readiness.topActionHint ?? "",
             focusedReadiness.focusedReviewKind ?? "",
             focusedReadiness.focusedReviewTitle ?? ""
-        ].joined(separator: " ")
+        ]
+        let queueVisibleText = (queueVisibleChunks + readinessVisibleChunks).joined(separator: " ")
         for forbidden in ["Authorization", "Bearer", "toolArguments", "file://", "/private", "/home", "C:\\", "stdout", "stderr"] {
             expect(queueVisibleText.contains(forbidden) == false, "review priority queue should not expose \(forbidden)")
         }
