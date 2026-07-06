@@ -639,6 +639,12 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(idleEvidenceCoverage.evidenceCoveredCount, 0)
         XCTAssertEqual(idleEvidenceCoverage.metadataPendingCount, 0)
         XCTAssertNil(idleEvidenceCoverage.primaryReviewKind)
+        let idleNextStepDeck = idleStore.missionRunSummary.macAgentNextStepDeck
+        XCTAssertFalse(idleNextStepDeck.isReviewable)
+        XCTAssertEqual(idleNextStepDeck.totalCount, 0)
+        XCTAssertTrue(idleNextStepDeck.candidates.isEmpty)
+        XCTAssertNil(idleNextStepDeck.primaryReviewKind)
+        XCTAssertNil(idleNextStepDeck.focusedReviewKind)
         XCTAssertNil(idleStore.missionRunSummary.activeReviewFocus(from: "delivery-safety"))
 
         let store = ClawStore(autoScanLocalArtifacts: false)
@@ -677,6 +683,16 @@ final class ClawTests: XCTestCase {
         let focusedPreSendEvidenceCoverage = preSendSummary.macAgentEvidenceCoverageMap(focusedOn: "approval")
         XCTAssertEqual(focusedPreSendEvidenceCoverage.focusedReviewKind, "approval")
         XCTAssertTrue(focusedPreSendEvidenceCoverage.items.contains { $0.reviewKind == "approval" && $0.isFocused })
+        let preSendNextStepDeck = preSendSummary.macAgentNextStepDeck
+        XCTAssertTrue(preSendNextStepDeck.isReviewable)
+        XCTAssertTrue(preSendNextStepDeck.requiresHumanAction)
+        XCTAssertEqual(preSendNextStepDeck.primaryReviewKind, "approval")
+        XCTAssertTrue(preSendNextStepDeck.canFocusPrimaryReview)
+        XCTAssertTrue(preSendNextStepDeck.candidates.contains { $0.id == "human-confirmation" && $0.reviewKind == "approval" && $0.requiresHumanAction })
+        XCTAssertTrue(preSendNextStepDeck.candidates.contains { $0.id == "evidence-fill" && $0.canContinueLoop == false })
+        let focusedPreSendNextStepDeck = preSendSummary.macAgentNextStepDeck(focusedOn: "approval")
+        XCTAssertEqual(focusedPreSendNextStepDeck.focusedReviewKind, "approval")
+        XCTAssertTrue(focusedPreSendNextStepDeck.candidates.contains { $0.reviewKind == "approval" && $0.isFocused })
 
         store.approveAndContinueAutonomousLoop()
 
@@ -761,6 +777,18 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(focusedEvidenceCoverage.focusedReviewKind, "delivery-safety")
         XCTAssertEqual(focusedEvidenceCoverage.focusedReviewTitle, "最终提交安全")
         XCTAssertTrue(focusedEvidenceCoverage.items.contains { $0.reviewKind == "delivery-safety" && $0.isFocused })
+        let nextStepDeck = summary.macAgentNextStepDeck
+        XCTAssertTrue(nextStepDeck.isReviewable)
+        XCTAssertGreaterThan(nextStepDeck.totalCount, 0)
+        XCTAssertEqual(nextStepDeck.candidates.map(\.rank), nextStepDeck.candidates.map(\.rank).sorted())
+        XCTAssertTrue(nextStepDeck.requiresHumanAction)
+        XCTAssertTrue(nextStepDeck.candidates.contains { $0.id == "human-confirmation" && $0.requiresHumanAction })
+        XCTAssertTrue(nextStepDeck.candidates.contains { $0.id == "loop-next" && $0.reviewKind == "agent-trace" })
+        XCTAssertNotNil(nextStepDeck.primaryReviewKind)
+        let focusedNextStepDeck = summary.macAgentNextStepDeck(focusedOn: "delivery-safety")
+        XCTAssertEqual(focusedNextStepDeck.focusedReviewKind, "delivery-safety")
+        XCTAssertEqual(focusedNextStepDeck.focusedReviewTitle, "最终提交安全")
+        XCTAssertTrue(focusedNextStepDeck.candidates.contains { $0.reviewKind == "delivery-safety" && $0.isFocused })
         let operatorStrip = summary.operatorStrip
         XCTAssertEqual(operatorStrip.lanes.map(\.id), ["gateway", "evidence", "review", "next"])
         XCTAssertEqual(operatorStrip.title, "Mission Operator")
@@ -920,6 +948,10 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(statusEvidenceCoverage.focusedReviewKind, statusOnlyItem.reviewKind)
         XCTAssertEqual(statusEvidenceCoverage.focusedReviewTitle, statusOnlyItem.title)
         XCTAssertTrue(statusEvidenceCoverage.items.contains { $0.reviewKind == statusOnlyItem.reviewKind && $0.isFocused })
+        let statusNextStepDeck = statusOnlySummary.macAgentNextStepDeck(focusedOn: statusOnlyItem.reviewKind)
+        XCTAssertEqual(statusNextStepDeck.focusedReviewKind, statusOnlyItem.reviewKind)
+        XCTAssertEqual(statusNextStepDeck.focusedReviewTitle, statusOnlyItem.title)
+        XCTAssertTrue(statusNextStepDeck.candidates.contains { $0.reviewKind == statusOnlyItem.reviewKind && $0.isFocused })
         let staleFocusContext = statusOnlySummary.focusContextSummary(focusedOn: "unknown-review-kind")
         XCTAssertNil(staleFocusContext.focusedReviewKind)
         XCTAssertTrue(staleFocusContext.canClearFocus)
@@ -945,6 +977,9 @@ final class ClawTests: XCTestCase {
         let staleEvidenceCoverage = statusOnlySummary.macAgentEvidenceCoverageMap(focusedOn: "unknown-review-kind")
         XCTAssertNil(staleEvidenceCoverage.focusedReviewKind)
         XCTAssertGreaterThanOrEqual(staleEvidenceCoverage.totalCount, availableDetailKinds.count)
+        let staleNextStepDeck = statusOnlySummary.macAgentNextStepDeck(focusedOn: "unknown-review-kind")
+        XCTAssertNil(staleNextStepDeck.focusedReviewKind)
+        XCTAssertEqual(staleNextStepDeck.totalCount, statusOnlySummary.macAgentNextStepDeck.totalCount)
         XCTAssertEqual(summary.detailReviewKinds(focusedOn: nil), availableDetailKinds)
         XCTAssertEqual(summary.detailReviewKinds(focusedOn: "delivery-safety"), ["delivery-safety"])
         XCTAssertEqual(summary.detailReviewKinds(focusedOn: "gateway-status"), availableDetailKinds)
@@ -1259,6 +1294,43 @@ final class ClawTests: XCTestCase {
             staleEvidenceCoverage.status,
             staleEvidenceCoverage.guidance
         ]
+        let nextStepDeckVisibleChunks = nextStepDeck.candidates.flatMap {
+            [
+                $0.title,
+                $0.status,
+                $0.guidance,
+                $0.reviewKind ?? "",
+                $0.reviewTitle ?? ""
+            ]
+        } + [
+            idleNextStepDeck.title,
+            idleNextStepDeck.status,
+            idleNextStepDeck.guidance,
+            preSendNextStepDeck.title,
+            preSendNextStepDeck.status,
+            preSendNextStepDeck.guidance,
+            focusedPreSendNextStepDeck.title,
+            focusedPreSendNextStepDeck.status,
+            focusedPreSendNextStepDeck.guidance,
+            nextStepDeck.title,
+            nextStepDeck.status,
+            nextStepDeck.guidance,
+            nextStepDeck.primaryReviewKind ?? "",
+            nextStepDeck.primaryReviewTitle ?? "",
+            focusedNextStepDeck.title,
+            focusedNextStepDeck.status,
+            focusedNextStepDeck.guidance,
+            focusedNextStepDeck.focusedReviewKind ?? "",
+            focusedNextStepDeck.focusedReviewTitle ?? "",
+            statusNextStepDeck.title,
+            statusNextStepDeck.status,
+            statusNextStepDeck.guidance,
+            statusNextStepDeck.focusedReviewKind ?? "",
+            statusNextStepDeck.focusedReviewTitle ?? "",
+            staleNextStepDeck.title,
+            staleNextStepDeck.status,
+            staleNextStepDeck.guidance
+        ]
         let visibleText = (
             queueVisibleChunks +
                 readinessVisibleChunks +
@@ -1271,7 +1343,8 @@ final class ClawTests: XCTestCase {
                 focusContextVisibleChunks +
                 macReadinessVisibleChunks +
                 actionPreflightVisibleChunks +
-                evidenceCoverageVisibleChunks
+                evidenceCoverageVisibleChunks +
+                nextStepDeckVisibleChunks
         ).joined(separator: " ")
         for forbidden in ["Authorization", "Bearer", "toolArguments", "file://", "/private", "/Users", "/home", "C:\\", "stdout", "stderr", "diff"] {
             XCTAssertFalse(visibleText.contains(forbidden), "queue leaked \(forbidden)")
@@ -1353,6 +1426,14 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(shellDetailDock.detailReviewKinds, ["shell-safety"])
         XCTAssertTrue(shellDetailDock.showsFocusedDetailOnly)
         XCTAssertTrue(shellDetailDock.canClearFocus)
+        let shellNextStepDeck = shellStore.missionRunSummary.macAgentNextStepDeck(focusedOn: "shell-safety")
+        XCTAssertTrue(shellNextStepDeck.isReviewable)
+        XCTAssertTrue(shellNextStepDeck.requiresHumanAction)
+        XCTAssertTrue(shellNextStepDeck.isRetryable)
+        XCTAssertEqual(shellNextStepDeck.focusedReviewKind, "shell-safety")
+        XCTAssertEqual(shellNextStepDeck.focusedReviewTitle, "Shell 命令安全")
+        XCTAssertTrue(shellNextStepDeck.candidates.contains { $0.id == "failure-review" && $0.reviewKind == "shell-safety" && $0.isRetryable })
+        XCTAssertTrue(shellNextStepDeck.candidates.contains { $0.reviewKind == "shell-safety" && $0.isFocused })
         XCTAssertFalse(
             [
                 shellReadiness.title,
@@ -1402,7 +1483,11 @@ final class ClawTests: XCTestCase {
                 shellDetailDock.status,
                 shellDetailDock.guidance,
                 shellDetailDock.activeReviewKind ?? "",
-                shellDetailDock.activeReviewTitle ?? ""
+                shellDetailDock.activeReviewTitle ?? "",
+                shellNextStepDeck.title,
+                shellNextStepDeck.status,
+                shellNextStepDeck.guidance,
+                shellNextStepDeck.candidates.map { "\($0.title) \($0.status) \($0.guidance)" }.joined(separator: " ")
             ].joined(separator: " ").contains("stdout")
         )
     }
@@ -1541,6 +1626,14 @@ final class ClawTests: XCTestCase {
         XCTAssertTrue(continuation.canContinueLoop)
         XCTAssertFalse(continuation.requiresHumanAction)
         XCTAssertTrue(continuation.canFocusAgentTrace)
+        let deck = summary.macAgentNextStepDeck(focusedOn: "agent-trace")
+        XCTAssertTrue(deck.isReviewable)
+        XCTAssertTrue(deck.canContinueLoop)
+        XCTAssertFalse(deck.requiresHumanAction)
+        XCTAssertEqual(deck.primaryReviewKind, "agent-trace")
+        XCTAssertEqual(deck.focusedReviewKind, "agent-trace")
+        XCTAssertTrue(deck.candidates.contains { $0.id == "loop-next" && $0.canContinueLoop && $0.reviewKind == "agent-trace" && $0.isFocused })
+        XCTAssertTrue(deck.candidates.contains { $0.guidance.contains("用户显式触发下一轮") })
     }
 
     func testMissionRunSummaryDerivesAccessibilityReview() throws {

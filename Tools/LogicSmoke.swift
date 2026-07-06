@@ -181,6 +181,12 @@ enum LogicSmoke {
         expect(idleEvidenceCoverage.evidenceCoveredCount == 0, "idle evidence coverage should not count evidence")
         expect(idleEvidenceCoverage.metadataPendingCount == 0, "idle evidence coverage should not count metadata gaps")
         expect(idleEvidenceCoverage.primaryReviewKind == nil, "idle evidence coverage should not invent primary focus")
+        let idleNextStepDeck = missionStore.missionRunSummary.macAgentNextStepDeck
+        expect(idleNextStepDeck.isReviewable == false, "idle next step deck should not be reviewable")
+        expect(idleNextStepDeck.totalCount == 0, "idle next step deck should not invent candidates")
+        expect(idleNextStepDeck.candidates.isEmpty, "idle next step deck should have no candidate rows")
+        expect(idleNextStepDeck.primaryReviewKind == nil, "idle next step deck should not invent primary focus")
+        expect(idleNextStepDeck.focusedReviewKind == nil, "idle next step deck should not invent focused review")
         expect(missionStore.missionRunSummary.activeReviewFocus(from: "delivery-safety") == nil, "idle active focus should not resolve")
         missionStore.phoneAgentCommand = "打开浏览器搜索资料，整理结果并发到 Slack"
         missionStore.startAutonomousComputerTakeover()
@@ -231,6 +237,25 @@ enum LogicSmoke {
         expect(
             focusedPreSendEvidenceCoverage.items.contains { $0.reviewKind == "approval" && $0.isFocused },
             "focused pre-send evidence coverage should mark approval row"
+        )
+        let preSendNextStepDeck = missionSummary.macAgentNextStepDeck
+        expect(preSendNextStepDeck.isReviewable, "pre-send next step deck should be reviewable")
+        expect(preSendNextStepDeck.requiresHumanAction, "pre-send next step deck should require human action")
+        expect(preSendNextStepDeck.primaryReviewKind == "approval", "pre-send next step deck should target approval")
+        expect(preSendNextStepDeck.canFocusPrimaryReview, "pre-send next step deck should focus approval")
+        expect(
+            preSendNextStepDeck.candidates.contains { $0.id == "human-confirmation" && $0.reviewKind == "approval" && $0.requiresHumanAction },
+            "pre-send next step deck should include approval candidate"
+        )
+        expect(
+            preSendNextStepDeck.candidates.contains { $0.id == "evidence-fill" && $0.canContinueLoop == false },
+            "pre-send next step deck should include evidence wait candidate"
+        )
+        let focusedPreSendNextStepDeck = missionSummary.macAgentNextStepDeck(focusedOn: "approval")
+        expect(focusedPreSendNextStepDeck.focusedReviewKind == "approval", "pre-send next step deck should focus approval")
+        expect(
+            focusedPreSendNextStepDeck.candidates.contains { $0.reviewKind == "approval" && $0.isFocused },
+            "focused pre-send next step deck should mark approval row"
         )
         missionStore.approveAndContinueAutonomousLoop()
         missionSummary = missionStore.missionRunSummary
@@ -382,6 +407,27 @@ enum LogicSmoke {
         expect(
             focusedEvidenceCoverage.items.contains { $0.reviewKind == "delivery-safety" && $0.isFocused },
             "focused evidence coverage should mark delivery row"
+        )
+        let nextStepDeck = missionSummary.macAgentNextStepDeck
+        expect(nextStepDeck.isReviewable, "next step deck should be reviewable once Gateway evidence exists")
+        expect(nextStepDeck.totalCount > 0, "next step deck should expose candidates")
+        expect(nextStepDeck.candidates.map(\.rank) == nextStepDeck.candidates.map(\.rank).sorted(), "next step deck should be rank sorted")
+        expect(nextStepDeck.requiresHumanAction, "next step deck should surface human review")
+        expect(
+            nextStepDeck.candidates.contains { $0.id == "human-confirmation" && $0.requiresHumanAction },
+            "next step deck should include human confirmation candidate"
+        )
+        expect(
+            nextStepDeck.candidates.contains { $0.id == "loop-next" && $0.reviewKind == "agent-trace" },
+            "next step deck should include loop candidate"
+        )
+        expect(nextStepDeck.primaryReviewKind != nil, "next step deck should expose a primary review")
+        let focusedNextStepDeck = missionSummary.macAgentNextStepDeck(focusedOn: "delivery-safety")
+        expect(focusedNextStepDeck.focusedReviewKind == "delivery-safety", "next step deck should record delivery focus")
+        expect(focusedNextStepDeck.focusedReviewTitle == "最终提交安全", "next step deck should expose delivery title")
+        expect(
+            focusedNextStepDeck.candidates.contains { $0.reviewKind == "delivery-safety" && $0.isFocused },
+            "focused next step deck should mark delivery candidate"
         )
         let operatorStrip = missionSummary.operatorStrip
         expect(operatorStrip.lanes.map(\.id) == ["gateway", "evidence", "review", "next"], "operator strip should expose stable lanes")
@@ -593,6 +639,13 @@ enum LogicSmoke {
             statusEvidenceCoverage.items.contains { $0.reviewKind == statusOnlyItem.reviewKind && $0.isFocused },
             "status evidence coverage should mark status row"
         )
+        let statusNextStepDeck = statusOnlySummary.macAgentNextStepDeck(focusedOn: statusOnlyItem.reviewKind)
+        expect(statusNextStepDeck.focusedReviewKind == statusOnlyItem.reviewKind, "status next step deck should keep status focus")
+        expect(statusNextStepDeck.focusedReviewTitle == statusOnlyItem.title, "status next step deck should expose status title")
+        expect(
+            statusNextStepDeck.candidates.contains { $0.reviewKind == statusOnlyItem.reviewKind && $0.isFocused },
+            "status next step deck should mark status candidate"
+        )
         let staleFocusContext = statusOnlySummary.focusContextSummary(focusedOn: "unknown-review-kind")
         expect(staleFocusContext.focusedReviewKind == nil, "stale focus context should not keep an unknown review kind")
         expect(staleFocusContext.canClearFocus, "stale focus context should allow clearing focus")
@@ -618,6 +671,12 @@ enum LogicSmoke {
         let staleEvidenceCoverage = statusOnlySummary.macAgentEvidenceCoverageMap(focusedOn: "unknown-review-kind")
         expect(staleEvidenceCoverage.focusedReviewKind == nil, "stale evidence coverage should not keep unknown focus")
         expect(staleEvidenceCoverage.totalCount >= availableDetailKinds.count, "stale evidence coverage should keep review rows")
+        let staleNextStepDeck = statusOnlySummary.macAgentNextStepDeck(focusedOn: "unknown-review-kind")
+        expect(staleNextStepDeck.focusedReviewKind == nil, "stale next step deck should not keep unknown focus")
+        expect(
+            staleNextStepDeck.totalCount == statusOnlySummary.macAgentNextStepDeck.totalCount,
+            "stale next step deck should keep candidates"
+        )
         expect(
             missionSummary.detailReviewKinds(focusedOn: nil) == availableDetailKinds,
             "nil focus should show all detail reviews"
@@ -976,6 +1035,45 @@ enum LogicSmoke {
             staleEvidenceCoverage.guidance
         ]
         let evidenceCoverageVisibleChunks = evidenceCoverageItemChunks + evidenceCoverageSummaryChunks
+        let nextStepDeckItemChunks: [String] = nextStepDeck.candidates.flatMap { item in
+            [
+                item.title,
+                item.status,
+                item.guidance,
+                item.reviewKind ?? "",
+                item.reviewTitle ?? ""
+            ]
+        }
+        let nextStepDeckSummaryChunks: [String] = [
+            idleNextStepDeck.title,
+            idleNextStepDeck.status,
+            idleNextStepDeck.guidance,
+            preSendNextStepDeck.title,
+            preSendNextStepDeck.status,
+            preSendNextStepDeck.guidance,
+            focusedPreSendNextStepDeck.title,
+            focusedPreSendNextStepDeck.status,
+            focusedPreSendNextStepDeck.guidance,
+            nextStepDeck.title,
+            nextStepDeck.status,
+            nextStepDeck.guidance,
+            nextStepDeck.primaryReviewKind ?? "",
+            nextStepDeck.primaryReviewTitle ?? "",
+            focusedNextStepDeck.title,
+            focusedNextStepDeck.status,
+            focusedNextStepDeck.guidance,
+            focusedNextStepDeck.focusedReviewKind ?? "",
+            focusedNextStepDeck.focusedReviewTitle ?? "",
+            statusNextStepDeck.title,
+            statusNextStepDeck.status,
+            statusNextStepDeck.guidance,
+            statusNextStepDeck.focusedReviewKind ?? "",
+            statusNextStepDeck.focusedReviewTitle ?? "",
+            staleNextStepDeck.title,
+            staleNextStepDeck.status,
+            staleNextStepDeck.guidance
+        ]
+        let nextStepDeckVisibleChunks = nextStepDeckItemChunks + nextStepDeckSummaryChunks
         let queueVisibleText = (
             queueVisibleChunks +
                 readinessVisibleChunks +
@@ -988,7 +1086,8 @@ enum LogicSmoke {
                 focusContextVisibleChunks +
                 macReadinessVisibleChunks +
                 actionPreflightVisibleChunks +
-                evidenceCoverageVisibleChunks
+                evidenceCoverageVisibleChunks +
+                nextStepDeckVisibleChunks
         ).joined(separator: " ")
         for forbidden in ["Authorization", "Bearer", "toolArguments", "file://", "/private", "/Users", "/home", "C:\\", "stdout", "stderr", "diff"] {
             expect(queueVisibleText.contains(forbidden) == false, "review priority queue should not expose \(forbidden)")
@@ -1226,6 +1325,20 @@ enum LogicSmoke {
         expect(shellDetailDock.detailReviewKinds == ["shell-safety"], "shell detail dock should show shell only")
         expect(shellDetailDock.showsFocusedDetailOnly, "shell detail dock should mark single detail mode")
         expect(shellDetailDock.canClearFocus, "shell detail dock should allow clearing")
+        let shellNextStepDeck = shellMissionSummary.macAgentNextStepDeck(focusedOn: "shell-safety")
+        expect(shellNextStepDeck.isReviewable, "shell next step deck should be reviewable")
+        expect(shellNextStepDeck.requiresHumanAction, "shell next step deck should require human review")
+        expect(shellNextStepDeck.isRetryable, "shell next step deck should surface retryable failure")
+        expect(shellNextStepDeck.focusedReviewKind == "shell-safety", "shell next step deck should record shell focus")
+        expect(shellNextStepDeck.focusedReviewTitle == "Shell 命令安全", "shell next step deck should expose shell title")
+        expect(
+            shellNextStepDeck.candidates.contains { $0.id == "failure-review" && $0.reviewKind == "shell-safety" && $0.isRetryable },
+            "shell next step deck should point retryable failure at shell safety"
+        )
+        expect(
+            shellNextStepDeck.candidates.contains { $0.reviewKind == "shell-safety" && $0.isFocused },
+            "shell next step deck should mark shell candidate"
+        )
         let shellPayloadLedgerRows = shellPayloadLedger.items.map { item in
             "\(item.reviewTitle) \(item.status) \(item.guidance)"
         }.joined(separator: " ")
@@ -1243,6 +1356,9 @@ enum LogicSmoke {
         }.joined(separator: " ")
         let shellEvidenceCoverageRows = shellEvidenceCoverage.items.map { item in
             "\(item.reviewTitle) \(item.status) \(item.guidance)"
+        }.joined(separator: " ")
+        let shellNextStepDeckRows = shellNextStepDeck.candidates.map { item in
+            "\(item.title) \(item.status) \(item.guidance)"
         }.joined(separator: " ")
         let shellVisibleChunks: [String] = [
             shellReadiness.title,
@@ -1290,7 +1406,11 @@ enum LogicSmoke {
             shellDetailDock.status,
             shellDetailDock.guidance,
             shellDetailDock.activeReviewKind ?? "",
-            shellDetailDock.activeReviewTitle ?? ""
+            shellDetailDock.activeReviewTitle ?? "",
+            shellNextStepDeck.title,
+            shellNextStepDeck.status,
+            shellNextStepDeck.guidance,
+            shellNextStepDeckRows
         ]
         let shellVisibleText = shellVisibleChunks.joined(separator: " ")
         expect(shellVisibleText.contains("stdout") == false, "shell readiness should not expose stdout")
@@ -1355,6 +1475,81 @@ enum LogicSmoke {
         expect(loopContinuation.canContinueLoop == false, "loop continuation should not auto-continue final submit")
         expect(loopContinuation.requiresHumanAction, "loop continuation should require human review")
         expect(loopContinuation.canFocusAgentTrace, "loop continuation should focus AgentTrace detail")
+        let readyLoopTrace = ClawGatewayArtifact(
+            kind: .agentTrace,
+            title: "agent-loop-ready",
+            reference: "file:///tmp/agent-loop-ready.json",
+            isRedacted: true,
+            metadata: [
+                "readinessScore": "100",
+                "readinessCanContinue": "true",
+                "satisfiedSignals": "browserTrace,fileDiff,commandOutput",
+                "degradedSignals": "",
+                "missingSignals": "",
+                "selectedNextActionKind": "extractData",
+                "selectedNextActionRequiresApproval": "false",
+                "riskTags": "",
+                "stopReason": "none",
+                "handoffStatus": "ready-to-continue",
+                "handoffSummary": "Evidence score 100/100. Selected next action: extractData."
+            ]
+        )
+        if let readyLoopReview = ClawAgentTraceReviewSummary.latest(from: [readyLoopTrace]) {
+            let readyLoopSummary = ClawMissionRunSummary(
+                command: "ready loop",
+                phaseTitle: "复核中",
+                phaseIcon: "arrow.triangle.2.circlepath",
+                progressCurrent: 1,
+                progressTotal: 3,
+                riskScore: 0,
+                approvalCount: 0,
+                blockedCount: 0,
+                succeededCount: 1,
+                failedCount: 0,
+                retryableCount: 0,
+                artifactCount: 1,
+                artifactKinds: [.agentTrace],
+                artifactMetadataReview: nil,
+                gatewayExtractionCompletenessReview: nil,
+                gatewayBrowserControlReview: nil,
+                gatewayDeliverySafetyReview: nil,
+                gatewayFileChangeSafetyReview: nil,
+                gatewayShellCommandSafetyReview: nil,
+                agentTraceReview: readyLoopReview,
+                gatewayAccessibilityReview: nil,
+                gatewayCapabilityReview: nil,
+                gatewayTaskReplayGuardReview: nil,
+                reviewPriorityQueue: [],
+                approvalQueue: [],
+                actionPreflightItems: [],
+                primaryActionTitle: "继续",
+                primaryActionIcon: "arrow.forward.circle.fill",
+                primaryActionKind: .continueAfterReview,
+                isPrimaryActionEnabled: true,
+                requiresUserApproval: false,
+                statusLine: "ready",
+                stageTrack: []
+            )
+            let readyLoopContinuation = readyLoopSummary.loopContinuationSummary
+            expect(readyLoopContinuation.canContinueLoop, "ready loop continuation should be user-continuable")
+            expect(readyLoopContinuation.requiresHumanAction == false, "ready loop continuation should not require approval")
+            let readyLoopDeck = readyLoopSummary.macAgentNextStepDeck(focusedOn: "agent-trace")
+            expect(readyLoopDeck.isReviewable, "ready loop next step deck should be reviewable")
+            expect(readyLoopDeck.canContinueLoop, "ready loop next step deck should surface loop candidate")
+            expect(readyLoopDeck.requiresHumanAction == false, "ready loop next step deck should not require human action")
+            expect(readyLoopDeck.primaryReviewKind == "agent-trace", "ready loop next step deck should target AgentTrace")
+            expect(readyLoopDeck.focusedReviewKind == "agent-trace", "ready loop next step deck should record AgentTrace focus")
+            expect(
+                readyLoopDeck.candidates.contains { $0.id == "loop-next" && $0.canContinueLoop && $0.reviewKind == "agent-trace" && $0.isFocused },
+                "ready loop next step deck should mark the loop candidate"
+            )
+            expect(
+                readyLoopDeck.candidates.contains { $0.guidance.contains("用户显式触发下一轮") },
+                "ready loop next step deck should require explicit user continuation"
+            )
+        } else {
+            failures.append("ready loop agent trace review should be derived")
+        }
         let sensitiveAgentTrace = ClawGatewayArtifact(
             kind: .agentTrace,
             title: "agent-loop file:///private/tmp/trace.json",

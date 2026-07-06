@@ -58,10 +58,10 @@ flowchart TD
   R --> LHEALTH
   SES --> LHEALTH
   SES --> RREVIEW["ClawGatewayTaskReplayGuardReviewSummary<br/>重复任务安全跳过复核"]
-  LHEALTH --> RUN["ClawMissionRunSummary<br/>派生目标、阶段、主动作、风险、证据、Operator Strip、Loop Continuation Brief、Mac Agent Readiness Board、Mac Gateway Action Preflight Matrix、Mac Agent Evidence Coverage Map、Focus Context、Review Detail Dock、Review Trail、Approval Queue、Payload Safety Ledger、Artifact Evidence Index、Review Readiness Summary、Next Review Action、Review Priority Queue、Focused Priority Detail、Live health、Artifact metadata、File Change Safety、Shell Command Safety、提取完整性、Browser Control、Delivery Safety、Gateway 能力、Accessibility、Replay Guard 和 AgentTrace handoff 复核"]
+  LHEALTH --> RUN["ClawMissionRunSummary<br/>派生目标、阶段、主动作、风险、证据、Operator Strip、Loop Continuation Brief、Mac Agent Readiness Board、Mac Gateway Action Preflight Matrix、Mac Agent Evidence Coverage Map、Mac Agent Next Step Deck、Focus Context、Review Detail Dock、Review Trail、Approval Queue、Payload Safety Ledger、Artifact Evidence Index、Review Readiness Summary、Next Review Action、Review Priority Queue、Focused Priority Detail、Live health、Artifact metadata、File Change Safety、Shell Command Safety、提取完整性、Browser Control、Delivery Safety、Gateway 能力、Accessibility、Replay Guard 和 AgentTrace handoff 复核"]
   RREVIEW --> RUN
   SES --> RUN
-  RUN --> UI["SwiftUI Mission Run / iPad 多栏工作台<br/>展示计划、风险、事件、artifact、审批点、Operator Strip、Loop 继续态势、Mac Agent Readiness Board 就绪看板、Mac Gateway Action Preflight Matrix 动作预检矩阵、Mac Agent Evidence Coverage Map 证据覆盖图、Focus Context 聚焦上下文、Review Detail Dock、Review Trail 复核路径、Approval Queue 审批队列、Payload Safety Ledger 载荷安全账本、Artifact 证据索引、复核态势、下一步复核行动、复核优先队列、当前聚焦项和详细复核摘要"]
+  RUN --> UI["SwiftUI Mission Run / iPad 多栏工作台<br/>展示计划、风险、事件、artifact、审批点、Operator Strip、Loop 继续态势、Mac Agent Readiness Board 就绪看板、Mac Gateway Action Preflight Matrix 动作预检矩阵、Mac Agent Evidence Coverage Map 证据覆盖图、Mac Agent Next Step Deck 下一步候选卡组、Focus Context 聚焦上下文、Review Detail Dock、Review Trail 复核路径、Approval Queue 审批队列、Payload Safety Ledger 载荷安全账本、Artifact 证据索引、复核态势、下一步复核行动、复核优先队列、当前聚焦项和详细复核摘要"]
   UI --> LOOP{"用户审批或继续循环"}
   LOOP -->|"批准发送/重试"| M
   LOOP -->|"人工修改目标"| U

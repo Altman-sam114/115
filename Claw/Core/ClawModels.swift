@@ -1567,6 +1567,52 @@ struct ClawMissionRunEvidenceCoverageMap: Equatable, Codable, Sendable {
     var items: [ClawMissionRunEvidenceCoverageItem]
 }
 
+struct ClawMissionRunNextStepCandidate: Identifiable, Equatable, Codable, Sendable {
+    var id: String
+    var rank: Int
+    var title: String
+    var status: String
+    var guidance: String
+    var icon: String
+    var tone: ClawMissionRunOperatorLaneTone
+    var reviewKind: String?
+    var reviewTitle: String?
+    var count: Int
+    var canFocusReview: Bool
+    var isFocused: Bool
+    var requiresHumanAction: Bool
+    var hasMetadataGap: Bool
+    var isBlocked: Bool
+    var isRetryable: Bool
+    var canContinueLoop: Bool
+}
+
+struct ClawMissionRunNextStepDeck: Equatable, Codable, Sendable {
+    var title: String
+    var status: String
+    var guidance: String
+    var icon: String
+    var totalCount: Int
+    var humanActionCount: Int
+    var metadataPendingCount: Int
+    var blockedCount: Int
+    var retryableCount: Int
+    var loopCandidateCount: Int
+    var focusedCandidateID: String?
+    var focusedReviewKind: String?
+    var focusedReviewTitle: String?
+    var primaryReviewKind: String?
+    var primaryReviewTitle: String?
+    var canFocusPrimaryReview: Bool
+    var requiresHumanAction: Bool
+    var hasMetadataGap: Bool
+    var isBlocked: Bool
+    var isRetryable: Bool
+    var canContinueLoop: Bool
+    var isReviewable: Bool
+    var candidates: [ClawMissionRunNextStepCandidate]
+}
+
 struct ClawMissionRunReviewReadinessSummary: Equatable, Codable, Sendable {
     var title: String
     var status: String
@@ -3741,6 +3787,333 @@ extension ClawMissionRunSummary {
         default:
             return Self.icon(forDetailReviewKind: reviewKind)
         }
+    }
+
+    var macAgentNextStepDeck: ClawMissionRunNextStepDeck {
+        macAgentNextStepDeck(focusedOn: nil)
+    }
+
+    func macAgentNextStepDeck(focusedOn reviewKind: String?) -> ClawMissionRunNextStepDeck {
+        let focusedKind = activeReviewFocus(from: reviewKind)
+        let readiness = reviewReadinessSummary(focusedOn: focusedKind)
+        let next = nextReviewAction(focusedOn: focusedKind)
+        let loop = loopContinuationSummary(focusedOn: focusedKind)
+        let macReadiness = macAgentReadinessBoard(focusedOn: focusedKind)
+        let actionPreflight = macGatewayActionPreflightMatrix(focusedOn: focusedKind)
+        let evidenceCoverage = macAgentEvidenceCoverageMap(focusedOn: focusedKind)
+        let approval = approvalQueueSummary(focusedOn: focusedKind)
+        let candidates = nextStepCandidates(
+            focusedOn: focusedKind,
+            readiness: readiness,
+            next: next,
+            loop: loop,
+            macReadiness: macReadiness,
+            actionPreflight: actionPreflight,
+            evidenceCoverage: evidenceCoverage,
+            approval: approval
+        )
+        let focusedCandidate = focusedKind.flatMap { kind in
+            candidates.first { $0.reviewKind == kind }
+        }
+        let primaryCandidate = focusedCandidate ??
+            candidates.first(where: \.isBlocked) ??
+            candidates.first(where: \.requiresHumanAction) ??
+            candidates.first(where: \.isRetryable) ??
+            candidates.first(where: \.hasMetadataGap) ??
+            candidates.first(where: \.canContinueLoop) ??
+            candidates.first
+        let humanActionCount = candidates.filter(\.requiresHumanAction).count
+        let metadataPendingCount = candidates.filter(\.hasMetadataGap).count
+        let blockedCandidateCount = candidates.filter(\.isBlocked).count
+        let retryableCandidateCount = candidates.filter(\.isRetryable).count
+        let loopCandidateCount = candidates.filter(\.canContinueLoop).count
+        let isReviewable = candidates.isEmpty == false
+        let requiresHumanAction = humanActionCount > 0 || readiness.requiresHumanAction || approval.requiresHumanAction
+        let hasMetadataGap = metadataPendingCount > 0
+        let isBlocked = blockedCandidateCount > 0
+        let isRetryable = retryableCandidateCount > 0
+        let canContinueLoop = loopCandidateCount > 0
+
+        let title: String
+        let status: String
+        let guidance: String
+        let icon: String
+        if isReviewable == false {
+            title = "Mac Agent 候选待生成"
+            status = "尚无 Gateway 证据"
+            guidance = "生成任务或收到 Gateway 事件后，会从审批、证据、失败、Loop 和抽查复核派生候选卡。"
+            icon = "rectangle.stack.badge.plus"
+        } else if let focusedCandidate {
+            title = "聚焦下一步候选"
+            status = focusedCandidate.title
+            guidance = "\(focusedCandidate.title)：\(focusedCandidate.guidance)"
+            icon = focusedCandidate.icon
+        } else if isBlocked {
+            title = "Mac Agent 失败复核候选"
+            status = "\(blockedCandidateCount) 类阻断 · \(retryableCandidateCount) 类可重试"
+            guidance = primaryCandidate.map { "先聚焦 \($0.reviewTitle ?? $0.title)：\($0.guidance)" } ?? "先处理失败或阻断候选。"
+            icon = "exclamationmark.triangle.fill"
+        } else if requiresHumanAction {
+            title = "Mac Agent 人工确认候选"
+            status = "\(humanActionCount) 类需人工确认"
+            guidance = primaryCandidate.map { "先聚焦 \($0.reviewTitle ?? $0.title)：\($0.guidance)" } ?? "先处理审批、Gateway 等待确认或交接候选。"
+            icon = "person.crop.circle.badge.checkmark"
+        } else if hasMetadataGap {
+            title = "Mac Agent 证据补齐候选"
+            status = "\(metadataPendingCount) 类 metadata 待同步"
+            guidance = primaryCandidate.map { "先聚焦 \($0.reviewTitle ?? $0.title)：\($0.guidance)" } ?? "等待 Gateway metadata 后再判断证据覆盖。"
+            icon = "doc.badge.clock"
+        } else if canContinueLoop {
+            title = "Mac Agent Loop 候选"
+            status = "可由用户显式触发下一轮"
+            guidance = primaryCandidate.map { "先复核 \($0.reviewTitle ?? $0.title)，再由用户显式触发下一轮。" } ?? "复核 AgentTrace 后，由用户显式触发下一轮。"
+            icon = "arrow.forward.circle.fill"
+        } else {
+            title = "Mac Agent 下一步候选"
+            status = "\(candidates.count) 类候选可抽查"
+            guidance = primaryCandidate.map { "可从 \($0.reviewTitle ?? $0.title) 开始聚焦复核。" } ?? "可继续抽查现有复核摘要。"
+            icon = "rectangle.stack.badge.play"
+        }
+
+        return ClawMissionRunNextStepDeck(
+            title: title,
+            status: status,
+            guidance: guidance,
+            icon: icon,
+            totalCount: candidates.count,
+            humanActionCount: humanActionCount,
+            metadataPendingCount: metadataPendingCount,
+            blockedCount: blockedCandidateCount,
+            retryableCount: retryableCandidateCount,
+            loopCandidateCount: loopCandidateCount,
+            focusedCandidateID: focusedCandidate?.id,
+            focusedReviewKind: focusedCandidate?.reviewKind,
+            focusedReviewTitle: focusedCandidate?.reviewTitle,
+            primaryReviewKind: primaryCandidate?.reviewKind,
+            primaryReviewTitle: primaryCandidate?.reviewTitle,
+            canFocusPrimaryReview: primaryCandidate?.canFocusReview ?? false,
+            requiresHumanAction: requiresHumanAction,
+            hasMetadataGap: hasMetadataGap,
+            isBlocked: isBlocked,
+            isRetryable: isRetryable,
+            canContinueLoop: canContinueLoop,
+            isReviewable: isReviewable,
+            candidates: candidates
+        )
+    }
+
+    private func nextStepCandidates(
+        focusedOn focusedKind: String?,
+        readiness: ClawMissionRunReviewReadinessSummary,
+        next: ClawMissionRunNextReviewAction,
+        loop: ClawMissionRunLoopContinuationSummary,
+        macReadiness: ClawMissionRunMacAgentReadinessBoard,
+        actionPreflight: ClawMissionRunActionPreflightMatrix,
+        evidenceCoverage: ClawMissionRunEvidenceCoverageMap,
+        approval: ClawMissionRunApprovalQueueSummary
+    ) -> [ClawMissionRunNextStepCandidate] {
+        var candidates: [ClawMissionRunNextStepCandidate] = []
+
+        if approval.isReviewable && (approval.requiresHumanAction || requiresUserApproval) {
+            candidates.append(
+                nextStepCandidate(
+                    id: "human-confirmation",
+                    rank: 10,
+                    title: "人工确认候选",
+                    status: approval.status,
+                    guidance: "聚焦审批、Gateway 等待确认、最终提交或 AgentTrace 交接；只改变本地复核焦点。",
+                    icon: approval.icon,
+                    tone: .warning,
+                    reviewKind: approval.primaryReviewKind,
+                    reviewTitle: approval.primaryReviewTitle,
+                    count: max(approval.actionableCount, approval.totalCount),
+                    canFocusReview: approval.canFocusPrimaryReview,
+                    focusedKind: focusedKind,
+                    requiresHumanAction: true,
+                    hasMetadataGap: approval.hasMetadataGap,
+                    isBlocked: false,
+                    isRetryable: false,
+                    canContinueLoop: false
+                )
+            )
+        }
+
+        if failedCount > 0 || blockedCount > 0 || retryableCount > 0 || actionPreflight.blockedCount > 0 {
+            let failureTarget = nextStepFailureTarget(actionPreflight: actionPreflight)
+            candidates.append(
+                nextStepCandidate(
+                    id: "failure-review",
+                    rank: 20,
+                    title: "失败复核候选",
+                    status: "\(failedCount) 失败 · \(blockedCount + actionPreflight.blockedCount) 阻断 · \(retryableCount) 可重试",
+                    guidance: "先聚焦失败、阻断或可重试复核，再由用户决定是否重试；不会自动重试。",
+                    icon: failureTarget.icon,
+                    tone: failedCount > 0 || blockedCount > 0 || actionPreflight.blockedCount > 0 ? .danger : .warning,
+                    reviewKind: failureTarget.reviewKind,
+                    reviewTitle: failureTarget.reviewTitle,
+                    count: max(1, failedCount + blockedCount + retryableCount + actionPreflight.blockedCount),
+                    canFocusReview: failureTarget.canFocusReview,
+                    focusedKind: focusedKind,
+                    requiresHumanAction: true,
+                    hasMetadataGap: false,
+                    isBlocked: failedCount > 0 || blockedCount > 0 || actionPreflight.blockedCount > 0,
+                    isRetryable: retryableCount > 0 || actionPreflight.items.contains(where: \.isRetryable),
+                    canContinueLoop: false
+                )
+            )
+        }
+
+        if evidenceCoverage.isReviewable && (evidenceCoverage.hasMetadataGap || macReadiness.hasMetadataGap || evidenceCoverage.evidenceCoveredCount < evidenceCoverage.totalCount) {
+            let evidenceTarget = nextStepEvidenceTarget(evidenceCoverage: evidenceCoverage, macReadiness: macReadiness, next: next)
+            let missingEvidenceCount = max(0, evidenceCoverage.totalCount - evidenceCoverage.evidenceCoveredCount)
+            candidates.append(
+                nextStepCandidate(
+                    id: "evidence-fill",
+                    rank: 30,
+                    title: "证据补齐候选",
+                    status: "\(evidenceCoverage.metadataPendingCount) metadata · \(missingEvidenceCount) 类待证据",
+                    guidance: "聚焦 metadata、artifact 覆盖或观察/能力降级；不打开 artifact payload。",
+                    icon: evidenceTarget.icon,
+                    tone: evidenceCoverage.hasMetadataGap || macReadiness.hasMetadataGap ? .info : .neutral,
+                    reviewKind: evidenceTarget.reviewKind,
+                    reviewTitle: evidenceTarget.reviewTitle,
+                    count: max(1, evidenceCoverage.metadataPendingCount + missingEvidenceCount),
+                    canFocusReview: evidenceTarget.canFocusReview,
+                    focusedKind: focusedKind,
+                    requiresHumanAction: evidenceCoverage.requiresHumanAction || macReadiness.requiresHumanAction,
+                    hasMetadataGap: evidenceCoverage.hasMetadataGap || macReadiness.hasMetadataGap,
+                    isBlocked: false,
+                    isRetryable: false,
+                    canContinueLoop: false
+                )
+            )
+        }
+
+        if loop.isReviewable {
+            candidates.append(
+                nextStepCandidate(
+                    id: "loop-next",
+                    rank: 40,
+                    title: "Loop 下一步候选",
+                    status: loop.status,
+                    guidance: loop.canContinueLoop ? "AgentTrace 显示可继续；复核后由用户显式触发下一轮，不会自动继续。" : loop.guidance,
+                    icon: loop.icon,
+                    tone: loop.hasMetadataGap ? .info : (loop.canContinueLoop ? .success : (loop.requiresHumanAction ? .warning : .neutral)),
+                    reviewKind: loop.focusReviewKind,
+                    reviewTitle: loop.focusReviewTitle,
+                    count: 1,
+                    canFocusReview: loop.canFocusAgentTrace,
+                    focusedKind: focusedKind,
+                    requiresHumanAction: loop.requiresHumanAction,
+                    hasMetadataGap: loop.hasMetadataGap,
+                    isBlocked: loop.handoffStatus == "blocked",
+                    isRetryable: false,
+                    canContinueLoop: loop.canContinueLoop
+                )
+            )
+        }
+
+        let hasBlockingCandidate = candidates.contains { $0.isBlocked || $0.requiresHumanAction || $0.isRetryable }
+        if hasBlockingCandidate == false && next.isReviewable {
+            candidates.append(
+                nextStepCandidate(
+                    id: "spot-check",
+                    rank: 50,
+                    title: "抽查复核候选",
+                    status: next.reviewTitle ?? next.status,
+                    guidance: next.actionHint.map { "聚焦 \($0)，继续抽查安全摘要。" } ?? next.guidance,
+                    icon: next.icon,
+                    tone: next.hasMetadataGap ? .info : .success,
+                    reviewKind: next.reviewKind,
+                    reviewTitle: next.reviewTitle,
+                    count: max(1, readiness.availableDetailReviewCount),
+                    canFocusReview: next.reviewKind.map(canFocusNextStepReviewKind) ?? false,
+                    focusedKind: focusedKind,
+                    requiresHumanAction: next.requiresHumanAction,
+                    hasMetadataGap: next.hasMetadataGap,
+                    isBlocked: false,
+                    isRetryable: false,
+                    canContinueLoop: false
+                )
+            )
+        }
+
+        return candidates.sorted { lhs, rhs in
+            lhs.rank == rhs.rank ? lhs.id < rhs.id : lhs.rank < rhs.rank
+        }
+    }
+
+    private func nextStepCandidate(
+        id: String,
+        rank: Int,
+        title: String,
+        status: String,
+        guidance: String,
+        icon: String,
+        tone: ClawMissionRunOperatorLaneTone,
+        reviewKind: String?,
+        reviewTitle: String?,
+        count: Int,
+        canFocusReview: Bool,
+        focusedKind: String?,
+        requiresHumanAction: Bool,
+        hasMetadataGap: Bool,
+        isBlocked: Bool,
+        isRetryable: Bool,
+        canContinueLoop: Bool
+    ) -> ClawMissionRunNextStepCandidate {
+        ClawMissionRunNextStepCandidate(
+            id: id,
+            rank: rank,
+            title: title,
+            status: status,
+            guidance: guidance,
+            icon: icon,
+            tone: tone,
+            reviewKind: reviewKind,
+            reviewTitle: reviewTitle,
+            count: count,
+            canFocusReview: canFocusReview && reviewKind != nil,
+            isFocused: reviewKind != nil && reviewKind == focusedKind,
+            requiresHumanAction: requiresHumanAction,
+            hasMetadataGap: hasMetadataGap,
+            isBlocked: isBlocked,
+            isRetryable: isRetryable,
+            canContinueLoop: canContinueLoop
+        )
+    }
+
+    private func nextStepFailureTarget(
+        actionPreflight: ClawMissionRunActionPreflightMatrix
+    ) -> (reviewKind: String?, reviewTitle: String?, icon: String, canFocusReview: Bool) {
+        if let item = actionPreflight.items.first(where: { $0.isBlocked || $0.isRetryable }) {
+            return (item.reviewKind, item.reviewTitle, item.icon, item.canFocusReview)
+        }
+        if let priority = reviewPriorityQueue.first(where: { $0.severity == .critical || $0.severity == .high || $0.isActionable }) {
+            return (priority.reviewKind, priority.title, priority.icon, canFocusNextStepReviewKind(priority.reviewKind))
+        }
+        return ("gateway-status", "Gateway 状态", "server.rack", canFocusNextStepReviewKind("gateway-status"))
+    }
+
+    private func nextStepEvidenceTarget(
+        evidenceCoverage: ClawMissionRunEvidenceCoverageMap,
+        macReadiness: ClawMissionRunMacAgentReadinessBoard,
+        next: ClawMissionRunNextReviewAction
+    ) -> (reviewKind: String?, reviewTitle: String?, icon: String, canFocusReview: Bool) {
+        if let item = evidenceCoverage.items.first(where: { $0.hasMetadataGap || $0.hasEvidence == false }) {
+            return (item.reviewKind, item.reviewTitle, item.icon, item.canFocusReview)
+        }
+        if let item = macReadiness.items.first(where: { $0.hasMetadataGap || $0.isBlocked }) {
+            return (item.reviewKind, item.reviewTitle, item.icon, item.canFocusReview)
+        }
+        return (next.reviewKind, next.reviewTitle, next.icon, next.reviewKind.map(canFocusNextStepReviewKind) ?? false)
+    }
+
+    private func canFocusNextStepReviewKind(_ reviewKind: String) -> Bool {
+        focusUsesDetailReview(reviewKind) ||
+            reviewPriorityQueue.contains { $0.reviewKind == reviewKind } ||
+            approvalQueue.contains { $0.reviewKind == reviewKind && $0.canFocusReview } ||
+            actionPreflightItems.contains { $0.reviewKind == reviewKind && $0.canFocusReview }
     }
 
     func macAgentReadinessBoard(focusedOn reviewKind: String?) -> ClawMissionRunMacAgentReadinessBoard {
