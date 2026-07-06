@@ -700,6 +700,10 @@ struct ClawMissionRunPanel: View {
                 }
             }
 
+            if summary.reviewPriorityQueue.isEmpty == false {
+                ClawMissionReviewPriorityQueueView(items: Array(summary.reviewPriorityQueue.prefix(5)))
+            }
+
             if let review = summary.artifactMetadataReview {
                 ClawGatewayArtifactMetadataReviewRow(review: review)
             }
@@ -789,6 +793,78 @@ struct ClawMissionRunPanel: View {
             store.continueAutonomousLoopAfterReview()
         case .waitForGateway, .inspectBlocked:
             break
+        }
+    }
+}
+
+struct ClawMissionReviewPriorityQueueView: View {
+    let items: [ClawMissionRunReviewPriorityItem]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("复核优先队列", systemImage: "list.bullet.clipboard.fill")
+                .font(.subheadline.bold())
+
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(items) { item in
+                    ClawMissionReviewPriorityItemRow(item: item)
+
+                    if item.id != items.last?.id {
+                        Divider()
+                    }
+                }
+            }
+        }
+        .accessibilityElement(children: .contain)
+    }
+}
+
+struct ClawMissionReviewPriorityItemRow: View {
+    let item: ClawMissionRunReviewPriorityItem
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: item.icon)
+                .font(.system(size: 13, weight: .bold))
+                .frame(width: 28, height: 28)
+                .background(tint.opacity(0.12), in: Circle())
+                .foregroundStyle(tint)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(item.title)
+                        .font(.footnote.bold())
+                    PhoneAgentTag(text: item.severity.title, icon: item.isActionable ? "arrow.right.circle.fill" : "info.circle.fill", tint: tint)
+                }
+
+                Text(item.status)
+                    .font(.footnote)
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text("\(item.reason) \(item.actionHint)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var tint: Color {
+        switch item.severity {
+        case .critical:
+            return .red
+        case .high:
+            return .orange
+        case .medium:
+            return .blue
+        case .low:
+            return .purple
+        case .info:
+            return .secondary
         }
     }
 }

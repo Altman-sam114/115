@@ -148,6 +148,18 @@ final class ClawStore: ObservableObject {
         let command = missionRunCommand(task: task, session: session)
         let progressTotal = max(autonomousLoop.maxIterations, 1)
         let progressCurrent = phase == .idle ? 0 : min(max(autonomousLoop.iteration, 1), progressTotal)
+        let artifactKinds = missionRunArtifactKinds(from: session)
+        let artifactMetadataReview = missionRunArtifactMetadataReview(from: session)
+        let gatewayExtractionCompletenessReview = missionRunGatewayExtractionCompletenessReview(from: session)
+        let gatewayBrowserControlReview = missionRunGatewayBrowserControlReview(from: session)
+        let gatewayDeliverySafetyReview = missionRunGatewayDeliverySafetyReview(from: session)
+        let gatewayFileChangeSafetyReview = missionRunGatewayFileChangeSafetyReview(from: session)
+        let gatewayShellCommandSafetyReview = missionRunGatewayShellCommandSafetyReview(from: session)
+        let agentTraceReview = missionRunAgentTraceReview(from: session)
+        let gatewayAccessibilityReview = missionRunGatewayAccessibilityReview(from: session)
+        let gatewayCapabilityReview = missionRunGatewayCapabilityReview(from: session)
+        let gatewayTaskReplayGuardReview = missionRunGatewayTaskReplayGuardReview(from: session)
+        let requiresUserApproval = autonomousLoop.requiresUserApproval || task?.status == .waitingForApproval || session?.status == .needsAttention
 
         return ClawMissionRunSummary(
             command: command,
@@ -162,22 +174,38 @@ final class ClawStore: ObservableObject {
             failedCount: session?.failedCount ?? 0,
             retryableCount: session?.retryableCount ?? 0,
             artifactCount: session?.artifactCount ?? 0,
-            artifactKinds: missionRunArtifactKinds(from: session),
-            artifactMetadataReview: missionRunArtifactMetadataReview(from: session),
-            gatewayExtractionCompletenessReview: missionRunGatewayExtractionCompletenessReview(from: session),
-            gatewayBrowserControlReview: missionRunGatewayBrowserControlReview(from: session),
-            gatewayDeliverySafetyReview: missionRunGatewayDeliverySafetyReview(from: session),
-            gatewayFileChangeSafetyReview: missionRunGatewayFileChangeSafetyReview(from: session),
-            gatewayShellCommandSafetyReview: missionRunGatewayShellCommandSafetyReview(from: session),
-            agentTraceReview: missionRunAgentTraceReview(from: session),
-            gatewayAccessibilityReview: missionRunGatewayAccessibilityReview(from: session),
-            gatewayCapabilityReview: missionRunGatewayCapabilityReview(from: session),
-            gatewayTaskReplayGuardReview: missionRunGatewayTaskReplayGuardReview(from: session),
+            artifactKinds: artifactKinds,
+            artifactMetadataReview: artifactMetadataReview,
+            gatewayExtractionCompletenessReview: gatewayExtractionCompletenessReview,
+            gatewayBrowserControlReview: gatewayBrowserControlReview,
+            gatewayDeliverySafetyReview: gatewayDeliverySafetyReview,
+            gatewayFileChangeSafetyReview: gatewayFileChangeSafetyReview,
+            gatewayShellCommandSafetyReview: gatewayShellCommandSafetyReview,
+            agentTraceReview: agentTraceReview,
+            gatewayAccessibilityReview: gatewayAccessibilityReview,
+            gatewayCapabilityReview: gatewayCapabilityReview,
+            gatewayTaskReplayGuardReview: gatewayTaskReplayGuardReview,
+            reviewPriorityQueue: missionRunReviewPriorityQueue(
+                phase: phase,
+                task: task,
+                session: session,
+                requiresUserApproval: requiresUserApproval,
+                artifactMetadataReview: artifactMetadataReview,
+                gatewayExtractionCompletenessReview: gatewayExtractionCompletenessReview,
+                gatewayBrowserControlReview: gatewayBrowserControlReview,
+                gatewayDeliverySafetyReview: gatewayDeliverySafetyReview,
+                gatewayFileChangeSafetyReview: gatewayFileChangeSafetyReview,
+                gatewayShellCommandSafetyReview: gatewayShellCommandSafetyReview,
+                agentTraceReview: agentTraceReview,
+                gatewayAccessibilityReview: gatewayAccessibilityReview,
+                gatewayCapabilityReview: gatewayCapabilityReview,
+                gatewayTaskReplayGuardReview: gatewayTaskReplayGuardReview
+            ),
             primaryActionTitle: primaryAction.title,
             primaryActionIcon: primaryAction.icon,
             primaryActionKind: primaryAction.kind,
             isPrimaryActionEnabled: primaryAction.isEnabled,
-            requiresUserApproval: autonomousLoop.requiresUserApproval || task?.status == .waitingForApproval || session?.status == .needsAttention,
+            requiresUserApproval: requiresUserApproval,
             statusLine: missionRunStatusLine(phase: phase, task: task, session: session),
             stageTrack: missionRunStageTrack(phase: phase, session: session)
         )
@@ -336,6 +364,297 @@ final class ClawStore: ObservableObject {
 
     private func missionRunGatewayTaskReplayGuardReview(from session: ClawGatewaySession?) -> ClawGatewayTaskReplayGuardReviewSummary? {
         ClawGatewayTaskReplayGuardReviewSummary.latest(from: session)
+    }
+
+    private func missionRunReviewPriorityQueue(
+        phase: ClawAutonomousLoopPhase,
+        task: ClawMobileTask?,
+        session: ClawGatewaySession?,
+        requiresUserApproval: Bool,
+        artifactMetadataReview: ClawGatewayArtifactMetadataReviewSummary?,
+        gatewayExtractionCompletenessReview: ClawGatewayExtractionCompletenessReviewSummary?,
+        gatewayBrowserControlReview: ClawGatewayBrowserControlReviewSummary?,
+        gatewayDeliverySafetyReview: ClawGatewayDeliverySafetyReviewSummary?,
+        gatewayFileChangeSafetyReview: ClawGatewayFileChangeSafetyReviewSummary?,
+        gatewayShellCommandSafetyReview: ClawGatewayShellCommandSafetyReviewSummary?,
+        agentTraceReview: ClawAgentTraceReviewSummary?,
+        gatewayAccessibilityReview: ClawGatewayAccessibilityReviewSummary?,
+        gatewayCapabilityReview: ClawGatewayCapabilityReviewSummary?,
+        gatewayTaskReplayGuardReview: ClawGatewayTaskReplayGuardReviewSummary?
+    ) -> [ClawMissionRunReviewPriorityItem] {
+        var items: [ClawMissionRunReviewPriorityItem] = []
+
+        func add(
+            id: String,
+            rank: Int,
+            severity: ClawMissionRunReviewPrioritySeverity,
+            title: String,
+            status: String,
+            reason: String,
+            icon: String,
+            reviewKind: String,
+            actionHint: String,
+            isActionable: Bool,
+            hasMetadata: Bool
+        ) {
+            items.append(
+                ClawMissionRunReviewPriorityItem(
+                    id: id,
+                    rank: rank,
+                    severity: severity,
+                    title: title,
+                    status: status,
+                    reason: reason,
+                    icon: icon,
+                    reviewKind: reviewKind,
+                    actionHint: actionHint,
+                    isActionable: isActionable,
+                    hasMetadata: hasMetadata
+                )
+            )
+        }
+
+        if phase == .waitingForUserApproval || (requiresUserApproval && session == nil) {
+            let count = task?.approvalCount ?? phoneAgentPlan.confirmationCount
+            add(
+                id: "approval",
+                rank: 10,
+                severity: .critical,
+                title: "手机审批",
+                status: "\(count) 个审批点待确认",
+                reason: "任务尚未发送到桌面 Gateway。",
+                icon: "checkmark.seal.fill",
+                reviewKind: "approval",
+                actionHint: "审批计划后继续",
+                isActionable: true,
+                hasMetadata: true
+            )
+        }
+
+        if let session {
+            if session.status == .blocked {
+                add(
+                    id: "gateway-status-blocked",
+                    rank: 12,
+                    severity: .critical,
+                    title: "Gateway 阻断",
+                    status: session.status.title,
+                    reason: "安全策略阻断任务或重复提交。",
+                    icon: "lock.trianglebadge.exclamationmark.fill",
+                    reviewKind: "gateway-status",
+                    actionHint: "检查白名单或任务约束",
+                    isActionable: true,
+                    hasMetadata: true
+                )
+            } else if session.failedCount > 0 || session.retryableCount > 0 {
+                add(
+                    id: "gateway-status-needs-attention",
+                    rank: 18,
+                    severity: .high,
+                    title: "Gateway 结果",
+                    status: "失败 \(session.failedCount) · 可重试 \(session.retryableCount)",
+                    reason: "至少一个动作需要人工复核。",
+                    icon: "exclamationmark.arrow.triangle.2.circlepath",
+                    reviewKind: "gateway-status",
+                    actionHint: "查看失败动作和重试条件",
+                    isActionable: true,
+                    hasMetadata: true
+                )
+            }
+        } else if task?.status == .blocked || phase == .blocked {
+            add(
+                id: "gateway-status-task-blocked",
+                rank: 18,
+                severity: .critical,
+                title: "任务阻断",
+                status: "\(task?.blockedCount ?? phoneAgentPlan.blockedCount) 个动作不可发送",
+                reason: "任务需要修改或 Gateway allowlist 未覆盖。",
+                icon: "nosign",
+                reviewKind: "gateway-status",
+                actionHint: "修改任务或白名单",
+                isActionable: true,
+                hasMetadata: true
+            )
+        }
+
+        if let review = gatewayTaskReplayGuardReview {
+            add(
+                id: "replay-guard",
+                rank: 20,
+                severity: review.hasMetadata ? .critical : .high,
+                title: "Replay Guard",
+                status: review.compactStatus,
+                reason: review.hasMetadata ? "重复任务已由 Gateway 跳过。" : "Replay Guard metadata 待同步。",
+                icon: "rectangle.stack.badge.person.crop.fill",
+                reviewKind: "replay-guard",
+                actionHint: "确认是否需要新 task id",
+                isActionable: true,
+                hasMetadata: review.hasMetadata
+            )
+        }
+
+        if let review = gatewayDeliverySafetyReview {
+            let blocked = review.finalSubmitRequiresApproval == true || review.submitBlocked == true || review.userApprovalRequired == true
+            add(
+                id: "delivery-safety",
+                rank: blocked ? 30 : 82,
+                severity: review.hasMetadata == false ? .high : (blocked ? .high : .info),
+                title: "最终提交安全",
+                status: review.compactStatus,
+                reason: review.hasMetadata ? "草稿或桌面提交需要人工复核。" : "草稿/提交 metadata 待同步。",
+                icon: "hand.raised.fill",
+                reviewKind: "delivery-safety",
+                actionHint: blocked ? "确认草稿和提交闸门" : "抽查提交策略",
+                isActionable: blocked || review.hasMetadata == false,
+                hasMetadata: review.hasMetadata
+            )
+        }
+
+        if let review = gatewayShellCommandSafetyReview {
+            let needsReview = review.hasMetadata == false || review.resultStatus == "failed" || review.executed == true || review.executionAttempted == true
+            add(
+                id: "shell-safety",
+                rank: needsReview ? 34 : 84,
+                severity: review.hasMetadata == false ? .high : (needsReview ? .high : .info),
+                title: "Shell 命令安全",
+                status: review.compactStatus,
+                reason: review.hasMetadata ? "只展示结构化命令安全状态。" : "Shell metadata 待同步。",
+                icon: "terminal.fill",
+                reviewKind: "shell-safety",
+                actionHint: needsReview ? "确认 policy、allowlist 和执行状态" : "抽查 Shell 复核",
+                isActionable: needsReview,
+                hasMetadata: review.hasMetadata
+            )
+        }
+
+        if let review = gatewayFileChangeSafetyReview {
+            let needsReview = review.hasMetadata == false || review.pathEscapeBlocked == true || review.writeSucceeded == false || review.resultStatus == "failed"
+            add(
+                id: "file-change-safety",
+                rank: needsReview ? 38 : 86,
+                severity: review.hasMetadata == false ? .high : (needsReview ? .high : .info),
+                title: "文件变更安全",
+                status: review.compactStatus,
+                reason: review.hasMetadata ? "只展示 workspace 写入复核状态。" : "文件变更 metadata 待同步。",
+                icon: "folder.badge.gearshape.fill",
+                reviewKind: "file-change-safety",
+                actionHint: needsReview ? "确认 workspace policy 和写入结果" : "抽查文件变更",
+                isActionable: needsReview,
+                hasMetadata: review.hasMetadata
+            )
+        }
+
+        if let review = gatewayBrowserControlReview {
+            let needsReview = review.hasMetadata == false || review.networkBlocked == true || review.resultStatus == "failed"
+            add(
+                id: "browser-control",
+                rank: needsReview ? 48 : 88,
+                severity: review.hasMetadata == false ? .medium : (needsReview ? .medium : .low),
+                title: "浏览器控制",
+                status: review.compactStatus,
+                reason: review.hasMetadata ? "浏览器动作按策略和 presence 复核。" : "浏览器 metadata 待同步。",
+                icon: "safari.fill",
+                reviewKind: "browser-control",
+                actionHint: needsReview ? "确认浏览器策略和网络状态" : "抽查浏览器计划",
+                isActionable: needsReview,
+                hasMetadata: review.hasMetadata
+            )
+        }
+
+        if let review = gatewayExtractionCompletenessReview {
+            let incomplete = review.hasMetadata == false || review.completenessStatus != "complete"
+            add(
+                id: "extraction-completeness",
+                rank: incomplete ? 52 : 90,
+                severity: review.hasMetadata == false ? .medium : (incomplete ? .medium : .low),
+                title: "提取完整性",
+                status: review.compactStatus,
+                reason: review.hasMetadata ? "结构化结果有来源和完整性状态。" : "提取 metadata 待同步。",
+                icon: "tablecells.fill",
+                reviewKind: "extraction-completeness",
+                actionHint: incomplete ? "确认来源 artifact 和行数" : "抽查提取摘要",
+                isActionable: incomplete,
+                hasMetadata: review.hasMetadata
+            )
+        }
+
+        if let review = gatewayAccessibilityReview {
+            let unavailable = review.hasMetadata == false || review.accessibilityPolicy?.contains("unavailable") == true || review.mode?.contains("unavailable") == true
+            add(
+                id: "accessibility",
+                rank: unavailable ? 58 : 92,
+                severity: review.hasMetadata == false ? .medium : (unavailable ? .medium : .low),
+                title: "Accessibility 观察",
+                status: review.compactStatus,
+                reason: review.hasMetadata ? "只读观察摘要可用于复核屏幕依据。" : "Accessibility metadata 待同步。",
+                icon: "accessibility.fill",
+                reviewKind: "accessibility",
+                actionHint: unavailable ? "检查观察权限和候选控件" : "抽查观察摘要",
+                isActionable: unavailable,
+                hasMetadata: review.hasMetadata
+            )
+        }
+
+        if let review = gatewayCapabilityReview {
+            let unavailable = review.hasMetadata == false ||
+                [review.workspaceState, review.shellState, review.browserControlState, review.desktopControlState, review.accessibilityTreeState]
+                .compactMap { $0 }
+                .contains { $0.contains("unavailable") || $0.contains("disabled") }
+            add(
+                id: "gateway-capability",
+                rank: unavailable ? 62 : 94,
+                severity: review.hasMetadata == false ? .medium : (unavailable ? .medium : .low),
+                title: "Gateway 能力",
+                status: review.compactStatus,
+                reason: review.hasMetadata ? "能力快照决定后续动作可用性。" : "能力 metadata 待同步。",
+                icon: "server.rack",
+                reviewKind: "gateway-capability",
+                actionHint: unavailable ? "检查 Gateway 配置" : "抽查能力快照",
+                isActionable: unavailable,
+                hasMetadata: review.hasMetadata
+            )
+        }
+
+        if let review = artifactMetadataReview {
+            let coverageGap = review.hasMetadata == false || review.metadataArtifactCount < review.artifactCount
+            add(
+                id: "artifact-metadata",
+                rank: coverageGap ? 66 : 96,
+                severity: review.hasMetadata == false ? .medium : (coverageGap ? .low : .info),
+                title: "Artifact metadata",
+                status: review.compactStatus,
+                reason: review.hasMetadata ? "复核 metadata 覆盖和脱敏状态。" : "artifact metadata 待同步。",
+                icon: "paperclip.badge.ellipsis",
+                reviewKind: "artifact-metadata",
+                actionHint: coverageGap ? "确认缺失 metadata 的 artifact" : "抽查 metadata 覆盖",
+                isActionable: coverageGap,
+                hasMetadata: review.hasMetadata
+            )
+        }
+
+        if let review = agentTraceReview {
+            let needsReview = review.hasMetadata == false || review.readinessCanContinue == false || review.missingSignals.isEmpty == false || review.selectedNextActionRequiresApproval == true
+            add(
+                id: "agent-trace",
+                rank: needsReview ? 70 : 98,
+                severity: review.hasMetadata == false ? .medium : (needsReview ? .low : .info),
+                title: "AgentTrace",
+                status: review.compactStatus,
+                reason: review.hasMetadata ? "智能体下一步和证据缺口需要复核。" : "AgentTrace metadata 待同步。",
+                icon: "point.topleft.down.curvedto.point.bottomright.up",
+                reviewKind: "agent-trace",
+                actionHint: needsReview ? "确认下一步、缺口和停止原因" : "抽查 handoff 摘要",
+                isActionable: needsReview,
+                hasMetadata: review.hasMetadata
+            )
+        }
+
+        return items.sorted {
+            if $0.rank != $1.rank {
+                return $0.rank < $1.rank
+            }
+            return $0.reviewKind < $1.reviewKind
+        }
     }
 
     private func missionRunStageTrack(

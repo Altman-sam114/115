@@ -103,6 +103,7 @@ enum LogicSmoke {
 
         let missionStore = ClawStore(autoScanLocalArtifacts: false)
         expect(missionStore.missionRunSummary.primaryActionKind == .start, "mission summary should start with a launch action")
+        expect(missionStore.missionRunSummary.reviewPriorityQueue.isEmpty, "idle mission summary should not invent review priorities")
         missionStore.phoneAgentCommand = "打开浏览器搜索资料，整理结果并发到 Slack"
         missionStore.startAutonomousComputerTakeover()
         var missionSummary = missionStore.missionRunSummary
@@ -115,6 +116,25 @@ enum LogicSmoke {
         expect(missionSummary.artifactCount > 0, "mission summary should count gateway artifacts")
         expect(missionSummary.artifactKinds.contains(.browserTrace), "mission summary should summarize artifact kinds")
         expect(missionSummary.artifactKinds.contains(.auditLog), "mission summary should include session-level audit artifacts")
+        expect(missionSummary.reviewPriorityQueue.isEmpty == false, "mission summary should derive review priority queue")
+        expect(
+            missionSummary.reviewPriorityQueue.map(\.rank) == missionSummary.reviewPriorityQueue.map(\.rank).sorted(),
+            "review priority queue should be rank sorted"
+        )
+        expect(
+            missionSummary.reviewPriorityQueue.contains { $0.reviewKind == "delivery-safety" && ($0.severity == .high || $0.severity == .critical) },
+            "review priority queue should prioritize delivery safety"
+        )
+        expect(
+            missionSummary.reviewPriorityQueue.contains { $0.reviewKind == "file-change-safety" },
+            "review priority queue should include file change safety"
+        )
+        let queueVisibleText = missionSummary.reviewPriorityQueue.map {
+            "\($0.title) \($0.status) \($0.reason) \($0.actionHint) \($0.reviewKind)"
+        }.joined(separator: " ")
+        for forbidden in ["Authorization", "Bearer", "toolArguments", "file://", "/private", "/home", "C:\\", "stdout", "stderr"] {
+            expect(queueVisibleText.contains(forbidden) == false, "review priority queue should not expose \(forbidden)")
+        }
         if let metadataReview = missionSummary.artifactMetadataReview {
             expect(metadataReview.artifactCount > 0, "mission summary should derive artifact metadata review")
             expect(metadataReview.metadataArtifactCount > 0, "artifact metadata review should count metadata artifacts")
@@ -240,6 +260,10 @@ enum LogicSmoke {
         } else {
             failures.append("mission summary should derive shell command safety review")
         }
+        expect(
+            shellMissionSummary.reviewPriorityQueue.contains { $0.reviewKind == "shell-safety" && $0.severity == .high },
+            "review priority queue should prioritize shell safety when shell policy blocks execution"
+        )
         if let shellArtifacts = shellReviewStore.clawGatewaySessions.first?.results.first(where: { $0.actionKind == .runShellCommand })?.artifacts,
            let shellReview = ClawGatewayShellCommandSafetyReviewSummary.latest(from: shellArtifacts) {
             expect(shellReview.mode == "shell-policy-blocked", "shell result review should expose policy blocked mode")

@@ -562,6 +562,43 @@ final class ClawTests: XCTestCase {
         XCTAssertTrue(shellReview.safetyFlags.contains("stdout-omitted"))
     }
 
+    func testMissionRunSummaryDerivesReviewPriorityQueue() throws {
+        let idleStore = ClawStore(autoScanLocalArtifacts: false)
+        XCTAssertTrue(idleStore.missionRunSummary.reviewPriorityQueue.isEmpty)
+
+        let store = ClawStore(autoScanLocalArtifacts: false)
+        store.phoneAgentCommand = "打开浏览器搜索资料，整理结果并发到 Slack"
+        store.startAutonomousComputerTakeover()
+        store.approveAndContinueAutonomousLoop()
+
+        let queue = store.missionRunSummary.reviewPriorityQueue
+        XCTAssertFalse(queue.isEmpty)
+        XCTAssertEqual(queue.map(\.rank), queue.map(\.rank).sorted())
+        XCTAssertTrue(queue.contains { $0.reviewKind == "delivery-safety" && $0.severity == .high })
+        XCTAssertTrue(queue.contains { $0.reviewKind == "file-change-safety" })
+        XCTAssertTrue(queue.contains { $0.reviewKind == "browser-control" })
+        XCTAssertTrue(queue.contains { $0.reviewKind == "artifact-metadata" })
+
+        let visibleText = queue.map {
+            "\($0.title) \($0.status) \($0.reason) \($0.actionHint) \($0.reviewKind)"
+        }.joined(separator: " ")
+        for forbidden in ["Authorization", "Bearer", "toolArguments", "file://", "/private", "/home", "C:\\", "stdout", "stderr"] {
+            XCTAssertFalse(visibleText.contains(forbidden), "queue leaked \(forbidden)")
+        }
+
+        let shellStore = ClawStore(autoScanLocalArtifacts: false)
+        shellStore.phoneAgentCommand = "在项目目录运行测试，失败时导出日志文件"
+        shellStore.startAutonomousComputerTakeover()
+        shellStore.approveAndContinueAutonomousLoop()
+
+        let shellQueue = shellStore.missionRunSummary.reviewPriorityQueue
+        let shellItem = try XCTUnwrap(shellQueue.first { $0.reviewKind == "shell-safety" })
+        XCTAssertEqual(shellItem.severity, .high)
+        XCTAssertTrue(shellItem.isActionable)
+        XCTAssertTrue(shellItem.hasMetadata)
+        XCTAssertTrue(shellItem.status.contains("policy dry-run"))
+    }
+
     func testMissionRunSummaryDerivesGatewayCapabilityReview() throws {
         let store = ClawStore(autoScanLocalArtifacts: false)
 

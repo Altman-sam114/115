@@ -1329,6 +1329,43 @@ struct ClawMissionRunStage: Identifiable, Equatable, Codable, Sendable {
     var isBlocked: Bool
 }
 
+enum ClawMissionRunReviewPrioritySeverity: String, Codable, Sendable {
+    case critical
+    case high
+    case medium
+    case low
+    case info
+
+    var title: String {
+        switch self {
+        case .critical:
+            return "必须复核"
+        case .high:
+            return "高优先"
+        case .medium:
+            return "需复核"
+        case .low:
+            return "可检查"
+        case .info:
+            return "信息"
+        }
+    }
+}
+
+struct ClawMissionRunReviewPriorityItem: Identifiable, Equatable, Codable, Sendable {
+    var id: String
+    var rank: Int
+    var severity: ClawMissionRunReviewPrioritySeverity
+    var title: String
+    var status: String
+    var reason: String
+    var icon: String
+    var reviewKind: String
+    var actionHint: String
+    var isActionable: Bool
+    var hasMetadata: Bool
+}
+
 private enum ClawArtifactMetadataParser {
     static func cleanValue(_ value: String?) -> String? {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -2536,6 +2573,7 @@ struct ClawMissionRunSummary: Equatable, Codable, Sendable {
     var gatewayAccessibilityReview: ClawGatewayAccessibilityReviewSummary?
     var gatewayCapabilityReview: ClawGatewayCapabilityReviewSummary?
     var gatewayTaskReplayGuardReview: ClawGatewayTaskReplayGuardReviewSummary?
+    var reviewPriorityQueue: [ClawMissionRunReviewPriorityItem]
     var primaryActionTitle: String
     var primaryActionIcon: String
     var primaryActionKind: ClawMissionRunPrimaryActionKind
