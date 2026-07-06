@@ -583,6 +583,11 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(idleEvidence.redactedArtifactCount, 0)
         XCTAssertEqual(idleEvidence.coveredReviewCount, 0)
         XCTAssertFalse(idleEvidence.focusedHasEvidence)
+        let idleOperatorStrip = idleStore.missionRunSummary.operatorStrip
+        XCTAssertEqual(idleOperatorStrip.lanes.map(\.id), ["gateway", "evidence", "review", "next"])
+        XCTAssertNil(idleOperatorStrip.focusedReviewKind)
+        XCTAssertTrue(idleOperatorStrip.lanes.allSatisfy { $0.canFocusReview == false })
+        XCTAssertTrue(idleOperatorStrip.lanes.contains { $0.id == "evidence" && $0.status == "0/0 类覆盖" })
 
         let store = ClawStore(autoScanLocalArtifacts: false)
         store.phoneAgentCommand = "打开浏览器搜索资料，整理结果并发到 Slack"
@@ -614,6 +619,16 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(focusedEvidenceIndex.focusedReviewTitle, "最终提交安全")
         XCTAssertTrue(focusedEvidenceIndex.focusedHasEvidence)
         XCTAssertTrue(focusedEvidenceIndex.items.contains { $0.reviewKind == "delivery-safety" && $0.isFocused })
+        let operatorStrip = summary.operatorStrip
+        XCTAssertEqual(operatorStrip.lanes.map(\.id), ["gateway", "evidence", "review", "next"])
+        XCTAssertEqual(operatorStrip.title, "Mission Operator")
+        XCTAssertTrue(operatorStrip.lanes.contains { $0.id == "gateway" && $0.status.contains(summary.phaseTitle) })
+        XCTAssertTrue(operatorStrip.lanes.contains { $0.id == "evidence" && $0.status == "\(evidenceIndex.coveredReviewCount)/\(evidenceIndex.items.count) 类覆盖" })
+        XCTAssertTrue(operatorStrip.lanes.contains { $0.id == "review" && $0.status == "\(summary.reviewReadinessSummary.actionablePriorityCount) 可行动 · \(summary.reviewReadinessSummary.criticalOrHighCount) 高优先" })
+        XCTAssertTrue(operatorStrip.lanes.contains { $0.id == "next" && $0.reviewKind == summary.nextReviewAction.reviewKind })
+        let focusedOperatorStrip = summary.operatorStrip(focusedOn: "delivery-safety")
+        XCTAssertEqual(focusedOperatorStrip.focusedReviewKind, "delivery-safety")
+        XCTAssertTrue(focusedOperatorStrip.lanes.contains { $0.id == "next" && $0.reviewKind == "delivery-safety" && $0.isFocused })
         XCTAssertEqual(summary.detailReviewKinds(focusedOn: nil), availableDetailKinds)
         XCTAssertEqual(summary.detailReviewKinds(focusedOn: "delivery-safety"), ["delivery-safety"])
         XCTAssertEqual(summary.detailReviewKinds(focusedOn: "gateway-status"), availableDetailKinds)
@@ -694,7 +709,20 @@ final class ClawTests: XCTestCase {
             focusedEvidenceIndex.focusedReviewKind ?? "",
             focusedEvidenceIndex.focusedReviewTitle ?? ""
         ]
-        let visibleText = (queueVisibleChunks + readinessVisibleChunks + nextActionVisibleChunks + evidenceVisibleChunks).joined(separator: " ")
+        let operatorVisibleChunks = operatorStrip.lanes.flatMap {
+            [
+                $0.id,
+                $0.title,
+                $0.status,
+                $0.guidance,
+                $0.reviewKind ?? ""
+            ]
+        } + [
+            operatorStrip.title,
+            operatorStrip.status,
+            focusedOperatorStrip.focusedReviewKind ?? ""
+        ]
+        let visibleText = (queueVisibleChunks + readinessVisibleChunks + nextActionVisibleChunks + evidenceVisibleChunks + operatorVisibleChunks).joined(separator: " ")
         for forbidden in ["Authorization", "Bearer", "toolArguments", "file://", "/private", "/Users", "/home", "C:\\", "stdout", "stderr", "diff"] {
             XCTAssertFalse(visibleText.contains(forbidden), "queue leaked \(forbidden)")
         }
@@ -725,6 +753,9 @@ final class ClawTests: XCTestCase {
         XCTAssertTrue(shellEvidenceItem.metadataReady)
         XCTAssertTrue(shellEvidenceItem.artifactKinds.contains(.commandOutput))
         XCTAssertTrue(shellEvidenceItem.isFocused)
+        let shellOperatorStrip = shellStore.missionRunSummary.operatorStrip(focusedOn: "shell-safety")
+        XCTAssertEqual(shellOperatorStrip.focusedReviewKind, "shell-safety")
+        XCTAssertTrue(shellOperatorStrip.lanes.contains { $0.id == "next" && $0.reviewKind == "shell-safety" && $0.isFocused })
         XCTAssertFalse(
             [
                 shellReadiness.title,
@@ -740,7 +771,8 @@ final class ClawTests: XCTestCase {
                 shellEvidence.status,
                 shellEvidence.guidance,
                 shellEvidenceItem.status,
-                shellEvidenceItem.guidance
+                shellEvidenceItem.guidance,
+                shellOperatorStrip.status
             ].joined(separator: " ").contains("stdout")
         )
     }

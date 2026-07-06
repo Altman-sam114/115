@@ -1432,6 +1432,33 @@ struct ClawMissionRunArtifactEvidenceIndex: Equatable, Codable, Sendable {
     var items: [ClawMissionRunArtifactEvidenceItem]
 }
 
+enum ClawMissionRunOperatorLaneTone: String, Codable, Sendable {
+    case neutral
+    case info
+    case success
+    case warning
+    case danger
+}
+
+struct ClawMissionRunOperatorLane: Identifiable, Equatable, Codable, Sendable {
+    var id: String
+    var title: String
+    var status: String
+    var guidance: String
+    var icon: String
+    var tone: ClawMissionRunOperatorLaneTone
+    var reviewKind: String?
+    var canFocusReview: Bool
+    var isFocused: Bool
+}
+
+struct ClawMissionRunOperatorStrip: Equatable, Codable, Sendable {
+    var title: String
+    var status: String
+    var focusedReviewKind: String?
+    var lanes: [ClawMissionRunOperatorLane]
+}
+
 private enum ClawArtifactMetadataParser {
     static func cleanValue(_ value: String?) -> String? {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -2839,6 +2866,117 @@ extension ClawMissionRunSummary {
         default:
             return false
         }
+    }
+
+    var operatorStrip: ClawMissionRunOperatorStrip {
+        operatorStrip(focusedOn: nil)
+    }
+
+    func operatorStrip(focusedOn reviewKind: String?) -> ClawMissionRunOperatorStrip {
+        let focusedKind = reviewKind.flatMap { kind in
+            availableDetailReviewKinds.contains(kind) || reviewPriorityQueue.contains { $0.reviewKind == kind } ? kind : nil
+        }
+        let evidence = artifactEvidenceIndex(focusedOn: focusedKind)
+        let readiness = reviewReadinessSummary(focusedOn: focusedKind)
+        let next = nextReviewAction(focusedOn: focusedKind)
+        let gatewayTone: ClawMissionRunOperatorLaneTone
+        if blockedCount > 0 || failedCount > 0 {
+            gatewayTone = .danger
+        } else if requiresUserApproval || retryableCount > 0 {
+            gatewayTone = .warning
+        } else if succeededCount > 0 {
+            gatewayTone = .success
+        } else if progressCurrent > 0 {
+            gatewayTone = .info
+        } else {
+            gatewayTone = .neutral
+        }
+
+        let evidenceTone: ClawMissionRunOperatorLaneTone
+        if evidence.isReviewable == false {
+            evidenceTone = .neutral
+        } else if evidence.missingReviewCount > 0 {
+            evidenceTone = .info
+        } else {
+            evidenceTone = .success
+        }
+
+        let reviewTone: ClawMissionRunOperatorLaneTone
+        if readiness.isReviewable == false {
+            reviewTone = .neutral
+        } else if readiness.requiresHumanAction {
+            reviewTone = .warning
+        } else if readiness.metadataPendingCount > 0 {
+            reviewTone = .info
+        } else {
+            reviewTone = .success
+        }
+
+        let nextTone: ClawMissionRunOperatorLaneTone
+        if next.requiresHumanAction {
+            nextTone = .warning
+        } else if next.hasMetadataGap {
+            nextTone = .info
+        } else if next.isReviewable {
+            nextTone = .success
+        } else {
+            nextTone = .neutral
+        }
+
+        let nextReviewKind = next.reviewKind
+        let lanes = [
+            ClawMissionRunOperatorLane(
+                id: "gateway",
+                title: "Gateway",
+                status: "\(phaseTitle) · \(progressCurrent)/\(progressTotal)",
+                guidance: "\(succeededCount) 成功 · \(failedCount) 失败 · \(retryableCount) 可重试",
+                icon: phaseIcon,
+                tone: gatewayTone,
+                reviewKind: nil,
+                canFocusReview: false,
+                isFocused: false
+            ),
+            ClawMissionRunOperatorLane(
+                id: "evidence",
+                title: "证据",
+                status: "\(evidence.coveredReviewCount)/\(evidence.items.count) 类覆盖",
+                guidance: "artifact \(evidence.artifactKindCount) · metadata \(evidence.metadataArtifactCount)",
+                icon: evidence.icon,
+                tone: evidenceTone,
+                reviewKind: evidence.focusedReviewKind,
+                canFocusReview: false,
+                isFocused: evidence.focusedReviewKind != nil
+            ),
+            ClawMissionRunOperatorLane(
+                id: "review",
+                title: "复核",
+                status: "\(readiness.actionablePriorityCount) 可行动 · \(readiness.criticalOrHighCount) 高优先",
+                guidance: readiness.topReviewTitle.map { "先看 \($0)" } ?? readiness.guidance,
+                icon: readiness.icon,
+                tone: reviewTone,
+                reviewKind: readiness.topReviewKind,
+                canFocusReview: readiness.topReviewKind.map(focusUsesDetailReview) ?? false,
+                isFocused: focusedKind == readiness.topReviewKind
+            ),
+            ClawMissionRunOperatorLane(
+                id: "next",
+                title: "下一步",
+                status: next.reviewTitle ?? next.status,
+                guidance: next.actionHint ?? next.guidance,
+                icon: next.icon,
+                tone: nextTone,
+                reviewKind: nextReviewKind,
+                canFocusReview: nextReviewKind.map(focusUsesDetailReview) ?? false,
+                isFocused: focusedKind == nextReviewKind
+            )
+        ]
+        let status = focusedKind.flatMap { Self.title(forDetailReviewKind: $0) }.map { "聚焦 \($0)" } ?? "\(lanes.count) 条操作态势"
+        return ClawMissionRunOperatorStrip(
+            title: "Mission Operator",
+            status: status,
+            focusedReviewKind: focusedKind,
+            lanes: lanes
+        )
     }
 
     var reviewReadinessSummary: ClawMissionRunReviewReadinessSummary {

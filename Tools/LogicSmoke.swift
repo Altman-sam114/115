@@ -122,6 +122,14 @@ enum LogicSmoke {
         expect(idleEvidence.redactedArtifactCount == 0, "idle evidence index should not count redacted artifacts")
         expect(idleEvidence.coveredReviewCount == 0, "idle evidence index should not invent coverage")
         expect(idleEvidence.focusedHasEvidence == false, "idle evidence index should not mark focused evidence")
+        let idleOperatorStrip = missionStore.missionRunSummary.operatorStrip
+        expect(idleOperatorStrip.lanes.map(\.id) == ["gateway", "evidence", "review", "next"], "idle operator strip should expose stable lanes")
+        expect(idleOperatorStrip.focusedReviewKind == nil, "idle operator strip should not invent focus")
+        expect(idleOperatorStrip.lanes.allSatisfy { $0.canFocusReview == false }, "idle operator strip should not expose focus buttons")
+        expect(
+            idleOperatorStrip.lanes.contains { $0.id == "evidence" && $0.status == "0/0 类覆盖" },
+            "idle operator strip should not invent evidence coverage"
+        )
         missionStore.phoneAgentCommand = "打开浏览器搜索资料，整理结果并发到 Slack"
         missionStore.startAutonomousComputerTakeover()
         var missionSummary = missionStore.missionRunSummary
@@ -180,6 +188,31 @@ enum LogicSmoke {
         expect(
             focusedEvidenceIndex.items.contains { $0.reviewKind == "delivery-safety" && $0.isFocused },
             "evidence index should mark focused item"
+        )
+        let operatorStrip = missionSummary.operatorStrip
+        expect(operatorStrip.lanes.map(\.id) == ["gateway", "evidence", "review", "next"], "operator strip should expose stable lanes")
+        expect(operatorStrip.title == "Mission Operator", "operator strip should expose stable title")
+        expect(
+            operatorStrip.lanes.contains { $0.id == "gateway" && $0.status.contains(missionSummary.phaseTitle) },
+            "operator strip should include gateway phase"
+        )
+        expect(
+            operatorStrip.lanes.contains { $0.id == "evidence" && $0.status == "\(evidenceIndex.coveredReviewCount)/\(evidenceIndex.items.count) 类覆盖" },
+            "operator strip should mirror evidence coverage"
+        )
+        expect(
+            operatorStrip.lanes.contains { $0.id == "review" && $0.status == "\(missionSummary.reviewReadinessSummary.actionablePriorityCount) 可行动 · \(missionSummary.reviewReadinessSummary.criticalOrHighCount) 高优先" },
+            "operator strip should mirror readiness counts"
+        )
+        expect(
+            operatorStrip.lanes.contains { $0.id == "next" && $0.reviewKind == missionSummary.nextReviewAction.reviewKind },
+            "operator strip next lane should target next review action"
+        )
+        let focusedOperatorStrip = missionSummary.operatorStrip(focusedOn: "delivery-safety")
+        expect(focusedOperatorStrip.focusedReviewKind == "delivery-safety", "operator strip should record focused review kind")
+        expect(
+            focusedOperatorStrip.lanes.contains { $0.id == "next" && $0.reviewKind == "delivery-safety" && $0.isFocused },
+            "operator strip should mark focused next lane"
         )
         expect(
             missionSummary.detailReviewKinds(focusedOn: nil) == availableDetailKinds,
@@ -299,7 +332,20 @@ enum LogicSmoke {
             focusedEvidenceIndex.focusedReviewKind ?? "",
             focusedEvidenceIndex.focusedReviewTitle ?? ""
         ]
-        let queueVisibleText = (queueVisibleChunks + readinessVisibleChunks + nextActionVisibleChunks + evidenceVisibleChunks).joined(separator: " ")
+        let operatorVisibleChunks = operatorStrip.lanes.flatMap {
+            [
+                $0.id,
+                $0.title,
+                $0.status,
+                $0.guidance,
+                $0.reviewKind ?? ""
+            ]
+        } + [
+            operatorStrip.title,
+            operatorStrip.status,
+            focusedOperatorStrip.focusedReviewKind ?? ""
+        ]
+        let queueVisibleText = (queueVisibleChunks + readinessVisibleChunks + nextActionVisibleChunks + evidenceVisibleChunks + operatorVisibleChunks).joined(separator: " ")
         for forbidden in ["Authorization", "Bearer", "toolArguments", "file://", "/private", "/Users", "/home", "C:\\", "stdout", "stderr", "diff"] {
             expect(queueVisibleText.contains(forbidden) == false, "review priority queue should not expose \(forbidden)")
         }
@@ -453,6 +499,12 @@ enum LogicSmoke {
         } else {
             failures.append("shell evidence index should include shell safety")
         }
+        let shellOperatorStrip = shellMissionSummary.operatorStrip(focusedOn: "shell-safety")
+        expect(shellOperatorStrip.focusedReviewKind == "shell-safety", "shell operator strip should record shell focus")
+        expect(
+            shellOperatorStrip.lanes.contains { $0.id == "next" && $0.reviewKind == "shell-safety" && $0.isFocused },
+            "shell operator strip should focus shell next lane"
+        )
         expect(
             [
                 shellReadiness.title,
@@ -466,7 +518,8 @@ enum LogicSmoke {
                 shellNextAction.primaryButtonTitle ?? "",
                 shellEvidence.title,
                 shellEvidence.status,
-                shellEvidence.guidance
+                shellEvidence.guidance,
+                shellOperatorStrip.status
             ].joined(separator: " ").contains("stdout") == false,
             "shell readiness should not expose stdout"
         )

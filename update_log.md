@@ -15,12 +15,54 @@
 
 - 项目方向：OpenClaw 式电脑接管智能体，iPhone 作为控制台，桌面 Claw Gateway 作为执行端。
 - 当前 schema：`claw.computer.control.v1`。
-- 当前核心闭环：用户自然语言任务 -> `PhoneAgentPlanner` -> `ClawMobileTask` -> `ClawMobileEnvelope` -> 模拟事件流或带有界重连/ping 可观测性和进程内 task replay guard 的 WebSocket Gateway -> `ClawGatewayEvent` -> session reducer -> Mission Run / Artifact 证据索引 / 复核态势摘要 / 复核优先队列 / 复核聚焦详情 / Live Gateway 连接健康 / Artifact metadata 复核摘要 / 文件变更安全复核摘要 / Shell 命令安全复核摘要 / 提取完整性复核摘要 / 浏览器控制计划复核摘要 / 草稿最终提交安全复核摘要 / Gateway 能力复核摘要 / Accessibility 复核摘要 / Replay Guard 复核摘要 / AgentTrace 复核 UI / iPad 多栏工作台展示和审批。
+- 当前核心闭环：用户自然语言任务 -> `PhoneAgentPlanner` -> `ClawMobileTask` -> `ClawMobileEnvelope` -> 模拟事件流或带有界重连/ping 可观测性和进程内 task replay guard 的 WebSocket Gateway -> `ClawGatewayEvent` -> session reducer -> Mission Run / Operator Strip / Artifact 证据索引 / 复核态势摘要 / 复核优先队列 / 复核聚焦详情 / Live Gateway 连接健康 / Artifact metadata 复核摘要 / 文件变更安全复核摘要 / Shell 命令安全复核摘要 / 提取完整性复核摘要 / 浏览器控制计划复核摘要 / 草稿最终提交安全复核摘要 / Gateway 能力复核摘要 / Accessibility 复核摘要 / Replay Guard 复核摘要 / AgentTrace 复核 UI / iPad 多栏工作台展示和审批。
 - 当前 Gateway 能力：进程内 task replay guard、session-start 能力快照 `auditLog`、屏幕观察 dry-run/截图/窗口元数据/受控 Accessibility 摘要策略、浏览器 HTML/URL trace、带 metadata-only 计划复核的浏览器打开/搜索计划、workspace 文件写入与 metadata-only 文件变更安全复核、Shell dry-run/allowlist 执行与 metadata-only Shell 命令安全复核、带 metadata-only 完整性复核的结构化提取、带 metadata-only 草稿/最终提交安全复核的 messageDraft/桌面 App 审批闸门、带 readiness/checklist/risk/stop/handoff 与安全 metadata 的 `runAgentLoop`/`agentTrace`。
 - 当前协作闭环：默认 `main` 直推，GitHub Actions 生成未加密 `ci-results` 结果包，Agent C 下载并核对 manifest/JUnit/日志后验收。
 - 当前主要遗留：完整 macOS Accessibility bridge、Playwright/browser-use 兼容控制器、真实多轮 agent loop、live Gateway 后台保活/真实心跳协议/配对、完整 artifact 内容复核体验。
 
 ## 历史记录
+
+### v0.29 / iPad Mission Run Operator Strip
+
+日期：2026-07-06
+
+核心变更：
+
+- 新增 `ClawMissionRunOperatorStrip`、`ClawMissionRunOperatorLane` 和 tone 模型，`ClawMissionRunSummary` 通过 computed helper 从阶段、回合进度、结果计数、Artifact 证据索引、复核态势摘要和下一步复核行动派生 4 条操作态势 lane。
+- Operator Strip 固定展示 Gateway、证据、复核和下一步状态，帮助 iPad/宽屏工作台快速扫视当前任务态势；compact iPhone 复用同一面板并保持可换行。
+- Strip lane 只使用固定文案、计数、枚举和既有安全 summary；可聚焦 lane 只调用已有 detail review 聚焦，不执行 Gateway 动作，不读取 artifact payload。
+- SwiftUI 新增 `ClawMissionRunOperatorStripView` 和 `ClawMissionRunOperatorLaneView`，使用 `Label`、语义字体、44pt 以上触控区和 VoiceOver label/hint。
+- XCTest 和 Swift logic smoke 覆盖 idle、正常任务、delivery 聚焦、Shell 高风险、lane 顺序、count 一致性和敏感字符串不外显。
+- 同步 README、协议、flow/flowchart、测试说明和 Agent A 提示词；本轮不新增 schema/event/action/artifact kind，不改变 Gateway 权限。
+
+关键文件：
+
+- `Claw/Core/ClawModels.swift`
+- `Claw/Views/ContentView.swift`
+- `ClawTests/ClawTests.swift`
+- `Tools/LogicSmoke.swift`
+- `README.md`
+- `Docs/claw-mobile-gateway-protocol.md`
+- `md/flow/flow.md`
+- `md/flow/flowchart.md`
+- `md/test/test.md`
+- `md/prompt/v0（核心智能能力）/v0.29（iPadMissionRunOperatorStrip）.md`
+- `update_log.md`
+
+验证结果：
+
+- Swift logic smoke 编译通过。
+- `.build/claw-logic-smoke` 通过，输出 `Claw logic smoke passed`。
+- 本地无签名 iOS build 通过，输出 `** BUILD SUCCEEDED **`。
+- `git diff --check` 通过。
+- `ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci-results.yml"); puts "yaml ok"'` 通过，输出 `yaml ok`。
+- `node --check Tools/claw-gateway-server.mjs`、`node --check Tools/claw-gateway-direct-smoke.mjs`、`node --check Tools/claw-gateway-smoke.mjs` 通过。
+- 待 push `origin/main` 后由 GitHub Actions 覆盖 xcodebuild、Swift logic smoke、Gateway direct/WebSocket smoke 和结果包验收。
+
+遗留事项：
+
+- 当前 Operator Strip 是手机端 presentation-layer 操作态势带，不是自动执行控制台、自动安全裁决、Gateway readiness、完整 payload viewer 或自动修复器。
+- 完整 macOS Accessibility bridge、浏览器真实点击/表单控制、完整 artifact payload 复核体验和真实多轮 agent loop 仍是后续遗留。
 
 ### v0.28 / Mission Run Artifact 证据索引
 

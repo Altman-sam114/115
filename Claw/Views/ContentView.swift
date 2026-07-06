@@ -629,6 +629,7 @@ struct ClawMissionRunPanel: View {
         let artifactEvidenceIndex = summary.artifactEvidenceIndex(focusedOn: activeFocusedReviewKind)
         let reviewReadinessSummary = summary.reviewReadinessSummary(focusedOn: activeFocusedReviewKind)
         let nextReviewAction = summary.nextReviewAction(focusedOn: activeFocusedReviewKind)
+        let operatorStrip = summary.operatorStrip(focusedOn: activeFocusedReviewKind)
         VStack(alignment: .leading, spacing: 14) {
             SectionHeader(title: "Mission Run", icon: "flag.checkered")
 
@@ -676,6 +677,11 @@ struct ClawMissionRunPanel: View {
                 ProgressView(value: Double(summary.progressCurrent), total: Double(summary.progressTotal))
                     .tint(phaseTint(for: summary))
             }
+
+            ClawMissionRunOperatorStripView(
+                strip: operatorStrip,
+                onFocusReviewKind: focusReviewKind
+            )
 
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
                 ClawMissionMetric(value: "\(summary.riskScore)", label: "风险分", icon: "gauge.with.dots.needle.67percent", tint: riskTint(summary.riskScore))
@@ -854,6 +860,116 @@ struct ClawMissionRunPanel: View {
             store.continueAutonomousLoopAfterReview()
         case .waitForGateway, .inspectBlocked:
             break
+        }
+    }
+}
+
+struct ClawMissionRunOperatorStripView: View {
+    let strip: ClawMissionRunOperatorStrip
+    let onFocusReviewKind: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Label(strip.title, systemImage: "rectangle.grid.2x2.fill")
+                    .font(.subheadline.bold())
+                    .foregroundStyle(.primary)
+                Spacer(minLength: 0)
+                Text(strip.status)
+                    .font(.footnote.bold())
+                    .foregroundStyle(.secondary)
+            }
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                ForEach(strip.lanes) { lane in
+                    ClawMissionRunOperatorLaneView(
+                        lane: lane,
+                        onFocusReviewKind: onFocusReviewKind
+                    )
+                }
+            }
+        }
+        .padding(10)
+        .background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(.secondary.opacity(0.14), lineWidth: 1)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(accessibilitySummary)
+    }
+
+    private var accessibilitySummary: String {
+        "Mission Operator，\(strip.status)"
+    }
+}
+
+struct ClawMissionRunOperatorLaneView: View {
+    let lane: ClawMissionRunOperatorLane
+    let onFocusReviewKind: (String) -> Void
+
+    var body: some View {
+        Group {
+            if lane.canFocusReview, let reviewKind = lane.reviewKind {
+                Button {
+                    onFocusReviewKind(reviewKind)
+                } label: {
+                    laneContent
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("聚焦对应详细复核，不执行 Gateway 动作")
+                .accessibilityInputLabels(["聚焦\(lane.title)", "复核\(lane.title)"])
+            } else {
+                laneContent
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilitySummary)
+    }
+
+    private var laneContent: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Label(lane.title, systemImage: lane.isFocused ? "scope" : lane.icon)
+                .font(.footnote.bold())
+                .foregroundStyle(tint)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(lane.status)
+                .font(.footnote.bold())
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(lane.guidance)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, minHeight: 74, alignment: .topLeading)
+        .padding(8)
+        .background(tint.opacity(lane.isFocused ? 0.12 : 0.07), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(tint.opacity(lane.isFocused ? 0.45 : 0.14), lineWidth: 1)
+        }
+    }
+
+    private var accessibilitySummary: String {
+        "\(lane.title)，\(lane.status)，\(lane.guidance)"
+    }
+
+    private var tint: Color {
+        switch lane.tone {
+        case .neutral:
+            return .secondary
+        case .info:
+            return .blue
+        case .success:
+            return .green
+        case .warning:
+            return .orange
+        case .danger:
+            return .red
         }
     }
 }
