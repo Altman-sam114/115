@@ -639,6 +639,7 @@ struct ClawMissionRunPanel: View {
         let operatorStrip = summary.operatorStrip(focusedOn: activeFocusedReviewKind)
         let loopContinuation = summary.loopContinuationSummary(focusedOn: activeFocusedReviewKind)
         let focusContext = summary.focusContextSummary(focusedOn: focusedReviewKind)
+        let evidenceTrail = summary.evidenceTrailSummary(focusedOn: activeFocusedReviewKind)
         VStack(alignment: .leading, spacing: 14) {
             SectionHeader(title: "Mission Run", icon: "flag.checkered")
 
@@ -727,6 +728,11 @@ struct ClawMissionRunPanel: View {
 
             ClawMissionArtifactEvidenceIndexView(
                 index: artifactEvidenceIndex,
+                onFocusReviewKind: focusReviewKind
+            )
+
+            ClawMissionReviewTrailView(
+                trail: evidenceTrail,
                 onFocusReviewKind: focusReviewKind
             )
 
@@ -827,6 +833,7 @@ struct ClawMissionReviewDetailDockView: View {
         let activeFocusedReviewKind = summary.activeReviewFocus(from: focusedReviewKind)
         let dock = summary.reviewDetailDockSummary(focusedOn: focusedReviewKind)
         let focusContext = summary.focusContextSummary(focusedOn: focusedReviewKind)
+        let evidenceTrail = summary.evidenceTrailSummary(focusedOn: activeFocusedReviewKind)
 
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -869,6 +876,11 @@ struct ClawMissionReviewDetailDockView: View {
             }
 
             if dock.isReviewable {
+                ClawMissionReviewTrailView(
+                    trail: evidenceTrail,
+                    onFocusReviewKind: focusReviewKind
+                )
+
                 ClawMissionRunFocusContextView(
                     summary: focusContext,
                     onFocusReviewKind: focusReviewKind,
@@ -1334,6 +1346,177 @@ struct ClawMissionRunFocusContextView: View {
             return .green
         }
         return .purple
+    }
+}
+
+struct ClawMissionReviewTrailView: View {
+    let trail: ClawMissionRunEvidenceTrailSummary
+    let onFocusReviewKind: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Label(trail.title, systemImage: trail.icon)
+                    .font(.subheadline.bold())
+                    .foregroundStyle(tint)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Spacer(minLength: 0)
+
+                if let focusedReviewTitle = trail.focusedReviewTitle {
+                    PhoneAgentTag(text: focusedReviewTitle, icon: "scope", tint: tint)
+                }
+            }
+
+            Text(trail.status)
+                .font(.footnote.bold())
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(trail.guidance)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 8) {
+                Label("\(trail.coveredReviewCount)/\(trail.totalReviewCount) 证据", systemImage: "paperclip")
+                Label("\(trail.metadataPendingCount) metadata", systemImage: "doc.badge.clock")
+                Label("\(trail.actionablePriorityCount) 可行动", systemImage: "arrow.right.circle.fill")
+            }
+            .font(.caption.bold())
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(trail.steps) { step in
+                    ClawMissionReviewTrailStepRow(
+                        step: step,
+                        onFocusReviewKind: onFocusReviewKind
+                    )
+                }
+            }
+        }
+        .padding(10)
+        .background(tint.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(tint.opacity(0.16), lineWidth: 1)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(accessibilitySummary)
+    }
+
+    private var accessibilitySummary: String {
+        if let focusedReviewTitle = trail.focusedReviewTitle {
+            return "Mission 复核路径，当前聚焦 \(focusedReviewTitle)，\(trail.status)"
+        }
+        return "Mission 复核路径，\(trail.status)"
+    }
+
+    private var tint: Color {
+        if trail.requiresHumanAction {
+            return .orange
+        }
+        if trail.hasMetadataGap {
+            return .blue
+        }
+        if trail.isReviewable {
+            return .green
+        }
+        return .secondary
+    }
+}
+
+struct ClawMissionReviewTrailStepRow: View {
+    let step: ClawMissionRunEvidenceTrailStep
+    let onFocusReviewKind: (String) -> Void
+
+    var body: some View {
+        Group {
+            if step.canFocusReview, let reviewKind = step.reviewKind {
+                Button {
+                    onFocusReviewKind(reviewKind)
+                } label: {
+                    rowContent
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("聚焦对应复核项，不打开 artifact 内容")
+                .accessibilityInputLabels(accessibilityInputLabels)
+            } else {
+                rowContent
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(accessibilitySummary)
+    }
+
+    private var rowContent: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: step.isFocused ? "scope" : step.icon)
+                .font(.caption.bold())
+                .frame(width: 26, height: 26)
+                .background(tint.opacity(step.isFocused ? 0.2 : 0.12), in: Circle())
+                .foregroundStyle(tint)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(step.title)
+                    .font(.footnote.bold())
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(step.status)
+                    .font(.caption.bold())
+                    .foregroundStyle(tint)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(step.guidance)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .padding(.vertical, 4)
+        .padding(.horizontal, 6)
+        .background(tint.opacity(step.isFocused ? 0.09 : 0.02), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            if step.isFocused {
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(tint.opacity(0.45), lineWidth: 1)
+            }
+        }
+    }
+
+    private var accessibilityInputLabels: [String] {
+        guard let reviewTitle = step.reviewTitle else {
+            return ["聚焦\(step.title)", "复核\(step.title)"]
+        }
+        return ["聚焦\(reviewTitle)", "复核\(reviewTitle)"]
+    }
+
+    private var accessibilitySummary: String {
+        if let reviewTitle = step.reviewTitle {
+            return "\(step.title)，\(reviewTitle)，\(step.status)"
+        }
+        return "\(step.title)，\(step.status)"
+    }
+
+    private var tint: Color {
+        switch step.tone {
+        case .neutral:
+            return .secondary
+        case .info:
+            return .blue
+        case .success:
+            return .green
+        case .warning:
+            return .orange
+        case .danger:
+            return .red
+        }
     }
 }
 

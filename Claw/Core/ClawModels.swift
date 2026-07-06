@@ -1464,6 +1464,39 @@ struct ClawMissionRunArtifactEvidenceIndex: Equatable, Codable, Sendable {
     var items: [ClawMissionRunArtifactEvidenceItem]
 }
 
+struct ClawMissionRunEvidenceTrailStep: Identifiable, Equatable, Codable, Sendable {
+    var id: String
+    var title: String
+    var status: String
+    var guidance: String
+    var icon: String
+    var tone: ClawMissionRunOperatorLaneTone
+    var reviewKind: String?
+    var reviewTitle: String?
+    var canFocusReview: Bool
+    var isFocused: Bool
+}
+
+struct ClawMissionRunEvidenceTrailSummary: Equatable, Codable, Sendable {
+    var title: String
+    var status: String
+    var guidance: String
+    var icon: String
+    var focusedReviewKind: String?
+    var focusedReviewTitle: String?
+    var coveredReviewCount: Int
+    var totalReviewCount: Int
+    var metadataPendingCount: Int
+    var actionablePriorityCount: Int
+    var primaryReviewKind: String?
+    var primaryReviewTitle: String?
+    var canFocusPrimaryReview: Bool
+    var requiresHumanAction: Bool
+    var hasMetadataGap: Bool
+    var isReviewable: Bool
+    var steps: [ClawMissionRunEvidenceTrailStep]
+}
+
 enum ClawMissionRunOperatorLaneTone: String, Codable, Sendable {
     case neutral
     case info
@@ -3313,6 +3346,171 @@ extension ClawMissionRunSummary {
             return agentTraceReview?.hasMetadata == true
         default:
             return false
+        }
+    }
+
+    var evidenceTrailSummary: ClawMissionRunEvidenceTrailSummary {
+        evidenceTrailSummary(focusedOn: nil)
+    }
+
+    func evidenceTrailSummary(focusedOn reviewKind: String?) -> ClawMissionRunEvidenceTrailSummary {
+        let focusedKind = activeReviewFocus(from: reviewKind)
+        let evidence = artifactEvidenceIndex(focusedOn: focusedKind)
+        let readiness = reviewReadinessSummary(focusedOn: focusedKind)
+        let next = nextReviewAction(focusedOn: focusedKind)
+        let focusedTitle = focusedKind.flatMap { kind in
+            reviewPriorityItem(focusedOn: kind)?.title ?? Self.title(forDetailReviewKind: kind)
+        }
+        let metadataTarget = reviewPriorityQueue.first { $0.hasMetadata == false }
+        let topItem = reviewPriorityQueue.first
+        let primaryReviewKind = next.reviewKind ?? topItem?.reviewKind
+        let primaryReviewTitle = next.reviewTitle ?? topItem?.title
+        let canFocusPrimary = primaryReviewKind.map(canFocusEvidenceTrailReviewKind) ?? false
+        let hasMetadataGap = readiness.metadataPendingCount > 0 || next.hasMetadataGap
+        let requiresHumanAction = readiness.requiresHumanAction || next.requiresHumanAction
+        let isReviewable = evidence.isReviewable || readiness.isReviewable || next.isReviewable
+
+        let steps = [
+            evidenceTrailStep(
+                id: "evidence",
+                title: "证据覆盖",
+                status: evidence.isReviewable ? "\(evidence.coveredReviewCount)/\(evidence.items.count) 类覆盖" : "等待 artifact",
+                guidance: evidence.focusedReviewTitle.map { "当前聚焦 \($0)，先核对对应证据和 metadata。" } ?? evidence.guidance,
+                icon: evidence.icon,
+                tone: evidence.missingReviewCount > 0 ? .info : (evidence.isReviewable ? .success : .neutral),
+                reviewKind: evidence.focusedReviewKind,
+                reviewTitle: evidence.focusedReviewTitle,
+                focusedKind: focusedKind
+            ),
+            evidenceTrailStep(
+                id: "metadata",
+                title: "metadata 状态",
+                status: readiness.isReviewable ? "\(readiness.metadataPendingCount) 项待同步" : "等待 metadata",
+                guidance: metadataTarget.map { "优先确认 \($0.title)：\($0.actionHint)" } ?? "metadata 已进入安全摘要后，再查看详细复核 row。",
+                icon: readiness.metadataPendingCount > 0 ? "doc.badge.clock" : "doc.badge.gearshape",
+                tone: readiness.metadataPendingCount > 0 ? .info : (readiness.isReviewable ? .success : .neutral),
+                reviewKind: metadataTarget?.reviewKind,
+                reviewTitle: metadataTarget?.title,
+                focusedKind: focusedKind
+            ),
+            evidenceTrailStep(
+                id: "priority",
+                title: "优先复核",
+                status: topItem?.title ?? "暂无优先项",
+                guidance: topItem.map { "\($0.severity.title)：\($0.actionHint)" } ?? readiness.guidance,
+                icon: topItem?.icon ?? "list.bullet.clipboard",
+                tone: topItem.map { tone(forReviewPrioritySeverity: $0.severity) } ?? (readiness.isReviewable ? .success : .neutral),
+                reviewKind: topItem?.reviewKind,
+                reviewTitle: topItem?.title,
+                focusedKind: focusedKind
+            ),
+            evidenceTrailStep(
+                id: "next",
+                title: "下一步",
+                status: next.reviewTitle ?? next.status,
+                guidance: next.actionHint.map { "\(next.guidance) \($0)" } ?? next.guidance,
+                icon: next.icon,
+                tone: next.requiresHumanAction ? .warning : (next.isReviewable ? .success : .neutral),
+                reviewKind: next.reviewKind,
+                reviewTitle: next.reviewTitle,
+                focusedKind: focusedKind
+            )
+        ]
+
+        let title: String
+        let status: String
+        let guidance: String
+        let icon: String
+        if isReviewable == false {
+            title = "Mission 复核路径待生成"
+            status = "尚无 Gateway 证据"
+            guidance = "发送任务后会把证据、metadata、优先复核和下一步串成短路径。"
+            icon = "point.topleft.down.curvedto.point.bottomright.up"
+        } else if let focusedTitle {
+            title = "Mission 聚焦复核路径"
+            status = "聚焦 \(focusedTitle)"
+            guidance = "按当前聚焦项核对证据、metadata 和下一步；不会打开 artifact 内容。"
+            icon = "scope"
+        } else if requiresHumanAction {
+            title = "Mission 复核路径"
+            status = "\(readiness.actionablePriorityCount) 项可行动 · \(readiness.criticalOrHighCount) 项高优先"
+            guidance = primaryReviewTitle.map { "建议先看 \($0)，再决定审批、重试或下一轮。" } ?? "先处理需要人工复核的项目。"
+            icon = "point.topleft.down.curvedto.point.bottomright.up"
+        } else if hasMetadataGap {
+            title = "Mission 复核路径"
+            status = "\(readiness.metadataPendingCount) 项 metadata 待同步"
+            guidance = "先确认 metadata 覆盖，再抽查详细复核。"
+            icon = "doc.badge.clock"
+        } else {
+            title = "Mission 复核路径"
+            status = "\(evidence.coveredReviewCount)/\(evidence.items.count) 类证据可复核"
+            guidance = primaryReviewTitle.map { "可从 \($0) 开始抽查。" } ?? "可继续查看详细复核摘要。"
+            icon = "checkmark.seal.fill"
+        }
+
+        return ClawMissionRunEvidenceTrailSummary(
+            title: title,
+            status: status,
+            guidance: guidance,
+            icon: icon,
+            focusedReviewKind: focusedKind,
+            focusedReviewTitle: focusedTitle,
+            coveredReviewCount: evidence.coveredReviewCount,
+            totalReviewCount: evidence.items.count,
+            metadataPendingCount: readiness.metadataPendingCount,
+            actionablePriorityCount: readiness.actionablePriorityCount,
+            primaryReviewKind: primaryReviewKind,
+            primaryReviewTitle: primaryReviewTitle,
+            canFocusPrimaryReview: canFocusPrimary,
+            requiresHumanAction: requiresHumanAction,
+            hasMetadataGap: hasMetadataGap,
+            isReviewable: isReviewable,
+            steps: steps
+        )
+    }
+
+    private func evidenceTrailStep(
+        id: String,
+        title: String,
+        status: String,
+        guidance: String,
+        icon: String,
+        tone: ClawMissionRunOperatorLaneTone,
+        reviewKind: String?,
+        reviewTitle: String?,
+        focusedKind: String?
+    ) -> ClawMissionRunEvidenceTrailStep {
+        let canFocus = reviewKind.map(canFocusEvidenceTrailReviewKind) ?? false
+        return ClawMissionRunEvidenceTrailStep(
+            id: id,
+            title: title,
+            status: status,
+            guidance: guidance,
+            icon: icon,
+            tone: tone,
+            reviewKind: reviewKind,
+            reviewTitle: reviewTitle,
+            canFocusReview: canFocus,
+            isFocused: reviewKind != nil && reviewKind == focusedKind
+        )
+    }
+
+    private func canFocusEvidenceTrailReviewKind(_ reviewKind: String) -> Bool {
+        focusUsesDetailReview(reviewKind) || reviewPriorityQueue.contains { $0.reviewKind == reviewKind }
+    }
+
+    private func tone(forReviewPrioritySeverity severity: ClawMissionRunReviewPrioritySeverity) -> ClawMissionRunOperatorLaneTone {
+        switch severity {
+        case .critical:
+            return .danger
+        case .high:
+            return .warning
+        case .medium:
+            return .info
+        case .low:
+            return .success
+        case .info:
+            return .neutral
         }
     }
 

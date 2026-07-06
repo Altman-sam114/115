@@ -588,6 +588,12 @@ final class ClawTests: XCTestCase {
         XCTAssertNil(idleOperatorStrip.focusedReviewKind)
         XCTAssertTrue(idleOperatorStrip.lanes.allSatisfy { $0.canFocusReview == false })
         XCTAssertTrue(idleOperatorStrip.lanes.contains { $0.id == "evidence" && $0.status == "0/0 类覆盖" })
+        let idleEvidenceTrail = idleStore.missionRunSummary.evidenceTrailSummary
+        XCTAssertFalse(idleEvidenceTrail.isReviewable)
+        XCTAssertFalse(idleEvidenceTrail.canFocusPrimaryReview)
+        XCTAssertNil(idleEvidenceTrail.primaryReviewKind)
+        XCTAssertEqual(idleEvidenceTrail.steps.map(\.id), ["evidence", "metadata", "priority", "next"])
+        XCTAssertTrue(idleEvidenceTrail.steps.allSatisfy { $0.canFocusReview == false })
         let idleFocusContext = idleStore.missionRunSummary.focusContextSummary
         XCTAssertFalse(idleFocusContext.isReviewable)
         XCTAssertFalse(idleFocusContext.canClearFocus)
@@ -638,6 +644,22 @@ final class ClawTests: XCTestCase {
         let focusedOperatorStrip = summary.operatorStrip(focusedOn: "delivery-safety")
         XCTAssertEqual(focusedOperatorStrip.focusedReviewKind, "delivery-safety")
         XCTAssertTrue(focusedOperatorStrip.lanes.contains { $0.id == "next" && $0.reviewKind == "delivery-safety" && $0.isFocused })
+        let evidenceTrail = summary.evidenceTrailSummary
+        XCTAssertTrue(evidenceTrail.isReviewable)
+        XCTAssertEqual(evidenceTrail.steps.map(\.id), ["evidence", "metadata", "priority", "next"])
+        XCTAssertEqual(evidenceTrail.coveredReviewCount, evidenceIndex.coveredReviewCount)
+        XCTAssertEqual(evidenceTrail.totalReviewCount, evidenceIndex.items.count)
+        XCTAssertEqual(evidenceTrail.metadataPendingCount, summary.reviewReadinessSummary.metadataPendingCount)
+        XCTAssertEqual(evidenceTrail.actionablePriorityCount, summary.reviewReadinessSummary.actionablePriorityCount)
+        XCTAssertEqual(evidenceTrail.primaryReviewKind, summary.nextReviewAction.reviewKind)
+        XCTAssertEqual(evidenceTrail.primaryReviewTitle, summary.nextReviewAction.reviewTitle)
+        XCTAssertTrue(evidenceTrail.canFocusPrimaryReview)
+        XCTAssertTrue(evidenceTrail.requiresHumanAction)
+        XCTAssertTrue(evidenceTrail.steps.contains { $0.id == "priority" && $0.reviewKind == queue.first?.reviewKind })
+        let focusedEvidenceTrail = summary.evidenceTrailSummary(focusedOn: "delivery-safety")
+        XCTAssertEqual(focusedEvidenceTrail.focusedReviewKind, "delivery-safety")
+        XCTAssertEqual(focusedEvidenceTrail.focusedReviewTitle, "最终提交安全")
+        XCTAssertTrue(focusedEvidenceTrail.steps.contains { $0.reviewKind == "delivery-safety" && $0.isFocused })
         let focusContext = summary.focusContextSummary
         XCTAssertTrue(focusContext.isReviewable)
         XCTAssertFalse(focusContext.canClearFocus)
@@ -689,6 +711,10 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(statusDetailDock.detailReviewKinds, availableDetailKinds)
         XCTAssertFalse(statusDetailDock.showsFocusedDetailOnly)
         XCTAssertTrue(statusDetailDock.canClearFocus)
+        let statusEvidenceTrail = statusOnlySummary.evidenceTrailSummary(focusedOn: statusOnlyItem.reviewKind)
+        XCTAssertEqual(statusEvidenceTrail.focusedReviewKind, statusOnlyItem.reviewKind)
+        XCTAssertEqual(statusEvidenceTrail.focusedReviewTitle, statusOnlyItem.title)
+        XCTAssertTrue(statusEvidenceTrail.steps.contains { $0.reviewKind == statusOnlyItem.reviewKind && $0.isFocused })
         let staleFocusContext = statusOnlySummary.focusContextSummary(focusedOn: "unknown-review-kind")
         XCTAssertNil(staleFocusContext.focusedReviewKind)
         XCTAssertTrue(staleFocusContext.canClearFocus)
@@ -699,6 +725,9 @@ final class ClawTests: XCTestCase {
         XCTAssertFalse(staleDetailDock.showsFocusedDetailOnly)
         XCTAssertTrue(staleDetailDock.canClearFocus)
         XCTAssertTrue(staleDetailDock.hasStaleFocus)
+        let staleEvidenceTrail = statusOnlySummary.evidenceTrailSummary(focusedOn: "unknown-review-kind")
+        XCTAssertNil(staleEvidenceTrail.focusedReviewKind)
+        XCTAssertEqual(staleEvidenceTrail.primaryReviewKind, statusOnlyItem.reviewKind)
         XCTAssertEqual(summary.detailReviewKinds(focusedOn: nil), availableDetailKinds)
         XCTAssertEqual(summary.detailReviewKinds(focusedOn: "delivery-safety"), ["delivery-safety"])
         XCTAssertEqual(summary.detailReviewKinds(focusedOn: "gateway-status"), availableDetailKinds)
@@ -792,6 +821,33 @@ final class ClawTests: XCTestCase {
             operatorStrip.status,
             focusedOperatorStrip.focusedReviewKind ?? ""
         ]
+        let evidenceTrailVisibleChunks = evidenceTrail.steps.flatMap {
+            [
+                $0.id,
+                $0.title,
+                $0.status,
+                $0.guidance,
+                $0.reviewKind ?? "",
+                $0.reviewTitle ?? ""
+            ]
+        } + [
+            evidenceTrail.title,
+            evidenceTrail.status,
+            evidenceTrail.guidance,
+            evidenceTrail.primaryReviewKind ?? "",
+            evidenceTrail.primaryReviewTitle ?? "",
+            focusedEvidenceTrail.title,
+            focusedEvidenceTrail.status,
+            focusedEvidenceTrail.guidance,
+            focusedEvidenceTrail.focusedReviewKind ?? "",
+            focusedEvidenceTrail.focusedReviewTitle ?? "",
+            statusEvidenceTrail.title,
+            statusEvidenceTrail.status,
+            statusEvidenceTrail.guidance,
+            staleEvidenceTrail.title,
+            staleEvidenceTrail.status,
+            staleEvidenceTrail.guidance
+        ]
         let focusContextVisibleChunks = [
             focusContext.title,
             focusContext.status,
@@ -824,7 +880,7 @@ final class ClawTests: XCTestCase {
             staleDetailDock.status,
             staleDetailDock.guidance
         ]
-        let visibleText = (queueVisibleChunks + readinessVisibleChunks + nextActionVisibleChunks + evidenceVisibleChunks + operatorVisibleChunks + focusContextVisibleChunks).joined(separator: " ")
+        let visibleText = (queueVisibleChunks + readinessVisibleChunks + nextActionVisibleChunks + evidenceVisibleChunks + operatorVisibleChunks + evidenceTrailVisibleChunks + focusContextVisibleChunks).joined(separator: " ")
         for forbidden in ["Authorization", "Bearer", "toolArguments", "file://", "/private", "/Users", "/home", "C:\\", "stdout", "stderr", "diff"] {
             XCTAssertFalse(visibleText.contains(forbidden), "queue leaked \(forbidden)")
         }
@@ -858,6 +914,11 @@ final class ClawTests: XCTestCase {
         let shellOperatorStrip = shellStore.missionRunSummary.operatorStrip(focusedOn: "shell-safety")
         XCTAssertEqual(shellOperatorStrip.focusedReviewKind, "shell-safety")
         XCTAssertTrue(shellOperatorStrip.lanes.contains { $0.id == "next" && $0.reviewKind == "shell-safety" && $0.isFocused })
+        let shellEvidenceTrail = shellStore.missionRunSummary.evidenceTrailSummary(focusedOn: "shell-safety")
+        XCTAssertEqual(shellEvidenceTrail.focusedReviewKind, "shell-safety")
+        XCTAssertEqual(shellEvidenceTrail.focusedReviewTitle, "Shell 命令安全")
+        XCTAssertTrue(shellEvidenceTrail.steps.contains { $0.reviewKind == "shell-safety" && $0.isFocused })
+        XCTAssertTrue(shellEvidenceTrail.requiresHumanAction)
         let shellFocusContext = shellStore.missionRunSummary.focusContextSummary(focusedOn: "shell-safety")
         XCTAssertEqual(shellFocusContext.focusedReviewKind, "shell-safety")
         XCTAssertEqual(shellFocusContext.focusedReviewTitle, "Shell 命令安全")
@@ -888,6 +949,10 @@ final class ClawTests: XCTestCase {
                 shellEvidenceItem.status,
                 shellEvidenceItem.guidance,
                 shellOperatorStrip.status,
+                shellEvidenceTrail.title,
+                shellEvidenceTrail.status,
+                shellEvidenceTrail.guidance,
+                shellEvidenceTrail.steps.map { "\($0.title) \($0.status) \($0.guidance)" }.joined(separator: " "),
                 shellFocusContext.title,
                 shellFocusContext.status,
                 shellFocusContext.guidance,

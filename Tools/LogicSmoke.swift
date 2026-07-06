@@ -130,6 +130,12 @@ enum LogicSmoke {
             idleOperatorStrip.lanes.contains { $0.id == "evidence" && $0.status == "0/0 类覆盖" },
             "idle operator strip should not invent evidence coverage"
         )
+        let idleEvidenceTrail = missionStore.missionRunSummary.evidenceTrailSummary
+        expect(idleEvidenceTrail.isReviewable == false, "idle evidence trail should not be reviewable")
+        expect(idleEvidenceTrail.canFocusPrimaryReview == false, "idle evidence trail should not expose primary focus")
+        expect(idleEvidenceTrail.primaryReviewKind == nil, "idle evidence trail should not invent primary review")
+        expect(idleEvidenceTrail.steps.map(\.id) == ["evidence", "metadata", "priority", "next"], "idle evidence trail should expose stable steps")
+        expect(idleEvidenceTrail.steps.allSatisfy { $0.canFocusReview == false }, "idle evidence trail should not expose focus buttons")
         let idleFocusContext = missionStore.missionRunSummary.focusContextSummary
         expect(idleFocusContext.isReviewable == false, "idle focus context should not be reviewable")
         expect(idleFocusContext.canClearFocus == false, "idle focus context should not expose clear focus")
@@ -223,6 +229,28 @@ enum LogicSmoke {
             focusedOperatorStrip.lanes.contains { $0.id == "next" && $0.reviewKind == "delivery-safety" && $0.isFocused },
             "operator strip should mark focused next lane"
         )
+        let evidenceTrail = missionSummary.evidenceTrailSummary
+        expect(evidenceTrail.isReviewable, "evidence trail should be reviewable once Gateway evidence exists")
+        expect(evidenceTrail.steps.map(\.id) == ["evidence", "metadata", "priority", "next"], "evidence trail should expose stable steps")
+        expect(evidenceTrail.coveredReviewCount == evidenceIndex.coveredReviewCount, "evidence trail should mirror evidence coverage")
+        expect(evidenceTrail.totalReviewCount == evidenceIndex.items.count, "evidence trail should count review evidence rows")
+        expect(evidenceTrail.metadataPendingCount == missionSummary.reviewReadinessSummary.metadataPendingCount, "evidence trail should mirror metadata gaps")
+        expect(evidenceTrail.actionablePriorityCount == missionSummary.reviewReadinessSummary.actionablePriorityCount, "evidence trail should mirror actionable count")
+        expect(evidenceTrail.primaryReviewKind == missionSummary.nextReviewAction.reviewKind, "evidence trail should point to next review kind")
+        expect(evidenceTrail.primaryReviewTitle == missionSummary.nextReviewAction.reviewTitle, "evidence trail should point to next review title")
+        expect(evidenceTrail.canFocusPrimaryReview, "evidence trail should allow focusing the primary review")
+        expect(evidenceTrail.requiresHumanAction, "evidence trail should surface human review")
+        expect(
+            evidenceTrail.steps.contains { $0.id == "priority" && $0.reviewKind == missionSummary.reviewPriorityQueue.first?.reviewKind },
+            "evidence trail should include top priority step"
+        )
+        let focusedEvidenceTrail = missionSummary.evidenceTrailSummary(focusedOn: "delivery-safety")
+        expect(focusedEvidenceTrail.focusedReviewKind == "delivery-safety", "focused evidence trail should record focus")
+        expect(focusedEvidenceTrail.focusedReviewTitle == "最终提交安全", "focused evidence trail should expose delivery title")
+        expect(
+            focusedEvidenceTrail.steps.contains { $0.reviewKind == "delivery-safety" && $0.isFocused },
+            "focused evidence trail should mark focused step"
+        )
         let focusContext = missionSummary.focusContextSummary
         expect(focusContext.isReviewable, "focus context should be reviewable once Gateway evidence exists")
         expect(focusContext.canClearFocus == false, "unfocused context should not expose clear focus")
@@ -274,6 +302,13 @@ enum LogicSmoke {
         expect(statusDetailDock.detailReviewKinds == availableDetailKinds, "status detail dock should keep all details visible")
         expect(statusDetailDock.showsFocusedDetailOnly == false, "status detail dock should not filter details")
         expect(statusDetailDock.canClearFocus, "status detail dock should allow clearing")
+        let statusEvidenceTrail = statusOnlySummary.evidenceTrailSummary(focusedOn: statusOnlyItem.reviewKind)
+        expect(statusEvidenceTrail.focusedReviewKind == statusOnlyItem.reviewKind, "status evidence trail should keep status focus")
+        expect(statusEvidenceTrail.focusedReviewTitle == statusOnlyItem.title, "status evidence trail should expose status title")
+        expect(
+            statusEvidenceTrail.steps.contains { $0.reviewKind == statusOnlyItem.reviewKind && $0.isFocused },
+            "status evidence trail should mark status focus"
+        )
         let staleFocusContext = statusOnlySummary.focusContextSummary(focusedOn: "unknown-review-kind")
         expect(staleFocusContext.focusedReviewKind == nil, "stale focus context should not keep an unknown review kind")
         expect(staleFocusContext.canClearFocus, "stale focus context should allow clearing focus")
@@ -284,6 +319,9 @@ enum LogicSmoke {
         expect(staleDetailDock.showsFocusedDetailOnly == false, "stale detail dock should not filter details")
         expect(staleDetailDock.canClearFocus, "stale detail dock should allow clearing")
         expect(staleDetailDock.hasStaleFocus, "stale detail dock should mark stale focus")
+        let staleEvidenceTrail = statusOnlySummary.evidenceTrailSummary(focusedOn: "unknown-review-kind")
+        expect(staleEvidenceTrail.focusedReviewKind == nil, "stale evidence trail should not keep unknown focus")
+        expect(staleEvidenceTrail.primaryReviewKind == statusOnlyItem.reviewKind, "stale evidence trail should fall back to top priority")
         expect(
             missionSummary.detailReviewKinds(focusedOn: nil) == availableDetailKinds,
             "nil focus should show all detail reviews"
@@ -415,6 +453,33 @@ enum LogicSmoke {
             operatorStrip.status,
             focusedOperatorStrip.focusedReviewKind ?? ""
         ]
+        let evidenceTrailVisibleChunks = evidenceTrail.steps.flatMap {
+            [
+                $0.id,
+                $0.title,
+                $0.status,
+                $0.guidance,
+                $0.reviewKind ?? "",
+                $0.reviewTitle ?? ""
+            ]
+        } + [
+            evidenceTrail.title,
+            evidenceTrail.status,
+            evidenceTrail.guidance,
+            evidenceTrail.primaryReviewKind ?? "",
+            evidenceTrail.primaryReviewTitle ?? "",
+            focusedEvidenceTrail.title,
+            focusedEvidenceTrail.status,
+            focusedEvidenceTrail.guidance,
+            focusedEvidenceTrail.focusedReviewKind ?? "",
+            focusedEvidenceTrail.focusedReviewTitle ?? "",
+            statusEvidenceTrail.title,
+            statusEvidenceTrail.status,
+            statusEvidenceTrail.guidance,
+            staleEvidenceTrail.title,
+            staleEvidenceTrail.status,
+            staleEvidenceTrail.guidance
+        ]
         let focusContextVisibleChunks = [
             focusContext.title,
             focusContext.status,
@@ -443,7 +508,7 @@ enum LogicSmoke {
             staleDetailDock.status,
             staleDetailDock.guidance
         ]
-        let queueVisibleText = (queueVisibleChunks + readinessVisibleChunks + nextActionVisibleChunks + evidenceVisibleChunks + operatorVisibleChunks + focusContextVisibleChunks).joined(separator: " ")
+        let queueVisibleText = (queueVisibleChunks + readinessVisibleChunks + nextActionVisibleChunks + evidenceVisibleChunks + operatorVisibleChunks + evidenceTrailVisibleChunks + focusContextVisibleChunks).joined(separator: " ")
         for forbidden in ["Authorization", "Bearer", "toolArguments", "file://", "/private", "/Users", "/home", "C:\\", "stdout", "stderr", "diff"] {
             expect(queueVisibleText.contains(forbidden) == false, "review priority queue should not expose \(forbidden)")
         }
@@ -603,6 +668,14 @@ enum LogicSmoke {
             shellOperatorStrip.lanes.contains { $0.id == "next" && $0.reviewKind == "shell-safety" && $0.isFocused },
             "shell operator strip should focus shell next lane"
         )
+        let shellEvidenceTrail = shellMissionSummary.evidenceTrailSummary(focusedOn: "shell-safety")
+        expect(shellEvidenceTrail.focusedReviewKind == "shell-safety", "shell evidence trail should record shell focus")
+        expect(shellEvidenceTrail.focusedReviewTitle == "Shell 命令安全", "shell evidence trail should expose shell title")
+        expect(
+            shellEvidenceTrail.steps.contains { $0.reviewKind == "shell-safety" && $0.isFocused },
+            "shell evidence trail should mark shell focus"
+        )
+        expect(shellEvidenceTrail.requiresHumanAction, "shell evidence trail should require human review")
         let shellFocusContext = shellMissionSummary.focusContextSummary(focusedOn: "shell-safety")
         expect(shellFocusContext.focusedReviewKind == "shell-safety", "shell focus context should record shell focus")
         expect(shellFocusContext.focusedReviewTitle == "Shell 命令安全", "shell focus context should expose shell title")
@@ -631,6 +704,10 @@ enum LogicSmoke {
                 shellEvidence.status,
                 shellEvidence.guidance,
                 shellOperatorStrip.status,
+                shellEvidenceTrail.title,
+                shellEvidenceTrail.status,
+                shellEvidenceTrail.guidance,
+                shellEvidenceTrail.steps.map { "\($0.title) \($0.status) \($0.guidance)" }.joined(separator: " "),
                 shellFocusContext.title,
                 shellFocusContext.status,
                 shellFocusContext.guidance,
