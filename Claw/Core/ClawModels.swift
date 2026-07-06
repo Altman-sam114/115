@@ -2365,6 +2365,7 @@ struct ClawAgentTraceReviewSummary: Equatable, Codable, Sendable {
     var selectedNextActionRequiresApproval: Bool?
     var riskTags: [String]
     var stopReason: String?
+    var handoffStatus: String?
     var handoffSummary: String?
     var isRedacted: Bool
 
@@ -2374,8 +2375,8 @@ struct ClawAgentTraceReviewSummary: Equatable, Codable, Sendable {
         }
         let score = readinessScore.map { "证据 \($0)/100" } ?? "证据待复核"
         let action = selectedNextActionKind ?? "下一步待定"
-        let stop = stopReason ?? "stop 未标记"
-        return "\(score) · \(action) · \(stop)"
+        let handoff = handoffStatus.map { "交接 \($0)" } ?? (stopReason ?? "handoff 待同步")
+        return "\(score) · \(action) · \(handoff)"
     }
 
     static func latest(from session: ClawGatewaySession?) -> ClawAgentTraceReviewSummary? {
@@ -2403,9 +2404,37 @@ struct ClawAgentTraceReviewSummary: Equatable, Codable, Sendable {
             selectedNextActionRequiresApproval: ClawArtifactMetadataParser.boolValue(metadata["selectedNextActionRequiresApproval"]),
             riskTags: ClawArtifactMetadataDisplaySanitizer.safeList(metadata["riskTags"]),
             stopReason: ClawArtifactMetadataDisplaySanitizer.safeValue(metadata["stopReason"]),
+            handoffStatus: Self.allowedHandoffStatus(metadata["handoffStatus"]),
             handoffSummary: ClawArtifactMetadataDisplaySanitizer.safeValue(metadata["handoffSummary"]),
             isRedacted: latest.isRedacted
         )
+    }
+
+    static func allowedHandoffStatus(_ value: String?) -> String? {
+        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
+            return nil
+        }
+        let allowed = [
+            "needs-evidence",
+            "waiting-for-approval",
+            "final-submit-review",
+            "blocked",
+            "ready-to-continue",
+            "complete"
+        ]
+        return allowed.contains(clean) ? clean : nil
+    }
+
+    var needsHandoffReview: Bool {
+        guard hasMetadata else {
+            return true
+        }
+        switch handoffStatus {
+        case "needs-evidence", "waiting-for-approval", "final-submit-review", "blocked":
+            return true
+        default:
+            return false
+        }
     }
 }
 

@@ -3288,6 +3288,9 @@ struct ClawAgentTraceReviewRow: View {
             let icon = review.selectedNextActionRequiresApproval == true ? "checkmark.seal.fill" : "arrow.forward.circle.fill"
             items.append((action, icon, review.selectedNextActionRequiresApproval == true ? .orange : .blue))
         }
+        if let handoff = review.handoffStatus {
+            items.append((handoff, handoffIcon(for: handoff), handoffTint(for: handoff)))
+        }
         if let stop = review.stopReason {
             items.append((stop, "hand.raised.fill", stop == "none" || stop == "complete" ? .green : .red))
         }
@@ -3337,6 +3340,34 @@ struct ClawAgentTraceReviewRow: View {
             }
         }
         .accessibilityElement(children: .combine)
+    }
+
+    private func handoffIcon(for status: String) -> String {
+        switch status {
+        case "needs-evidence":
+            return "tray.and.arrow.down.fill"
+        case "waiting-for-approval", "final-submit-review":
+            return "person.crop.circle.badge.checkmark"
+        case "blocked":
+            return "octagon.fill"
+        case "complete":
+            return "checkmark.circle.fill"
+        default:
+            return "arrow.forward.circle.fill"
+        }
+    }
+
+    private func handoffTint(for status: String) -> Color {
+        switch status {
+        case "needs-evidence", "waiting-for-approval", "final-submit-review":
+            return .orange
+        case "blocked":
+            return .red
+        case "complete", "ready-to-continue":
+            return .green
+        default:
+            return .blue
+        }
     }
 }
 

@@ -180,6 +180,7 @@ expect(agentTrace?.decisionChecklist?.some((item) => item.signal === "messageDra
 expect(agentTrace?.nextActions?.some((action) => action.kind === agentTrace?.selectedNextAction?.kind), "agent loop selected action should come from nextActions");
 expect(agentTrace?.riskTags?.includes("approval-required"), "agent loop should tag approval-gated actions");
 expect(agentTrace?.riskTags?.includes("final-submit-gate") || agentTrace?.stopReason === "final-submit", "agent loop should stop before final delivery");
+expect(agentTrace?.handoffStatus === "final-submit-review", "agent loop should expose handoff status");
 expect(typeof agentTrace?.handoffSummary === "string" && agentTrace.handoffSummary.includes(agentTrace.selectedNextAction.kind), "agent loop handoff summary should name selected action");
 const screenArtifacts = await readArtifacts(dryRunEvents, "screenshot");
 expect(screenArtifacts.some((artifact) => artifact.observationGoal === "observe smoke desktop"), "missing screen observation goal");
@@ -826,6 +827,7 @@ function assertAccessibilityTreeArtifact(artifact, tree, { mode, policy, label }
 function assertAgentTraceMetadata(metadata, trace, label) {
   expect(metadata && typeof metadata === "object", `${label} missing agentTrace metadata`);
   const allowedKeys = [
+    "handoffStatus",
     "handoffSummary",
     "missingSignals",
     "readinessCanContinue",
@@ -848,6 +850,11 @@ function assertAgentTraceMetadata(metadata, trace, label) {
   expect(metadata.selectedNextActionRequiresApproval === String(trace.selectedNextAction.requiresApproval), `${label} selected approval metadata mismatch`);
   expect(metadata.riskTags === trace.riskTags.join(","), `${label} risk tags metadata mismatch`);
   expect(metadata.stopReason === trace.stopReason, `${label} stop reason metadata mismatch`);
+  expect(metadata.handoffStatus === trace.handoffStatus, `${label} handoff status metadata mismatch`);
+  expect(
+    ["needs-evidence", "waiting-for-approval", "final-submit-review", "blocked", "ready-to-continue", "complete"].includes(metadata.handoffStatus),
+    `${label} handoff status metadata invalid`,
+  );
   expect(metadata.handoffSummary === trace.handoffSummary, `${label} handoff summary metadata mismatch`);
 }
 

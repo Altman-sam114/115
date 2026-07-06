@@ -817,10 +817,12 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(review.selectedNextActionRequiresApproval, true)
         XCTAssertTrue(review.riskTags.contains("final-submit-gate"))
         XCTAssertEqual(review.stopReason, "final-submit")
+        XCTAssertEqual(review.handoffStatus, "final-submit-review")
+        XCTAssertTrue(review.needsHandoffReview)
         XCTAssertTrue(review.isRedacted)
         XCTAssertTrue(review.compactStatus.contains("72/100"))
         XCTAssertTrue(review.compactStatus.contains("composeMessage"))
-        XCTAssertTrue(review.compactStatus.contains("final-submit"))
+        XCTAssertTrue(review.compactStatus.contains("final-submit-review"))
     }
 
     func testMissionRunSummaryDerivesAccessibilityReview() throws {
@@ -1134,6 +1136,8 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(review.traceCount, 1)
         XCTAssertFalse(review.hasMetadata)
         XCTAssertNil(review.readinessScore)
+        XCTAssertNil(review.handoffStatus)
+        XCTAssertTrue(review.needsHandoffReview)
         XCTAssertEqual(review.latestTitle, "legacy-agent-loop.json")
         XCTAssertTrue(review.isRedacted)
         XCTAssertTrue(review.compactStatus.contains("metadata"))
@@ -1544,6 +1548,7 @@ final class ClawTests: XCTestCase {
                 "selectedNextActionRequiresApproval": "true",
                 "riskTags": "final-submit-gate,headers={Authorization: Bearer raw-token},C:\\Users\\alice\\secret.txt",
                 "stopReason": "final-submit file:///private/tmp/secret.txt \\\\server\\share\\secret.txt",
+                "handoffStatus": "waiting-for-approval Authorization: Bearer raw-token file:///private/tmp/secret.txt",
                 "handoffSummary": "Use toolArguments with Authorization: Bearer raw-token in /private/tmp/claw-work and /home/alice/claw"
             ]
         )
@@ -1557,12 +1562,14 @@ final class ClawTests: XCTestCase {
             review.selectedNextActionKind ?? "",
             review.riskTags.joined(separator: " "),
             review.stopReason ?? "",
+            review.handoffStatus ?? "",
             review.handoffSummary ?? ""
         ].joined(separator: " ")
 
         XCTAssertEqual(review.readinessScore, 64)
         XCTAssertEqual(review.readinessCanContinue, true)
         XCTAssertEqual(review.selectedNextActionRequiresApproval, true)
+        XCTAssertNil(review.handoffStatus)
         XCTAssertFalse(visibleText.contains("Authorization"))
         XCTAssertFalse(visibleText.contains("Bearer"))
         XCTAssertFalse(visibleText.contains("raw-token"))

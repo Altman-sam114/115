@@ -564,6 +564,8 @@ enum LogicSmoke {
             expect(agentTraceReview.selectedNextActionRequiresApproval == true, "agent trace review should expose approval requirement")
             expect(agentTraceReview.riskTags.contains("final-submit-gate"), "agent trace review should expose risk tags")
             expect(agentTraceReview.stopReason == "final-submit", "agent trace review should expose stop reason")
+            expect(agentTraceReview.handoffStatus == "final-submit-review", "agent trace review should expose handoff status")
+            expect(agentTraceReview.needsHandoffReview, "agent trace review should mark final submit handoff actionable")
             expect(agentTraceReview.isRedacted, "agent trace review should preserve redacted status")
         } else {
             failures.append("mission summary should derive agent trace review")
@@ -578,6 +580,7 @@ enum LogicSmoke {
                 "selectedNextActionKind": "composeMessage token=raw-token",
                 "riskTags": "headers={Authorization: Bearer raw-token},C:\\Users\\alice\\secret.txt",
                 "stopReason": "final-submit file:///private/tmp/secret.txt /home/alice/secret.txt",
+                "handoffStatus": "blocked Authorization: Bearer raw-token /private/tmp/secret.txt",
                 "handoffSummary": "Do not expose toolArguments or Authorization: Bearer raw-token from ~/Library/Claw or \\\\server\\share\\claw"
             ]
         )
@@ -587,8 +590,10 @@ enum LogicSmoke {
                 sensitiveAgentTraceReview.compactStatus,
                 sensitiveAgentTraceReview.riskTags.joined(separator: " "),
                 sensitiveAgentTraceReview.stopReason ?? "",
+                sensitiveAgentTraceReview.handoffStatus ?? "",
                 sensitiveAgentTraceReview.handoffSummary ?? ""
             ].joined(separator: " ")
+            expect(sensitiveAgentTraceReview.handoffStatus == nil, "agent trace review should reject unsafe handoff status")
             expect(visibleText.contains("Authorization") == false, "agent trace review should redact Authorization")
             expect(visibleText.contains("Bearer") == false, "agent trace review should redact bearer token")
             expect(visibleText.contains("raw-token") == false, "agent trace review should redact raw token")

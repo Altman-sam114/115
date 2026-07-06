@@ -2747,6 +2747,7 @@ async function agentLoopAction(action, index, config) {
     riskTags,
     stopBeforeDestructiveAction,
   });
+  const handoffStatus = makeAgentHandoffStatus({ readiness, selectedNextAction, riskTags, stopReason });
   const handoffSummary = makeAgentHandoffSummary(readiness, selectedNextAction, stopReason);
   const iterations = [];
 
@@ -2783,6 +2784,7 @@ async function agentLoopAction(action, index, config) {
     selectedNextAction,
     riskTags,
     stopReason,
+    handoffStatus,
     handoffSummary,
     iterations,
     finalState: proposedActions.some((item) => item.requiresApproval)
@@ -2818,6 +2820,7 @@ function agentTraceMetadata(trace) {
     selectedNextActionRequiresApproval: trace.selectedNextAction?.requiresApproval,
     riskTags: trace.riskTags,
     stopReason: trace.stopReason,
+    handoffStatus: trace.handoffStatus,
     handoffSummary: trace.handoffSummary,
   });
 }
@@ -3093,6 +3096,25 @@ function makeAgentStopReason({
     return "complete";
   }
   return "none";
+}
+
+function makeAgentHandoffStatus({ readiness, selectedNextAction, riskTags, stopReason }) {
+  if (!readiness.canContinue) {
+    return "needs-evidence";
+  }
+  if (stopReason === "final-submit" || riskTags.includes("final-submit-gate")) {
+    return "final-submit-review";
+  }
+  if (selectedNextAction?.requiresApproval || stopReason === "approval-required") {
+    return "waiting-for-approval";
+  }
+  if (["destructive", "external"].includes(stopReason)) {
+    return "blocked";
+  }
+  if (selectedNextAction?.kind === "none" || stopReason === "complete") {
+    return "complete";
+  }
+  return "ready-to-continue";
 }
 
 function makeAgentHandoffSummary(readiness, selectedNextAction, stopReason) {

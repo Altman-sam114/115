@@ -633,7 +633,7 @@ final class ClawStore: ObservableObject {
         }
 
         if let review = agentTraceReview {
-            let needsReview = review.hasMetadata == false || review.readinessCanContinue == false || review.missingSignals.isEmpty == false || review.selectedNextActionRequiresApproval == true
+            let needsReview = review.needsHandoffReview || review.readinessCanContinue == false || review.missingSignals.isEmpty == false || review.selectedNextActionRequiresApproval == true
             add(
                 id: "agent-trace",
                 rank: needsReview ? 70 : 98,
@@ -2355,6 +2355,7 @@ enum ClawGatewaySimulator {
             "selectedNextActionRequiresApproval": "true",
             "riskTags": "approval-required,final-submit-gate,missing-message-draft",
             "stopReason": "final-submit",
+            "handoffStatus": "final-submit-review",
             "handoffSummary": "Evidence score 72/100 from screenObservation, accessibilityTree, browserTrace, fileDiff, commandOutput; missing messageDraft. Selected next action: composeMessage. Stop reason: final-submit."
         ]
     }

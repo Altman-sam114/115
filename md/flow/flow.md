@@ -33,8 +33,8 @@ Claw 的当前主链路是：用户在 iPhone 输入电脑任务，App 生成可
   -> ClawGatewayCapabilityReviewSummary 从 snapshot metadata 派生能力复核摘要
   -> ClawGatewayAccessibilityReviewSummary 从 accessibilityTree metadata 派生观察复核摘要
   -> ClawGatewayTaskReplayGuardReviewSummary 从 task-replay-guard metadata 派生重复任务复核摘要
-  -> ClawGatewayArtifact.metadata 上的 agentTrace 安全摘要
-  -> ClawMissionRunSummary 派生任务回合摘要、Live Gateway 连接健康、Operator Strip、Artifact 证据索引、Artifact metadata、文件变更安全、Shell 命令安全、提取完整性、浏览器控制计划、草稿/最终提交安全、Gateway 能力复核摘要、Accessibility 复核摘要、Replay Guard 复核摘要、AgentTrace 复核摘要、复核优先队列、聚焦详情、复核态势摘要和下一步复核行动
+  -> ClawGatewayArtifact.metadata 上的 agentTrace 安全摘要和 handoff 状态
+  -> ClawMissionRunSummary 派生任务回合摘要、Live Gateway 连接健康、Operator Strip、Artifact 证据索引、Artifact metadata、文件变更安全、Shell 命令安全、提取完整性、浏览器控制计划、草稿/最终提交安全、Gateway 能力复核摘要、Accessibility 复核摘要、Replay Guard 复核摘要、AgentTrace handoff 复核摘要、复核优先队列、聚焦详情、复核态势摘要和下一步复核行动
   -> SwiftUI Mission Run / iPad 多栏工作台展示 Operator Strip、Artifact 证据索引、复核态势、下一步复核行动、聚焦优先队列、复核、审批、重试或下一轮
 ```
 
@@ -91,7 +91,7 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 9. 正常路径在 `gatewayConnected` 后写入 session 级 `gateway-capability-snapshot.json` `auditLog` artifact，记录 workspace、platform、短 token 指纹、envelope allowlist、策略 allowlist 和 capability 状态，并在 artifact event metadata 上附安全字符串摘要。
 10. Gateway action handler 写 artifact 并返回状态：成功、失败、等待审批、跳过。
 11. 手机端 reducer 用事件更新 session；无 action 绑定的 `artifactStored` 进入 `sessionArtifacts` 和 auditTrail，action-bound artifact 保持 result 合并逻辑。
-12. UI 显示结果、artifact、审批点、retry 状态、Live Gateway 连接健康摘要、Mission Run Operator Strip、Artifact 证据索引、复核态势摘要、下一步人工复核行动、按风险/可行动性排序的复核优先队列、当前聚焦的队列项详情、Artifact metadata 复核摘要、文件变更安全复核摘要、提取完整性复核摘要、浏览器控制计划复核摘要、草稿/最终提交安全复核摘要、Gateway 能力复核摘要、Accessibility 复核摘要、Replay Guard 复核摘要和 AgentTrace 复核摘要。
+12. UI 显示结果、artifact、审批点、retry 状态、Live Gateway 连接健康摘要、Mission Run Operator Strip、Artifact 证据索引、复核态势摘要、下一步人工复核行动、按风险/可行动性排序的复核优先队列、当前聚焦的队列项详情、Artifact metadata 复核摘要、文件变更安全复核摘要、提取完整性复核摘要、浏览器控制计划复核摘要、草稿/最终提交安全复核摘要、Gateway 能力复核摘要、Accessibility 复核摘要、Replay Guard 复核摘要和 AgentTrace handoff 复核摘要。
 13. `ClawAutonomousLoopState` 记录计划、审批、发送、观察、重试等自动循环状态。
 
 ## 4. 核心模块
@@ -102,7 +102,7 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 
 - 展示连接、聊天、电脑接管、能力和榜单。
 - 让用户输入任务、配置 Gateway URL/token、切换发送模式、查看 envelope 和事件。
-- 在电脑接管首屏用 Mission Run 面板汇总任务目标、阶段、下一步主动作、风险、审批点、Gateway 结果、artifact 证据、Operator Strip、Artifact 证据索引、复核态势摘要、下一步人工复核行动、按阻断/审批/metadata 缺失/高风险执行面排序的复核优先队列、当前聚焦项对应的详细复核、Live Gateway 连接健康摘要、Artifact metadata 复核摘要、文件变更安全复核摘要、提取完整性复核摘要、浏览器控制计划复核摘要、草稿/最终提交安全复核摘要、Gateway 能力复核摘要、Accessibility 复核摘要、Replay Guard 复核摘要和最近 AgentTrace 复核摘要。
+- 在电脑接管首屏用 Mission Run 面板汇总任务目标、阶段、下一步主动作、风险、审批点、Gateway 结果、artifact 证据、Operator Strip、Artifact 证据索引、复核态势摘要、下一步人工复核行动、按阻断/审批/metadata 缺失/高风险执行面排序的复核优先队列、当前聚焦项对应的详细复核、Live Gateway 连接健康摘要、Artifact metadata 复核摘要、文件变更安全复核摘要、提取完整性复核摘要、浏览器控制计划复核摘要、草稿/最终提交安全复核摘要、Gateway 能力复核摘要、Accessibility 复核摘要、Replay Guard 复核摘要和最近 AgentTrace handoff 复核摘要。
 - 在 iPad/regular horizontal size class 上用多栏工作台重排同一组展示层信息：左侧命令输入和 Mission Run，右侧计划、Claw 电脑任务、Gateway 会话、事件/envelope、权限和日志；compact 布局保持单栏。
 
 输入：
@@ -114,7 +114,7 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 输出：
 
 - UI 状态。
-- `ClawMissionRunSummary` 派生展示状态、Operator Strip、Artifact 证据索引、下一步复核行动、复核优先队列、`ClawGatewayLiveHealthSummary` 连接健康摘要、`ClawGatewayArtifactMetadataReviewSummary` 通用 metadata 复核摘要、`ClawGatewayFileChangeSafetyReviewSummary` 文件变更安全复核摘要、`ClawGatewayShellCommandSafetyReviewSummary` Shell 命令安全复核摘要、`ClawGatewayExtractionCompletenessReviewSummary` 提取完整性复核摘要、`ClawGatewayBrowserControlReviewSummary` 浏览器控制计划复核摘要、`ClawGatewayDeliverySafetyReviewSummary` 草稿/最终提交安全复核摘要、`ClawGatewayCapabilityReviewSummary` 能力复核摘要、`ClawGatewayAccessibilityReviewSummary` 观察复核摘要、`ClawGatewayTaskReplayGuardReviewSummary` 复核摘要和 `ClawAgentTraceReviewSummary` 复核摘要。
+- `ClawMissionRunSummary` 派生展示状态、Operator Strip、Artifact 证据索引、下一步复核行动、复核优先队列、`ClawGatewayLiveHealthSummary` 连接健康摘要、`ClawGatewayArtifactMetadataReviewSummary` 通用 metadata 复核摘要、`ClawGatewayFileChangeSafetyReviewSummary` 文件变更安全复核摘要、`ClawGatewayShellCommandSafetyReviewSummary` Shell 命令安全复核摘要、`ClawGatewayExtractionCompletenessReviewSummary` 提取完整性复核摘要、`ClawGatewayBrowserControlReviewSummary` 浏览器控制计划复核摘要、`ClawGatewayDeliverySafetyReviewSummary` 草稿/最终提交安全复核摘要、`ClawGatewayCapabilityReviewSummary` 能力复核摘要、`ClawGatewayAccessibilityReviewSummary` 观察复核摘要、`ClawGatewayTaskReplayGuardReviewSummary` 复核摘要和 `ClawAgentTraceReviewSummary` handoff 复核摘要。
 - `ClawMobileEnvelope`。
 - 审批/发送/重试动作。
 
@@ -212,7 +212,7 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 - `runShellCommand`：结构化命令 dry-run 或 allowlist 执行，并在既有 `commandOutput` artifact event 上附 metadata-only Shell 命令安全复核摘要；metadata 只含结构化命令 presence、解析/policy/allowlist/执行/exit code/stdout/stderr presence 和 omission flags，不含 raw command、cwd/path、stdout/stderr 内容或 `toolArguments`。
 - `extractData`：消费同 session artifact 生成结构化数据，并在输出 artifact event metadata 上附完整性状态、row count、来源计数、source kind 和 safety flags；metadata 不含 row 内容、URL/path、命令输出或 `toolArguments`。
 - `operateDesktopApp`：桌面 App 聚焦、粘贴、allowlist 快捷键、最终提交前审批，并在相关 artifact event metadata 上附草稿/最终提交安全摘要；metadata 只含审批/省略/计数/safety flags，不含草稿正文、paste text、按键原文或 `toolArguments`。
-- `runAgentLoop`：基于 session artifacts 生成观察-规划-动作建议-验证 `agentTrace`，并在 artifact 内部记录 readiness、decisionChecklist、selectedNextAction、riskTags、stopReason 和 handoffSummary，同时把证据分、缺失信号、下一步、风险、停止原因和 handoff 摘要压缩成 artifact event 上的可选字符串 metadata 供手机端复核。
+- `runAgentLoop`：基于 session artifacts 生成观察-规划-动作建议-验证 `agentTrace`，并在 artifact 内部记录 readiness、decisionChecklist、selectedNextAction、riskTags、stopReason、handoffStatus 和 handoffSummary，同时把证据分、缺失信号、下一步、风险、停止原因、固定 handoff 状态和 handoff 摘要压缩成 artifact event 上的可选字符串 metadata 供手机端复核。
 - `composeMessage`/`composeEmail`：生成待确认草稿，并在 `messageDraft` artifact event metadata 上标记最终发送需要用户确认、草稿正文已从 metadata 省略。
 - session-start `auditLog`：`gateway-capability-snapshot.json`，只记录 workspace、session workspace、platform、短 token 指纹、allowedActionKinds、策略 allowlist 和 capability 状态，并把 `snapshotKind`、token 配置/指纹、allowlist、capability state、`accessibilityTreeState`、safety flags 和 platform 压缩成 artifact event metadata；不记录 raw token、Authorization header、自然语言 instruction、`toolArguments`、网页正文、命令输出、截图内容、草稿正文、联系人或完整 workspace path。
 - replay guard `auditLog`：`task-replay-guard.json`，只记录 task id、短 digest、首次 session id、原始状态、replay count、action count/kinds 和安全标志；不记录 raw token、Authorization header、自然语言 instruction、`toolArguments`、业务 artifact payload 或完整 workspace path。该防护只在当前 Gateway 进程生命周期内有效，不是跨重启持久化 exactly-once。
@@ -275,13 +275,13 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 - `ClawGatewayCapabilityReviewSummary`：手机端从 `gateway-capability-snapshot.json` `auditLog` metadata 派生的能力复核摘要，只展示短 token 指纹、allowlist、capability state、`accessibilityTreeState` 和 safety flags，不读取 Gateway `file://` 内容，UI 可见字符串统一走 metadata 脱敏路径。
 - `ClawGatewayAccessibilityReviewSummary`：手机端从 `accessibilityTree` artifact metadata 派生的观察复核摘要，只展示 mode、policy、节点数、候选控件数、platform、redaction 和 safety flags，不读取 Gateway `file://` 内容，UI 可见字符串统一走 metadata 脱敏路径。
 - `ClawGatewayTaskReplayGuardReviewSummary`：手机端从 `task-replay-guard.json` `auditLog` metadata 派生的 Replay Guard 复核摘要，只展示重复次数、跳过动作数、短 digest、首次状态和 safety flags，不读取 Gateway `file://` 内容，不声称跨进程 exactly-once，UI 可见字符串统一走 metadata 脱敏路径。
-- `ClawAgentTraceReviewSummary`：手机端从最近 `agentTrace` artifact metadata 派生的复核摘要，只展示安全字符串摘要，不读取 Gateway `file://` 内容，UI 可见字符串统一走 metadata 脱敏路径。
+- `ClawAgentTraceReviewSummary`：手机端从最近 `agentTrace` artifact metadata 派生的复核摘要和固定 handoff 状态，只展示安全字符串摘要和枚举状态，不读取 Gateway `file://` 内容，UI 可见字符串统一走 metadata 脱敏路径。
 - `ClawMissionRunReviewPriorityItem`：手机端 presentation layer 队列项，只从既有 Mission Run summary、review summary 和 session/action 状态派生，用固定 severity/rank/review kind 排序首屏复核重点，并作为聚焦详情的安全输入；不读取 Gateway `file://` payload，不展示 raw URL/path/command/stdout/stderr/diff/token/header 或 `toolArguments`。
 - `ClawMissionRunReviewReadinessSummary`：手机端 presentation layer 复核态势摘要，只从完整复核优先队列、可用 detail review kind 和聚焦状态派生，展示总优先项、可行动项、高优先项、metadata 缺口、最高优先项和聚焦状态；不读取 Gateway `file://` payload，不展示 raw URL/path/command/stdout/stderr/diff/token/header 或 `toolArguments`，不是自动执行 readiness。
 - `ClawMissionRunNextReviewAction`：手机端 presentation layer 下一步人工复核行动，只从当前有效聚焦项、完整复核优先队列和可用 detail review kind 派生，提示用户下一步聚焦哪类复核或等待 Gateway 证据；不读取 Gateway `file://` payload，不展示 raw URL/path/command/stdout/stderr/diff/token/header 或 `toolArguments`，不是自动执行计划。
 - `ClawMissionRunArtifactEvidenceIndex`：手机端 presentation layer Artifact 证据索引，只从 artifact kind、Artifact metadata review 的 metadata/redaction count、可用 detail review kind、复核优先队列和当前聚焦项派生，展示复核项对应的证据类型覆盖和 metadata 状态；不读取 Gateway `file://` payload，不展示 raw URL/path/command/stdout/stderr/diff/token/header 或 `toolArguments`，不是完整 payload viewer 或自动安全裁决。
 - `ClawMissionRunOperatorStrip`：手机端 presentation layer 操作态势带，只从阶段、回合进度、结果计数、Artifact 证据索引、复核态势摘要和下一步复核行动派生，展示 Gateway、证据、复核和下一步 4 个 lane；不读取 Gateway `file://` payload，不展示 raw URL/path/command/stdout/stderr/diff/token/header 或 `toolArguments`，不是自动执行控制台或 Gateway readiness。
-- `ClawMissionRunSummary`：手机端 presentation layer 摘要，只从 loop/task/session 派生，不进入 envelope 或 Gateway 协议；iPad 多栏工作台只重排该展示层和既有会话/日志面板，并展示 Operator Strip、Artifact 证据索引、复核态势摘要、下一步复核行动、复核优先队列、聚焦详情、Artifact metadata、File Change Safety、Shell Command Safety、提取完整性、Browser Control、Delivery Safety、Gateway capability、Accessibility、Replay Guard 和 AgentTrace 复核摘要。
+- `ClawMissionRunSummary`：手机端 presentation layer 摘要，只从 loop/task/session 派生，不进入 envelope 或 Gateway 协议；iPad 多栏工作台只重排该展示层和既有会话/日志面板，并展示 Operator Strip、Artifact 证据索引、复核态势摘要、下一步复核行动、复核优先队列、聚焦详情、Artifact metadata、File Change Safety、Shell Command Safety、提取完整性、Browser Control、Delivery Safety、Gateway capability、Accessibility、Replay Guard 和 AgentTrace handoff 复核摘要。
 
 ## 6. 用户入口
 
@@ -310,7 +310,7 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 - 每个重要 action 都要产生 artifact 或明确失败/跳过原因。
 - 新协议字段必须同步测试和文档。
 - Gateway capability snapshot 只能作为审计复核 artifact，不能新增权限，不能成为执行计划来源，payload 和 metadata 不能包含 raw token、Authorization header、自然语言 instruction、`toolArguments`、网页正文、命令输出、截图内容、草稿正文、联系人或完整 workspace path。
-- `agentTrace` metadata 只能用于手机端复核展示，不能成为执行计划来源，不能放入浏览器正文、命令输出、截图内容、草稿正文、联系人或 token；手机端展示前必须统一脱敏 raw token、Authorization/header、`toolArguments`、`file://` 和完整 workspace path。
+- `agentTrace` metadata 和 handoffStatus 只能用于手机端复核展示，不能成为执行计划来源，不能放入浏览器正文、命令输出、截图内容、草稿正文、联系人或 token；手机端展示前必须统一脱敏 raw token、Authorization/header、`toolArguments`、`file://` 和完整 workspace path；handoffStatus 只能使用固定枚举，不能从自然语言或 payload 解析。
 - `extractData` 完整性 metadata 只能用于手机端复核展示，不能成为执行计划来源，不能放入 row 内容、URL/path、命令输出、网页正文、草稿正文、联系人、token 或 `toolArguments`；手机端展示前必须统一脱敏敏感值。
 - File Change Safety metadata 只能用于手机端复核展示，不能成为执行计划来源，不能放入 raw path、workspace/sessionWorkspace、文件名/目录名、文件内容、diff hunk、patch、stdout/stderr、token、Authorization/header、cookie、secret 或 `toolArguments`；metadata 缺失时必须显示“metadata 待同步”，不能假定写入安全。
 - Shell Command Safety metadata 只能用于手机端复核展示，不能成为执行计划来源，不能放入 raw command、binary/args、cwd、workspace/session path、stdout/stderr 内容、token、Authorization/header、cookie、secret、自然语言 instruction 或 `toolArguments`；metadata 缺失时必须显示“metadata 待同步”，不能假定命令安全、已阻断或已执行。
@@ -325,7 +325,7 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 - Planner/bridge/schema 变更：本地 Swift logic smoke（需要时）+ 云端 xcodebuild/logic smoke/结果包验收。
 - Gateway handler 变更：本地 `node --check Tools/*.mjs` + 云端 direct smoke/WebSocket smoke/结果包验收。
 - Event reducer 变更：Swift logic smoke、XCTest 或等价云端 build 结果。
-- Mission Run 派生摘要或首屏任务回合 UI 变更：XCTest/Swift logic smoke 覆盖 idle、待审批、需处理、完成、阻断摘要、Operator Strip、Artifact 证据索引、复核优先队列、复核聚焦、复核态势摘要、下一步复核行动和敏感字符串不外显；Artifact metadata、File Change Safety、Shell Command Safety、提取完整性、Browser Control、Delivery Safety、Gateway capability、Accessibility、Replay Guard 和 AgentTrace 复核摘要需覆盖 metadata 存在和缺失两种路径；云端 xcodebuild 覆盖 SwiftUI 编译。
+- Mission Run 派生摘要或首屏任务回合 UI 变更：XCTest/Swift logic smoke 覆盖 idle、待审批、需处理、完成、阻断摘要、Operator Strip、AgentTrace handoff 状态、Artifact 证据索引、复核优先队列、复核聚焦、复核态势摘要、下一步复核行动和敏感字符串不外显；Artifact metadata、File Change Safety、Shell Command Safety、提取完整性、Browser Control、Delivery Safety、Gateway capability、Accessibility、Replay Guard 和 AgentTrace 复核摘要需覆盖 metadata 存在和缺失两种路径；云端 xcodebuild 覆盖 SwiftUI 编译。
 - 文档-only 变更：本地 `git diff --check`、workflow YAML 语法检查；云端由 `main` push 触发结果包。
 
 ## 10. 未来扩展点
