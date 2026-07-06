@@ -2583,6 +2583,76 @@ struct ClawMissionRunSummary: Equatable, Codable, Sendable {
     var stageTrack: [ClawMissionRunStage]
 }
 
+extension ClawMissionRunSummary {
+    static let detailReviewKindOrder: [String] = [
+        "artifact-metadata",
+        "file-change-safety",
+        "shell-safety",
+        "extraction-completeness",
+        "browser-control",
+        "delivery-safety",
+        "gateway-capability",
+        "accessibility",
+        "replay-guard",
+        "agent-trace"
+    ]
+
+    var availableDetailReviewKinds: [String] {
+        Self.detailReviewKindOrder.filter { kind in
+            switch kind {
+            case "artifact-metadata":
+                return artifactMetadataReview != nil
+            case "file-change-safety":
+                return gatewayFileChangeSafetyReview != nil
+            case "shell-safety":
+                return gatewayShellCommandSafetyReview != nil
+            case "extraction-completeness":
+                return gatewayExtractionCompletenessReview != nil
+            case "browser-control":
+                return gatewayBrowserControlReview != nil
+            case "delivery-safety":
+                return gatewayDeliverySafetyReview != nil
+            case "gateway-capability":
+                return gatewayCapabilityReview != nil
+            case "accessibility":
+                return gatewayAccessibilityReview != nil
+            case "replay-guard":
+                return gatewayTaskReplayGuardReview != nil
+            case "agent-trace":
+                return agentTraceReview != nil
+            default:
+                return false
+            }
+        }
+    }
+
+    func detailReviewKinds(focusedOn reviewKind: String?) -> [String] {
+        let available = availableDetailReviewKinds
+        guard let reviewKind, available.contains(reviewKind) else {
+            return available
+        }
+        return [reviewKind]
+    }
+
+    func shouldShowDetailReview(_ reviewKind: String, focusedOn focusedReviewKind: String?) -> Bool {
+        detailReviewKinds(focusedOn: focusedReviewKind).contains(reviewKind)
+    }
+
+    func reviewPriorityItem(focusedOn reviewKind: String?) -> ClawMissionRunReviewPriorityItem? {
+        guard let reviewKind else {
+            return nil
+        }
+        return reviewPriorityQueue.first { $0.reviewKind == reviewKind }
+    }
+
+    func focusUsesDetailReview(_ reviewKind: String?) -> Bool {
+        guard let reviewKind else {
+            return false
+        }
+        return availableDetailReviewKinds.contains(reviewKind)
+    }
+}
+
 struct ClawGatewayLiveRequest: Identifiable, Equatable, Codable, Sendable {
     let id: UUID
     var endpoint: String

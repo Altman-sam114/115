@@ -129,9 +129,43 @@ enum LogicSmoke {
             missionSummary.reviewPriorityQueue.contains { $0.reviewKind == "file-change-safety" },
             "review priority queue should include file change safety"
         )
+        let availableDetailKinds = missionSummary.availableDetailReviewKinds
+        expect(availableDetailKinds.isEmpty == false, "mission summary should expose detail review kinds")
+        expect(
+            missionSummary.detailReviewKinds(focusedOn: nil) == availableDetailKinds,
+            "nil focus should show all detail reviews"
+        )
+        expect(
+            missionSummary.detailReviewKinds(focusedOn: "delivery-safety") == ["delivery-safety"],
+            "delivery focus should show delivery detail only"
+        )
+        expect(
+            missionSummary.detailReviewKinds(focusedOn: "gateway-status") == availableDetailKinds,
+            "status focus should keep all detail reviews visible"
+        )
+        expect(
+            missionSummary.detailReviewKinds(focusedOn: "unknown-review-kind") == availableDetailKinds,
+            "stale focus should keep all detail reviews visible"
+        )
+        expect(
+            missionSummary.shouldShowDetailReview("delivery-safety", focusedOn: "delivery-safety"),
+            "focused delivery detail should remain visible"
+        )
+        expect(
+            missionSummary.shouldShowDetailReview("artifact-metadata", focusedOn: "delivery-safety") == false,
+            "delivery focus should hide unrelated detail reviews"
+        )
+        expect(
+            missionSummary.focusUsesDetailReview("gateway-status") == false,
+            "gateway status focus should be treated as a status-level focus"
+        )
+        expect(
+            missionSummary.reviewPriorityItem(focusedOn: "delivery-safety") != nil,
+            "focus should resolve a queue item"
+        )
         let queueVisibleText = missionSummary.reviewPriorityQueue.map {
             "\($0.title) \($0.status) \($0.reason) \($0.actionHint) \($0.reviewKind)"
-        }.joined(separator: " ")
+        }.joined(separator: " ") + " " + availableDetailKinds.joined(separator: " ")
         for forbidden in ["Authorization", "Bearer", "toolArguments", "file://", "/private", "/home", "C:\\", "stdout", "stderr"] {
             expect(queueVisibleText.contains(forbidden) == false, "review priority queue should not expose \(forbidden)")
         }
@@ -263,6 +297,10 @@ enum LogicSmoke {
         expect(
             shellMissionSummary.reviewPriorityQueue.contains { $0.reviewKind == "shell-safety" && $0.severity == .high },
             "review priority queue should prioritize shell safety when shell policy blocks execution"
+        )
+        expect(
+            shellMissionSummary.detailReviewKinds(focusedOn: "shell-safety") == ["shell-safety"],
+            "shell focus should show shell detail only"
         )
         if let shellArtifacts = shellReviewStore.clawGatewaySessions.first?.results.first(where: { $0.actionKind == .runShellCommand })?.artifacts,
            let shellReview = ClawGatewayShellCommandSafetyReviewSummary.latest(from: shellArtifacts) {

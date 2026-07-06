@@ -579,9 +579,21 @@ final class ClawTests: XCTestCase {
         XCTAssertTrue(queue.contains { $0.reviewKind == "browser-control" })
         XCTAssertTrue(queue.contains { $0.reviewKind == "artifact-metadata" })
 
+        let summary = store.missionRunSummary
+        let availableDetailKinds = summary.availableDetailReviewKinds
+        XCTAssertFalse(availableDetailKinds.isEmpty)
+        XCTAssertEqual(summary.detailReviewKinds(focusedOn: nil), availableDetailKinds)
+        XCTAssertEqual(summary.detailReviewKinds(focusedOn: "delivery-safety"), ["delivery-safety"])
+        XCTAssertEqual(summary.detailReviewKinds(focusedOn: "gateway-status"), availableDetailKinds)
+        XCTAssertEqual(summary.detailReviewKinds(focusedOn: "unknown-review-kind"), availableDetailKinds)
+        XCTAssertTrue(summary.shouldShowDetailReview("delivery-safety", focusedOn: "delivery-safety"))
+        XCTAssertFalse(summary.shouldShowDetailReview("artifact-metadata", focusedOn: "delivery-safety"))
+        XCTAssertFalse(summary.focusUsesDetailReview("gateway-status"))
+        XCTAssertNotNil(summary.reviewPriorityItem(focusedOn: "delivery-safety"))
+
         let visibleText = queue.map {
             "\($0.title) \($0.status) \($0.reason) \($0.actionHint) \($0.reviewKind)"
-        }.joined(separator: " ")
+        }.joined(separator: " ") + " " + availableDetailKinds.joined(separator: " ")
         for forbidden in ["Authorization", "Bearer", "toolArguments", "file://", "/private", "/home", "C:\\", "stdout", "stderr"] {
             XCTAssertFalse(visibleText.contains(forbidden), "queue leaked \(forbidden)")
         }
@@ -597,6 +609,7 @@ final class ClawTests: XCTestCase {
         XCTAssertTrue(shellItem.isActionable)
         XCTAssertTrue(shellItem.hasMetadata)
         XCTAssertTrue(shellItem.status.contains("policy dry-run"))
+        XCTAssertEqual(shellStore.missionRunSummary.detailReviewKinds(focusedOn: "shell-safety"), ["shell-safety"])
     }
 
     func testMissionRunSummaryDerivesGatewayCapabilityReview() throws {

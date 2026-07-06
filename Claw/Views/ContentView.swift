@@ -621,9 +621,11 @@ struct PhoneAgentCommandPanel: View {
 
 struct ClawMissionRunPanel: View {
     @EnvironmentObject private var store: ClawStore
+    @State private var focusedReviewKind: String?
 
     var body: some View {
         let summary = store.missionRunSummary
+        let activeFocusedReviewKind = activeFocusedReviewKind(for: summary)
         VStack(alignment: .leading, spacing: 14) {
             SectionHeader(title: "Mission Run", icon: "flag.checkered")
 
@@ -701,46 +703,66 @@ struct ClawMissionRunPanel: View {
             }
 
             if summary.reviewPriorityQueue.isEmpty == false {
-                ClawMissionReviewPriorityQueueView(items: Array(summary.reviewPriorityQueue.prefix(5)))
+                ClawMissionReviewPriorityQueueView(
+                    items: Array(summary.reviewPriorityQueue.prefix(5)),
+                    selectedReviewKind: activeFocusedReviewKind,
+                    onSelectReviewKind: focusReviewKind,
+                    onClearFocus: clearFocusedReviewKind
+                )
             }
 
-            if let review = summary.artifactMetadataReview {
+            if let focusedItem = summary.reviewPriorityItem(focusedOn: activeFocusedReviewKind),
+               summary.focusUsesDetailReview(activeFocusedReviewKind) == false {
+                ClawMissionReviewFocusNoticeView(item: focusedItem)
+            }
+
+            if let review = summary.artifactMetadataReview,
+               summary.shouldShowDetailReview("artifact-metadata", focusedOn: activeFocusedReviewKind) {
                 ClawGatewayArtifactMetadataReviewRow(review: review)
             }
 
-            if let review = summary.gatewayFileChangeSafetyReview {
+            if let review = summary.gatewayFileChangeSafetyReview,
+               summary.shouldShowDetailReview("file-change-safety", focusedOn: activeFocusedReviewKind) {
                 ClawGatewayFileChangeSafetyReviewRow(review: review)
             }
 
-            if let review = summary.gatewayShellCommandSafetyReview {
+            if let review = summary.gatewayShellCommandSafetyReview,
+               summary.shouldShowDetailReview("shell-safety", focusedOn: activeFocusedReviewKind) {
                 ClawGatewayShellCommandSafetyReviewRow(review: review)
             }
 
-            if let review = summary.gatewayExtractionCompletenessReview {
+            if let review = summary.gatewayExtractionCompletenessReview,
+               summary.shouldShowDetailReview("extraction-completeness", focusedOn: activeFocusedReviewKind) {
                 ClawGatewayExtractionCompletenessReviewRow(review: review)
             }
 
-            if let review = summary.gatewayBrowserControlReview {
+            if let review = summary.gatewayBrowserControlReview,
+               summary.shouldShowDetailReview("browser-control", focusedOn: activeFocusedReviewKind) {
                 ClawGatewayBrowserControlReviewRow(review: review)
             }
 
-            if let review = summary.gatewayDeliverySafetyReview {
+            if let review = summary.gatewayDeliverySafetyReview,
+               summary.shouldShowDetailReview("delivery-safety", focusedOn: activeFocusedReviewKind) {
                 ClawGatewayDeliverySafetyReviewRow(review: review)
             }
 
-            if let review = summary.gatewayCapabilityReview {
+            if let review = summary.gatewayCapabilityReview,
+               summary.shouldShowDetailReview("gateway-capability", focusedOn: activeFocusedReviewKind) {
                 ClawGatewayCapabilityReviewRow(review: review)
             }
 
-            if let review = summary.gatewayAccessibilityReview {
+            if let review = summary.gatewayAccessibilityReview,
+               summary.shouldShowDetailReview("accessibility", focusedOn: activeFocusedReviewKind) {
                 ClawGatewayAccessibilityReviewRow(review: review)
             }
 
-            if let review = summary.gatewayTaskReplayGuardReview {
+            if let review = summary.gatewayTaskReplayGuardReview,
+               summary.shouldShowDetailReview("replay-guard", focusedOn: activeFocusedReviewKind) {
                 ClawGatewayTaskReplayGuardReviewRow(review: review)
             }
 
-            if let review = summary.agentTraceReview {
+            if let review = summary.agentTraceReview,
+               summary.shouldShowDetailReview("agent-trace", focusedOn: activeFocusedReviewKind) {
                 ClawAgentTraceReviewRow(review: review)
             }
 
@@ -758,6 +780,22 @@ struct ClawMissionRunPanel: View {
             .opacity(summary.isPrimaryActionEnabled ? 1 : 0.55)
         }
         .panelCard()
+    }
+
+    private func activeFocusedReviewKind(for summary: ClawMissionRunSummary) -> String? {
+        guard let focusedReviewKind,
+              summary.reviewPriorityQueue.contains(where: { $0.reviewKind == focusedReviewKind }) else {
+            return nil
+        }
+        return focusedReviewKind
+    }
+
+    private func focusReviewKind(_ reviewKind: String) {
+        focusedReviewKind = reviewKind
+    }
+
+    private func clearFocusedReviewKind() {
+        focusedReviewKind = nil
     }
 
     private func phaseTint(for summary: ClawMissionRunSummary) -> Color {
@@ -799,15 +837,41 @@ struct ClawMissionRunPanel: View {
 
 struct ClawMissionReviewPriorityQueueView: View {
     let items: [ClawMissionRunReviewPriorityItem]
+    let selectedReviewKind: String?
+    let onSelectReviewKind: (String) -> Void
+    let onClearFocus: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label("复核优先队列", systemImage: "list.bullet.clipboard.fill")
-                .font(.subheadline.bold())
+            HStack(spacing: 8) {
+                Label("复核优先队列", systemImage: "list.bullet.clipboard.fill")
+                    .font(.subheadline.bold())
+
+                Spacer(minLength: 0)
+
+                if selectedReviewKind != nil {
+                    Button("全部", systemImage: "line.3.horizontal.decrease.circle", action: onClearFocus)
+                        .font(.caption.bold())
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.blue)
+                        .accessibilityHint("恢复显示全部详细复核")
+                }
+            }
+
+            if let selectedItem {
+                Label("当前聚焦：\(selectedItem.title)", systemImage: selectedItem.icon)
+                    .font(.caption.bold())
+                    .foregroundStyle(tint(for: selectedItem))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(items) { item in
-                    ClawMissionReviewPriorityItemRow(item: item)
+                    ClawMissionReviewPriorityItemRow(
+                        item: item,
+                        isSelected: item.reviewKind == selectedReviewKind,
+                        onSelect: onSelectReviewKind
+                    )
 
                     if item.id != items.last?.id {
                         Divider()
@@ -817,40 +881,82 @@ struct ClawMissionReviewPriorityQueueView: View {
         }
         .accessibilityElement(children: .contain)
     }
+
+    private var selectedItem: ClawMissionRunReviewPriorityItem? {
+        guard let selectedReviewKind else {
+            return nil
+        }
+        return items.first { $0.reviewKind == selectedReviewKind }
+    }
+
+    private func tint(for item: ClawMissionRunReviewPriorityItem) -> Color {
+        switch item.severity {
+        case .critical:
+            return .red
+        case .high:
+            return .orange
+        case .medium:
+            return .blue
+        case .low:
+            return .purple
+        case .info:
+            return .secondary
+        }
+    }
 }
 
 struct ClawMissionReviewPriorityItemRow: View {
     let item: ClawMissionRunReviewPriorityItem
+    let isSelected: Bool
+    let onSelect: (String) -> Void
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: item.icon)
-                .font(.system(size: 13, weight: .bold))
-                .frame(width: 28, height: 28)
-                .background(tint.opacity(0.12), in: Circle())
-                .foregroundStyle(tint)
+        Button(action: selectItem) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: isSelected ? "scope" : item.icon)
+                    .font(.system(size: 13, weight: .bold))
+                    .frame(width: 28, height: 28)
+                    .background(tint.opacity(isSelected ? 0.2 : 0.12), in: Circle())
+                    .foregroundStyle(tint)
 
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text(item.title)
-                        .font(.footnote.bold())
-                    PhoneAgentTag(text: item.severity.title, icon: item.isActionable ? "arrow.right.circle.fill" : "info.circle.fill", tint: tint)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Text(item.title)
+                            .font(.footnote.bold())
+                        PhoneAgentTag(text: item.severity.title, icon: item.isActionable ? "arrow.right.circle.fill" : "info.circle.fill", tint: tint)
+                    }
+
+                    Text(item.status)
+                        .font(.footnote)
+                        .foregroundStyle(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text("\(item.reason) \(item.actionHint)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
-                Text(item.status)
-                    .font(.footnote)
-                    .foregroundStyle(.primary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Text("\(item.reason) \(item.actionHint)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
             }
-
-            Spacer(minLength: 0)
+            .padding(.vertical, 6)
+            .padding(.horizontal, 8)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .background(tint.opacity(isSelected ? 0.08 : 0), in: RoundedRectangle(cornerRadius: 8))
+            .overlay {
+                if isSelected {
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(tint.opacity(0.45), lineWidth: 1)
+                }
+            }
         }
-        .accessibilityElement(children: .combine)
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(isSelected ? "当前聚焦，" : "")\(item.title)，\(item.severity.title)，\(item.status)")
+        .accessibilityHint("聚焦对应详细复核")
+    }
+
+    private func selectItem() {
+        onSelect(item.reviewKind)
     }
 
     private var tint: Color {
@@ -866,6 +972,21 @@ struct ClawMissionReviewPriorityItemRow: View {
         case .info:
             return .secondary
         }
+    }
+}
+
+struct ClawMissionReviewFocusNoticeView: View {
+    let item: ClawMissionRunReviewPriorityItem
+
+    var body: some View {
+        Label(
+            "当前聚焦项对应任务状态或审批动作；详细复核保持全量显示。",
+            systemImage: item.icon
+        )
+        .font(.caption.bold())
+        .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityLabel("当前聚焦 \(item.title)，详细复核保持全量显示")
     }
 }
 

@@ -109,9 +109,11 @@ v0.2 增加的 Mission Run 任务回合摘要只存在于手机端展示层。`C
 
 v0.24 起，`ClawMissionRunSummary` 还会从既有状态和 review summary 派生 `reviewPriorityQueue` 或等价复核优先队列。该队列按阻断、审批、metadata 缺失、高风险执行面和可行动性排序，用于在 Mission Run 首屏先展示最需要人工查看的复核项。队列只包含固定文案、数字、枚举状态和已脱敏 summary 字段，不读取 artifact `reference`，不打开 Gateway `file://` payload，不展示 raw URL/path/command/stdout/stderr/diff/token/header/`toolArguments`。
 
+v0.25 起，Mission Run 可在复核优先队列上聚焦单个队列项。聚焦只使用队列项 `reviewKind` 和既有 review summary 是否存在来筛选详细复核 row；`approval`、`gateway-status` 或未知/过期聚焦项没有对应详细 row 时，手机端保持全量详情并显示固定提示。该聚焦状态只存在于手机端 presentation layer，不写入 envelope，不回传 Gateway，不读取 artifact `reference` 或 Gateway `file://` payload。
+
 v0.8 在 iPad/regular horizontal size class 上把同一组 presentation layer 信息重排为多栏复核工作台：左侧为命令输入和 Mission Run 主操作，右侧为计划、Claw 电脑任务、Gateway 会话、事件/envelope、权限和日志。compact iPhone 布局仍保持单栏滚动。
 
-这不是 envelope 字段：Mission Run、复核优先队列、Live Gateway health summary、Artifact metadata review、File Change Safety review、Shell Command Safety review、Extraction completeness review、Browser Control review、Delivery Safety review、Accessibility artifact review、Replay Guard review 和 iPad 多栏工作台都不写入 `ClawMobileEnvelope`，不改变 `claw.computer.control.v1` schema，不新增 action kind、artifact kind、Gateway event kind，也不扩大桌面 Gateway 的执行权限。桌面端仍只接收结构化 `task.actions[].toolArguments`，手机端仍只负责计划、审批、发送 envelope 和查看事件。手机端展示复核优先队列、Artifact metadata、File Change Safety、Shell Command Safety、Extraction completeness、Browser Control、Delivery Safety、AgentTrace、Gateway capability、Accessibility artifact、Replay Guard 和 Live Gateway health summary 时只读取安全 metadata 或既有事件摘要，不读取 Gateway `file://` artifact 内容；所有专用 metadata review 的 UI 可见字符串必须先经过同一套敏感值脱敏。
+这不是 envelope 字段：Mission Run、复核优先队列、复核聚焦模式、Live Gateway health summary、Artifact metadata review、File Change Safety review、Shell Command Safety review、Extraction completeness review、Browser Control review、Delivery Safety review、Accessibility artifact review、Replay Guard review 和 iPad 多栏工作台都不写入 `ClawMobileEnvelope`，不改变 `claw.computer.control.v1` schema，不新增 action kind、artifact kind、Gateway event kind，也不扩大桌面 Gateway 的执行权限。桌面端仍只接收结构化 `task.actions[].toolArguments`，手机端仍只负责计划、审批、发送 envelope 和查看事件。手机端展示复核优先队列、复核聚焦详情、Artifact metadata、File Change Safety、Shell Command Safety、Extraction completeness、Browser Control、Delivery Safety、AgentTrace、Gateway capability、Accessibility artifact、Replay Guard 和 Live Gateway health summary 时只读取安全 metadata 或既有事件摘要，不读取 Gateway `file://` artifact 内容；所有专用 metadata review 的 UI 可见字符串必须先经过同一套敏感值脱敏。
 
 ## Live Gateway Transport
 
