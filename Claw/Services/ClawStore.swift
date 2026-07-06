@@ -160,6 +160,22 @@ final class ClawStore: ObservableObject {
         let gatewayCapabilityReview = missionRunGatewayCapabilityReview(from: session)
         let gatewayTaskReplayGuardReview = missionRunGatewayTaskReplayGuardReview(from: session)
         let requiresUserApproval = autonomousLoop.requiresUserApproval || task?.status == .waitingForApproval || session?.status == .needsAttention
+        let reviewPriorityQueue = missionRunReviewPriorityQueue(
+            phase: phase,
+            task: task,
+            session: session,
+            requiresUserApproval: requiresUserApproval,
+            artifactMetadataReview: artifactMetadataReview,
+            gatewayExtractionCompletenessReview: gatewayExtractionCompletenessReview,
+            gatewayBrowserControlReview: gatewayBrowserControlReview,
+            gatewayDeliverySafetyReview: gatewayDeliverySafetyReview,
+            gatewayFileChangeSafetyReview: gatewayFileChangeSafetyReview,
+            gatewayShellCommandSafetyReview: gatewayShellCommandSafetyReview,
+            agentTraceReview: agentTraceReview,
+            gatewayAccessibilityReview: gatewayAccessibilityReview,
+            gatewayCapabilityReview: gatewayCapabilityReview,
+            gatewayTaskReplayGuardReview: gatewayTaskReplayGuardReview
+        )
 
         return ClawMissionRunSummary(
             command: command,
@@ -185,21 +201,15 @@ final class ClawStore: ObservableObject {
             gatewayAccessibilityReview: gatewayAccessibilityReview,
             gatewayCapabilityReview: gatewayCapabilityReview,
             gatewayTaskReplayGuardReview: gatewayTaskReplayGuardReview,
-            reviewPriorityQueue: missionRunReviewPriorityQueue(
+            reviewPriorityQueue: reviewPriorityQueue,
+            approvalQueue: missionRunApprovalQueue(
                 phase: phase,
                 task: task,
                 session: session,
                 requiresUserApproval: requiresUserApproval,
-                artifactMetadataReview: artifactMetadataReview,
-                gatewayExtractionCompletenessReview: gatewayExtractionCompletenessReview,
-                gatewayBrowserControlReview: gatewayBrowserControlReview,
                 gatewayDeliverySafetyReview: gatewayDeliverySafetyReview,
-                gatewayFileChangeSafetyReview: gatewayFileChangeSafetyReview,
-                gatewayShellCommandSafetyReview: gatewayShellCommandSafetyReview,
                 agentTraceReview: agentTraceReview,
-                gatewayAccessibilityReview: gatewayAccessibilityReview,
-                gatewayCapabilityReview: gatewayCapabilityReview,
-                gatewayTaskReplayGuardReview: gatewayTaskReplayGuardReview
+                reviewPriorityQueue: reviewPriorityQueue
             ),
             primaryActionTitle: primaryAction.title,
             primaryActionIcon: primaryAction.icon,
@@ -364,6 +374,226 @@ final class ClawStore: ObservableObject {
 
     private func missionRunGatewayTaskReplayGuardReview(from session: ClawGatewaySession?) -> ClawGatewayTaskReplayGuardReviewSummary? {
         ClawGatewayTaskReplayGuardReviewSummary.latest(from: session)
+    }
+
+    private func missionRunApprovalQueue(
+        phase: ClawAutonomousLoopPhase,
+        task: ClawMobileTask?,
+        session: ClawGatewaySession?,
+        requiresUserApproval: Bool,
+        gatewayDeliverySafetyReview: ClawGatewayDeliverySafetyReviewSummary?,
+        agentTraceReview: ClawAgentTraceReviewSummary?,
+        reviewPriorityQueue: [ClawMissionRunReviewPriorityItem]
+    ) -> [ClawMissionRunApprovalQueueItem] {
+        var items: [ClawMissionRunApprovalQueueItem] = []
+
+        func canFocus(_ reviewKind: String) -> Bool {
+            ClawMissionRunSummary.detailReviewKindOrder.contains(reviewKind) ||
+            reviewPriorityQueue.contains { $0.reviewKind == reviewKind }
+        }
+
+        func add(
+            id: String,
+            rank: Int,
+            severity: ClawMissionRunReviewPrioritySeverity,
+            title: String,
+            status: String,
+            reason: String,
+            icon: String,
+            reviewKind: String,
+            actionKindTitle: String?,
+            approvalTitle: String?,
+            isActionable: Bool,
+            hasMetadata: Bool
+        ) {
+            items.append(
+                ClawMissionRunApprovalQueueItem(
+                    id: id,
+                    rank: rank,
+                    severity: severity,
+                    title: title,
+                    status: status,
+                    reason: reason,
+                    icon: icon,
+                    reviewKind: reviewKind,
+                    actionKindTitle: actionKindTitle,
+                    approvalTitle: approvalTitle,
+                    isActionable: isActionable,
+                    hasMetadata: hasMetadata,
+                    canFocusReview: canFocus(reviewKind),
+                    isFocused: false
+                )
+            )
+        }
+
+        if let task {
+            let hasPendingTaskApproval = task.status == .waitingForApproval || phase == .waitingForUserApproval
+            let actionableApprovals = task.actions
+                .filter { $0.approval == .userConfirmation || $0.approval == .gatewayApproval }
+                .prefix(4)
+            for (offset, action) in actionableApprovals.enumerated() {
+                add(
+                    id: "task-approval-\(action.id.uuidString)",
+                    rank: (hasPendingTaskApproval ? 10 : 90) + offset,
+                    severity: action.approval == .userConfirmation ? .critical : .high,
+                    title: action.title,
+                    status: action.approval.title,
+                    reason: hasPendingTaskApproval ? "任务发送前需要手机端确认。" : "该动作带有审批要求，可抽查执行结果。",
+                    icon: action.approval == .userConfirmation ? "checkmark.seal.fill" : "server.rack",
+                    reviewKind: "approval",
+                    actionKindTitle: action.kind.title,
+                    approvalTitle: action.approval.title,
+                    isActionable: hasPendingTaskApproval,
+                    hasMetadata: true
+                )
+            }
+
+            let blockedActions = task.actions
+                .filter { $0.approval == .blocked }
+                .prefix(3)
+            for (offset, action) in blockedActions.enumerated() {
+                add(
+                    id: "task-blocked-\(action.id.uuidString)",
+                    rank: 30 + offset,
+                    severity: .critical,
+                    title: action.title,
+                    status: "策略阻断",
+                    reason: "该动作不可发送，需要修改任务或 Gateway allowlist。",
+                    icon: "nosign",
+                    reviewKind: "gateway-status",
+                    actionKindTitle: action.kind.title,
+                    approvalTitle: action.approval.title,
+                    isActionable: true,
+                    hasMetadata: true
+                )
+            }
+        } else if requiresUserApproval || phase == .waitingForUserApproval {
+            let count = phoneAgentPlan.confirmationCount
+            add(
+                id: "plan-approval",
+                rank: 10,
+                severity: .critical,
+                title: "手机审批",
+                status: "\(count) 个审批点待确认",
+                reason: "先生成并审批 Claw 电脑任务。",
+                icon: "checkmark.seal.fill",
+                reviewKind: "approval",
+                actionKindTitle: nil,
+                approvalTitle: "用户确认",
+                isActionable: true,
+                hasMetadata: true
+            )
+        }
+
+        if let session {
+            let waitingResults = session.results
+                .filter { $0.status == .waitingForApproval }
+                .prefix(4)
+            for (offset, result) in waitingResults.enumerated() {
+                add(
+                    id: "gateway-waiting-\(result.id.uuidString)",
+                    rank: 40 + offset,
+                    severity: .high,
+                    title: result.actionTitle,
+                    status: result.status.title,
+                    reason: "Gateway 已停在确认点，需复核对应安全摘要。",
+                    icon: "person.crop.circle.badge.checkmark",
+                    reviewKind: reviewKind(forActionKind: result.actionKind),
+                    actionKindTitle: result.actionKind.title,
+                    approvalTitle: "Gateway 确认",
+                    isActionable: true,
+                    hasMetadata: result.artifacts.contains { ($0.metadata ?? [:]).isEmpty == false }
+                )
+            }
+
+            let retryableResults = session.results
+                .filter { $0.status == .failed || $0.isRetryable }
+                .prefix(3)
+            for (offset, result) in retryableResults.enumerated() {
+                add(
+                    id: "gateway-review-\(result.id.uuidString)",
+                    rank: 55 + offset,
+                    severity: result.status == .failed ? .high : .medium,
+                    title: result.actionTitle,
+                    status: result.status.title,
+                    reason: result.isRetryable ? "失败后可重试，先确认原因。" : "失败动作需要人工复核。",
+                    icon: result.isRetryable ? "arrow.clockwise.circle.fill" : "xmark.circle.fill",
+                    reviewKind: reviewKind(forActionKind: result.actionKind),
+                    actionKindTitle: result.actionKind.title,
+                    approvalTitle: nil,
+                    isActionable: true,
+                    hasMetadata: result.artifacts.contains { ($0.metadata ?? [:]).isEmpty == false }
+                )
+            }
+        }
+
+        if let review = gatewayDeliverySafetyReview,
+           review.finalSubmitRequiresApproval == true || review.submitBlocked == true || review.userApprovalRequired == true || review.hasMetadata == false {
+            add(
+                id: "delivery-final-submit",
+                rank: 70,
+                severity: review.hasMetadata ? .high : .critical,
+                title: "最终提交安全",
+                status: review.compactStatus,
+                reason: review.hasMetadata ? "草稿或桌面提交停在人工确认前。" : "最终提交 metadata 待同步。",
+                icon: "hand.raised.fill",
+                reviewKind: "delivery-safety",
+                actionKindTitle: nil,
+                approvalTitle: review.userApprovalRequired == true ? "用户确认" : "最终提交闸门",
+                isActionable: true,
+                hasMetadata: review.hasMetadata
+            )
+        }
+
+        if let review = agentTraceReview {
+            let needsApproval = review.handoffStatus == "waiting-for-approval" ||
+                review.handoffStatus == "final-submit-review" ||
+                review.selectedNextActionRequiresApproval == true
+            if needsApproval || review.hasMetadata == false {
+                add(
+                    id: "agent-trace-approval",
+                    rank: 80,
+                    severity: review.hasMetadata ? .high : .critical,
+                    title: "AgentTrace 交接",
+                    status: review.handoffStatus ?? review.compactStatus,
+                    reason: review.selectedNextActionKind.map { "下一步 \($0) 需要人工确认。" } ?? "Loop 交接需要人工复核。",
+                    icon: "point.topleft.down.curvedto.point.bottomright.up",
+                    reviewKind: "agent-trace",
+                    actionKindTitle: review.selectedNextActionKind,
+                    approvalTitle: review.selectedNextActionRequiresApproval == true ? "下一步需确认" : nil,
+                    isActionable: true,
+                    hasMetadata: review.hasMetadata
+                )
+            }
+        }
+
+        return items.sorted { lhs, rhs in
+            if lhs.rank == rhs.rank {
+                return lhs.id < rhs.id
+            }
+            return lhs.rank < rhs.rank
+        }
+    }
+
+    private func reviewKind(forActionKind actionKind: ClawMobileActionKind) -> String {
+        switch actionKind {
+        case .manageFiles:
+            return "file-change-safety"
+        case .runShellCommand:
+            return "shell-safety"
+        case .extractData:
+            return "extraction-completeness"
+        case .controlBrowser:
+            return "browser-control"
+        case .operateDesktopApp, .composeMessage, .composeEmail:
+            return "delivery-safety"
+        case .observeScreen:
+            return "accessibility"
+        case .runAgentLoop:
+            return "agent-trace"
+        default:
+            return "gateway-status"
+        }
     }
 
     private func missionRunReviewPriorityQueue(

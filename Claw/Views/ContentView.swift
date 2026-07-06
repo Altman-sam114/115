@@ -640,6 +640,7 @@ struct ClawMissionRunPanel: View {
         let loopContinuation = summary.loopContinuationSummary(focusedOn: activeFocusedReviewKind)
         let focusContext = summary.focusContextSummary(focusedOn: focusedReviewKind)
         let evidenceTrail = summary.evidenceTrailSummary(focusedOn: activeFocusedReviewKind)
+        let approvalQueue = summary.approvalQueueSummary(focusedOn: activeFocusedReviewKind)
         VStack(alignment: .leading, spacing: 14) {
             SectionHeader(title: "Mission Run", icon: "flag.checkered")
 
@@ -733,6 +734,11 @@ struct ClawMissionRunPanel: View {
 
             ClawMissionReviewTrailView(
                 trail: evidenceTrail,
+                onFocusReviewKind: focusReviewKind
+            )
+
+            ClawMissionApprovalQueueView(
+                summary: approvalQueue,
                 onFocusReviewKind: focusReviewKind
             )
 
@@ -834,6 +840,7 @@ struct ClawMissionReviewDetailDockView: View {
         let dock = summary.reviewDetailDockSummary(focusedOn: focusedReviewKind)
         let focusContext = summary.focusContextSummary(focusedOn: focusedReviewKind)
         let evidenceTrail = summary.evidenceTrailSummary(focusedOn: activeFocusedReviewKind)
+        let approvalQueue = summary.approvalQueueSummary(focusedOn: activeFocusedReviewKind)
 
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -878,6 +885,11 @@ struct ClawMissionReviewDetailDockView: View {
             if dock.isReviewable {
                 ClawMissionReviewTrailView(
                     trail: evidenceTrail,
+                    onFocusReviewKind: focusReviewKind
+                )
+
+                ClawMissionApprovalQueueView(
+                    summary: approvalQueue,
                     onFocusReviewKind: focusReviewKind
                 )
 
@@ -1656,6 +1668,176 @@ struct ClawMissionArtifactEvidenceItemRow: View {
             return .blue
         }
         return .green
+    }
+}
+
+struct ClawMissionApprovalQueueView: View {
+    let summary: ClawMissionRunApprovalQueueSummary
+    let onFocusReviewKind: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Label(summary.title, systemImage: summary.icon)
+                    .font(.subheadline.bold())
+                    .foregroundStyle(tint)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Spacer(minLength: 0)
+
+                if let focusedReviewTitle = summary.focusedReviewTitle {
+                    PhoneAgentTag(text: focusedReviewTitle, icon: "scope", tint: tint)
+                }
+            }
+
+            Text(summary.status)
+                .font(.footnote.bold())
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(summary.guidance)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 8) {
+                Label("\(summary.totalCount) 项", systemImage: "checklist")
+                Label("\(summary.actionableCount) 可处理", systemImage: "arrow.right.circle.fill")
+                Label("\(summary.metadataPendingCount) metadata", systemImage: "doc.badge.clock")
+            }
+            .font(.caption.bold())
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+            if summary.items.isEmpty == false {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(Array(summary.items.prefix(4))) { item in
+                        ClawMissionApprovalQueueItemRow(
+                            item: item,
+                            onFocusReviewKind: onFocusReviewKind
+                        )
+                    }
+                }
+            }
+        }
+        .padding(10)
+        .background(tint.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(tint.opacity(0.16), lineWidth: 1)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(accessibilitySummary)
+    }
+
+    private var accessibilitySummary: String {
+        "Mission 审批队列，\(summary.status)，\(summary.actionableCount) 项可处理"
+    }
+
+    private var tint: Color {
+        if summary.isReviewable == false {
+            return .secondary
+        }
+        if summary.requiresHumanAction {
+            return .orange
+        }
+        if summary.hasMetadataGap {
+            return .blue
+        }
+        return .green
+    }
+}
+
+struct ClawMissionApprovalQueueItemRow: View {
+    let item: ClawMissionRunApprovalQueueItem
+    let onFocusReviewKind: (String) -> Void
+
+    var body: some View {
+        Group {
+            if item.canFocusReview {
+                Button(action: focusItem) {
+                    rowContent
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("聚焦对应复核项，不执行审批、发送或 Gateway 动作")
+                .accessibilityInputLabels(["聚焦\(item.title)", "复核\(item.title)"])
+            } else {
+                rowContent
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(accessibilitySummary)
+    }
+
+    private var rowContent: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: item.isFocused ? "scope" : item.icon)
+                .font(.caption.bold())
+                .frame(width: 28, height: 28)
+                .background(tint.opacity(item.isFocused ? 0.22 : 0.12), in: Circle())
+                .foregroundStyle(tint)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(item.title)
+                    .font(.footnote.bold())
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(item.status)
+                    .font(.caption.bold())
+                    .foregroundStyle(tint)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(item.reason)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 6) {
+                    if let actionKindTitle = item.actionKindTitle {
+                        PhoneAgentTag(text: actionKindTitle, icon: "slider.horizontal.3", tint: .blue)
+                    }
+                    if let approvalTitle = item.approvalTitle {
+                        PhoneAgentTag(text: approvalTitle, icon: "checkmark.seal.fill", tint: .orange)
+                    }
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .padding(.vertical, 4)
+        .padding(.horizontal, 6)
+        .background(tint.opacity(item.isFocused ? 0.08 : 0), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            if item.isFocused {
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(tint.opacity(0.45), lineWidth: 1)
+            }
+        }
+    }
+
+    private func focusItem() {
+        onFocusReviewKind(item.reviewKind)
+    }
+
+    private var accessibilitySummary: String {
+        "审批队列，\(item.title)，\(item.status)，\(item.reason)"
+    }
+
+    private var tint: Color {
+        switch item.severity {
+        case .critical:
+            return .red
+        case .high:
+            return .orange
+        case .medium:
+            return .blue
+        case .low:
+            return .green
+        case .info:
+            return .secondary
+        }
     }
 }
 

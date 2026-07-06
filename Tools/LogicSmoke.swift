@@ -144,6 +144,13 @@ enum LogicSmoke {
         expect(idleDetailDock.isReviewable == false, "idle detail dock should not be reviewable")
         expect(idleDetailDock.canClearFocus == false, "idle detail dock should not expose clear focus")
         expect(idleDetailDock.detailReviewKinds.isEmpty, "idle detail dock should not invent detail rows")
+        let idleApprovalQueue = missionStore.missionRunSummary.approvalQueueSummary
+        expect(idleApprovalQueue.isReviewable == false, "idle approval queue should not be reviewable")
+        expect(idleApprovalQueue.totalCount == 0, "idle approval queue should not count items")
+        expect(idleApprovalQueue.actionableCount == 0, "idle approval queue should not count actions")
+        expect(idleApprovalQueue.criticalOrHighCount == 0, "idle approval queue should not count high priority items")
+        expect(idleApprovalQueue.metadataPendingCount == 0, "idle approval queue should not count metadata gaps")
+        expect(idleApprovalQueue.primaryReviewKind == nil, "idle approval queue should not invent primary focus")
         expect(missionStore.missionRunSummary.activeReviewFocus(from: "delivery-safety") == nil, "idle active focus should not resolve")
         missionStore.phoneAgentCommand = "打开浏览器搜索资料，整理结果并发到 Slack"
         missionStore.startAutonomousComputerTakeover()
@@ -151,6 +158,23 @@ enum LogicSmoke {
         expect(missionSummary.primaryActionKind == .approveAndContinue, "mission summary should stop at approval gate")
         expect(missionSummary.requiresUserApproval, "mission summary should surface approval requirements")
         expect(missionSummary.riskScore > 0, "mission summary should include task risk")
+        let preSendApprovalQueue = missionSummary.approvalQueueSummary
+        expect(preSendApprovalQueue.isReviewable, "pre-send approval queue should be reviewable")
+        expect(preSendApprovalQueue.requiresHumanAction, "pre-send approval queue should require human action")
+        expect(preSendApprovalQueue.primaryReviewKind == "approval", "pre-send approval queue should target approval")
+        expect(preSendApprovalQueue.canFocusPrimaryReview, "pre-send approval queue should focus approval status")
+        expect(preSendApprovalQueue.totalCount > 0, "pre-send approval queue should count approval items")
+        expect(preSendApprovalQueue.actionableCount > 0, "pre-send approval queue should count actionable approvals")
+        expect(
+            preSendApprovalQueue.items.contains { $0.reviewKind == "approval" && $0.isActionable && $0.canFocusReview },
+            "pre-send approval queue should include actionable approval rows"
+        )
+        let focusedPreSendApprovalQueue = missionSummary.approvalQueueSummary(focusedOn: "approval")
+        expect(focusedPreSendApprovalQueue.focusedReviewKind == "approval", "approval queue should focus approval status")
+        expect(
+            focusedPreSendApprovalQueue.items.contains { $0.reviewKind == "approval" && $0.isFocused },
+            "focused approval queue should mark approval row"
+        )
         missionStore.approveAndContinueAutonomousLoop()
         missionSummary = missionStore.missionRunSummary
         expect(missionSummary.primaryActionKind == .continueAfterReview, "mission summary should expose review action")
@@ -251,6 +275,35 @@ enum LogicSmoke {
             focusedEvidenceTrail.steps.contains { $0.reviewKind == "delivery-safety" && $0.isFocused },
             "focused evidence trail should mark focused step"
         )
+        let approvalQueue = missionSummary.approvalQueueSummary
+        expect(approvalQueue.isReviewable, "approval queue should be reviewable once mission has approvals or gateway review")
+        expect(approvalQueue.requiresHumanAction, "approval queue should surface human action")
+        expect(approvalQueue.totalCount > 0, "approval queue should count items")
+        expect(approvalQueue.actionableCount > 0, "approval queue should count actionable items")
+        expect(approvalQueue.criticalOrHighCount > 0, "approval queue should count high priority items")
+        expect(
+            approvalQueue.items.map(\.rank) == approvalQueue.items.map(\.rank).sorted(),
+            "approval queue should be rank sorted"
+        )
+        expect(
+            approvalQueue.items.contains { $0.reviewKind == "delivery-safety" && $0.isActionable && $0.hasMetadata },
+            "approval queue should include delivery safety confirmation"
+        )
+        expect(
+            approvalQueue.items.contains { $0.reviewKind == "agent-trace" && $0.isActionable && $0.hasMetadata },
+            "approval queue should include agent trace handoff confirmation"
+        )
+        expect(
+            approvalQueue.items.contains { $0.reviewKind == "approval" && $0.isActionable == false },
+            "approval queue should retain sent approval rows as status-only checks"
+        )
+        let focusedApprovalQueue = missionSummary.approvalQueueSummary(focusedOn: "delivery-safety")
+        expect(focusedApprovalQueue.focusedReviewKind == "delivery-safety", "approval queue should record delivery focus")
+        expect(focusedApprovalQueue.focusedReviewTitle != nil, "approval queue should expose a focused delivery title")
+        expect(
+            focusedApprovalQueue.items.contains { $0.reviewKind == "delivery-safety" && $0.isFocused },
+            "focused approval queue should mark delivery row"
+        )
         let focusContext = missionSummary.focusContextSummary
         expect(focusContext.isReviewable, "focus context should be reviewable once Gateway evidence exists")
         expect(focusContext.canClearFocus == false, "unfocused context should not expose clear focus")
@@ -308,6 +361,32 @@ enum LogicSmoke {
         expect(
             statusEvidenceTrail.steps.contains { $0.reviewKind == statusOnlyItem.reviewKind && $0.isFocused },
             "status evidence trail should mark status focus"
+        )
+        statusOnlySummary.approvalQueue.insert(
+            ClawMissionRunApprovalQueueItem(
+                id: "gateway-status-approval",
+                rank: 0,
+                severity: .info,
+                title: "Gateway 状态",
+                status: "状态待查看",
+                reason: "状态项没有详细复核 row。",
+                icon: "server.rack",
+                reviewKind: "gateway-status",
+                actionKindTitle: nil,
+                approvalTitle: nil,
+                isActionable: false,
+                hasMetadata: true,
+                canFocusReview: true,
+                isFocused: false
+            ),
+            at: 0
+        )
+        let statusApprovalQueue = statusOnlySummary.approvalQueueSummary(focusedOn: statusOnlyItem.reviewKind)
+        expect(statusApprovalQueue.focusedReviewKind == statusOnlyItem.reviewKind, "status approval queue should keep status focus")
+        expect(statusApprovalQueue.focusedReviewTitle == statusOnlyItem.title, "status approval queue should expose status title")
+        expect(
+            statusApprovalQueue.items.contains { $0.reviewKind == statusOnlyItem.reviewKind && $0.isFocused },
+            "status approval queue should mark status row"
         )
         let staleFocusContext = statusOnlySummary.focusContextSummary(focusedOn: "unknown-review-kind")
         expect(staleFocusContext.focusedReviewKind == nil, "stale focus context should not keep an unknown review kind")
@@ -480,6 +559,37 @@ enum LogicSmoke {
             staleEvidenceTrail.status,
             staleEvidenceTrail.guidance
         ]
+        let approvalQueueVisibleChunks = approvalQueue.items.flatMap {
+            [
+                $0.title,
+                $0.status,
+                $0.reason,
+                $0.reviewKind,
+                $0.actionKindTitle ?? "",
+                $0.approvalTitle ?? ""
+            ]
+        } + [
+            preSendApprovalQueue.title,
+            preSendApprovalQueue.status,
+            preSendApprovalQueue.guidance,
+            focusedPreSendApprovalQueue.focusedReviewKind ?? "",
+            focusedPreSendApprovalQueue.focusedReviewTitle ?? "",
+            approvalQueue.title,
+            approvalQueue.status,
+            approvalQueue.guidance,
+            approvalQueue.primaryReviewKind ?? "",
+            approvalQueue.primaryReviewTitle ?? "",
+            focusedApprovalQueue.title,
+            focusedApprovalQueue.status,
+            focusedApprovalQueue.guidance,
+            focusedApprovalQueue.focusedReviewKind ?? "",
+            focusedApprovalQueue.focusedReviewTitle ?? "",
+            statusApprovalQueue.title,
+            statusApprovalQueue.status,
+            statusApprovalQueue.guidance,
+            statusApprovalQueue.focusedReviewKind ?? "",
+            statusApprovalQueue.focusedReviewTitle ?? ""
+        ]
         let focusContextVisibleChunks = [
             focusContext.title,
             focusContext.status,
@@ -508,7 +618,7 @@ enum LogicSmoke {
             staleDetailDock.status,
             staleDetailDock.guidance
         ]
-        let queueVisibleText = (queueVisibleChunks + readinessVisibleChunks + nextActionVisibleChunks + evidenceVisibleChunks + operatorVisibleChunks + evidenceTrailVisibleChunks + focusContextVisibleChunks).joined(separator: " ")
+        let queueVisibleText = (queueVisibleChunks + readinessVisibleChunks + nextActionVisibleChunks + evidenceVisibleChunks + operatorVisibleChunks + evidenceTrailVisibleChunks + approvalQueueVisibleChunks + focusContextVisibleChunks).joined(separator: " ")
         for forbidden in ["Authorization", "Bearer", "toolArguments", "file://", "/private", "/Users", "/home", "C:\\", "stdout", "stderr", "diff"] {
             expect(queueVisibleText.contains(forbidden) == false, "review priority queue should not expose \(forbidden)")
         }
@@ -676,6 +786,17 @@ enum LogicSmoke {
             "shell evidence trail should mark shell focus"
         )
         expect(shellEvidenceTrail.requiresHumanAction, "shell evidence trail should require human review")
+        let shellApprovalQueue = shellMissionSummary.approvalQueueSummary(focusedOn: "shell-safety")
+        expect(shellApprovalQueue.focusedReviewKind == "shell-safety", "shell approval queue should record shell focus")
+        expect(shellApprovalQueue.requiresHumanAction, "shell approval queue should require human review")
+        expect(
+            shellApprovalQueue.items.contains { $0.reviewKind == "shell-safety" && $0.isFocused },
+            "shell approval queue should mark focused shell item"
+        )
+        expect(
+            shellApprovalQueue.items.contains { $0.reviewKind == "shell-safety" && $0.hasMetadata },
+            "shell approval queue should mark shell metadata ready"
+        )
         let shellFocusContext = shellMissionSummary.focusContextSummary(focusedOn: "shell-safety")
         expect(shellFocusContext.focusedReviewKind == "shell-safety", "shell focus context should record shell focus")
         expect(shellFocusContext.focusedReviewTitle == "Shell 命令安全", "shell focus context should expose shell title")
@@ -708,6 +829,10 @@ enum LogicSmoke {
                 shellEvidenceTrail.status,
                 shellEvidenceTrail.guidance,
                 shellEvidenceTrail.steps.map { "\($0.title) \($0.status) \($0.guidance)" }.joined(separator: " "),
+                shellApprovalQueue.title,
+                shellApprovalQueue.status,
+                shellApprovalQueue.guidance,
+                shellApprovalQueue.items.map { "\($0.title) \($0.status) \($0.reason)" }.joined(separator: " "),
                 shellFocusContext.title,
                 shellFocusContext.status,
                 shellFocusContext.guidance,

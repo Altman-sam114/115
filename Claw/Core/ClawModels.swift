@@ -1366,6 +1366,43 @@ struct ClawMissionRunReviewPriorityItem: Identifiable, Equatable, Codable, Senda
     var hasMetadata: Bool
 }
 
+struct ClawMissionRunApprovalQueueItem: Identifiable, Equatable, Codable, Sendable {
+    var id: String
+    var rank: Int
+    var severity: ClawMissionRunReviewPrioritySeverity
+    var title: String
+    var status: String
+    var reason: String
+    var icon: String
+    var reviewKind: String
+    var actionKindTitle: String?
+    var approvalTitle: String?
+    var isActionable: Bool
+    var hasMetadata: Bool
+    var canFocusReview: Bool
+    var isFocused: Bool
+}
+
+struct ClawMissionRunApprovalQueueSummary: Equatable, Codable, Sendable {
+    var title: String
+    var status: String
+    var guidance: String
+    var icon: String
+    var totalCount: Int
+    var actionableCount: Int
+    var criticalOrHighCount: Int
+    var metadataPendingCount: Int
+    var focusedReviewKind: String?
+    var focusedReviewTitle: String?
+    var primaryReviewKind: String?
+    var primaryReviewTitle: String?
+    var canFocusPrimaryReview: Bool
+    var requiresHumanAction: Bool
+    var hasMetadataGap: Bool
+    var isReviewable: Bool
+    var items: [ClawMissionRunApprovalQueueItem]
+}
+
 struct ClawMissionRunReviewReadinessSummary: Equatable, Codable, Sendable {
     var title: String
     var status: String
@@ -2797,6 +2834,7 @@ struct ClawMissionRunSummary: Equatable, Codable, Sendable {
     var gatewayCapabilityReview: ClawGatewayCapabilityReviewSummary?
     var gatewayTaskReplayGuardReview: ClawGatewayTaskReplayGuardReviewSummary?
     var reviewPriorityQueue: [ClawMissionRunReviewPriorityItem]
+    var approvalQueue: [ClawMissionRunApprovalQueueItem]
     var primaryActionTitle: String
     var primaryActionIcon: String
     var primaryActionKind: ClawMissionRunPrimaryActionKind
@@ -2985,6 +3023,95 @@ extension ClawMissionRunSummary {
             return false
         }
         return availableDetailReviewKinds.contains(reviewKind)
+    }
+
+    var approvalQueueSummary: ClawMissionRunApprovalQueueSummary {
+        approvalQueueSummary(focusedOn: nil)
+    }
+
+    func approvalQueueSummary(focusedOn reviewKind: String?) -> ClawMissionRunApprovalQueueSummary {
+        let focusedKind = activeReviewFocus(from: reviewKind)
+        let focusedItem = focusedKind.flatMap { kind in
+            approvalQueue.first { $0.reviewKind == kind }
+        }
+        let items = approvalQueue.map { item in
+            ClawMissionRunApprovalQueueItem(
+                id: item.id,
+                rank: item.rank,
+                severity: item.severity,
+                title: item.title,
+                status: item.status,
+                reason: item.reason,
+                icon: item.icon,
+                reviewKind: item.reviewKind,
+                actionKindTitle: item.actionKindTitle,
+                approvalTitle: item.approvalTitle,
+                isActionable: item.isActionable,
+                hasMetadata: item.hasMetadata,
+                canFocusReview: item.canFocusReview,
+                isFocused: item.reviewKind == focusedKind
+            )
+        }
+        let actionableCount = items.filter(\.isActionable).count
+        let criticalOrHighCount = items.filter { item in
+            item.severity == .critical || item.severity == .high
+        }.count
+        let metadataPendingCount = items.filter { $0.hasMetadata == false }.count
+        let topItem = focusedItem ?? items.first
+        let isReviewable = items.isEmpty == false
+        let requiresHumanAction = actionableCount > 0 || criticalOrHighCount > 0 || requiresUserApproval
+        let hasMetadataGap = metadataPendingCount > 0
+
+        let title: String
+        let status: String
+        let guidance: String
+        let icon: String
+        if isReviewable == false {
+            title = "审批队列待生成"
+            status = "暂无待确认项"
+            guidance = "生成任务或收到 Gateway 等待确认事件后，这里会列出需要人工处理的确认点。"
+            icon = "checklist"
+        } else if let focusedItem {
+            title = "聚焦审批队列"
+            status = focusedItem.title
+            guidance = "当前聚焦 \(focusedItem.title)：\(focusedItem.reason)"
+            icon = focusedItem.icon
+        } else if requiresHumanAction {
+            title = "Mission 审批队列"
+            status = "\(actionableCount) 项可处理 · \(criticalOrHighCount) 项高优先"
+            guidance = topItem.map { "先看 \($0.title)：\($0.reason)" } ?? "先处理可行动确认项。"
+            icon = "checkmark.seal.fill"
+        } else if hasMetadataGap {
+            title = "Mission 审批队列"
+            status = "\(metadataPendingCount) 项 metadata 待同步"
+            guidance = "等待 Gateway metadata 后再确认审批状态。"
+            icon = "doc.badge.clock"
+        } else {
+            title = "Mission 审批队列"
+            status = "\(items.count) 项可抽查"
+            guidance = topItem.map { "可抽查 \($0.title)：\($0.reason)" } ?? "审批队列已同步。"
+            icon = "checkmark.seal.fill"
+        }
+
+        return ClawMissionRunApprovalQueueSummary(
+            title: title,
+            status: status,
+            guidance: guidance,
+            icon: icon,
+            totalCount: items.count,
+            actionableCount: actionableCount,
+            criticalOrHighCount: criticalOrHighCount,
+            metadataPendingCount: metadataPendingCount,
+            focusedReviewKind: focusedItem?.reviewKind,
+            focusedReviewTitle: focusedItem?.title,
+            primaryReviewKind: topItem?.reviewKind,
+            primaryReviewTitle: topItem?.title,
+            canFocusPrimaryReview: topItem?.canFocusReview ?? false,
+            requiresHumanAction: requiresHumanAction,
+            hasMetadataGap: hasMetadataGap,
+            isReviewable: isReviewable,
+            items: items
+        )
     }
 
     var focusContextSummary: ClawMissionRunFocusContextSummary {

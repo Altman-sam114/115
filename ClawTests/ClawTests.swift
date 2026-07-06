@@ -602,11 +602,34 @@ final class ClawTests: XCTestCase {
         XCTAssertFalse(idleDetailDock.isReviewable)
         XCTAssertFalse(idleDetailDock.canClearFocus)
         XCTAssertTrue(idleDetailDock.detailReviewKinds.isEmpty)
+        let idleApprovalQueue = idleStore.missionRunSummary.approvalQueueSummary
+        XCTAssertFalse(idleApprovalQueue.isReviewable)
+        XCTAssertEqual(idleApprovalQueue.totalCount, 0)
+        XCTAssertEqual(idleApprovalQueue.actionableCount, 0)
+        XCTAssertEqual(idleApprovalQueue.criticalOrHighCount, 0)
+        XCTAssertEqual(idleApprovalQueue.metadataPendingCount, 0)
+        XCTAssertNil(idleApprovalQueue.primaryReviewKind)
         XCTAssertNil(idleStore.missionRunSummary.activeReviewFocus(from: "delivery-safety"))
 
         let store = ClawStore(autoScanLocalArtifacts: false)
         store.phoneAgentCommand = "打开浏览器搜索资料，整理结果并发到 Slack"
         store.startAutonomousComputerTakeover()
+
+        let preSendSummary = store.missionRunSummary
+        XCTAssertEqual(preSendSummary.primaryActionKind, .approveAndContinue)
+        XCTAssertTrue(preSendSummary.requiresUserApproval)
+        let preSendApprovalQueue = preSendSummary.approvalQueueSummary
+        XCTAssertTrue(preSendApprovalQueue.isReviewable)
+        XCTAssertTrue(preSendApprovalQueue.requiresHumanAction)
+        XCTAssertEqual(preSendApprovalQueue.primaryReviewKind, "approval")
+        XCTAssertTrue(preSendApprovalQueue.canFocusPrimaryReview)
+        XCTAssertGreaterThan(preSendApprovalQueue.totalCount, 0)
+        XCTAssertGreaterThan(preSendApprovalQueue.actionableCount, 0)
+        XCTAssertTrue(preSendApprovalQueue.items.contains { $0.reviewKind == "approval" && $0.isActionable && $0.canFocusReview })
+        let focusedPreSendApprovalQueue = preSendSummary.approvalQueueSummary(focusedOn: "approval")
+        XCTAssertEqual(focusedPreSendApprovalQueue.focusedReviewKind, "approval")
+        XCTAssertTrue(focusedPreSendApprovalQueue.items.contains { $0.reviewKind == "approval" && $0.isFocused })
+
         store.approveAndContinueAutonomousLoop()
 
         let queue = store.missionRunSummary.reviewPriorityQueue
@@ -660,6 +683,20 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(focusedEvidenceTrail.focusedReviewKind, "delivery-safety")
         XCTAssertEqual(focusedEvidenceTrail.focusedReviewTitle, "最终提交安全")
         XCTAssertTrue(focusedEvidenceTrail.steps.contains { $0.reviewKind == "delivery-safety" && $0.isFocused })
+        let approvalQueue = summary.approvalQueueSummary
+        XCTAssertTrue(approvalQueue.isReviewable)
+        XCTAssertTrue(approvalQueue.requiresHumanAction)
+        XCTAssertGreaterThan(approvalQueue.totalCount, 0)
+        XCTAssertGreaterThan(approvalQueue.actionableCount, 0)
+        XCTAssertGreaterThan(approvalQueue.criticalOrHighCount, 0)
+        XCTAssertEqual(approvalQueue.items.map(\.rank), approvalQueue.items.map(\.rank).sorted())
+        XCTAssertTrue(approvalQueue.items.contains { $0.reviewKind == "delivery-safety" && $0.isActionable && $0.hasMetadata })
+        XCTAssertTrue(approvalQueue.items.contains { $0.reviewKind == "agent-trace" && $0.isActionable && $0.hasMetadata })
+        XCTAssertTrue(approvalQueue.items.contains { $0.reviewKind == "approval" && $0.isActionable == false })
+        let focusedApprovalQueue = summary.approvalQueueSummary(focusedOn: "delivery-safety")
+        XCTAssertEqual(focusedApprovalQueue.focusedReviewKind, "delivery-safety")
+        XCTAssertNotNil(focusedApprovalQueue.focusedReviewTitle)
+        XCTAssertTrue(focusedApprovalQueue.items.contains { $0.reviewKind == "delivery-safety" && $0.isFocused })
         let focusContext = summary.focusContextSummary
         XCTAssertTrue(focusContext.isReviewable)
         XCTAssertFalse(focusContext.canClearFocus)
@@ -715,6 +752,29 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(statusEvidenceTrail.focusedReviewKind, statusOnlyItem.reviewKind)
         XCTAssertEqual(statusEvidenceTrail.focusedReviewTitle, statusOnlyItem.title)
         XCTAssertTrue(statusEvidenceTrail.steps.contains { $0.reviewKind == statusOnlyItem.reviewKind && $0.isFocused })
+        statusOnlySummary.approvalQueue.insert(
+            ClawMissionRunApprovalQueueItem(
+                id: "gateway-status-approval",
+                rank: 0,
+                severity: .info,
+                title: "Gateway 状态",
+                status: "状态待查看",
+                reason: "状态项没有详细复核 row。",
+                icon: "server.rack",
+                reviewKind: "gateway-status",
+                actionKindTitle: nil,
+                approvalTitle: nil,
+                isActionable: false,
+                hasMetadata: true,
+                canFocusReview: true,
+                isFocused: false
+            ),
+            at: 0
+        )
+        let statusApprovalQueue = statusOnlySummary.approvalQueueSummary(focusedOn: statusOnlyItem.reviewKind)
+        XCTAssertEqual(statusApprovalQueue.focusedReviewKind, statusOnlyItem.reviewKind)
+        XCTAssertEqual(statusApprovalQueue.focusedReviewTitle, statusOnlyItem.title)
+        XCTAssertTrue(statusApprovalQueue.items.contains { $0.reviewKind == statusOnlyItem.reviewKind && $0.isFocused })
         let staleFocusContext = statusOnlySummary.focusContextSummary(focusedOn: "unknown-review-kind")
         XCTAssertNil(staleFocusContext.focusedReviewKind)
         XCTAssertTrue(staleFocusContext.canClearFocus)
@@ -848,6 +908,37 @@ final class ClawTests: XCTestCase {
             staleEvidenceTrail.status,
             staleEvidenceTrail.guidance
         ]
+        let approvalQueueVisibleChunks = approvalQueue.items.flatMap {
+            [
+                $0.title,
+                $0.status,
+                $0.reason,
+                $0.reviewKind,
+                $0.actionKindTitle ?? "",
+                $0.approvalTitle ?? ""
+            ]
+        } + [
+            preSendApprovalQueue.title,
+            preSendApprovalQueue.status,
+            preSendApprovalQueue.guidance,
+            focusedPreSendApprovalQueue.focusedReviewKind ?? "",
+            focusedPreSendApprovalQueue.focusedReviewTitle ?? "",
+            approvalQueue.title,
+            approvalQueue.status,
+            approvalQueue.guidance,
+            approvalQueue.primaryReviewKind ?? "",
+            approvalQueue.primaryReviewTitle ?? "",
+            focusedApprovalQueue.title,
+            focusedApprovalQueue.status,
+            focusedApprovalQueue.guidance,
+            focusedApprovalQueue.focusedReviewKind ?? "",
+            focusedApprovalQueue.focusedReviewTitle ?? "",
+            statusApprovalQueue.title,
+            statusApprovalQueue.status,
+            statusApprovalQueue.guidance,
+            statusApprovalQueue.focusedReviewKind ?? "",
+            statusApprovalQueue.focusedReviewTitle ?? ""
+        ]
         let focusContextVisibleChunks = [
             focusContext.title,
             focusContext.status,
@@ -880,7 +971,7 @@ final class ClawTests: XCTestCase {
             staleDetailDock.status,
             staleDetailDock.guidance
         ]
-        let visibleText = (queueVisibleChunks + readinessVisibleChunks + nextActionVisibleChunks + evidenceVisibleChunks + operatorVisibleChunks + evidenceTrailVisibleChunks + focusContextVisibleChunks).joined(separator: " ")
+        let visibleText = (queueVisibleChunks + readinessVisibleChunks + nextActionVisibleChunks + evidenceVisibleChunks + operatorVisibleChunks + evidenceTrailVisibleChunks + approvalQueueVisibleChunks + focusContextVisibleChunks).joined(separator: " ")
         for forbidden in ["Authorization", "Bearer", "toolArguments", "file://", "/private", "/Users", "/home", "C:\\", "stdout", "stderr", "diff"] {
             XCTAssertFalse(visibleText.contains(forbidden), "queue leaked \(forbidden)")
         }
@@ -919,6 +1010,11 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(shellEvidenceTrail.focusedReviewTitle, "Shell 命令安全")
         XCTAssertTrue(shellEvidenceTrail.steps.contains { $0.reviewKind == "shell-safety" && $0.isFocused })
         XCTAssertTrue(shellEvidenceTrail.requiresHumanAction)
+        let shellApprovalQueue = shellStore.missionRunSummary.approvalQueueSummary(focusedOn: "shell-safety")
+        XCTAssertEqual(shellApprovalQueue.focusedReviewKind, "shell-safety")
+        XCTAssertTrue(shellApprovalQueue.requiresHumanAction)
+        XCTAssertTrue(shellApprovalQueue.items.contains { $0.reviewKind == "shell-safety" && $0.isFocused })
+        XCTAssertTrue(shellApprovalQueue.items.contains { $0.reviewKind == "shell-safety" && $0.hasMetadata })
         let shellFocusContext = shellStore.missionRunSummary.focusContextSummary(focusedOn: "shell-safety")
         XCTAssertEqual(shellFocusContext.focusedReviewKind, "shell-safety")
         XCTAssertEqual(shellFocusContext.focusedReviewTitle, "Shell 命令安全")
@@ -953,6 +1049,10 @@ final class ClawTests: XCTestCase {
                 shellEvidenceTrail.status,
                 shellEvidenceTrail.guidance,
                 shellEvidenceTrail.steps.map { "\($0.title) \($0.status) \($0.guidance)" }.joined(separator: " "),
+                shellApprovalQueue.title,
+                shellApprovalQueue.status,
+                shellApprovalQueue.guidance,
+                shellApprovalQueue.items.map { "\($0.title) \($0.status) \($0.reason)" }.joined(separator: " "),
                 shellFocusContext.title,
                 shellFocusContext.status,
                 shellFocusContext.guidance,
@@ -1078,6 +1178,7 @@ final class ClawTests: XCTestCase {
             gatewayCapabilityReview: nil,
             gatewayTaskReplayGuardReview: nil,
             reviewPriorityQueue: [],
+            approvalQueue: [],
             primaryActionTitle: "继续",
             primaryActionIcon: "arrow.forward.circle.fill",
             primaryActionKind: .continueAfterReview,
@@ -1443,6 +1544,7 @@ final class ClawTests: XCTestCase {
             gatewayCapabilityReview: nil,
             gatewayTaskReplayGuardReview: nil,
             reviewPriorityQueue: [],
+            approvalQueue: [],
             primaryActionTitle: "完成",
             primaryActionIcon: "checkmark.circle.fill",
             primaryActionKind: .waitForGateway,
