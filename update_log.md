@@ -57,7 +57,7 @@
 - `git diff --check` 通过。
 - `ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci-results.yml"); puts "yaml ok"'` 通过，输出 `yaml ok`。
 - `node --check Tools/claw-gateway-server.mjs`、`node --check Tools/claw-gateway-direct-smoke.mjs`、`node --check Tools/claw-gateway-smoke.mjs` 通过。
-- GitHub Actions artifact 复判待本轮 push 后由 Agent C 下载最新结果包确认。
+- GitHub Actions run `28767970421` attempt `1` 对 commit `16ee75e04342b0994083d497c35cae5a30ecd97c` 通过，artifact `claw-ci-v0.2-main-16ee75e04342-run28767970421-attempt1` 已下载到 `/private/tmp/claw-c-review-28767970421/` 并核对 manifest、JUnit、failure summary、Swift/Gateway smoke、node/plutil/git diff check 和 xcodebuild 日志。
 
 遗留事项：
 
