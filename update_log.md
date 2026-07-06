@@ -58,6 +58,8 @@
 - `ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci-results.yml"); puts "yaml ok"'` 通过，输出 `yaml ok`。
 - `plutil -lint Claw.xcodeproj/project.pbxproj` 通过，输出 `OK`。
 - GitHub Actions run `28799070479` attempt `1` 对 commit `1f07fc3cd91a35a96111aae8eb3fb0574e0a6bca` 通过，artifact `claw-ci-v0.2-main-1f07fc3cd91a-run28799070479-attempt1` 已下载到 `/private/tmp/claw-c-review-28799070479/` 并核对 manifest、JUnit、failure summary、Swift logic smoke、Gateway direct/WebSocket smoke、node/plutil/git diff check 和 xcodebuild 日志。
+- 后续验证记录 commit `260b32380860bec26170ed7eb6f56532bc830dda` 的 run `28799863898` 在 `swift-logic-smoke` 因 `Tools/LogicSmoke.swift` 大表达式 type-check 压力失败；追加 commit `c1a8d661dfb9c6e47336868e9d33613f81ca8fb3` 将相关断言拆成显式中间数组和字符串。
+- GitHub Actions run `28801091805` attempt `1` 对 commit `c1a8d661dfb9c6e47336868e9d33613f81ca8fb3` 通过，artifact `claw-ci-v0.2-main-c1a8d661dfb9-run28801091805-attempt1` 已下载到 `/private/tmp/claw-c-review-28801091805/` 并核对 manifest、JUnit、failure summary、Swift logic smoke、Gateway direct/WebSocket smoke、node/plutil/git diff check、xcodebuild 日志和 `Claw.xcresult/Info.plist`。
 
 遗留事项：
 
