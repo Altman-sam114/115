@@ -58,7 +58,7 @@
 - `git diff --check` 通过。
 - `ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci-results.yml"); puts "yaml ok"'` 通过，输出 `yaml ok`。
 - `plutil -lint Claw.xcodeproj/project.pbxproj` 通过，输出 `OK`。
-- 待 push `origin/main` 后由 GitHub Actions 覆盖 xcodebuild、Swift logic smoke、Gateway direct/WebSocket smoke 和结果包验收。
+- GitHub Actions run `28787504818` attempt `1` 对 commit `2b8ab8e494e156808d2615e5e69b215109ee15af` 通过，artifact `claw-ci-v0.2-main-2b8ab8e494e1-run28787504818-attempt1` 已下载到 `/private/tmp/claw-c-review-28787504818/` 并核对 manifest、JUnit、failure summary、Swift logic smoke、Gateway direct/WebSocket smoke、node/plutil/git diff check 和 xcodebuild 日志。
 
 遗留事项：
 
