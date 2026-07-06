@@ -54,7 +54,7 @@
 - `node Tools/claw-gateway-smoke.mjs` 沙盒内监听 `127.0.0.1:18879` 因 `EPERM` 失败；提升权限重跑通过，输出 `Claw Gateway smoke passed (79 events)`。
 - `git diff --check` 通过。
 - `ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci-results.yml"); puts "yaml ok"'` 通过，输出 `yaml ok`。
-- 云端结果包验收待 push `origin/main` 后补齐。
+- GitHub Actions run `28779619275` attempt `1` 对 commit `57879c4e7497c798068d2bd10905f50bd935a0bb` 通过，artifact `claw-ci-v0.2-main-57879c4e7497-run28779619275-attempt1` 已下载到 `/private/tmp/claw-c-review-28779619275/` 并核对 manifest、JUnit、failure summary、Swift logic smoke、Gateway direct/WebSocket smoke、node/plutil/git diff check 和 xcodebuild 日志。
 
 遗留事项：
 
