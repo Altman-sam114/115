@@ -630,6 +630,7 @@ struct ClawMissionRunPanel: View {
         let reviewReadinessSummary = summary.reviewReadinessSummary(focusedOn: activeFocusedReviewKind)
         let nextReviewAction = summary.nextReviewAction(focusedOn: activeFocusedReviewKind)
         let operatorStrip = summary.operatorStrip(focusedOn: activeFocusedReviewKind)
+        let loopContinuation = summary.loopContinuationSummary(focusedOn: activeFocusedReviewKind)
         VStack(alignment: .leading, spacing: 14) {
             SectionHeader(title: "Mission Run", icon: "flag.checkered")
 
@@ -680,6 +681,11 @@ struct ClawMissionRunPanel: View {
 
             ClawMissionRunOperatorStripView(
                 strip: operatorStrip,
+                onFocusReviewKind: focusReviewKind
+            )
+
+            ClawMissionRunLoopContinuationBriefView(
+                summary: loopContinuation,
                 onFocusReviewKind: focusReviewKind
             )
 
@@ -923,7 +929,7 @@ struct ClawMissionRunOperatorLaneView: View {
                 laneContent
             }
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
         .accessibilityLabel(accessibilitySummary)
     }
 
@@ -970,6 +976,131 @@ struct ClawMissionRunOperatorLaneView: View {
             return .orange
         case .danger:
             return .red
+        }
+    }
+}
+
+struct ClawMissionRunLoopContinuationBriefView: View {
+    let summary: ClawMissionRunLoopContinuationSummary
+    let onFocusReviewKind: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Label(summary.title, systemImage: summary.icon)
+                    .font(.subheadline.bold())
+                    .foregroundStyle(tint)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                if let handoffStatus = summary.handoffStatus {
+                    PhoneAgentTag(text: handoffStatus, icon: handoffIcon(for: handoffStatus), tint: tint)
+                }
+            }
+
+            Text(summary.status)
+                .font(.footnote.bold())
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(summary.guidance)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    PhoneAgentTag(
+                        text: summary.readinessScore.map { "证据 \($0)/100" } ?? "证据待同步",
+                        icon: "gauge.with.dots.needle.67percent",
+                        tint: scoreTint
+                    )
+                    PhoneAgentTag(text: "\(summary.satisfiedSignalCount) 满足", icon: "checkmark.circle.fill", tint: .green)
+                    PhoneAgentTag(text: "\(summary.degradedSignalCount) 降级", icon: "exclamationmark.triangle.fill", tint: summary.degradedSignalCount > 0 ? .orange : .secondary)
+                    PhoneAgentTag(text: "\(summary.missingSignalCount) 缺失", icon: "tray.and.arrow.down.fill", tint: summary.missingSignalCount > 0 ? .orange : .secondary)
+                }
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    PhoneAgentTag(
+                        text: summary.selectedNextActionKind ?? "下一步待定",
+                        icon: summary.selectedNextActionRequiresApproval ? "checkmark.seal.fill" : "arrow.forward.circle.fill",
+                        tint: summary.selectedNextActionRequiresApproval ? .orange : .blue
+                    )
+                    PhoneAgentTag(
+                        text: summary.canContinueLoop ? "可继续" : "需复核",
+                        icon: summary.canContinueLoop ? "arrow.forward.circle.fill" : "person.crop.circle.badge.exclamationmark.fill",
+                        tint: summary.canContinueLoop ? .green : .orange
+                    )
+                }
+            }
+
+            if let focusReviewKind = summary.focusReviewKind,
+               summary.canFocusAgentTrace {
+                Button {
+                    onFocusReviewKind(focusReviewKind)
+                } label: {
+                    Label("聚焦 \(summary.focusReviewTitle ?? "AgentTrace")", systemImage: "scope")
+                        .font(.footnote.bold())
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(tint)
+                .accessibilityHint("聚焦 AgentTrace 详细复核，不执行 Gateway 动作")
+                .accessibilityInputLabels(["聚焦AgentTrace", "复核AgentTrace"])
+            }
+        }
+        .padding(10)
+        .background(tint.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(tint.opacity(0.16), lineWidth: 1)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilitySummary)
+    }
+
+    private var tint: Color {
+        if summary.canContinueLoop {
+            return .green
+        }
+        if summary.hasMetadataGap {
+            return .blue
+        }
+        if summary.requiresHumanAction {
+            return .orange
+        }
+        if summary.isReviewable {
+            return .purple
+        }
+        return .secondary
+    }
+
+    private var scoreTint: Color {
+        guard let readinessScore = summary.readinessScore else {
+            return .secondary
+        }
+        return readinessScore >= 70 ? .green : .orange
+    }
+
+    private var accessibilitySummary: String {
+        "Loop 继续态势，\(summary.title)，\(summary.status)，\(summary.satisfiedSignalCount) 满足，\(summary.degradedSignalCount) 降级，\(summary.missingSignalCount) 缺失"
+    }
+
+    private func handoffIcon(for status: String) -> String {
+        switch status {
+        case "needs-evidence":
+            return "tray.and.arrow.down.fill"
+        case "waiting-for-approval", "final-submit-review":
+            return "person.crop.circle.badge.checkmark"
+        case "blocked":
+            return "octagon.fill"
+        case "complete":
+            return "checkmark.circle.fill"
+        case "ready-to-continue":
+            return "arrow.forward.circle.fill"
+        default:
+            return "point.topleft.down.curvedto.point.bottomright.up"
         }
     }
 }
@@ -3283,6 +3414,9 @@ struct ClawAgentTraceReviewRow: View {
         }
         if review.missingSignals.isEmpty == false {
             items.append(("缺 \(review.missingSignals.prefix(2).joined(separator: ","))", "exclamationmark.triangle.fill", .orange))
+        }
+        if review.degradedSignals.isEmpty == false {
+            items.append(("降 \(review.degradedSignals.prefix(2).joined(separator: ","))", "exclamationmark.triangle.fill", .orange))
         }
         if let action = review.selectedNextActionKind {
             let icon = review.selectedNextActionRequiresApproval == true ? "checkmark.seal.fill" : "arrow.forward.circle.fill"

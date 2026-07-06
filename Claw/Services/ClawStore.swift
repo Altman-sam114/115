@@ -2347,16 +2347,17 @@ enum ClawGatewaySimulator {
 
     private static func agentTraceMetadata() -> [String: String] {
         [
-            "readinessScore": "72",
+            "readinessScore": "50",
             "readinessCanContinue": "true",
-            "satisfiedSignals": "screenObservation,accessibilityTree,browserTrace,fileDiff,commandOutput",
+            "satisfiedSignals": "browserTrace,fileDiff,commandOutput",
+            "degradedSignals": "screenObservation,accessibilityTree",
             "missingSignals": "messageDraft",
             "selectedNextActionKind": "composeMessage",
             "selectedNextActionRequiresApproval": "true",
-            "riskTags": "approval-required,final-submit-gate,missing-message-draft",
+            "riskTags": "degraded-screen-observation,degraded-accessibility-tree,approval-required,final-submit-gate,missing-message-draft",
             "stopReason": "final-submit",
             "handoffStatus": "final-submit-review",
-            "handoffSummary": "Evidence score 72/100 from screenObservation, accessibilityTree, browserTrace, fileDiff, commandOutput; missing messageDraft. Selected next action: composeMessage. Stop reason: final-submit."
+            "handoffSummary": "Evidence score 50/100 from browserTrace, fileDiff, commandOutput; degraded screenObservation, accessibilityTree; missing messageDraft. Selected next action: composeMessage. Stop reason: final-submit."
         ]
     }
 

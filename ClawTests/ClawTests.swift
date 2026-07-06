@@ -810,19 +810,105 @@ final class ClawTests: XCTestCase {
         let review = try XCTUnwrap(store.missionRunSummary.agentTraceReview)
 
         XCTAssertTrue(review.hasMetadata)
-        XCTAssertEqual(review.readinessScore, 72)
+        XCTAssertEqual(review.readinessScore, 50)
         XCTAssertEqual(review.readinessCanContinue, true)
+        XCTAssertEqual(review.satisfiedSignals, ["browserTrace", "fileDiff", "commandOutput"])
+        XCTAssertEqual(review.degradedSignals, ["screenObservation", "accessibilityTree"])
         XCTAssertTrue(review.missingSignals.contains("messageDraft"))
         XCTAssertEqual(review.selectedNextActionKind, "composeMessage")
         XCTAssertEqual(review.selectedNextActionRequiresApproval, true)
+        XCTAssertTrue(review.riskTags.contains("degraded-screen-observation"))
         XCTAssertTrue(review.riskTags.contains("final-submit-gate"))
         XCTAssertEqual(review.stopReason, "final-submit")
         XCTAssertEqual(review.handoffStatus, "final-submit-review")
         XCTAssertTrue(review.needsHandoffReview)
         XCTAssertTrue(review.isRedacted)
-        XCTAssertTrue(review.compactStatus.contains("72/100"))
+        XCTAssertTrue(review.compactStatus.contains("50/100"))
         XCTAssertTrue(review.compactStatus.contains("composeMessage"))
         XCTAssertTrue(review.compactStatus.contains("final-submit-review"))
+
+        let continuation = store.missionRunSummary.loopContinuationSummary
+        XCTAssertEqual(continuation.title, "Loop 最终提交复核")
+        XCTAssertEqual(continuation.handoffStatus, "final-submit-review")
+        XCTAssertEqual(continuation.readinessScore, 50)
+        XCTAssertEqual(continuation.satisfiedSignalCount, 3)
+        XCTAssertEqual(continuation.degradedSignalCount, 2)
+        XCTAssertEqual(continuation.missingSignalCount, 1)
+        XCTAssertEqual(continuation.selectedNextActionKind, "composeMessage")
+        XCTAssertTrue(continuation.selectedNextActionRequiresApproval)
+        XCTAssertEqual(continuation.focusReviewKind, "agent-trace")
+        XCTAssertTrue(continuation.canFocusAgentTrace)
+        XCTAssertFalse(continuation.canContinueLoop)
+        XCTAssertTrue(continuation.requiresHumanAction)
+        XCTAssertTrue(continuation.isReviewable)
+    }
+
+    func testMissionRunLoopContinuationCanBeReadyToContinue() throws {
+        let artifact = ClawGatewayArtifact(
+            kind: .agentTrace,
+            title: "agent-loop-ready.json",
+            reference: "file:///tmp/agent-loop-ready.json",
+            isRedacted: true,
+            metadata: [
+                "readinessScore": "100",
+                "readinessCanContinue": "true",
+                "satisfiedSignals": "browserTrace,fileDiff,commandOutput",
+                "degradedSignals": "",
+                "missingSignals": "",
+                "selectedNextActionKind": "extractData",
+                "selectedNextActionRequiresApproval": "false",
+                "riskTags": "",
+                "stopReason": "none",
+                "handoffStatus": "ready-to-continue",
+                "handoffSummary": "Evidence score 100/100 from browserTrace, fileDiff, commandOutput. Selected next action: extractData. Stop reason: none."
+            ]
+        )
+        let review = try XCTUnwrap(ClawAgentTraceReviewSummary.latest(from: [artifact]))
+        let summary = ClawMissionRunSummary(
+            command: "ready loop",
+            phaseTitle: "复核中",
+            phaseIcon: "arrow.triangle.2.circlepath",
+            progressCurrent: 1,
+            progressTotal: 3,
+            riskScore: 0,
+            approvalCount: 0,
+            blockedCount: 0,
+            succeededCount: 1,
+            failedCount: 0,
+            retryableCount: 0,
+            artifactCount: 1,
+            artifactKinds: [.agentTrace],
+            artifactMetadataReview: nil,
+            gatewayExtractionCompletenessReview: nil,
+            gatewayBrowserControlReview: nil,
+            gatewayDeliverySafetyReview: nil,
+            gatewayFileChangeSafetyReview: nil,
+            gatewayShellCommandSafetyReview: nil,
+            agentTraceReview: review,
+            gatewayAccessibilityReview: nil,
+            gatewayCapabilityReview: nil,
+            gatewayTaskReplayGuardReview: nil,
+            reviewPriorityQueue: [],
+            primaryActionTitle: "继续",
+            primaryActionIcon: "arrow.forward.circle.fill",
+            primaryActionKind: .continueAfterReview,
+            isPrimaryActionEnabled: true,
+            requiresUserApproval: false,
+            statusLine: "ready",
+            stageTrack: []
+        )
+
+        let continuation = summary.loopContinuationSummary
+
+        XCTAssertEqual(continuation.title, "Loop 可继续")
+        XCTAssertEqual(continuation.handoffStatus, "ready-to-continue")
+        XCTAssertEqual(continuation.readinessScore, 100)
+        XCTAssertEqual(continuation.satisfiedSignalCount, 3)
+        XCTAssertEqual(continuation.degradedSignalCount, 0)
+        XCTAssertEqual(continuation.missingSignalCount, 0)
+        XCTAssertTrue(continuation.canContinueLoop)
+        XCTAssertFalse(continuation.requiresHumanAction)
+        XCTAssertTrue(continuation.canFocusAgentTrace)
     }
 
     func testMissionRunSummaryDerivesAccessibilityReview() throws {
@@ -1137,10 +1223,48 @@ final class ClawTests: XCTestCase {
         XCTAssertFalse(review.hasMetadata)
         XCTAssertNil(review.readinessScore)
         XCTAssertNil(review.handoffStatus)
+        XCTAssertTrue(review.degradedSignals.isEmpty)
         XCTAssertTrue(review.needsHandoffReview)
         XCTAssertEqual(review.latestTitle, "legacy-agent-loop.json")
         XCTAssertTrue(review.isRedacted)
         XCTAssertTrue(review.compactStatus.contains("metadata"))
+
+        let summary = ClawMissionRunSummary(
+            command: "legacy",
+            phaseTitle: "完成",
+            phaseIcon: "checkmark.circle.fill",
+            progressCurrent: 1,
+            progressTotal: 1,
+            riskScore: 0,
+            approvalCount: 0,
+            blockedCount: 0,
+            succeededCount: 1,
+            failedCount: 0,
+            retryableCount: 0,
+            artifactCount: 1,
+            artifactKinds: [.agentTrace],
+            artifactMetadataReview: nil,
+            gatewayExtractionCompletenessReview: nil,
+            gatewayBrowserControlReview: nil,
+            gatewayDeliverySafetyReview: nil,
+            gatewayFileChangeSafetyReview: nil,
+            gatewayShellCommandSafetyReview: nil,
+            agentTraceReview: review,
+            gatewayAccessibilityReview: nil,
+            gatewayCapabilityReview: nil,
+            gatewayTaskReplayGuardReview: nil,
+            reviewPriorityQueue: [],
+            primaryActionTitle: "完成",
+            primaryActionIcon: "checkmark.circle.fill",
+            primaryActionKind: .waitForGateway,
+            isPrimaryActionEnabled: false,
+            requiresUserApproval: false,
+            statusLine: "legacy",
+            stageTrack: []
+        )
+        XCTAssertEqual(summary.loopContinuationSummary.title, "Loop metadata 待同步")
+        XCTAssertTrue(summary.loopContinuationSummary.hasMetadataGap)
+        XCTAssertTrue(summary.loopContinuationSummary.requiresHumanAction)
     }
 
     func testExtractionCompletenessReviewParsesMetadataAndRedactsSensitiveValues() throws {
@@ -1543,6 +1667,7 @@ final class ClawTests: XCTestCase {
                 "readinessScore": "64",
                 "readinessCanContinue": "true",
                 "satisfiedSignals": "browserTrace,Authorization: Bearer raw-token,file:///private/tmp/browser.json,/home/alice/browser.json",
+                "degradedSignals": "accessibilityTree,Authorization: Bearer raw-token,file:///private/tmp/accessibility.json,/Users/alice/window.json",
                 "missingSignals": "messageDraft,workspace=/private/tmp/claw-work,~/Library/Claw/state.json",
                 "selectedNextActionKind": "composeMessage token=raw-token",
                 "selectedNextActionRequiresApproval": "true",
@@ -1558,6 +1683,7 @@ final class ClawTests: XCTestCase {
             review.latestTitle,
             review.compactStatus,
             review.satisfiedSignals.joined(separator: " "),
+            review.degradedSignals.joined(separator: " "),
             review.missingSignals.joined(separator: " "),
             review.selectedNextActionKind ?? "",
             review.riskTags.joined(separator: " "),
@@ -1569,6 +1695,7 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(review.readinessScore, 64)
         XCTAssertEqual(review.readinessCanContinue, true)
         XCTAssertEqual(review.selectedNextActionRequiresApproval, true)
+        XCTAssertEqual(review.degradedSignals, ["accessibilityTree"])
         XCTAssertNil(review.handoffStatus)
         XCTAssertFalse(visibleText.contains("Authorization"))
         XCTAssertFalse(visibleText.contains("Bearer"))

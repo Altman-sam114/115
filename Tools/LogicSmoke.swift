@@ -558,10 +558,13 @@ enum LogicSmoke {
         if let agentTraceReview = missionSummary.agentTraceReview {
             expect(agentTraceReview.traceCount > 0, "mission summary should count agent traces")
             expect(agentTraceReview.hasMetadata, "agent trace review should include metadata")
-            expect(agentTraceReview.readinessScore == 72, "agent trace review should expose readiness score")
+            expect(agentTraceReview.readinessScore == 50, "agent trace review should expose readiness score")
+            expect(agentTraceReview.satisfiedSignals == ["browserTrace", "fileDiff", "commandOutput"], "agent trace review should expose satisfied signals")
+            expect(agentTraceReview.degradedSignals == ["screenObservation", "accessibilityTree"], "agent trace review should expose degraded signals")
             expect(agentTraceReview.missingSignals.contains("messageDraft"), "agent trace review should expose missing signals")
             expect(agentTraceReview.selectedNextActionKind == "composeMessage", "agent trace review should expose selected action")
             expect(agentTraceReview.selectedNextActionRequiresApproval == true, "agent trace review should expose approval requirement")
+            expect(agentTraceReview.riskTags.contains("degraded-screen-observation"), "agent trace review should expose degraded risk tags")
             expect(agentTraceReview.riskTags.contains("final-submit-gate"), "agent trace review should expose risk tags")
             expect(agentTraceReview.stopReason == "final-submit", "agent trace review should expose stop reason")
             expect(agentTraceReview.handoffStatus == "final-submit-review", "agent trace review should expose handoff status")
@@ -570,6 +573,17 @@ enum LogicSmoke {
         } else {
             failures.append("mission summary should derive agent trace review")
         }
+        let loopContinuation = missionSummary.loopContinuationSummary
+        expect(loopContinuation.title == "Loop 最终提交复核", "loop continuation should expose final submit review")
+        expect(loopContinuation.handoffStatus == "final-submit-review", "loop continuation should expose handoff status")
+        expect(loopContinuation.readinessScore == 50, "loop continuation should expose readiness score")
+        expect(loopContinuation.satisfiedSignalCount == 3, "loop continuation should count satisfied signals")
+        expect(loopContinuation.degradedSignalCount == 2, "loop continuation should count degraded signals")
+        expect(loopContinuation.missingSignalCount == 1, "loop continuation should count missing signals")
+        expect(loopContinuation.selectedNextActionKind == "composeMessage", "loop continuation should expose next action")
+        expect(loopContinuation.canContinueLoop == false, "loop continuation should not auto-continue final submit")
+        expect(loopContinuation.requiresHumanAction, "loop continuation should require human review")
+        expect(loopContinuation.canFocusAgentTrace, "loop continuation should focus AgentTrace detail")
         let sensitiveAgentTrace = ClawGatewayArtifact(
             kind: .agentTrace,
             title: "agent-loop file:///private/tmp/trace.json",
@@ -578,6 +592,7 @@ enum LogicSmoke {
             metadata: [
                 "readinessScore": "51",
                 "selectedNextActionKind": "composeMessage token=raw-token",
+                "degradedSignals": "accessibilityTree,Authorization: Bearer raw-token,file:///private/tmp/accessibility.json,/Users/alice/window.json",
                 "riskTags": "headers={Authorization: Bearer raw-token},C:\\Users\\alice\\secret.txt",
                 "stopReason": "final-submit file:///private/tmp/secret.txt /home/alice/secret.txt",
                 "handoffStatus": "blocked Authorization: Bearer raw-token /private/tmp/secret.txt",
@@ -588,11 +603,13 @@ enum LogicSmoke {
             let visibleText = [
                 sensitiveAgentTraceReview.latestTitle,
                 sensitiveAgentTraceReview.compactStatus,
+                sensitiveAgentTraceReview.degradedSignals.joined(separator: " "),
                 sensitiveAgentTraceReview.riskTags.joined(separator: " "),
                 sensitiveAgentTraceReview.stopReason ?? "",
                 sensitiveAgentTraceReview.handoffStatus ?? "",
                 sensitiveAgentTraceReview.handoffSummary ?? ""
             ].joined(separator: " ")
+            expect(sensitiveAgentTraceReview.degradedSignals == ["accessibilityTree"], "agent trace review should keep only safe degraded signals")
             expect(sensitiveAgentTraceReview.handoffStatus == nil, "agent trace review should reject unsafe handoff status")
             expect(visibleText.contains("Authorization") == false, "agent trace review should redact Authorization")
             expect(visibleText.contains("Bearer") == false, "agent trace review should redact bearer token")

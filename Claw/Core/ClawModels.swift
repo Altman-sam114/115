@@ -1459,6 +1459,27 @@ struct ClawMissionRunOperatorStrip: Equatable, Codable, Sendable {
     var lanes: [ClawMissionRunOperatorLane]
 }
 
+struct ClawMissionRunLoopContinuationSummary: Equatable, Codable, Sendable {
+    var title: String
+    var status: String
+    var guidance: String
+    var icon: String
+    var handoffStatus: String?
+    var readinessScore: Int?
+    var satisfiedSignalCount: Int
+    var degradedSignalCount: Int
+    var missingSignalCount: Int
+    var selectedNextActionKind: String?
+    var selectedNextActionRequiresApproval: Bool
+    var focusReviewKind: String?
+    var focusReviewTitle: String?
+    var canFocusAgentTrace: Bool
+    var canContinueLoop: Bool
+    var requiresHumanAction: Bool
+    var hasMetadataGap: Bool
+    var isReviewable: Bool
+}
+
 private enum ClawArtifactMetadataParser {
     static func cleanValue(_ value: String?) -> String? {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -2360,6 +2381,7 @@ struct ClawAgentTraceReviewSummary: Equatable, Codable, Sendable {
     var readinessScore: Int?
     var readinessCanContinue: Bool?
     var satisfiedSignals: [String]
+    var degradedSignals: [String]
     var missingSignals: [String]
     var selectedNextActionKind: String?
     var selectedNextActionRequiresApproval: Bool?
@@ -2398,8 +2420,9 @@ struct ClawAgentTraceReviewSummary: Equatable, Codable, Sendable {
             hasMetadata: metadata.isEmpty == false,
             readinessScore: ClawArtifactMetadataParser.intValue(metadata["readinessScore"]),
             readinessCanContinue: ClawArtifactMetadataParser.boolValue(metadata["readinessCanContinue"]),
-            satisfiedSignals: ClawArtifactMetadataDisplaySanitizer.safeList(metadata["satisfiedSignals"]),
-            missingSignals: ClawArtifactMetadataDisplaySanitizer.safeList(metadata["missingSignals"]),
+            satisfiedSignals: Self.allowedAgentSignalList(metadata["satisfiedSignals"]),
+            degradedSignals: Self.allowedAgentSignalList(metadata["degradedSignals"]),
+            missingSignals: Self.allowedAgentSignalList(metadata["missingSignals"]),
             selectedNextActionKind: ClawArtifactMetadataDisplaySanitizer.safeValue(metadata["selectedNextActionKind"]),
             selectedNextActionRequiresApproval: ClawArtifactMetadataParser.boolValue(metadata["selectedNextActionRequiresApproval"]),
             riskTags: ClawArtifactMetadataDisplaySanitizer.safeList(metadata["riskTags"]),
@@ -2423,6 +2446,19 @@ struct ClawAgentTraceReviewSummary: Equatable, Codable, Sendable {
             "complete"
         ]
         return allowed.contains(clean) ? clean : nil
+    }
+
+    static func allowedAgentSignalList(_ value: String?) -> [String] {
+        let allowed = [
+            "screenObservation",
+            "accessibilityTree",
+            "browserTrace",
+            "fileDiff",
+            "commandOutput",
+            "messageDraft",
+            "agentTrace"
+        ]
+        return ClawArtifactMetadataParser.listValue(value).filter { allowed.contains($0) }
     }
 
     var needsHandoffReview: Bool {
@@ -2772,6 +2808,124 @@ extension ClawMissionRunSummary {
             return false
         }
         return availableDetailReviewKinds.contains(reviewKind)
+    }
+
+    var loopContinuationSummary: ClawMissionRunLoopContinuationSummary {
+        loopContinuationSummary(focusedOn: nil)
+    }
+
+    func loopContinuationSummary(focusedOn reviewKind: String?) -> ClawMissionRunLoopContinuationSummary {
+        let focusKind = agentTraceReview == nil ? nil : "agent-trace"
+        let canFocusAgentTrace = focusKind.map(focusUsesDetailReview) ?? false
+        let isFocused = reviewKind == focusKind
+
+        guard let review = agentTraceReview else {
+            return ClawMissionRunLoopContinuationSummary(
+                title: "Loop 继续态势待生成",
+                status: "尚无 AgentTrace",
+                guidance: "发送任务或运行 agent loop 后会显示继续条件。",
+                icon: "point.topleft.down.curvedto.point.bottomright.up",
+                handoffStatus: nil,
+                readinessScore: nil,
+                satisfiedSignalCount: 0,
+                degradedSignalCount: 0,
+                missingSignalCount: 0,
+                selectedNextActionKind: nil,
+                selectedNextActionRequiresApproval: false,
+                focusReviewKind: nil,
+                focusReviewTitle: nil,
+                canFocusAgentTrace: false,
+                canContinueLoop: false,
+                requiresHumanAction: false,
+                hasMetadataGap: false,
+                isReviewable: false
+            )
+        }
+
+        let hasMetadataGap = review.hasMetadata == false
+        let selectedRequiresApproval = review.selectedNextActionRequiresApproval == true
+        let hasEvidenceGap = review.missingSignals.isEmpty == false || review.degradedSignals.isEmpty == false
+        let handoff = review.handoffStatus
+        let canContinue = review.readinessCanContinue == true &&
+            handoff == "ready-to-continue" &&
+            selectedRequiresApproval == false &&
+            hasEvidenceGap == false &&
+            hasMetadataGap == false
+        let requiresHumanAction = hasMetadataGap ||
+            selectedRequiresApproval ||
+            hasEvidenceGap ||
+            review.needsHandoffReview ||
+            blockedCount > 0 ||
+            failedCount > 0 ||
+            requiresUserApproval
+
+        let title: String
+        let status: String
+        let guidance: String
+        let icon: String
+
+        if hasMetadataGap {
+            title = "Loop metadata 待同步"
+            status = "AgentTrace 已收到"
+            guidance = "先聚焦 AgentTrace，确认 Gateway 是否提供了继续条件。"
+            icon = "doc.badge.clock"
+        } else if canContinue {
+            title = "Loop 可继续"
+            status = review.selectedNextActionKind.map { "下一步 \($0)" } ?? "下一步待定"
+            guidance = isFocused ? "当前已聚焦 AgentTrace，可复核后由用户决定下一轮。" : "证据满足且无需审批；仍需用户明确触发下一轮。"
+            icon = "arrow.forward.circle.fill"
+        } else if handoff == "complete" {
+            title = "Loop 已完成"
+            status = review.readinessScore.map { "证据 \($0)/100" } ?? "证据已复核"
+            guidance = "当前 AgentTrace 表示完成；可抽查摘要或开始新任务。"
+            icon = "checkmark.circle.fill"
+        } else if handoff == "blocked" {
+            title = "Loop 已阻断"
+            status = "需要人工处理"
+            guidance = "先查看阻断原因和 AgentTrace 详情。"
+            icon = "octagon.fill"
+        } else if handoff == "final-submit-review" {
+            title = "Loop 最终提交复核"
+            status = review.selectedNextActionKind.map { "\($0) 停在提交前" } ?? "停在提交前"
+            guidance = "最终提交必须由用户复核，不能自动发送或提交。"
+            icon = "hand.raised.fill"
+        } else if handoff == "waiting-for-approval" || selectedRequiresApproval {
+            title = "Loop 等待审批"
+            status = review.selectedNextActionKind.map { "\($0) 需确认" } ?? "下一步需确认"
+            guidance = "先确认审批点和安全摘要，不能自动继续。"
+            icon = "person.crop.circle.badge.checkmark"
+        } else if handoff == "needs-evidence" || review.readinessCanContinue == false || hasEvidenceGap {
+            title = "Loop 需要证据"
+            status = "\(review.degradedSignals.count) 降级 · \(review.missingSignals.count) 缺失"
+            guidance = "先补齐或复核降级证据，再决定下一轮。"
+            icon = "tray.and.arrow.down.fill"
+        } else {
+            title = "Loop 继续态势"
+            status = review.compactStatus
+            guidance = "先查看 AgentTrace 摘要和下一步建议。"
+            icon = "point.topleft.down.curvedto.point.bottomright.up"
+        }
+
+        return ClawMissionRunLoopContinuationSummary(
+            title: title,
+            status: status,
+            guidance: guidance,
+            icon: icon,
+            handoffStatus: handoff,
+            readinessScore: review.readinessScore,
+            satisfiedSignalCount: review.satisfiedSignals.count,
+            degradedSignalCount: review.degradedSignals.count,
+            missingSignalCount: review.missingSignals.count,
+            selectedNextActionKind: review.selectedNextActionKind,
+            selectedNextActionRequiresApproval: selectedRequiresApproval,
+            focusReviewKind: focusKind,
+            focusReviewTitle: focusKind.map(Self.title(forDetailReviewKind:)),
+            canFocusAgentTrace: canFocusAgentTrace,
+            canContinueLoop: canContinue,
+            requiresHumanAction: requiresHumanAction,
+            hasMetadataGap: hasMetadataGap,
+            isReviewable: true
+        )
     }
 
     var artifactEvidenceIndex: ClawMissionRunArtifactEvidenceIndex {
