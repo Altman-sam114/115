@@ -153,7 +153,7 @@ v0.13 起，桌面 Gateway 原型增加进程内 task replay guard，作为 v0.1
   - Shell 只读取 `toolArguments.shellCommand`；默认 dry-run，必须设置 `CLAW_ALLOW_SHELL=1` 且命令在 `CLAW_SHELL_ALLOWLIST` 内才会真执行。v0.23 起，`commandOutput` artifact event 会附 Shell Command Safety metadata，只写结构化命令 presence、parse/policy/allowlist/执行/exit code/stdout/stderr presence 和 omission flags，不写 raw command、cwd/path、stdout/stderr 内容或 `toolArguments`。
   - `controlBrowser` 可处理 `toolArguments.html`，也可在 `CLAW_ALLOW_BROWSER_NETWORK=1` 且 host allowlist 通过时抓取 URL；输出标题、链接、标题层级、表格、表单字段、候选控件和文本预览。默认只写入桌面浏览器打开/搜索计划；设置 `CLAW_ALLOW_BROWSER_CONTROL=1`、`CLAW_BROWSER_APP_ALLOWLIST` 和 `CLAW_BROWSER_HOST_ALLOWLIST` 后，可在 macOS 上打开允许的浏览器并跳转到结构化 URL/搜索结果。v0.21 起，`browserTrace` 和 `browser-control-*.json` artifact event 会附 Browser Control metadata，只写请求/策略/allowlist/执行状态和 omission flags，不写 raw URL、search query、HTML/page text、form fields、candidate labels 或 `toolArguments`。
   - `extractData` 会消费同一 session 内的 browser trace、file diff、command output、screen observation 和 accessibility tree artifact，生成 `artifact-grounded-extraction` 结构化结果，并在 artifact event metadata 上附 metadata-only 的完整性复核摘要；metadata 只含计数、状态、source kind 和 safety flags，不含 row 内容、URL/path、命令输出或 `toolArguments`。
-  - `runAgentLoop` 会消费同一 session 内的 artifact context，写出 `agentTrace` artifact。v0.6 保留旧字段 `sourceArtifacts`、`evidenceRows`、`observations`、`nextActions`、`safetyGates`，并新增 `readiness`、`decisionChecklist`、`selectedNextAction`、`riskTags`、`stopReason`、`handoffSummary`，用于说明证据分数、满足/缺失信号、当前推荐下一步、风险标签和停在审批/最终提交前的原因。v0.7 会把这些安全摘要压缩成 artifact event 上的可选字符串 `metadata`，供手机端复核；旧事件缺少 metadata 仍合法。这些字段不进入 `ClawMobileEnvelope` schema，也不能作为可执行指令。
+  - `runAgentLoop` 会消费同一 session 内的 artifact context，写出 `agentTrace` artifact。v0.6 保留旧字段 `sourceArtifacts`、`evidenceRows`、`observations`、`nextActions`、`safetyGates`，并新增 `readiness`、`decisionChecklist`、`selectedNextAction`、`riskTags`、`stopReason`、`handoffSummary`，用于说明证据分数、满足/缺失信号、当前推荐下一步、风险标签和停在审批/最终提交前的原因。v0.7 会把这些安全摘要压缩成 artifact event 上的可选字符串 `metadata`，供手机端复核；旧事件缺少 metadata 仍合法。v0.31 起，`decisionChecklist[].status` 可为 `satisfied`、`degraded` 或 `missing`，`readiness.degradedSignals` 记录 dry-run、window metadata、network blocked、failed、unavailable 或 not-requested 等降级证据；这些降级证据不计入 readiness score。这些字段不进入 `ClawMobileEnvelope` schema，也不能作为可执行指令。
   - `observeScreen` 默认 dry-run；设置 `CLAW_ALLOW_SCREEN_CAPTURE=1` 后可在 macOS 上生成真实截图 artifact，设置 `CLAW_ALLOW_WINDOW_METADATA=1` 后可读取前台窗口元数据，设置 `CLAW_ALLOW_ACCESSIBILITY_OBSERVE=1` 后可在授权 macOS Gateway 上通过固定只读 System Events 脚本采集前台 App/窗口和有限候选控件摘要。该摘要只写既有 `accessibilityTree` artifact，不执行点击、输入或任意选择器；无权限或非 macOS 时写入可审计 accessibility-failed/accessibility-unavailable 结果。
   - `operateDesktopApp` 默认停在审批闸门；设置 `CLAW_ALLOW_DESKTOP_CONTROL=1`、`CLAW_DESKTOP_APP_ALLOWLIST` 和 `CLAW_DESKTOP_KEY_ALLOWLIST` 后，可在 macOS 上聚焦允许的 App、粘贴结构化草稿、执行允许的非提交快捷键，并在最终提交前回到用户确认。该 handler 会在相关 artifact event metadata 上附 Delivery Safety 摘要，只写最终提交闸门、用户确认、正文/paste 省略和按键计数，不写草稿正文、paste text、按键原文或 `toolArguments`。
   - `composeMessage`/`composeEmail` 写既有 `messageDraft` artifact 并等待用户确认；v0.20 起会附 Delivery Safety metadata，说明草稿正文已从 metadata 中省略且最终发送需要用户确认，不新增真实发送能力。
@@ -222,16 +222,17 @@ live gateway 与模拟器共用 `ClawGatewayEvent`，手机端只依赖事件 re
       "reference": "file:///workspace/session/agent-loop-1.json",
       "isRedacted": true,
       "metadata": {
-        "readinessScore": "72",
+        "readinessScore": "50",
         "readinessCanContinue": "true",
-        "satisfiedSignals": "screenObservation,accessibilityTree,browserTrace,fileDiff,commandOutput",
+        "satisfiedSignals": "browserTrace,fileDiff,commandOutput",
+        "degradedSignals": "screenObservation,accessibilityTree",
         "missingSignals": "messageDraft",
         "selectedNextActionKind": "composeMessage",
         "selectedNextActionRequiresApproval": "true",
-        "riskTags": "approval-required,final-submit-gate,missing-message-draft",
+        "riskTags": "degraded-screen-observation,degraded-accessibility-tree,approval-required,final-submit-gate,missing-message-draft",
         "stopReason": "final-submit",
         "handoffStatus": "final-submit-review",
-        "handoffSummary": "Evidence score 72/100; missing messageDraft. Selected next action: composeMessage. Stop reason: final-submit."
+        "handoffSummary": "Evidence score 50/100 from browserTrace, fileDiff, commandOutput; degraded screenObservation, accessibilityTree; missing messageDraft. Selected next action: composeMessage. Stop reason: final-submit."
       }
     }
   ],
@@ -246,6 +247,7 @@ live gateway 与模拟器共用 `ClawGatewayEvent`，手机端只依赖事件 re
 - `readinessScore`
 - `readinessCanContinue`
 - `satisfiedSignals`
+- `degradedSignals`
 - `missingSignals`
 - `selectedNextActionKind`
 - `selectedNextActionRequiresApproval`
@@ -255,6 +257,8 @@ live gateway 与模拟器共用 `ClawGatewayEvent`，手机端只依赖事件 re
 - `handoffSummary`
 
 v0.30 起，`agentTrace` metadata 建议包含固定枚举 `handoffStatus`，用于把证据缺口、审批等待、最终提交复核、阻断、可继续或完成状态压缩成一个安全字符串。建议值包括 `needs-evidence`、`waiting-for-approval`、`final-submit-review`、`blocked`、`ready-to-continue` 和 `complete`。该状态只由 `readinessCanContinue`、`selectedNextActionRequiresApproval`、`riskTags` 和 `stopReason` 等结构化字段派生，不从自然语言 `handoffSummary` 或 artifact payload 解析；手机端展示时仍只用于人工复核，不是自动执行授权或 Gateway readiness。
+
+v0.31 起，`agentTrace` metadata 建议包含 `degradedSignals`，只使用固定 source 枚举列表，例如 `screenObservation,accessibilityTree`。`runAgentLoop` 会把真实或可操作证据计入 `satisfiedSignals`，把 dry-run、window metadata、network blocked、failed、unavailable 或 not-requested 等 artifact 计入 `degradedSignals`，完全没有 artifact 时计入 `missingSignals`。降级证据可用于人工复核和风险提示，但不增加 readiness score，也不能作为自动执行授权。
 
 metadata 只能包含安全摘要，不能放入浏览器正文、命令输出、截图内容、消息草稿、联系人、token、完整 URL/path、row 内容、`toolArguments` 或其他敏感 payload。旧 Gateway 事件不带 metadata 时，手机端必须正常 decode，并按对应复核摘要降级显示 metadata 待同步。
 

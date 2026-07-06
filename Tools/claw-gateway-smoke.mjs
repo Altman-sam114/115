@@ -59,7 +59,7 @@ for (const artifact of events.flatMap((event) => event.artifacts || [])) {
   }
 }
 
-const fileDiffArtifact = findArtifactByTitle(events, "fileDiff", "file-diff-2");
+const fileDiffArtifact = findArtifactByTitle(events, "fileDiff", "file-diff-3");
 assertFileChangeSafetyMetadata(fileDiffArtifact?.metadata, {
   mode: "workspace-write",
   actionKind: "manageFiles",
@@ -79,7 +79,7 @@ assertFileChangeSafetyMetadata(fileDiffArtifact?.metadata, {
   resultStatus: "succeeded",
   safetyFlags: ["metadata-only", "tool-arguments-omitted", "raw-path-omitted", "workspace-path-omitted", "file-content-omitted", "diff-content-omitted", "artifact-payload-not-read", "session-workspace-only"],
 }, "websocket file change");
-const pathEscapeArtifact = findArtifactByTitle(events, "auditLog", "file-change-blocked-3");
+const pathEscapeArtifact = findArtifactByTitle(events, "auditLog", "file-change-blocked-4");
 assertFileChangeSafetyMetadata(pathEscapeArtifact?.metadata, {
   mode: "workspace-path-blocked",
   actionKind: "manageFiles",
@@ -99,7 +99,7 @@ assertFileChangeSafetyMetadata(pathEscapeArtifact?.metadata, {
   resultStatus: "failed",
   safetyFlags: ["metadata-only", "tool-arguments-omitted", "raw-path-omitted", "workspace-path-omitted", "file-content-omitted", "diff-content-omitted", "artifact-payload-not-read", "session-workspace-only", "path-escape-blocked", "no-file-written"],
 }, "websocket path escape file change");
-const writeFailureArtifact = findArtifactByTitle(events, "auditLog", "file-change-failed-5");
+const writeFailureArtifact = findArtifactByTitle(events, "auditLog", "file-change-failed-6");
 assertFileChangeSafetyMetadata(writeFailureArtifact?.metadata, {
   mode: "workspace-write-failed",
   actionKind: "manageFiles",
@@ -134,7 +134,7 @@ const capabilitySnapshot = await assertCapabilitySnapshot(events, {
   },
 });
 expect(capabilitySnapshot.envelope.allowedActionKinds.includes("controlBrowser"), "websocket snapshot missing controlBrowser allowlist");
-expect(!capabilitySnapshot.envelope.allowedActionKinds.includes("observeScreen"), "websocket snapshot should match envelope allowlist exactly");
+expect(capabilitySnapshot.envelope.allowedActionKinds.includes("observeScreen"), "websocket snapshot missing observeScreen allowlist");
 const shellPolicyArtifact = findArtifactByTitle(events, "commandOutput", "shell-policy-");
 assertShellCommandSafetyMetadata(shellPolicyArtifact?.metadata, {
   mode: "shell-policy-blocked",
@@ -160,7 +160,7 @@ const pageTrace = browserTraces.find((trace) => trace.mode === "local-html");
 expect(pageTrace?.title === "Gateway Smoke Page", "missing websocket browser title extraction");
 expect(pageTrace?.tables?.some((table) => table.rows?.some((row) => row.includes("Gateway"))), "missing websocket browser table extraction");
 expect(pageTrace?.forms?.some((form) => form.fields?.some((field) => field.name === "query")), "missing websocket browser form extraction");
-const pageTraceArtifact = findArtifactByTitle(events, "browserTrace", "browser-trace-1");
+const pageTraceArtifact = findArtifactByTitle(events, "browserTrace", "browser-trace-2");
 assertBrowserControlReviewMetadata(pageTraceArtifact?.metadata, {
   mode: "browser-control-not-requested",
   browserControlPolicy: "not-requested",
@@ -178,7 +178,7 @@ assertBrowserControlReviewMetadata(pageTraceArtifact?.metadata, {
   resultStatus: "skipped",
   safetyFlags: ["metadata-only", "tool-arguments-omitted", "url-omitted", "search-query-omitted", "page-content-omitted", "form-fields-omitted", "candidate-labels-omitted", "artifact-payload-not-read"],
 }, "websocket browser trace");
-const pageControlArtifact = findArtifactByTitle(events, "screenshot", "browser-control-1");
+const pageControlArtifact = findArtifactByTitle(events, "screenshot", "browser-control-2");
 assertBrowserControlReviewMetadata(pageControlArtifact?.metadata, {
   mode: "browser-control-not-requested",
   browserControlPolicy: "not-requested",
@@ -217,13 +217,23 @@ expect(typeof agentTrace?.readiness?.score === "number", "websocket agent loop r
 expect(agentTrace?.readiness?.satisfiedSignals?.includes("browserTrace"), "websocket agent loop should satisfy browser trace signal");
 expect(agentTrace?.readiness?.satisfiedSignals?.includes("fileDiff"), "websocket agent loop should satisfy file diff signal");
 expect(agentTrace?.readiness?.satisfiedSignals?.includes("commandOutput"), "websocket agent loop should satisfy command output signal");
+expect(!agentTrace?.readiness?.satisfiedSignals?.includes("screenObservation"), "websocket agent loop should not satisfy dry-run screen observation");
+expect(!agentTrace?.readiness?.satisfiedSignals?.includes("accessibilityTree"), "websocket agent loop should not satisfy dry-run accessibility tree");
+expect(agentTrace?.readiness?.degradedSignals?.includes("screenObservation"), "websocket agent loop should degrade dry-run screen observation");
+expect(agentTrace?.readiness?.degradedSignals?.includes("accessibilityTree"), "websocket agent loop should degrade dry-run accessibility tree");
 expect(agentTrace?.readiness?.missingSignals?.includes("messageDraft"), "websocket agent loop should flag missing draft signal");
+expect(agentTrace?.readiness?.score === 50, "websocket agent loop readiness score should count only satisfied evidence");
+expect(agentTrace?.readiness?.canContinue === true, "websocket agent loop should remain continuable with browser/file/command evidence");
+expect(agentTrace?.decisionChecklist?.some((item) => item.signal === "screenObservation" && item.status === "degraded"), "websocket agent loop checklist should degrade screen observation");
+expect(agentTrace?.decisionChecklist?.some((item) => item.signal === "accessibilityTree" && item.status === "degraded"), "websocket agent loop checklist should degrade accessibility tree");
 expect(agentTrace?.decisionChecklist?.some((item) => item.signal === "browserTrace" && item.status === "satisfied"), "websocket agent loop checklist missing browser trace");
 expect(agentTrace?.decisionChecklist?.some((item) => item.signal === "fileDiff" && item.status === "satisfied"), "websocket agent loop checklist missing file diff");
 expect(agentTrace?.decisionChecklist?.some((item) => item.signal === "commandOutput" && item.status === "satisfied"), "websocket agent loop checklist missing command output");
 expect(agentTrace?.decisionChecklist?.some((item) => item.signal === "messageDraft" && item.status === "missing"), "websocket agent loop checklist missing draft gap");
 expect(agentTrace?.nextActions?.some((action) => action.kind === agentTrace?.selectedNextAction?.kind), "websocket selected action should come from nextActions");
 expect(agentTrace?.riskTags?.includes("approval-required"), "websocket agent loop should tag approval-gated actions");
+expect(agentTrace?.riskTags?.includes("degraded-screen-observation"), "websocket agent loop should tag degraded screen observation");
+expect(agentTrace?.riskTags?.includes("degraded-accessibility-tree"), "websocket agent loop should tag degraded accessibility tree");
 expect(agentTrace?.riskTags?.includes("final-submit-gate") || agentTrace?.stopReason === "final-submit", "websocket agent loop should stop before final delivery");
 expect(agentTrace?.handoffStatus === "final-submit-review", "websocket agent loop should expose handoff status");
 expect(typeof agentTrace?.handoffSummary === "string" && agentTrace.handoffSummary.includes(agentTrace.selectedNextAction.kind), "websocket agent loop handoff summary should name selected action");
@@ -311,7 +321,7 @@ function makeEnvelope(rawToken, endpointPort = port) {
       deviceName: "smoke",
       securityMode: "mutualApproval",
       tokenFingerprint: tokenFingerprint(rawToken),
-      allowedActionKinds: ["controlBrowser", "manageFiles", "runShellCommand", "extractData", "runAgentLoop", "composeMessage"],
+      allowedActionKinds: ["observeScreen", "controlBrowser", "manageFiles", "runShellCommand", "extractData", "runAgentLoop", "composeMessage"],
       requiresApprovalForSensitiveData: true,
       auditEnabled: true,
     },
@@ -322,6 +332,25 @@ function makeEnvelope(rawToken, endpointPort = port) {
       sourceDevice: "smoke",
       destinationGateway: `ws://${host}:${endpointPort}`,
       actions: [
+        {
+          id: crypto.randomUUID(),
+          kind: "observeScreen",
+          title: "Observe screen",
+          target: "Desktop Screen",
+          instruction: "Collect dry-run screen and accessibility evidence",
+          approval: "gatewayApproval",
+          sourceSurface: "clawGateway",
+          handlesSensitiveData: true,
+          inputPreview: "smoke",
+          toolArguments: {
+            observationGoal: "observe websocket smoke desktop",
+            includeScreenshot: "true",
+            includeWindowTitles: "true",
+            includeAccessibilityTree: "true",
+            maxCandidateControls: "8",
+            redaction: "required",
+          },
+        },
         {
           id: crypto.randomUUID(),
           kind: "controlBrowser",
@@ -455,8 +484,8 @@ function makeEnvelope(rawToken, endpointPort = port) {
             objective: "finish websocket smoke task with artifact-backed decisions",
             loopMode: "observe-plan-act-verify",
             maxIterations: "3",
-            inputSources: "browserTrace,fileDiff,commandOutput,messageDraft",
-            allowedNextActions: "controlBrowser,manageFiles,extractData,composeMessage",
+            inputSources: "screenObservation,accessibilityTree,browserTrace,fileDiff,commandOutput,messageDraft",
+            allowedNextActions: "observeScreen,controlBrowser,manageFiles,extractData,composeMessage",
             approvalRequiredFor: "externalNetwork,destructiveFileChange",
             stopBeforeDestructiveAction: "true",
             writeTrace: "true",
@@ -696,6 +725,7 @@ function assertCapabilitySnapshotMetadata(metadata, snapshot, label) {
 function assertAgentTraceMetadata(metadata, trace, label) {
   expect(metadata && typeof metadata === "object", `${label} missing agentTrace metadata`);
   const allowedKeys = [
+    "degradedSignals",
     "handoffStatus",
     "handoffSummary",
     "missingSignals",
@@ -707,13 +737,21 @@ function assertAgentTraceMetadata(metadata, trace, label) {
     "selectedNextActionRequiresApproval",
     "stopReason",
   ];
+  const expectedKeys = trace.readiness.degradedSignals?.length > 0
+    ? allowedKeys
+    : allowedKeys.filter((key) => key !== "degradedSignals");
   expect(
-    Object.keys(metadata).sort().join(",") === allowedKeys.join(","),
+    Object.keys(metadata).sort().join(",") === expectedKeys.join(","),
     `${label} agentTrace metadata includes unexpected keys`,
   );
   expect(metadata.readinessScore === String(trace.readiness.score), `${label} readiness score metadata mismatch`);
   expect(metadata.readinessCanContinue === String(trace.readiness.canContinue), `${label} readiness continuation metadata mismatch`);
   expect(metadata.satisfiedSignals === trace.readiness.satisfiedSignals.join(","), `${label} satisfied signals metadata mismatch`);
+  if (trace.readiness.degradedSignals?.length > 0) {
+    expect(metadata.degradedSignals === trace.readiness.degradedSignals.join(","), `${label} degraded signals metadata mismatch`);
+  } else {
+    expect(metadata.degradedSignals === undefined, `${label} unexpected degraded signals metadata`);
+  }
   expect(metadata.missingSignals === trace.readiness.missingSignals.join(","), `${label} missing signals metadata mismatch`);
   expect(metadata.selectedNextActionKind === trace.selectedNextAction.kind, `${label} selected action metadata mismatch`);
   expect(metadata.selectedNextActionRequiresApproval === String(trace.selectedNextAction.requiresApproval), `${label} selected approval metadata mismatch`);

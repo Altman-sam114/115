@@ -172,13 +172,23 @@ expect(typeof agentTrace?.readiness?.score === "number", "agent loop readiness s
 expect(agentTrace?.readiness?.satisfiedSignals?.includes("browserTrace"), "agent loop should satisfy browser trace signal");
 expect(agentTrace?.readiness?.satisfiedSignals?.includes("fileDiff"), "agent loop should satisfy file diff signal");
 expect(agentTrace?.readiness?.satisfiedSignals?.includes("commandOutput"), "agent loop should satisfy command output signal");
+expect(!agentTrace?.readiness?.satisfiedSignals?.includes("screenObservation"), "agent loop should not satisfy dry-run screen observation");
+expect(!agentTrace?.readiness?.satisfiedSignals?.includes("accessibilityTree"), "agent loop should not satisfy dry-run accessibility tree");
+expect(agentTrace?.readiness?.degradedSignals?.includes("screenObservation"), "agent loop should degrade dry-run screen observation");
+expect(agentTrace?.readiness?.degradedSignals?.includes("accessibilityTree"), "agent loop should degrade dry-run accessibility tree");
 expect(agentTrace?.readiness?.missingSignals?.includes("messageDraft"), "agent loop should flag missing draft signal");
+expect(agentTrace?.readiness?.score === 50, "agent loop readiness score should count only satisfied evidence");
+expect(agentTrace?.readiness?.canContinue === true, "agent loop should remain continuable with browser/file/command evidence");
+expect(agentTrace?.decisionChecklist?.some((item) => item.signal === "screenObservation" && item.status === "degraded"), "agent loop checklist should degrade screen observation");
+expect(agentTrace?.decisionChecklist?.some((item) => item.signal === "accessibilityTree" && item.status === "degraded"), "agent loop checklist should degrade accessibility tree");
 expect(agentTrace?.decisionChecklist?.some((item) => item.signal === "browserTrace" && item.status === "satisfied"), "agent loop checklist missing browser trace");
 expect(agentTrace?.decisionChecklist?.some((item) => item.signal === "fileDiff" && item.status === "satisfied"), "agent loop checklist missing file diff");
 expect(agentTrace?.decisionChecklist?.some((item) => item.signal === "commandOutput" && item.status === "satisfied"), "agent loop checklist missing command output");
 expect(agentTrace?.decisionChecklist?.some((item) => item.signal === "messageDraft" && item.status === "missing"), "agent loop checklist missing draft gap");
 expect(agentTrace?.nextActions?.some((action) => action.kind === agentTrace?.selectedNextAction?.kind), "agent loop selected action should come from nextActions");
 expect(agentTrace?.riskTags?.includes("approval-required"), "agent loop should tag approval-gated actions");
+expect(agentTrace?.riskTags?.includes("degraded-screen-observation"), "agent loop should tag degraded screen observation");
+expect(agentTrace?.riskTags?.includes("degraded-accessibility-tree"), "agent loop should tag degraded accessibility tree");
 expect(agentTrace?.riskTags?.includes("final-submit-gate") || agentTrace?.stopReason === "final-submit", "agent loop should stop before final delivery");
 expect(agentTrace?.handoffStatus === "final-submit-review", "agent loop should expose handoff status");
 expect(typeof agentTrace?.handoffSummary === "string" && agentTrace.handoffSummary.includes(agentTrace.selectedNextAction.kind), "agent loop handoff summary should name selected action");
@@ -827,6 +837,7 @@ function assertAccessibilityTreeArtifact(artifact, tree, { mode, policy, label }
 function assertAgentTraceMetadata(metadata, trace, label) {
   expect(metadata && typeof metadata === "object", `${label} missing agentTrace metadata`);
   const allowedKeys = [
+    "degradedSignals",
     "handoffStatus",
     "handoffSummary",
     "missingSignals",
@@ -838,13 +849,21 @@ function assertAgentTraceMetadata(metadata, trace, label) {
     "selectedNextActionRequiresApproval",
     "stopReason",
   ];
+  const expectedKeys = trace.readiness.degradedSignals?.length > 0
+    ? allowedKeys
+    : allowedKeys.filter((key) => key !== "degradedSignals");
   expect(
-    Object.keys(metadata).sort().join(",") === allowedKeys.join(","),
+    Object.keys(metadata).sort().join(",") === expectedKeys.join(","),
     `${label} agentTrace metadata includes unexpected keys`,
   );
   expect(metadata.readinessScore === String(trace.readiness.score), `${label} readiness score metadata mismatch`);
   expect(metadata.readinessCanContinue === String(trace.readiness.canContinue), `${label} readiness continuation metadata mismatch`);
   expect(metadata.satisfiedSignals === trace.readiness.satisfiedSignals.join(","), `${label} satisfied signals metadata mismatch`);
+  if (trace.readiness.degradedSignals?.length > 0) {
+    expect(metadata.degradedSignals === trace.readiness.degradedSignals.join(","), `${label} degraded signals metadata mismatch`);
+  } else {
+    expect(metadata.degradedSignals === undefined, `${label} unexpected degraded signals metadata`);
+  }
   expect(metadata.missingSignals === trace.readiness.missingSignals.join(","), `${label} missing signals metadata mismatch`);
   expect(metadata.selectedNextActionKind === trace.selectedNextAction.kind, `${label} selected action metadata mismatch`);
   expect(metadata.selectedNextActionRequiresApproval === String(trace.selectedNextAction.requiresApproval), `${label} selected approval metadata mismatch`);

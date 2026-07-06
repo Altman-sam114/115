@@ -33,7 +33,7 @@ Claw 的当前主链路是：用户在 iPhone 输入电脑任务，App 生成可
   -> ClawGatewayCapabilityReviewSummary 从 snapshot metadata 派生能力复核摘要
   -> ClawGatewayAccessibilityReviewSummary 从 accessibilityTree metadata 派生观察复核摘要
   -> ClawGatewayTaskReplayGuardReviewSummary 从 task-replay-guard metadata 派生重复任务复核摘要
-  -> ClawGatewayArtifact.metadata 上的 agentTrace 安全摘要和 handoff 状态
+  -> ClawGatewayArtifact.metadata 上的 agentTrace 安全摘要、证据质量和 handoff 状态
   -> ClawMissionRunSummary 派生任务回合摘要、Live Gateway 连接健康、Operator Strip、Artifact 证据索引、Artifact metadata、文件变更安全、Shell 命令安全、提取完整性、浏览器控制计划、草稿/最终提交安全、Gateway 能力复核摘要、Accessibility 复核摘要、Replay Guard 复核摘要、AgentTrace handoff 复核摘要、复核优先队列、聚焦详情、复核态势摘要和下一步复核行动
   -> SwiftUI Mission Run / iPad 多栏工作台展示 Operator Strip、Artifact 证据索引、复核态势、下一步复核行动、聚焦优先队列、复核、审批、重试或下一轮
 ```
@@ -212,7 +212,7 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 - `runShellCommand`：结构化命令 dry-run 或 allowlist 执行，并在既有 `commandOutput` artifact event 上附 metadata-only Shell 命令安全复核摘要；metadata 只含结构化命令 presence、解析/policy/allowlist/执行/exit code/stdout/stderr presence 和 omission flags，不含 raw command、cwd/path、stdout/stderr 内容或 `toolArguments`。
 - `extractData`：消费同 session artifact 生成结构化数据，并在输出 artifact event metadata 上附完整性状态、row count、来源计数、source kind 和 safety flags；metadata 不含 row 内容、URL/path、命令输出或 `toolArguments`。
 - `operateDesktopApp`：桌面 App 聚焦、粘贴、allowlist 快捷键、最终提交前审批，并在相关 artifact event metadata 上附草稿/最终提交安全摘要；metadata 只含审批/省略/计数/safety flags，不含草稿正文、paste text、按键原文或 `toolArguments`。
-- `runAgentLoop`：基于 session artifacts 生成观察-规划-动作建议-验证 `agentTrace`，并在 artifact 内部记录 readiness、decisionChecklist、selectedNextAction、riskTags、stopReason、handoffStatus 和 handoffSummary，同时把证据分、缺失信号、下一步、风险、停止原因、固定 handoff 状态和 handoff 摘要压缩成 artifact event 上的可选字符串 metadata 供手机端复核。
+- `runAgentLoop`：基于 session artifacts 生成观察-规划-动作建议-验证 `agentTrace`，并在 artifact 内部记录 readiness、decisionChecklist、selectedNextAction、riskTags、stopReason、handoffStatus 和 handoffSummary；v0.31 起，decisionChecklist 区分 `satisfied`、`degraded` 和 `missing`，dry-run、window metadata、network blocked、failed、unavailable 或 not-requested 证据只进入 degradedSignals，不计入 readiness score；Gateway 同时把证据分、满足/降级/缺失信号、下一步、风险、停止原因、固定 handoff 状态和 handoff 摘要压缩成 artifact event 上的可选字符串 metadata 供手机端复核。
 - `composeMessage`/`composeEmail`：生成待确认草稿，并在 `messageDraft` artifact event metadata 上标记最终发送需要用户确认、草稿正文已从 metadata 省略。
 - session-start `auditLog`：`gateway-capability-snapshot.json`，只记录 workspace、session workspace、platform、短 token 指纹、allowedActionKinds、策略 allowlist 和 capability 状态，并把 `snapshotKind`、token 配置/指纹、allowlist、capability state、`accessibilityTreeState`、safety flags 和 platform 压缩成 artifact event metadata；不记录 raw token、Authorization header、自然语言 instruction、`toolArguments`、网页正文、命令输出、截图内容、草稿正文、联系人或完整 workspace path。
 - replay guard `auditLog`：`task-replay-guard.json`，只记录 task id、短 digest、首次 session id、原始状态、replay count、action count/kinds 和安全标志；不记录 raw token、Authorization header、自然语言 instruction、`toolArguments`、业务 artifact payload 或完整 workspace path。该防护只在当前 Gateway 进程生命周期内有效，不是跨重启持久化 exactly-once。
@@ -275,7 +275,7 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 - `ClawGatewayCapabilityReviewSummary`：手机端从 `gateway-capability-snapshot.json` `auditLog` metadata 派生的能力复核摘要，只展示短 token 指纹、allowlist、capability state、`accessibilityTreeState` 和 safety flags，不读取 Gateway `file://` 内容，UI 可见字符串统一走 metadata 脱敏路径。
 - `ClawGatewayAccessibilityReviewSummary`：手机端从 `accessibilityTree` artifact metadata 派生的观察复核摘要，只展示 mode、policy、节点数、候选控件数、platform、redaction 和 safety flags，不读取 Gateway `file://` 内容，UI 可见字符串统一走 metadata 脱敏路径。
 - `ClawGatewayTaskReplayGuardReviewSummary`：手机端从 `task-replay-guard.json` `auditLog` metadata 派生的 Replay Guard 复核摘要，只展示重复次数、跳过动作数、短 digest、首次状态和 safety flags，不读取 Gateway `file://` 内容，不声称跨进程 exactly-once，UI 可见字符串统一走 metadata 脱敏路径。
-- `ClawAgentTraceReviewSummary`：手机端从最近 `agentTrace` artifact metadata 派生的复核摘要和固定 handoff 状态，只展示安全字符串摘要和枚举状态，不读取 Gateway `file://` 内容，UI 可见字符串统一走 metadata 脱敏路径。
+- `ClawAgentTraceReviewSummary`：手机端从最近 `agentTrace` artifact metadata 派生的复核摘要和固定 handoff 状态，只展示安全字符串摘要和枚举状态；v0.31 的 `degradedSignals` 仍是固定 source 枚举 metadata，不读取 Gateway `file://` 内容，UI 可见字符串统一走 metadata 脱敏路径。
 - `ClawMissionRunReviewPriorityItem`：手机端 presentation layer 队列项，只从既有 Mission Run summary、review summary 和 session/action 状态派生，用固定 severity/rank/review kind 排序首屏复核重点，并作为聚焦详情的安全输入；不读取 Gateway `file://` payload，不展示 raw URL/path/command/stdout/stderr/diff/token/header 或 `toolArguments`。
 - `ClawMissionRunReviewReadinessSummary`：手机端 presentation layer 复核态势摘要，只从完整复核优先队列、可用 detail review kind 和聚焦状态派生，展示总优先项、可行动项、高优先项、metadata 缺口、最高优先项和聚焦状态；不读取 Gateway `file://` payload，不展示 raw URL/path/command/stdout/stderr/diff/token/header 或 `toolArguments`，不是自动执行 readiness。
 - `ClawMissionRunNextReviewAction`：手机端 presentation layer 下一步人工复核行动，只从当前有效聚焦项、完整复核优先队列和可用 detail review kind 派生，提示用户下一步聚焦哪类复核或等待 Gateway 证据；不读取 Gateway `file://` payload，不展示 raw URL/path/command/stdout/stderr/diff/token/header 或 `toolArguments`，不是自动执行计划。
@@ -310,7 +310,7 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 - 每个重要 action 都要产生 artifact 或明确失败/跳过原因。
 - 新协议字段必须同步测试和文档。
 - Gateway capability snapshot 只能作为审计复核 artifact，不能新增权限，不能成为执行计划来源，payload 和 metadata 不能包含 raw token、Authorization header、自然语言 instruction、`toolArguments`、网页正文、命令输出、截图内容、草稿正文、联系人或完整 workspace path。
-- `agentTrace` metadata 和 handoffStatus 只能用于手机端复核展示，不能成为执行计划来源，不能放入浏览器正文、命令输出、截图内容、草稿正文、联系人或 token；手机端展示前必须统一脱敏 raw token、Authorization/header、`toolArguments`、`file://` 和完整 workspace path；handoffStatus 只能使用固定枚举，不能从自然语言或 payload 解析。
+- `agentTrace` metadata、degradedSignals 和 handoffStatus 只能用于手机端复核展示，不能成为执行计划来源，不能放入浏览器正文、命令输出、截图内容、草稿正文、联系人或 token；手机端展示前必须统一脱敏 raw token、Authorization/header、`toolArguments`、`file://` 和完整 workspace path；handoffStatus 只能使用固定枚举，不能从自然语言或 payload 解析，degradedSignals 只能使用固定 source 枚举，不能从 payload 文本解析。
 - `extractData` 完整性 metadata 只能用于手机端复核展示，不能成为执行计划来源，不能放入 row 内容、URL/path、命令输出、网页正文、草稿正文、联系人、token 或 `toolArguments`；手机端展示前必须统一脱敏敏感值。
 - File Change Safety metadata 只能用于手机端复核展示，不能成为执行计划来源，不能放入 raw path、workspace/sessionWorkspace、文件名/目录名、文件内容、diff hunk、patch、stdout/stderr、token、Authorization/header、cookie、secret 或 `toolArguments`；metadata 缺失时必须显示“metadata 待同步”，不能假定写入安全。
 - Shell Command Safety metadata 只能用于手机端复核展示，不能成为执行计划来源，不能放入 raw command、binary/args、cwd、workspace/session path、stdout/stderr 内容、token、Authorization/header、cookie、secret、自然语言 instruction 或 `toolArguments`；metadata 缺失时必须显示“metadata 待同步”，不能假定命令安全、已阻断或已执行。

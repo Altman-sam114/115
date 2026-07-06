@@ -2815,6 +2815,7 @@ function agentTraceMetadata(trace) {
     readinessScore: trace.readiness?.score,
     readinessCanContinue: trace.readiness?.canContinue,
     satisfiedSignals: trace.readiness?.satisfiedSignals,
+    degradedSignals: trace.readiness?.degradedSignals,
     missingSignals: trace.readiness?.missingSignals,
     selectedNextActionKind: trace.selectedNextAction?.kind,
     selectedNextActionRequiresApproval: trace.selectedNextAction?.requiresApproval,
@@ -2979,15 +2980,13 @@ function makeAgentSafetyGates(proposedActions, approvalRequiredFor) {
 function makeAgentDecisionChecklist(summary, inputSources) {
   const sources = [...new Set(inputSources.length > 0 ? inputSources : ["browserTrace", "fileDiff", "commandOutput"])];
   return sources.map((source) => {
-    const count = sourceEvidenceCount(summary, source);
-    const status = count > 0 ? "satisfied" : "missing";
+    const quality = sourceEvidenceQuality(summary, source);
     return {
       signal: source,
-      status,
-      count,
-      reason: status === "satisfied"
-        ? `${count} ${source} artifact signal(s) are available for grounded decisions.`
-        : `No ${source} artifact signal is available; gather it before relying on this input.`,
+      status: quality.status,
+      count: quality.count,
+      degradedCount: quality.degradedCount,
+      reason: agentChecklistReason(source, quality),
     };
   });
 }
@@ -2995,6 +2994,9 @@ function makeAgentDecisionChecklist(summary, inputSources) {
 function makeAgentReadiness(decisionChecklist, evidenceRows) {
   const satisfiedSignals = decisionChecklist
     .filter((item) => item.status === "satisfied")
+    .map((item) => item.signal);
+  const degradedSignals = decisionChecklist
+    .filter((item) => item.degradedCount > 0)
     .map((item) => item.signal);
   const missingSignals = decisionChecklist
     .filter((item) => item.status === "missing")
@@ -3005,6 +3007,7 @@ function makeAgentReadiness(decisionChecklist, evidenceRows) {
     score,
     evidenceRowCount: evidenceRows.length,
     satisfiedSignals,
+    degradedSignals,
     missingSignals,
     canContinue: score >= 50 && evidenceRows.length > 0,
   };
@@ -3040,6 +3043,9 @@ function makeAgentRiskTags({
   for (const item of decisionChecklist) {
     if (item.status === "missing") {
       tags.add(`missing-${kebabCase(item.signal)}`);
+    }
+    if (item.degradedCount > 0) {
+      tags.add(`degraded-${kebabCase(item.signal)}`);
     }
   }
   if (safetyGates.length > 0) {
@@ -3119,8 +3125,9 @@ function makeAgentHandoffStatus({ readiness, selectedNextAction, riskTags, stopR
 
 function makeAgentHandoffSummary(readiness, selectedNextAction, stopReason) {
   const satisfied = readiness.satisfiedSignals.length > 0 ? readiness.satisfiedSignals.join(", ") : "none";
+  const degraded = readiness.degradedSignals?.length > 0 ? `; degraded ${readiness.degradedSignals.join(", ")}` : "";
   const missing = readiness.missingSignals.length > 0 ? `; missing ${readiness.missingSignals.join(", ")}` : "";
-  return `Evidence score ${readiness.score}/100 from ${satisfied}${missing}. Selected next action: ${selectedNextAction.kind}. Stop reason: ${stopReason}.`;
+  return `Evidence score ${readiness.score}/100 from ${satisfied}${degraded}${missing}. Selected next action: ${selectedNextAction.kind}. Stop reason: ${stopReason}.`;
 }
 
 function sourceEvidenceCount(summary, source) {
@@ -3142,6 +3149,29 @@ function sourceEvidenceCount(summary, source) {
     default:
       return 0;
   }
+}
+
+function sourceEvidenceQuality(summary, source) {
+  const quality = summary?.signalQualities?.[source];
+  if (quality) {
+    return quality;
+  }
+  const count = sourceEvidenceCount(summary, source);
+  return {
+    status: count > 0 ? "satisfied" : "missing",
+    count,
+    degradedCount: 0,
+  };
+}
+
+function agentChecklistReason(source, quality) {
+  if (quality.status === "satisfied") {
+    return `${quality.count} ${source} artifact signal(s) include actionable evidence for grounded decisions.`;
+  }
+  if (quality.status === "degraded") {
+    return `${quality.count} ${source} artifact signal(s) are present but degraded; gather real evidence before relying on this input.`;
+  }
+  return `No ${source} artifact signal is available; gather it before relying on this input.`;
 }
 
 function kebabCase(value) {
@@ -3241,7 +3271,7 @@ async function writeArtifact(kind, title, payload, redacted, config, metadata = 
     artifact.metadata = metadata;
   }
   config.sessionContext?.artifacts?.push({ ...artifact, payload });
-  rememberArtifact(kind, payload, config.sessionContext);
+  rememberArtifact(kind, payload, config.sessionContext, metadata);
   return artifact;
 }
 
@@ -3258,7 +3288,7 @@ function rememberExistingArtifact(kind, title, filePath, redacted, payload, conf
   return artifact;
 }
 
-function rememberArtifact(kind, payload, context) {
+function rememberArtifact(kind, payload, context, metadata = undefined) {
   if (!context) {
     return;
   }
@@ -3287,7 +3317,15 @@ function rememberArtifact(kind, payload, context) {
       }
       break;
     case "commandOutput":
-      context.commandOutputs.push(String(payload).slice(0, 1200));
+      context.commandOutputs.push({
+        text: String(payload).slice(0, 1200),
+        mode: metadata?.mode || "",
+        structuredCommandPresent: metadata?.structuredCommandPresent || "",
+        commandParsed: metadata?.commandParsed || "",
+        executionAttempted: metadata?.executionAttempted || "",
+        executed: metadata?.executed || "",
+        resultStatus: metadata?.resultStatus || "",
+      });
       break;
     case "messageDraft":
       context.messageDrafts.push(String(payload).slice(0, 1200));
@@ -3303,15 +3341,75 @@ function rememberArtifact(kind, payload, context) {
 }
 
 function summarizeArtifactContext(context) {
+  const browserTraces = context?.browserTraces || [];
+  const screenObservations = context?.screenObservations || [];
+  const accessibilityTrees = context?.accessibilityTrees || [];
+  const fileDiffs = context?.fileDiffs || [];
+  const commandOutputs = context?.commandOutputs || [];
+  const messageDrafts = context?.messageDrafts || [];
+  const agentTraces = context?.agentTraces || [];
   return {
-    browserTraceCount: context?.browserTraces?.length || 0,
-    screenObservationCount: context?.screenObservations?.length || 0,
-    accessibilityTreeCount: context?.accessibilityTrees?.length || 0,
-    fileDiffCount: context?.fileDiffs?.length || 0,
-    commandOutputCount: context?.commandOutputs?.length || 0,
-    messageDraftCount: context?.messageDrafts?.length || 0,
-    agentTraceCount: context?.agentTraces?.length || 0,
+    browserTraceCount: browserTraces.length,
+    screenObservationCount: screenObservations.length,
+    accessibilityTreeCount: accessibilityTrees.length,
+    fileDiffCount: fileDiffs.length,
+    commandOutputCount: commandOutputs.length,
+    messageDraftCount: messageDrafts.length,
+    agentTraceCount: agentTraces.length,
+    signalQualities: {
+      browserTrace: summarizeSignalQuality("browserTrace", browserTraces),
+      screenObservation: summarizeSignalQuality("screenObservation", screenObservations),
+      accessibilityTree: summarizeSignalQuality("accessibilityTree", accessibilityTrees),
+      fileDiff: summarizeSignalQuality("fileDiff", fileDiffs),
+      commandOutput: summarizeSignalQuality("commandOutput", commandOutputs),
+      messageDraft: summarizeSignalQuality("messageDraft", messageDrafts),
+      agentTrace: summarizeSignalQuality("agentTrace", agentTraces),
+    },
   };
+}
+
+function summarizeSignalQuality(source, payloads) {
+  const items = Array.isArray(payloads) ? payloads : [];
+  if (items.length === 0) {
+    return {
+      status: "missing",
+      count: 0,
+      degradedCount: 0,
+    };
+  }
+  const satisfiedCount = items.filter((payload) => isSatisfiedEvidence(source, payload)).length;
+  const degradedCount = Math.max(0, items.length - satisfiedCount);
+  return {
+    status: satisfiedCount > 0 ? "satisfied" : "degraded",
+    count: items.length,
+    degradedCount,
+  };
+}
+
+function isSatisfiedEvidence(source, payload) {
+  const mode = typeof payload === "object" && payload ? String(payload.mode || "") : "";
+  switch (source) {
+    case "screenObservation":
+      return mode === "screen-capture";
+    case "accessibilityTree":
+      return mode === "accessibility-summary";
+    case "browserTrace":
+      return mode === "local-html" || mode === "network-fetch";
+    case "fileDiff":
+      return mode === "workspace-write";
+    case "commandOutput":
+      return mode === "shell-executed" || (
+        mode === "shell-policy-blocked" &&
+        payload?.structuredCommandPresent === "true" &&
+        payload?.commandParsed === "true"
+      );
+    case "messageDraft":
+      return true;
+    case "agentTrace":
+      return mode === "agent-loop-trace";
+    default:
+      return Boolean(payload);
+  }
 }
 
 function buildExtractionRows(context, sourcePriority, action) {
@@ -3395,8 +3493,8 @@ function commandOutputRows(outputs) {
   return outputs.map((output, index) => ({
     title: `Command output ${index + 1}`,
     source: "commandOutput",
-    summary: normalizeText(output).slice(0, 500),
-    confidence: output.includes("exitCode=0") ? 0.8 : 0.55,
+    summary: normalizeText(typeof output === "object" && output ? output.text : output).slice(0, 500),
+    confidence: String(typeof output === "object" && output ? output.text : output).includes("exitCode=0") ? 0.8 : 0.55,
   }));
 }
 

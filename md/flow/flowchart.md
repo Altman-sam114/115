@@ -36,7 +36,7 @@ flowchart TD
   ART --> SHMETA["shell command safety metadata<br/>结构化命令、policy、allowlist、执行状态、省略标志"]
   ART --> EXMETA["extractData metadata<br/>完整性状态、row count、来源计数、安全标志"]
   ART --> DLMETA["delivery safety metadata<br/>最终提交闸门、用户确认、省略状态、按键计数"]
-  ART --> META["agentTrace artifact metadata<br/>证据分、缺口、下一步、风险、停止原因、handoff 状态、统一脱敏"]
+  ART --> META["agentTrace artifact metadata<br/>证据分、满足/降级/缺失信号、下一步、风险、停止原因、handoff 状态、统一脱敏"]
   H --> EVT["ClawGatewayEvent<br/>actionStarted、artifactStored、completed、failed、approvalRequested"]
   SNAP --> EVT
   SIM --> EVT
@@ -89,7 +89,7 @@ flowchart TD
   KIND --> SH["runShellCommand<br/>结构化命令 dry-run 或 allowlist 执行、Shell Command Safety metadata"]
   KIND --> EXT["extractData<br/>消费已有 artifact 生成结构化数据和完整性 metadata"]
   KIND --> APP["operateDesktopApp<br/>app/key allowlist、最终提交前停止、delivery metadata"]
-  KIND --> AG["runAgentLoop<br/>基于 session artifacts 生成 readiness、checklist、下一步、风险、停止原因和 handoff 状态"]
+  KIND --> AG["runAgentLoop<br/>基于 session artifacts 生成证据质量、readiness、checklist、下一步、风险、停止原因和 handoff 状态"]
   KIND --> MSG["composeMessage/composeEmail<br/>生成待确认草稿、delivery metadata"]
   OBS --> CTX["sessionContext<br/>累计 screen、browser、file、shell、message、agent trace"]
   BRO --> CTX
