@@ -62,7 +62,7 @@
 - `ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci-results.yml"); puts "yaml ok"'` 通过，输出 `yaml ok`。
 - `node --check Tools/claw-gateway-server.mjs`、`node --check Tools/claw-gateway-direct-smoke.mjs`、`node --check Tools/claw-gateway-smoke.mjs` 通过。
 - `node Tools/claw-gateway-direct-smoke.mjs` 通过，输出 `Claw Gateway direct smoke passed (219 events)`。
-- 待 push `origin/main` 后由 GitHub Actions 覆盖 xcodebuild、Swift logic smoke、Gateway direct/WebSocket smoke 和结果包验收。
+- GitHub Actions run `28777405447` attempt `1` 对 commit `01ad990eb3a9cc504ec5f6c5641631eecf0b1fec` 通过，artifact `claw-ci-v0.2-main-01ad990eb3a9-run28777405447-attempt1` 已下载到 `/private/tmp/claw-c-review-28777405447/` 并核对 manifest、JUnit、failure summary、Swift logic smoke、Gateway direct/WebSocket smoke、node/plutil/git diff check 和 xcodebuild 日志。
 
 遗留事项：
 
