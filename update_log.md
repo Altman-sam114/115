@@ -58,7 +58,8 @@
 - `git diff --check` 通过。
 - `ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci-results.yml"); puts "yaml ok"'` 通过，输出 `yaml ok`。
 - `node --check Tools/claw-gateway-server.mjs`、`node --check Tools/claw-gateway-direct-smoke.mjs`、`node --check Tools/claw-gateway-smoke.mjs` 通过。
-- GitHub Actions 结果包复判待本轮 push 后补齐。
+- GitHub Actions run `28770520084` attempt `1` 对首个实现 commit `adcdbbd0d8544f98241a37171af202a773cad0d1` 通过；reviewer 随后指出 detail-only fallback 聚焦边界，已追加修复。
+- GitHub Actions run `28770668477` attempt `1` 对修复 commit `b4950c5db224796e1b7194afa84fda4a48eaa8f4` 通过，artifact `claw-ci-v0.2-main-b4950c5db224-run28770668477-attempt1` 已下载到 `/private/tmp/claw-c-review-28770668477/` 并核对 manifest、JUnit、failure summary、Swift/Gateway smoke、node/plutil/git diff check 和 xcodebuild 日志。
 
 遗留事项：
 
