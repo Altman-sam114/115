@@ -640,6 +640,7 @@ struct ClawMissionRunPanel: View {
         let loopContinuation = summary.loopContinuationSummary(focusedOn: activeFocusedReviewKind)
         let macAgentReadiness = summary.macAgentReadinessBoard(focusedOn: activeFocusedReviewKind)
         let actionPreflightMatrix = summary.macGatewayActionPreflightMatrix(focusedOn: activeFocusedReviewKind)
+        let evidenceCoverageMap = summary.macAgentEvidenceCoverageMap(focusedOn: activeFocusedReviewKind)
         let focusContext = summary.focusContextSummary(focusedOn: focusedReviewKind)
         let evidenceTrail = summary.evidenceTrailSummary(focusedOn: activeFocusedReviewKind)
         let approvalQueue = summary.approvalQueueSummary(focusedOn: activeFocusedReviewKind)
@@ -709,6 +710,11 @@ struct ClawMissionRunPanel: View {
 
             ClawMissionMacGatewayActionPreflightMatrixView(
                 matrix: actionPreflightMatrix,
+                onFocusReviewKind: focusReviewKind
+            )
+
+            ClawMissionMacAgentEvidenceCoverageMapView(
+                map: evidenceCoverageMap,
                 onFocusReviewKind: focusReviewKind
             )
 
@@ -860,6 +866,7 @@ struct ClawMissionReviewDetailDockView: View {
         let evidenceTrail = summary.evidenceTrailSummary(focusedOn: activeFocusedReviewKind)
         let macAgentReadiness = summary.macAgentReadinessBoard(focusedOn: activeFocusedReviewKind)
         let actionPreflightMatrix = summary.macGatewayActionPreflightMatrix(focusedOn: activeFocusedReviewKind)
+        let evidenceCoverageMap = summary.macAgentEvidenceCoverageMap(focusedOn: activeFocusedReviewKind)
         let approvalQueue = summary.approvalQueueSummary(focusedOn: activeFocusedReviewKind)
         let payloadSafetyLedger = summary.payloadSafetyLedger(focusedOn: activeFocusedReviewKind)
 
@@ -911,6 +918,11 @@ struct ClawMissionReviewDetailDockView: View {
 
                 ClawMissionMacGatewayActionPreflightMatrixView(
                     matrix: actionPreflightMatrix,
+                    onFocusReviewKind: focusReviewKind
+                )
+
+                ClawMissionMacAgentEvidenceCoverageMapView(
+                    map: evidenceCoverageMap,
                     onFocusReviewKind: focusReviewKind
                 )
 
@@ -2435,6 +2447,183 @@ struct ClawMissionMacGatewayActionPreflightItemRow: View {
 
     private var accessibilitySummary: String {
         "\(item.title)，\(item.actionKindTitle)，\(item.status)，\(item.guidance)"
+    }
+
+    private var tint: Color {
+        switch item.tone {
+        case .neutral:
+            return .secondary
+        case .info:
+            return .blue
+        case .success:
+            return .green
+        case .warning:
+            return .orange
+        case .danger:
+            return .red
+        }
+    }
+}
+
+struct ClawMissionMacAgentEvidenceCoverageMapView: View {
+    let map: ClawMissionRunEvidenceCoverageMap
+    let onFocusReviewKind: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Label(map.title, systemImage: map.icon)
+                    .font(.subheadline.bold())
+                    .foregroundStyle(tint)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Spacer(minLength: 0)
+
+                if let focusedReviewTitle = map.focusedReviewTitle {
+                    PhoneAgentTag(text: focusedReviewTitle, icon: "scope", tint: tint)
+                }
+            }
+
+            Text(map.status)
+                .font(.footnote.bold())
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(map.guidance)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 8) {
+                Label("\(map.actionSupportedCount) action", systemImage: "slider.horizontal.3")
+                Label("\(map.evidenceCoveredCount) 证据", systemImage: "paperclip")
+                Label("\(map.metadataReadyCount) metadata", systemImage: "doc.badge.gearshape")
+                Label("\(map.payloadProtectedCount) payload", systemImage: "lock.doc")
+            }
+            .font(.caption.bold())
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+            if map.items.isEmpty == false {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(Array(map.items.prefix(6))) { item in
+                        ClawMissionMacAgentEvidenceCoverageItemRow(
+                            item: item,
+                            onFocusReviewKind: onFocusReviewKind
+                        )
+                    }
+                }
+            }
+        }
+        .padding(10)
+        .background(tint.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(tint.opacity(0.16), lineWidth: 1)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(accessibilitySummary)
+    }
+
+    private var accessibilitySummary: String {
+        "Evidence Coverage，\(map.status)，\(map.evidenceCoveredCount) 类证据，\(map.metadataPendingCount) 项 metadata 待同步"
+    }
+
+    private var tint: Color {
+        if map.isReviewable == false {
+            return .secondary
+        }
+        if map.requiresHumanAction {
+            return .orange
+        }
+        if map.hasMetadataGap {
+            return .blue
+        }
+        if map.evidenceCoveredCount == map.totalCount {
+            return .green
+        }
+        return .purple
+    }
+}
+
+struct ClawMissionMacAgentEvidenceCoverageItemRow: View {
+    let item: ClawMissionRunEvidenceCoverageItem
+    let onFocusReviewKind: (String) -> Void
+
+    var body: some View {
+        Group {
+            if item.canFocusReview {
+                Button {
+                    onFocusReviewKind(item.reviewKind)
+                } label: {
+                    rowContent
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("聚焦对应复核项，不打开 artifact payload、不执行 Gateway 动作、不审批、不发送")
+                .accessibilityInputLabels(accessibilityInputLabels)
+            } else {
+                rowContent
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(accessibilitySummary)
+    }
+
+    private var rowContent: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: item.isFocused ? "scope" : item.icon)
+                .font(.caption.bold())
+                .frame(width: 28, height: 28)
+                .background(tint.opacity(item.isFocused ? 0.22 : 0.12), in: Circle())
+                .foregroundStyle(tint)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(item.reviewTitle)
+                    .font(.footnote.bold())
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(item.status)
+                    .font(.caption.bold())
+                    .foregroundStyle(tint)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(item.guidance)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 6) {
+                    PhoneAgentTag(text: "\(item.actionCount) action", icon: "slider.horizontal.3", tint: item.hasActionSupport ? .blue : .secondary)
+                    PhoneAgentTag(text: item.hasEvidence ? "证据" : "待证据", icon: "paperclip", tint: item.hasEvidence ? .green : .secondary)
+                    PhoneAgentTag(text: item.hasMetadata ? "metadata" : "待 metadata", icon: "doc.badge.clock", tint: item.hasMetadata ? .green : .orange)
+                    if item.payloadProtected {
+                        PhoneAgentTag(text: "payload 受控", icon: "lock.doc", tint: .green)
+                    }
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .padding(.vertical, 4)
+        .padding(.horizontal, 6)
+        .background(tint.opacity(item.isFocused ? 0.08 : 0), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            if item.isFocused {
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(tint.opacity(0.45), lineWidth: 1)
+            }
+        }
+    }
+
+    private var accessibilityInputLabels: [String] {
+        ["聚焦\(item.reviewTitle)", "证据覆盖\(item.reviewTitle)"]
+    }
+
+    private var accessibilitySummary: String {
+        "\(item.reviewTitle)，\(item.status)，\(item.guidance)"
     }
 
     private var tint: Color {

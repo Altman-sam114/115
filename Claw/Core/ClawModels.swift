@@ -1525,6 +1525,48 @@ struct ClawMissionRunActionPreflightMatrix: Equatable, Codable, Sendable {
     var items: [ClawMissionRunActionPreflightItem]
 }
 
+struct ClawMissionRunEvidenceCoverageItem: Identifiable, Equatable, Codable, Sendable {
+    var id: String { reviewKind }
+    var reviewKind: String
+    var reviewTitle: String
+    var status: String
+    var guidance: String
+    var icon: String
+    var tone: ClawMissionRunOperatorLaneTone
+    var actionCount: Int
+    var hasActionSupport: Bool
+    var hasEvidence: Bool
+    var hasMetadata: Bool
+    var payloadProtected: Bool
+    var requiresHumanAction: Bool
+    var hasMetadataGap: Bool
+    var canFocusReview: Bool
+    var isFocused: Bool
+}
+
+struct ClawMissionRunEvidenceCoverageMap: Equatable, Codable, Sendable {
+    var title: String
+    var status: String
+    var guidance: String
+    var icon: String
+    var totalCount: Int
+    var actionSupportedCount: Int
+    var evidenceCoveredCount: Int
+    var metadataReadyCount: Int
+    var payloadProtectedCount: Int
+    var humanActionCount: Int
+    var metadataPendingCount: Int
+    var focusedReviewKind: String?
+    var focusedReviewTitle: String?
+    var primaryReviewKind: String?
+    var primaryReviewTitle: String?
+    var canFocusPrimaryReview: Bool
+    var requiresHumanAction: Bool
+    var hasMetadataGap: Bool
+    var isReviewable: Bool
+    var items: [ClawMissionRunEvidenceCoverageItem]
+}
+
 struct ClawMissionRunReviewReadinessSummary: Equatable, Codable, Sendable {
     var title: String
     var status: String
@@ -3442,6 +3484,263 @@ extension ClawMissionRunSummary {
             isReviewable: isReviewable,
             items: items
         )
+    }
+
+    var macAgentEvidenceCoverageMap: ClawMissionRunEvidenceCoverageMap {
+        macAgentEvidenceCoverageMap(focusedOn: nil)
+    }
+
+    func macAgentEvidenceCoverageMap(focusedOn reviewKind: String?) -> ClawMissionRunEvidenceCoverageMap {
+        let focusedKind = activeReviewFocus(from: reviewKind)
+        let evidenceIndex = artifactEvidenceIndex(focusedOn: focusedKind)
+        let payloadLedger = payloadSafetyLedger(focusedOn: focusedKind)
+        let actionPreflight = macGatewayActionPreflightMatrix(focusedOn: focusedKind)
+        let reviewKinds = evidenceCoverageReviewKinds(
+            evidenceIndex: evidenceIndex,
+            actionPreflight: actionPreflight
+        )
+        let items = reviewKinds.map { kind in
+            evidenceCoverageItem(
+                for: kind,
+                focusedOn: focusedKind,
+                evidenceIndex: evidenceIndex,
+                payloadLedger: payloadLedger,
+                actionPreflight: actionPreflight
+            )
+        }
+        let actionSupportedCount = items.filter(\.hasActionSupport).count
+        let evidenceCoveredCount = items.filter(\.hasEvidence).count
+        let metadataReadyCount = items.filter(\.hasMetadata).count
+        let payloadProtectedCount = items.filter(\.payloadProtected).count
+        let humanActionCount = items.filter(\.requiresHumanAction).count
+        let metadataPendingCount = items.filter(\.hasMetadataGap).count
+        let focusedItem = focusedKind.flatMap { kind in
+            items.first { $0.reviewKind == kind }
+        }
+        let primaryItem = focusedItem ??
+            items.first(where: \.requiresHumanAction) ??
+            items.first(where: \.hasMetadataGap) ??
+            items.first(where: { $0.hasEvidence == false }) ??
+            items.first
+        let isReviewable = items.isEmpty == false
+        let readiness = reviewReadinessSummary(focusedOn: focusedKind)
+        let requiresHumanAction = humanActionCount > 0 || readiness.requiresHumanAction
+        let hasMetadataGap = metadataPendingCount > 0
+
+        let title: String
+        let status: String
+        let guidance: String
+        let icon: String
+        if isReviewable == false {
+            title = "Evidence Coverage 待生成"
+            status = "尚无 action 或 Gateway 证据"
+            guidance = "生成任务后会按复核域汇总 action、artifact、metadata 和 payload 边界。"
+            icon = "rectangle.stack.badge.play"
+        } else if let focusedItem {
+            title = "聚焦 Evidence Coverage"
+            status = focusedItem.reviewTitle
+            guidance = "\(focusedItem.reviewTitle)：\(focusedItem.guidance)"
+            icon = focusedItem.icon
+        } else if requiresHumanAction {
+            title = "Evidence Coverage 需人工复核"
+            status = "\(humanActionCount) 项需人工 · \(evidenceCoveredCount)/\(items.count) 类有证据"
+            guidance = primaryItem.map { "先看 \($0.reviewTitle)：\($0.guidance)" } ?? "先处理需要人工复核的证据域。"
+            icon = "person.crop.circle.badge.exclamationmark.fill"
+        } else if hasMetadataGap {
+            title = "Evidence Coverage metadata 待同步"
+            status = "\(metadataPendingCount) 项 metadata 待同步"
+            guidance = primaryItem.map { "等待 \($0.reviewTitle) metadata 后再判断覆盖。" } ?? "等待 Gateway metadata 后再判断覆盖。"
+            icon = "doc.badge.clock"
+        } else if evidenceCoveredCount == items.count {
+            title = "Evidence Coverage 已覆盖"
+            status = "\(evidenceCoveredCount)/\(items.count) 类证据可复核"
+            guidance = "证据覆盖图只汇总安全 metadata，不打开 artifact payload。"
+            icon = "checkmark.seal.fill"
+        } else {
+            title = "Evidence Coverage 可抽查"
+            status = "\(evidenceCoveredCount)/\(items.count) 类证据可复核"
+            guidance = primaryItem.map { "抽查 \($0.reviewTitle)：\($0.guidance)" } ?? "抽查缺少证据的复核域。"
+            icon = "rectangle.stack.badge.play"
+        }
+
+        return ClawMissionRunEvidenceCoverageMap(
+            title: title,
+            status: status,
+            guidance: guidance,
+            icon: icon,
+            totalCount: items.count,
+            actionSupportedCount: actionSupportedCount,
+            evidenceCoveredCount: evidenceCoveredCount,
+            metadataReadyCount: metadataReadyCount,
+            payloadProtectedCount: payloadProtectedCount,
+            humanActionCount: humanActionCount,
+            metadataPendingCount: metadataPendingCount,
+            focusedReviewKind: focusedItem?.reviewKind,
+            focusedReviewTitle: focusedItem?.reviewTitle,
+            primaryReviewKind: primaryItem?.reviewKind,
+            primaryReviewTitle: primaryItem?.reviewTitle,
+            canFocusPrimaryReview: primaryItem?.canFocusReview ?? false,
+            requiresHumanAction: requiresHumanAction,
+            hasMetadataGap: hasMetadataGap,
+            isReviewable: isReviewable,
+            items: items
+        )
+    }
+
+    private func evidenceCoverageReviewKinds(
+        evidenceIndex: ClawMissionRunArtifactEvidenceIndex,
+        actionPreflight: ClawMissionRunActionPreflightMatrix
+    ) -> [String] {
+        var seen: Set<String> = []
+        var kinds: [String] = []
+
+        func append(_ kind: String?) {
+            guard let kind, seen.insert(kind).inserted else {
+                return
+            }
+            kinds.append(kind)
+        }
+
+        for item in actionPreflight.items {
+            append(item.reviewKind)
+        }
+        for item in evidenceIndex.items {
+            append(item.reviewKind)
+        }
+        for item in reviewPriorityQueue {
+            append(item.reviewKind)
+        }
+
+        return kinds
+    }
+
+    private func evidenceCoverageItem(
+        for reviewKind: String,
+        focusedOn focusedKind: String?,
+        evidenceIndex: ClawMissionRunArtifactEvidenceIndex,
+        payloadLedger: ClawMissionRunPayloadSafetyLedgerSummary,
+        actionPreflight: ClawMissionRunActionPreflightMatrix
+    ) -> ClawMissionRunEvidenceCoverageItem {
+        let actions = actionPreflight.items.filter { $0.reviewKind == reviewKind }
+        let evidenceItem = evidenceIndex.items.first { $0.reviewKind == reviewKind }
+        let payloadItem = payloadLedger.items.first { $0.reviewKind == reviewKind }
+        let priorityItems = reviewPriorityQueue.filter { $0.reviewKind == reviewKind }
+
+        let hasActionSupport = actions.isEmpty == false
+        let hasEvidence = evidenceItem?.hasEvidence ?? false
+        let hasMetadata = evidenceItem?.metadataReady == true ||
+            payloadItem?.hasMetadata == true ||
+            priorityItems.contains(where: \.hasMetadata) ||
+            actions.contains(where: \.hasMetadata)
+        let payloadProtected = payloadItem.map { item in
+            item.payloadNotRead || item.metadataOnly || item.omissionSignalCount > 0
+        } ?? false
+        let requiresHumanAction = actions.contains(where: \.requiresHumanAction) ||
+            priorityItems.contains { item in
+                item.isActionable || item.severity == .critical || item.severity == .high
+            }
+        let hasMetadataGap = hasMetadata == false &&
+            (hasEvidence || hasActionSupport || priorityItems.isEmpty == false)
+        let title = evidenceCoverageTitle(
+            for: reviewKind,
+            evidenceItem: evidenceItem,
+            payloadItem: payloadItem,
+            actionItems: actions
+        )
+        let icon = evidenceCoverageIcon(
+            for: reviewKind,
+            evidenceItem: evidenceItem,
+            actionItems: actions
+        )
+        let tone: ClawMissionRunOperatorLaneTone
+        let status: String
+        let guidance: String
+
+        if requiresHumanAction {
+            tone = .warning
+            status = "人工复核"
+            guidance = hasEvidence ? "已有证据支撑，仍需人工确认该复核域。" : "已有 action 或状态项，但 Gateway 证据仍待同步。"
+        } else if hasMetadataGap {
+            tone = .info
+            status = "metadata 待同步"
+            guidance = hasActionSupport ? "action 已出现，等待 Gateway metadata 后再判断覆盖。" : "等待 metadata 后再判断该复核域。"
+        } else if hasEvidence && payloadProtected {
+            tone = .success
+            status = "证据覆盖 · payload 受控"
+            guidance = "artifact 和 metadata 已可复核，payload 边界由安全 flag 汇总。"
+        } else if hasEvidence {
+            tone = .success
+            status = "证据覆盖"
+            guidance = "已有 artifact 或安全 metadata 可支撑该复核域。"
+        } else if hasActionSupport {
+            tone = .info
+            status = "等待 Gateway 证据"
+            guidance = "action 已预检，发送或执行后等待对应 artifact/metadata。"
+        } else {
+            tone = .neutral
+            status = "证据待同步"
+            guidance = "尚未看到 action、artifact 或 metadata 支撑。"
+        }
+
+        return ClawMissionRunEvidenceCoverageItem(
+            reviewKind: reviewKind,
+            reviewTitle: title,
+            status: status,
+            guidance: guidance,
+            icon: icon,
+            tone: tone,
+            actionCount: actions.count,
+            hasActionSupport: hasActionSupport,
+            hasEvidence: hasEvidence,
+            hasMetadata: hasMetadata,
+            payloadProtected: payloadProtected,
+            requiresHumanAction: requiresHumanAction,
+            hasMetadataGap: hasMetadataGap,
+            canFocusReview: focusUsesDetailReview(reviewKind) ||
+                reviewPriorityQueue.contains { $0.reviewKind == reviewKind } ||
+                actionPreflight.items.contains { $0.reviewKind == reviewKind && $0.canFocusReview },
+            isFocused: reviewKind == focusedKind
+        )
+    }
+
+    private func evidenceCoverageTitle(
+        for reviewKind: String,
+        evidenceItem: ClawMissionRunArtifactEvidenceItem?,
+        payloadItem: ClawMissionRunPayloadSafetyLedgerItem?,
+        actionItems: [ClawMissionRunActionPreflightItem]
+    ) -> String {
+        if let reviewTitle = evidenceItem?.reviewTitle ?? payloadItem?.reviewTitle ?? actionItems.first?.reviewTitle {
+            return reviewTitle
+        }
+        if let priorityTitle = reviewPriorityQueue.first(where: { $0.reviewKind == reviewKind })?.title {
+            return priorityTitle
+        }
+        switch reviewKind {
+        case "approval":
+            return "手机审批"
+        case "gateway-status":
+            return "Gateway 状态"
+        default:
+            return Self.title(forDetailReviewKind: reviewKind)
+        }
+    }
+
+    private func evidenceCoverageIcon(
+        for reviewKind: String,
+        evidenceItem: ClawMissionRunArtifactEvidenceItem?,
+        actionItems: [ClawMissionRunActionPreflightItem]
+    ) -> String {
+        if let icon = evidenceItem?.icon ?? actionItems.first?.icon {
+            return icon
+        }
+        switch reviewKind {
+        case "approval":
+            return "checkmark.seal.fill"
+        case "gateway-status":
+            return "server.rack"
+        default:
+            return Self.icon(forDetailReviewKind: reviewKind)
+        }
     }
 
     func macAgentReadinessBoard(focusedOn reviewKind: String?) -> ClawMissionRunMacAgentReadinessBoard {

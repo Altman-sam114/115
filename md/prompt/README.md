@@ -38,7 +38,7 @@
 
 - Agent X 接收人工总目标 X 后，可以把总目标拆成多个小轮次，并要求 Agent A 为每轮生成独立版本化提示词。
 - Agent X 不直接把粗略总目标交给 Agent B 实现；每轮都必须先经过 Agent A 明确目标、非目标、边界、风险、测试和验收。
-- 每轮提示词必须包含本轮目标、非目标、验证命令、GitHub Actions 要求、CI artifact 内容、Agent C 下载和复判要求。
+- 每轮提示词必须包含本轮目标、非目标、非编译静态检查、GitHub Actions 要求、CI artifact 内容、Agent C 下载和复判要求。
 - Agent X 根据 Agent C 结论决定继续、退回、暂停或完成；如果 Agent C 未下载并核对最新结果包，本轮提示词不得被标记为验收完成。
 - Agent X 发起的连续轮次可以放在同一阶段目录下，文件名应体现轮次版本和任务名，例如 `v0.5（引入AgentX循环迭代）.md`。
 
@@ -47,7 +47,7 @@
 Agent A 写提示词时必须默认采用 main 直推和云端结果包验收流程：
 
 - Agent B 每轮开始前同步最新 `origin/main`，确认当前分支是 `main`，确认工作区无无关改动。
-- Agent B 本地只跑与改动匹配的轻量检查；只有人工明确要求时才默认跑本机完整 build。
+- Agent B 本地只做必要的非编译静态检查；从 2026-07-07 起，默认禁止本地编译、本地 build、本地 xcodebuild、本地 Swift logic smoke、本地 Gateway smoke 和本地 `node --check`，这些全部交给 GitHub Actions。
 - Agent B 完成后提交本轮相关文件并 `git push origin main`，触发 GitHub Actions。
 - Agent C 只验收 `origin/main` 最新 commit 对应的 workflow run 和未加密 CI 结果包。
 - Agent C 必须通过 `gh auth login` 后下载结果包到 `/private/tmp/claw-c-review-<run_id>/`。

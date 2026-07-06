@@ -632,6 +632,13 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(idleActionPreflight.blockedCount, 0)
         XCTAssertEqual(idleActionPreflight.humanActionCount, 0)
         XCTAssertNil(idleActionPreflight.primaryReviewKind)
+        let idleEvidenceCoverage = idleStore.missionRunSummary.macAgentEvidenceCoverageMap
+        XCTAssertFalse(idleEvidenceCoverage.isReviewable)
+        XCTAssertEqual(idleEvidenceCoverage.totalCount, 0)
+        XCTAssertEqual(idleEvidenceCoverage.actionSupportedCount, 0)
+        XCTAssertEqual(idleEvidenceCoverage.evidenceCoveredCount, 0)
+        XCTAssertEqual(idleEvidenceCoverage.metadataPendingCount, 0)
+        XCTAssertNil(idleEvidenceCoverage.primaryReviewKind)
         XCTAssertNil(idleStore.missionRunSummary.activeReviewFocus(from: "delivery-safety"))
 
         let store = ClawStore(autoScanLocalArtifacts: false)
@@ -662,6 +669,14 @@ final class ClawTests: XCTestCase {
         let focusedPreSendActionPreflight = preSendSummary.macGatewayActionPreflightMatrix(focusedOn: "approval")
         XCTAssertEqual(focusedPreSendActionPreflight.focusedReviewKind, "approval")
         XCTAssertTrue(focusedPreSendActionPreflight.items.contains { $0.reviewKind == "approval" && $0.isFocused })
+        let preSendEvidenceCoverage = preSendSummary.macAgentEvidenceCoverageMap
+        XCTAssertTrue(preSendEvidenceCoverage.isReviewable)
+        XCTAssertGreaterThan(preSendEvidenceCoverage.actionSupportedCount, 0)
+        XCTAssertTrue(preSendEvidenceCoverage.requiresHumanAction)
+        XCTAssertTrue(preSendEvidenceCoverage.items.contains { $0.reviewKind == "approval" && $0.hasActionSupport && $0.requiresHumanAction })
+        let focusedPreSendEvidenceCoverage = preSendSummary.macAgentEvidenceCoverageMap(focusedOn: "approval")
+        XCTAssertEqual(focusedPreSendEvidenceCoverage.focusedReviewKind, "approval")
+        XCTAssertTrue(focusedPreSendEvidenceCoverage.items.contains { $0.reviewKind == "approval" && $0.isFocused })
 
         store.approveAndContinueAutonomousLoop()
 
@@ -731,6 +746,21 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(focusedActionPreflight.focusedReviewKind, "delivery-safety")
         XCTAssertEqual(focusedActionPreflight.focusedReviewTitle, "最终提交安全")
         XCTAssertTrue(focusedActionPreflight.items.contains { $0.reviewKind == "delivery-safety" && $0.isFocused })
+        let evidenceCoverage = summary.macAgentEvidenceCoverageMap
+        XCTAssertTrue(evidenceCoverage.isReviewable)
+        XCTAssertGreaterThanOrEqual(evidenceCoverage.totalCount, availableDetailKinds.count)
+        XCTAssertGreaterThan(evidenceCoverage.actionSupportedCount, 0)
+        XCTAssertEqual(evidenceCoverage.evidenceCoveredCount, evidenceCoverage.items.filter(\.hasEvidence).count)
+        XCTAssertEqual(evidenceCoverage.metadataReadyCount, evidenceCoverage.items.filter(\.hasMetadata).count)
+        XCTAssertEqual(evidenceCoverage.payloadProtectedCount, evidenceCoverage.items.filter(\.payloadProtected).count)
+        XCTAssertTrue(evidenceCoverage.requiresHumanAction)
+        XCTAssertNotNil(evidenceCoverage.primaryReviewKind)
+        XCTAssertTrue(evidenceCoverage.items.contains { $0.reviewKind == "browser-control" && $0.hasActionSupport && $0.hasEvidence })
+        XCTAssertTrue(evidenceCoverage.items.contains { $0.reviewKind == "delivery-safety" && $0.hasEvidence && $0.payloadProtected })
+        let focusedEvidenceCoverage = summary.macAgentEvidenceCoverageMap(focusedOn: "delivery-safety")
+        XCTAssertEqual(focusedEvidenceCoverage.focusedReviewKind, "delivery-safety")
+        XCTAssertEqual(focusedEvidenceCoverage.focusedReviewTitle, "最终提交安全")
+        XCTAssertTrue(focusedEvidenceCoverage.items.contains { $0.reviewKind == "delivery-safety" && $0.isFocused })
         let operatorStrip = summary.operatorStrip
         XCTAssertEqual(operatorStrip.lanes.map(\.id), ["gateway", "evidence", "review", "next"])
         XCTAssertEqual(operatorStrip.title, "Mission Operator")
@@ -886,6 +916,10 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(statusActionPreflight.focusedReviewKind, statusOnlyItem.reviewKind)
         XCTAssertEqual(statusActionPreflight.focusedReviewTitle, statusOnlyItem.title)
         XCTAssertTrue(statusActionPreflight.items.contains { $0.reviewKind == statusOnlyItem.reviewKind && $0.isFocused })
+        let statusEvidenceCoverage = statusOnlySummary.macAgentEvidenceCoverageMap(focusedOn: statusOnlyItem.reviewKind)
+        XCTAssertEqual(statusEvidenceCoverage.focusedReviewKind, statusOnlyItem.reviewKind)
+        XCTAssertEqual(statusEvidenceCoverage.focusedReviewTitle, statusOnlyItem.title)
+        XCTAssertTrue(statusEvidenceCoverage.items.contains { $0.reviewKind == statusOnlyItem.reviewKind && $0.isFocused })
         let staleFocusContext = statusOnlySummary.focusContextSummary(focusedOn: "unknown-review-kind")
         XCTAssertNil(staleFocusContext.focusedReviewKind)
         XCTAssertTrue(staleFocusContext.canClearFocus)
@@ -908,6 +942,9 @@ final class ClawTests: XCTestCase {
         let staleActionPreflight = statusOnlySummary.macGatewayActionPreflightMatrix(focusedOn: "unknown-review-kind")
         XCTAssertNil(staleActionPreflight.focusedReviewKind)
         XCTAssertEqual(staleActionPreflight.totalCount, statusOnlySummary.actionPreflightItems.count)
+        let staleEvidenceCoverage = statusOnlySummary.macAgentEvidenceCoverageMap(focusedOn: "unknown-review-kind")
+        XCTAssertNil(staleEvidenceCoverage.focusedReviewKind)
+        XCTAssertGreaterThanOrEqual(staleEvidenceCoverage.totalCount, availableDetailKinds.count)
         XCTAssertEqual(summary.detailReviewKinds(focusedOn: nil), availableDetailKinds)
         XCTAssertEqual(summary.detailReviewKinds(focusedOn: "delivery-safety"), ["delivery-safety"])
         XCTAssertEqual(summary.detailReviewKinds(focusedOn: "gateway-status"), availableDetailKinds)
@@ -1186,6 +1223,42 @@ final class ClawTests: XCTestCase {
             staleActionPreflight.status,
             staleActionPreflight.guidance
         ]
+        let evidenceCoverageVisibleChunks = evidenceCoverage.items.flatMap {
+            [
+                $0.reviewTitle,
+                $0.status,
+                $0.guidance,
+                $0.reviewKind
+            ]
+        } + [
+            idleEvidenceCoverage.title,
+            idleEvidenceCoverage.status,
+            idleEvidenceCoverage.guidance,
+            preSendEvidenceCoverage.title,
+            preSendEvidenceCoverage.status,
+            preSendEvidenceCoverage.guidance,
+            focusedPreSendEvidenceCoverage.title,
+            focusedPreSendEvidenceCoverage.status,
+            focusedPreSendEvidenceCoverage.guidance,
+            evidenceCoverage.title,
+            evidenceCoverage.status,
+            evidenceCoverage.guidance,
+            evidenceCoverage.primaryReviewKind ?? "",
+            evidenceCoverage.primaryReviewTitle ?? "",
+            focusedEvidenceCoverage.title,
+            focusedEvidenceCoverage.status,
+            focusedEvidenceCoverage.guidance,
+            focusedEvidenceCoverage.focusedReviewKind ?? "",
+            focusedEvidenceCoverage.focusedReviewTitle ?? "",
+            statusEvidenceCoverage.title,
+            statusEvidenceCoverage.status,
+            statusEvidenceCoverage.guidance,
+            statusEvidenceCoverage.focusedReviewKind ?? "",
+            statusEvidenceCoverage.focusedReviewTitle ?? "",
+            staleEvidenceCoverage.title,
+            staleEvidenceCoverage.status,
+            staleEvidenceCoverage.guidance
+        ]
         let visibleText = (
             queueVisibleChunks +
                 readinessVisibleChunks +
@@ -1197,7 +1270,8 @@ final class ClawTests: XCTestCase {
                 payloadLedgerVisibleChunks +
                 focusContextVisibleChunks +
                 macReadinessVisibleChunks +
-                actionPreflightVisibleChunks
+                actionPreflightVisibleChunks +
+                evidenceCoverageVisibleChunks
         ).joined(separator: " ")
         for forbidden in ["Authorization", "Bearer", "toolArguments", "file://", "/private", "/Users", "/home", "C:\\", "stdout", "stderr", "diff"] {
             XCTAssertFalse(visibleText.contains(forbidden), "queue leaked \(forbidden)")
@@ -1259,6 +1333,13 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(shellActionPreflight.focusedReviewTitle, "Shell 命令安全")
         XCTAssertTrue(shellActionPreflight.items.contains { $0.reviewKind == "shell-safety" && $0.isFocused })
         XCTAssertTrue(shellActionPreflight.items.contains { $0.actionKindTitle == ClawMobileActionKind.runShellCommand.title && $0.isRetryable })
+        let shellEvidenceCoverage = shellStore.missionRunSummary.macAgentEvidenceCoverageMap(focusedOn: "shell-safety")
+        XCTAssertTrue(shellEvidenceCoverage.isReviewable)
+        XCTAssertTrue(shellEvidenceCoverage.requiresHumanAction)
+        XCTAssertEqual(shellEvidenceCoverage.focusedReviewKind, "shell-safety")
+        XCTAssertEqual(shellEvidenceCoverage.focusedReviewTitle, "Shell 命令安全")
+        XCTAssertTrue(shellEvidenceCoverage.items.contains { $0.reviewKind == "shell-safety" && $0.isFocused && $0.hasEvidence })
+        XCTAssertTrue(shellEvidenceCoverage.items.contains { $0.reviewKind == "shell-safety" && $0.payloadProtected })
         let shellFocusContext = shellStore.missionRunSummary.focusContextSummary(focusedOn: "shell-safety")
         XCTAssertEqual(shellFocusContext.focusedReviewKind, "shell-safety")
         XCTAssertEqual(shellFocusContext.focusedReviewTitle, "Shell 命令安全")
@@ -1309,6 +1390,10 @@ final class ClawTests: XCTestCase {
                 shellActionPreflight.status,
                 shellActionPreflight.guidance,
                 shellActionPreflight.items.map { "\($0.title) \($0.actionKindTitle) \($0.status) \($0.guidance)" }.joined(separator: " "),
+                shellEvidenceCoverage.title,
+                shellEvidenceCoverage.status,
+                shellEvidenceCoverage.guidance,
+                shellEvidenceCoverage.items.map { "\($0.reviewTitle) \($0.status) \($0.guidance)" }.joined(separator: " "),
                 shellFocusContext.title,
                 shellFocusContext.status,
                 shellFocusContext.guidance,

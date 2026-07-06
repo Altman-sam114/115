@@ -174,6 +174,13 @@ enum LogicSmoke {
         expect(idleActionPreflight.blockedCount == 0, "idle action preflight should not count blockers")
         expect(idleActionPreflight.humanActionCount == 0, "idle action preflight should not require human action")
         expect(idleActionPreflight.primaryReviewKind == nil, "idle action preflight should not invent primary focus")
+        let idleEvidenceCoverage = missionStore.missionRunSummary.macAgentEvidenceCoverageMap
+        expect(idleEvidenceCoverage.isReviewable == false, "idle evidence coverage should not be reviewable")
+        expect(idleEvidenceCoverage.totalCount == 0, "idle evidence coverage should not count rows")
+        expect(idleEvidenceCoverage.actionSupportedCount == 0, "idle evidence coverage should not count action support")
+        expect(idleEvidenceCoverage.evidenceCoveredCount == 0, "idle evidence coverage should not count evidence")
+        expect(idleEvidenceCoverage.metadataPendingCount == 0, "idle evidence coverage should not count metadata gaps")
+        expect(idleEvidenceCoverage.primaryReviewKind == nil, "idle evidence coverage should not invent primary focus")
         expect(missionStore.missionRunSummary.activeReviewFocus(from: "delivery-safety") == nil, "idle active focus should not resolve")
         missionStore.phoneAgentCommand = "打开浏览器搜索资料，整理结果并发到 Slack"
         missionStore.startAutonomousComputerTakeover()
@@ -213,6 +220,17 @@ enum LogicSmoke {
         expect(
             focusedPreSendActionPreflight.items.contains { $0.reviewKind == "approval" && $0.isFocused },
             "focused pre-send action preflight should mark approval row"
+        )
+        let preSendEvidenceCoverage = missionSummary.macAgentEvidenceCoverageMap
+        expect(preSendEvidenceCoverage.isReviewable, "pre-send evidence coverage should be reviewable")
+        expect(preSendEvidenceCoverage.actionSupportedCount > 0, "pre-send evidence coverage should count action support")
+        expect(preSendEvidenceCoverage.requiresHumanAction, "pre-send evidence coverage should require human review")
+        expect(preSendEvidenceCoverage.items.contains { $0.reviewKind == "approval" && $0.hasActionSupport && $0.requiresHumanAction }, "pre-send evidence coverage should expose approval support")
+        let focusedPreSendEvidenceCoverage = missionSummary.macAgentEvidenceCoverageMap(focusedOn: "approval")
+        expect(focusedPreSendEvidenceCoverage.focusedReviewKind == "approval", "pre-send evidence coverage should focus approval")
+        expect(
+            focusedPreSendEvidenceCoverage.items.contains { $0.reviewKind == "approval" && $0.isFocused },
+            "focused pre-send evidence coverage should mark approval row"
         )
         missionStore.approveAndContinueAutonomousLoop()
         missionSummary = missionStore.missionRunSummary
@@ -340,6 +358,30 @@ enum LogicSmoke {
         expect(
             focusedActionPreflight.items.contains { $0.reviewKind == "delivery-safety" && $0.isFocused },
             "focused action preflight should mark delivery row"
+        )
+        let evidenceCoverage = missionSummary.macAgentEvidenceCoverageMap
+        expect(evidenceCoverage.isReviewable, "evidence coverage should be reviewable once task or Gateway evidence exists")
+        expect(evidenceCoverage.totalCount >= availableDetailKinds.count, "evidence coverage should include detail review rows")
+        expect(evidenceCoverage.actionSupportedCount > 0, "evidence coverage should count action-supported rows")
+        expect(evidenceCoverage.evidenceCoveredCount == evidenceCoverage.items.filter(\.hasEvidence).count, "evidence coverage should count evidence rows")
+        expect(evidenceCoverage.metadataReadyCount == evidenceCoverage.items.filter(\.hasMetadata).count, "evidence coverage should count metadata rows")
+        expect(evidenceCoverage.payloadProtectedCount == evidenceCoverage.items.filter(\.payloadProtected).count, "evidence coverage should count payload-protected rows")
+        expect(evidenceCoverage.requiresHumanAction, "evidence coverage should surface human review")
+        expect(evidenceCoverage.primaryReviewKind != nil, "evidence coverage should point to a primary review")
+        expect(
+            evidenceCoverage.items.contains { $0.reviewKind == "browser-control" && $0.hasActionSupport && $0.hasEvidence },
+            "evidence coverage should join browser action support with evidence"
+        )
+        expect(
+            evidenceCoverage.items.contains { $0.reviewKind == "delivery-safety" && $0.hasEvidence && $0.payloadProtected },
+            "evidence coverage should include delivery evidence and payload boundary"
+        )
+        let focusedEvidenceCoverage = missionSummary.macAgentEvidenceCoverageMap(focusedOn: "delivery-safety")
+        expect(focusedEvidenceCoverage.focusedReviewKind == "delivery-safety", "evidence coverage should record delivery focus")
+        expect(focusedEvidenceCoverage.focusedReviewTitle == "最终提交安全", "evidence coverage should expose delivery title")
+        expect(
+            focusedEvidenceCoverage.items.contains { $0.reviewKind == "delivery-safety" && $0.isFocused },
+            "focused evidence coverage should mark delivery row"
         )
         let operatorStrip = missionSummary.operatorStrip
         expect(operatorStrip.lanes.map(\.id) == ["gateway", "evidence", "review", "next"], "operator strip should expose stable lanes")
@@ -544,6 +586,13 @@ enum LogicSmoke {
             statusActionPreflight.items.contains { $0.reviewKind == statusOnlyItem.reviewKind && $0.isFocused },
             "status action preflight should mark status row"
         )
+        let statusEvidenceCoverage = statusOnlySummary.macAgentEvidenceCoverageMap(focusedOn: statusOnlyItem.reviewKind)
+        expect(statusEvidenceCoverage.focusedReviewKind == statusOnlyItem.reviewKind, "status evidence coverage should keep status focus")
+        expect(statusEvidenceCoverage.focusedReviewTitle == statusOnlyItem.title, "status evidence coverage should expose status title")
+        expect(
+            statusEvidenceCoverage.items.contains { $0.reviewKind == statusOnlyItem.reviewKind && $0.isFocused },
+            "status evidence coverage should mark status row"
+        )
         let staleFocusContext = statusOnlySummary.focusContextSummary(focusedOn: "unknown-review-kind")
         expect(staleFocusContext.focusedReviewKind == nil, "stale focus context should not keep an unknown review kind")
         expect(staleFocusContext.canClearFocus, "stale focus context should allow clearing focus")
@@ -566,6 +615,9 @@ enum LogicSmoke {
         let staleActionPreflight = statusOnlySummary.macGatewayActionPreflightMatrix(focusedOn: "unknown-review-kind")
         expect(staleActionPreflight.focusedReviewKind == nil, "stale action preflight should not keep unknown focus")
         expect(staleActionPreflight.totalCount == statusOnlySummary.actionPreflightItems.count, "stale action preflight should keep rows")
+        let staleEvidenceCoverage = statusOnlySummary.macAgentEvidenceCoverageMap(focusedOn: "unknown-review-kind")
+        expect(staleEvidenceCoverage.focusedReviewKind == nil, "stale evidence coverage should not keep unknown focus")
+        expect(staleEvidenceCoverage.totalCount >= availableDetailKinds.count, "stale evidence coverage should keep review rows")
         expect(
             missionSummary.detailReviewKinds(focusedOn: nil) == availableDetailKinds,
             "nil focus should show all detail reviews"
@@ -886,6 +938,44 @@ enum LogicSmoke {
             staleActionPreflight.guidance
         ]
         let actionPreflightVisibleChunks = actionPreflightItemChunks + actionPreflightSummaryChunks
+        let evidenceCoverageItemChunks: [String] = evidenceCoverage.items.flatMap { item in
+            [
+                item.reviewTitle,
+                item.status,
+                item.guidance,
+                item.reviewKind
+            ]
+        }
+        let evidenceCoverageSummaryChunks: [String] = [
+            idleEvidenceCoverage.title,
+            idleEvidenceCoverage.status,
+            idleEvidenceCoverage.guidance,
+            preSendEvidenceCoverage.title,
+            preSendEvidenceCoverage.status,
+            preSendEvidenceCoverage.guidance,
+            focusedPreSendEvidenceCoverage.title,
+            focusedPreSendEvidenceCoverage.status,
+            focusedPreSendEvidenceCoverage.guidance,
+            evidenceCoverage.title,
+            evidenceCoverage.status,
+            evidenceCoverage.guidance,
+            evidenceCoverage.primaryReviewKind ?? "",
+            evidenceCoverage.primaryReviewTitle ?? "",
+            focusedEvidenceCoverage.title,
+            focusedEvidenceCoverage.status,
+            focusedEvidenceCoverage.guidance,
+            focusedEvidenceCoverage.focusedReviewKind ?? "",
+            focusedEvidenceCoverage.focusedReviewTitle ?? "",
+            statusEvidenceCoverage.title,
+            statusEvidenceCoverage.status,
+            statusEvidenceCoverage.guidance,
+            statusEvidenceCoverage.focusedReviewKind ?? "",
+            statusEvidenceCoverage.focusedReviewTitle ?? "",
+            staleEvidenceCoverage.title,
+            staleEvidenceCoverage.status,
+            staleEvidenceCoverage.guidance
+        ]
+        let evidenceCoverageVisibleChunks = evidenceCoverageItemChunks + evidenceCoverageSummaryChunks
         let queueVisibleText = (
             queueVisibleChunks +
                 readinessVisibleChunks +
@@ -897,7 +987,8 @@ enum LogicSmoke {
                 payloadLedgerVisibleChunks +
                 focusContextVisibleChunks +
                 macReadinessVisibleChunks +
-                actionPreflightVisibleChunks
+                actionPreflightVisibleChunks +
+                evidenceCoverageVisibleChunks
         ).joined(separator: " ")
         for forbidden in ["Authorization", "Bearer", "toolArguments", "file://", "/private", "/Users", "/home", "C:\\", "stdout", "stderr", "diff"] {
             expect(queueVisibleText.contains(forbidden) == false, "review priority queue should not expose \(forbidden)")
@@ -1109,6 +1200,19 @@ enum LogicSmoke {
             shellActionPreflight.items.contains { $0.actionKindTitle == ClawMobileActionKind.runShellCommand.title && $0.isRetryable },
             "shell action preflight should expose retryable shell result"
         )
+        let shellEvidenceCoverage = shellMissionSummary.macAgentEvidenceCoverageMap(focusedOn: "shell-safety")
+        expect(shellEvidenceCoverage.isReviewable, "shell evidence coverage should be reviewable")
+        expect(shellEvidenceCoverage.requiresHumanAction, "shell evidence coverage should require human review")
+        expect(shellEvidenceCoverage.focusedReviewKind == "shell-safety", "shell evidence coverage should record shell focus")
+        expect(shellEvidenceCoverage.focusedReviewTitle == "Shell 命令安全", "shell evidence coverage should expose shell title")
+        expect(
+            shellEvidenceCoverage.items.contains { $0.reviewKind == "shell-safety" && $0.isFocused && $0.hasEvidence },
+            "shell evidence coverage should mark focused shell evidence"
+        )
+        expect(
+            shellEvidenceCoverage.items.contains { $0.reviewKind == "shell-safety" && $0.payloadProtected },
+            "shell evidence coverage should carry shell payload boundary"
+        )
         let shellFocusContext = shellMissionSummary.focusContextSummary(focusedOn: "shell-safety")
         expect(shellFocusContext.focusedReviewKind == "shell-safety", "shell focus context should record shell focus")
         expect(shellFocusContext.focusedReviewTitle == "Shell 命令安全", "shell focus context should expose shell title")
@@ -1136,6 +1240,9 @@ enum LogicSmoke {
         }.joined(separator: " ")
         let shellActionPreflightRows = shellActionPreflight.items.map { item in
             "\(item.title) \(item.actionKindTitle) \(item.status) \(item.guidance)"
+        }.joined(separator: " ")
+        let shellEvidenceCoverageRows = shellEvidenceCoverage.items.map { item in
+            "\(item.reviewTitle) \(item.status) \(item.guidance)"
         }.joined(separator: " ")
         let shellVisibleChunks: [String] = [
             shellReadiness.title,
@@ -1171,6 +1278,10 @@ enum LogicSmoke {
             shellActionPreflight.status,
             shellActionPreflight.guidance,
             shellActionPreflightRows,
+            shellEvidenceCoverage.title,
+            shellEvidenceCoverage.status,
+            shellEvidenceCoverage.guidance,
+            shellEvidenceCoverageRows,
             shellFocusContext.title,
             shellFocusContext.status,
             shellFocusContext.guidance,

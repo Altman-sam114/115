@@ -64,7 +64,7 @@ Agent X 每轮职责：
 1. 读取入口文档、当前状态、上一轮 Agent C 结论和人工约束。
 2. 将总目标拆成当前小轮次目标、非目标、验收标准和停止判断。
 3. 调用或要求 Agent A 生成版本化提示词。
-4. 等 Agent B 按提示词实现、轻量检查、提交并 push 到 `origin/main`。
+4. 等 Agent B 按提示词实现、非编译静态检查、提交并 push 到 `origin/main`。
 5. 等 Agent C 下载 GitHub Actions 结果包，核对 manifest、JUnit/摘要、日志和关键结果文件。
 6. 根据 Agent C 结论选择：继续下一轮、退回 Agent B 修复、暂停等待人工确认、宣布总目标完成。
 
@@ -88,7 +88,7 @@ Agent A 提示词必须包含：版本号、版本分配依据、背景、目标
 
 ### Agent B：实现与测试
 
-Agent B 按 Agent A 提示词实现。必须先同步最新 `origin/main`，确认当前分支是 `main` 且工作区无无关改动；小步修改、补测试、按 `md/test/test.md` 选择本地轻量检查，更新必要文档。完成后提交本轮相关文件并直接 push 到 `origin/main`，触发 GitHub Actions 云端重验证。不得擅自扩大范围、删除旧实现、伪造测试通过或绕过核心规则。
+Agent B 按 Agent A 提示词实现。必须先同步最新 `origin/main`，确认当前分支是 `main` 且工作区无无关改动；小步修改、补测试、按 `md/test/test.md` 选择本地非编译静态检查，更新必要文档。完成后提交本轮相关文件并直接 push 到 `origin/main`，触发 GitHub Actions 云端重验证。不得擅自扩大范围、删除旧实现、伪造测试通过或绕过核心规则。
 
 ### Agent C：验收与核心逻辑更新
 
@@ -112,11 +112,10 @@ Agent C 阅读 Agent B 输出、实际 diff、`origin/main` 最新 commit 和 Gi
 ## 6. 测试规则
 
 - 每次实现前先读 `md/test/test.md`。
-- 默认本地只跑轻量检查，然后 commit/push 到 `origin/main` 由 GitHub Actions 做重验证。
-- 只有人工明确要求“本机测试”“本地 build”“本地 xcodebuild”等，才默认在本机跑完整构建或模拟器验证。
-- Gateway JS 改动本地至少跑 `node --check`；云端结果包必须覆盖对应 smoke。
-- Swift 核心逻辑改动本地优先跑 Swift logic smoke；云端结果包必须覆盖 build、logic smoke 或等价检查。
-- 文档-only 改动至少跑 `git diff --check` 和 workflow/YAML 语法检查，可不跑业务测试，但必须说明原因。
+- 从 2026-07-07 起，默认禁止本地编译、本地 build、本地 xcodebuild、本地 Swift logic smoke、本地 Gateway smoke、本地 `node --check` 等会替代云端验证的检查；代码、Swift、Gateway、UI 和测试改动统一 commit/push 到 `origin/main` 后交给 GitHub Actions 重验证。
+- 本地只允许必要的非编译静态检查，例如 `git status`、`git diff --check`、YAML 解析、`plutil -lint`、文本搜索和 git diff 复核；这些不能替代云端 CI artifact 验收。
+- Swift 核心逻辑、SwiftUI、XCTest 或 Gateway JS 改动必须由云端结果包覆盖 build、logic smoke、Gateway smoke、静态检查和关键日志；本地不得声称这些已通过。
+- 文档-only 改动可做非编译静态检查；业务验证仍以云端结果包为准。
 - 测试数据和 CI artifact 必须小而必要；禁止默认下载大体积测试数据、模型、历史 artifact、完整 build cache 或无关产物。
 - 不得用“已验证”替代具体命令和结果。
 
@@ -155,3 +154,4 @@ Agent C 阅读 Agent B 输出、实际 diff、`origin/main` 最新 commit 和 Gi
 - 禁止 Agent X 无条件无限循环、跳过 Agent C 云端 artifact 验收、把旧 run/旧 artifact/本地输出冒充最新云端结果、在总目标未完成时宣布完成，或为了循环推进扩大无关改动范围。
 - 禁止使用非 `Altman-sam114` 的 GitHub 账号伪装完成 push、CI 或 artifact 验收。
 - 禁止默认下载大体积测试数据、模型、历史 artifact 或无关产物，导致本机或 CI 容量被撑爆。
+- 禁止在默认流程中本地编译、本地 build、本地 xcodebuild、本地 Swift logic smoke、本地 Gateway smoke 或本地 `node --check` 来替代云端验证；最终验收必须来自最新 `origin/main` 的 GitHub Actions artifact。
