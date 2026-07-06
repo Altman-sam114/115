@@ -53,7 +53,11 @@
 
 - Swift logic smoke 编译通过。
 - `.build/claw-logic-smoke` 通过，输出 `Claw logic smoke passed`。
-- 云端 GitHub Actions 结果包待本轮 push 后由 Agent C 复判。
+- 本地无签名 iOS build 通过，输出 `** BUILD SUCCEEDED **`；仅有 CoreSimulator 服务不可用警告。
+- `git diff --check` 通过。
+- `ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci-results.yml"); puts "yaml ok"'` 通过，输出 `yaml ok`。
+- `plutil -lint Claw.xcodeproj/project.pbxproj` 通过，输出 `OK`。
+- GitHub Actions run `28789371045` attempt `1` 对 commit `6282fe833cafdda060d74ab0a2e246a21f22f6cf` 通过，artifact `claw-ci-v0.2-main-6282fe833caf-run28789371045-attempt1` 已下载到 `/private/tmp/claw-c-review-28789371045/` 并核对 manifest、JUnit、failure summary、Swift logic smoke、Gateway direct/WebSocket smoke、node/plutil/git diff check 和 xcodebuild 日志。
 
 遗留事项：
 
