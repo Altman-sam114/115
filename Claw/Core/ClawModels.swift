@@ -1403,6 +1403,42 @@ struct ClawMissionRunApprovalQueueSummary: Equatable, Codable, Sendable {
     var items: [ClawMissionRunApprovalQueueItem]
 }
 
+struct ClawMissionRunPayloadSafetyLedgerItem: Identifiable, Equatable, Codable, Sendable {
+    var id: String { reviewKind }
+    var reviewKind: String
+    var reviewTitle: String
+    var status: String
+    var guidance: String
+    var icon: String
+    var hasMetadata: Bool
+    var payloadNotRead: Bool
+    var metadataOnly: Bool
+    var omissionSignalCount: Int
+    var safetyFlags: [String]
+    var canFocusReview: Bool
+    var isFocused: Bool
+}
+
+struct ClawMissionRunPayloadSafetyLedgerSummary: Equatable, Codable, Sendable {
+    var title: String
+    var status: String
+    var guidance: String
+    var icon: String
+    var totalCount: Int
+    var payloadNotReadCount: Int
+    var metadataOnlyCount: Int
+    var omissionSignalCount: Int
+    var metadataPendingCount: Int
+    var focusedReviewKind: String?
+    var focusedReviewTitle: String?
+    var primaryReviewKind: String?
+    var primaryReviewTitle: String?
+    var canFocusPrimaryReview: Bool
+    var hasMetadataGap: Bool
+    var isReviewable: Bool
+    var items: [ClawMissionRunPayloadSafetyLedgerItem]
+}
+
 struct ClawMissionRunReviewReadinessSummary: Equatable, Codable, Sendable {
     var title: String
     var status: String
@@ -3114,6 +3150,95 @@ extension ClawMissionRunSummary {
         )
     }
 
+    var payloadSafetyLedger: ClawMissionRunPayloadSafetyLedgerSummary {
+        payloadSafetyLedger(focusedOn: nil)
+    }
+
+    func payloadSafetyLedger(focusedOn reviewKind: String?) -> ClawMissionRunPayloadSafetyLedgerSummary {
+        let focusedKind = activeReviewFocus(from: reviewKind)
+        let items = availableDetailReviewKinds.map { kind in
+            let flags = safetyFlags(forDetailReviewKind: kind)
+            let omissionCount = Self.omissionSignalCount(in: flags)
+            let hasMetadata = metadataReady(forDetailReviewKind: kind)
+            return ClawMissionRunPayloadSafetyLedgerItem(
+                reviewKind: kind,
+                reviewTitle: Self.title(forDetailReviewKind: kind),
+                status: Self.payloadSafetyStatus(hasMetadata: hasMetadata, flags: flags),
+                guidance: Self.payloadSafetyGuidance(hasMetadata: hasMetadata, flags: flags),
+                icon: Self.icon(forDetailReviewKind: kind),
+                hasMetadata: hasMetadata,
+                payloadNotRead: flags.contains("artifact-payload-not-read"),
+                metadataOnly: flags.contains("metadata-only"),
+                omissionSignalCount: omissionCount,
+                safetyFlags: flags,
+                canFocusReview: focusUsesDetailReview(kind),
+                isFocused: kind == focusedKind
+            )
+        }
+
+        let payloadNotReadCount = items.filter(\.payloadNotRead).count
+        let metadataOnlyCount = items.filter(\.metadataOnly).count
+        let omissionSignalCount = items.reduce(0) { $0 + $1.omissionSignalCount }
+        let metadataPendingCount = items.filter { $0.hasMetadata == false }.count
+        let focusedItem = focusedKind.flatMap { kind in
+            items.first { $0.reviewKind == kind }
+        }
+        let primaryItem = focusedItem ?? items.first { $0.hasMetadata == false } ?? items.first { $0.payloadNotRead == false } ?? items.first
+        let isReviewable = items.isEmpty == false
+        let hasMetadataGap = metadataPendingCount > 0
+
+        let title: String
+        let status: String
+        let guidance: String
+        let icon: String
+        if isReviewable == false {
+            title = "Payload 安全账本待生成"
+            status = "尚无 Gateway artifact"
+            guidance = "发送任务后会从安全 metadata 汇总 payload 是否被读取、哪些内容已省略。"
+            icon = "lock.doc"
+        } else if let focusedItem {
+            title = "聚焦 Payload 安全"
+            status = focusedItem.reviewTitle
+            guidance = "\(focusedItem.reviewTitle)：\(focusedItem.guidance)"
+            icon = focusedItem.icon
+        } else if hasMetadataGap {
+            title = "Payload 安全账本"
+            status = "\(metadataPendingCount) 项 metadata 待同步"
+            guidance = primaryItem.map { "先确认 \($0.reviewTitle) 的 metadata，再判断 payload 边界。" } ?? "等待 metadata 后再判断 payload 边界。"
+            icon = "doc.badge.clock"
+        } else if payloadNotReadCount == items.count {
+            title = "Payload 安全账本"
+            status = "\(payloadNotReadCount)/\(items.count) 项未读取 payload"
+            guidance = "当前复核只使用 metadata；artifact reference 和 payload 内容不会在手机端打开。"
+            icon = "lock.doc"
+        } else {
+            title = "Payload 安全账本"
+            status = "\(payloadNotReadCount)/\(items.count) 项声明未读取 payload"
+            guidance = primaryItem.map { "抽查 \($0.reviewTitle) 的安全 flag，确认 metadata-only 边界。" } ?? "抽查安全 flag，确认 metadata-only 边界。"
+            icon = "lock.doc"
+        }
+
+        return ClawMissionRunPayloadSafetyLedgerSummary(
+            title: title,
+            status: status,
+            guidance: guidance,
+            icon: icon,
+            totalCount: items.count,
+            payloadNotReadCount: payloadNotReadCount,
+            metadataOnlyCount: metadataOnlyCount,
+            omissionSignalCount: omissionSignalCount,
+            metadataPendingCount: metadataPendingCount,
+            focusedReviewKind: focusedItem?.reviewKind,
+            focusedReviewTitle: focusedItem?.reviewTitle,
+            primaryReviewKind: primaryItem?.reviewKind,
+            primaryReviewTitle: primaryItem?.reviewTitle,
+            canFocusPrimaryReview: primaryItem?.canFocusReview ?? false,
+            hasMetadataGap: hasMetadataGap,
+            isReviewable: isReviewable,
+            items: items
+        )
+    }
+
     var focusContextSummary: ClawMissionRunFocusContextSummary {
         focusContextSummary(focusedOn: nil)
     }
@@ -3474,6 +3599,73 @@ extension ClawMissionRunSummary {
         default:
             return false
         }
+    }
+
+    private func safetyFlags(forDetailReviewKind reviewKind: String) -> [String] {
+        switch reviewKind {
+        case "artifact-metadata":
+            return artifactMetadataReview?.safetyFlags ?? []
+        case "file-change-safety":
+            return gatewayFileChangeSafetyReview?.safetyFlags ?? []
+        case "shell-safety":
+            return gatewayShellCommandSafetyReview?.safetyFlags ?? []
+        case "extraction-completeness":
+            return gatewayExtractionCompletenessReview?.safetyFlags ?? []
+        case "browser-control":
+            return gatewayBrowserControlReview?.safetyFlags ?? []
+        case "delivery-safety":
+            return gatewayDeliverySafetyReview?.safetyFlags ?? []
+        case "gateway-capability":
+            return gatewayCapabilityReview?.safetyFlags ?? []
+        case "accessibility":
+            return gatewayAccessibilityReview?.safetyFlags ?? []
+        case "replay-guard":
+            return gatewayTaskReplayGuardReview?.safetyFlags ?? []
+        case "agent-trace":
+            return agentTraceReview?.hasMetadata == true ? ["artifact-payload-not-read", "metadata-only"] : []
+        default:
+            return []
+        }
+    }
+
+    private static func omissionSignalCount(in flags: [String]) -> Int {
+        flags.filter { flag in
+            flag.contains("omitted") ||
+                flag.contains("redacted") ||
+                flag.contains("gated") ||
+                flag.contains("not-read")
+        }.count
+    }
+
+    private static func payloadSafetyStatus(hasMetadata: Bool, flags: [String]) -> String {
+        guard hasMetadata else {
+            return "metadata 待同步"
+        }
+        if flags.contains("artifact-payload-not-read") {
+            return flags.contains("metadata-only") ? "payload 未读取 · metadata-only" : "payload 未读取"
+        }
+        if flags.contains("metadata-only") {
+            return "metadata-only 边界"
+        }
+        return "payload 边界待复核"
+    }
+
+    private static func payloadSafetyGuidance(hasMetadata: Bool, flags: [String]) -> String {
+        guard hasMetadata else {
+            return "等待 Gateway metadata 后再判断 payload 是否被读取。"
+        }
+        let omissionCount = omissionSignalCount(in: flags)
+        if flags.contains("artifact-payload-not-read") {
+            return omissionCount > 0
+                ? "\(omissionCount) 个省略/保护信号；不打开 artifact reference。"
+                : "声明未读取 payload；仅使用安全 metadata。"
+        }
+        if flags.contains("metadata-only") {
+            return omissionCount > 0
+                ? "\(omissionCount) 个省略/保护信号；继续按 metadata 复核。"
+                : "只展示 metadata 摘要，不展示 payload 内容。"
+        }
+        return "未看到 payload-not-read flag；保持人工抽查。"
     }
 
     var evidenceTrailSummary: ClawMissionRunEvidenceTrailSummary {

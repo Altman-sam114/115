@@ -641,6 +641,7 @@ struct ClawMissionRunPanel: View {
         let focusContext = summary.focusContextSummary(focusedOn: focusedReviewKind)
         let evidenceTrail = summary.evidenceTrailSummary(focusedOn: activeFocusedReviewKind)
         let approvalQueue = summary.approvalQueueSummary(focusedOn: activeFocusedReviewKind)
+        let payloadSafetyLedger = summary.payloadSafetyLedger(focusedOn: activeFocusedReviewKind)
         VStack(alignment: .leading, spacing: 14) {
             SectionHeader(title: "Mission Run", icon: "flag.checkered")
 
@@ -729,6 +730,11 @@ struct ClawMissionRunPanel: View {
 
             ClawMissionArtifactEvidenceIndexView(
                 index: artifactEvidenceIndex,
+                onFocusReviewKind: focusReviewKind
+            )
+
+            ClawMissionPayloadSafetyLedgerView(
+                ledger: payloadSafetyLedger,
                 onFocusReviewKind: focusReviewKind
             )
 
@@ -841,6 +847,7 @@ struct ClawMissionReviewDetailDockView: View {
         let focusContext = summary.focusContextSummary(focusedOn: focusedReviewKind)
         let evidenceTrail = summary.evidenceTrailSummary(focusedOn: activeFocusedReviewKind)
         let approvalQueue = summary.approvalQueueSummary(focusedOn: activeFocusedReviewKind)
+        let payloadSafetyLedger = summary.payloadSafetyLedger(focusedOn: activeFocusedReviewKind)
 
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -885,6 +892,11 @@ struct ClawMissionReviewDetailDockView: View {
             if dock.isReviewable {
                 ClawMissionReviewTrailView(
                     trail: evidenceTrail,
+                    onFocusReviewKind: focusReviewKind
+                )
+
+                ClawMissionPayloadSafetyLedgerView(
+                    ledger: payloadSafetyLedger,
                     onFocusReviewKind: focusReviewKind
                 )
 
@@ -1668,6 +1680,156 @@ struct ClawMissionArtifactEvidenceItemRow: View {
             return .blue
         }
         return .green
+    }
+}
+
+struct ClawMissionPayloadSafetyLedgerView: View {
+    let ledger: ClawMissionRunPayloadSafetyLedgerSummary
+    let onFocusReviewKind: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Label(ledger.title, systemImage: ledger.icon)
+                    .font(.subheadline.bold())
+                    .foregroundStyle(tint)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Spacer(minLength: 0)
+
+                if let focusedReviewTitle = ledger.focusedReviewTitle {
+                    PhoneAgentTag(text: focusedReviewTitle, icon: "scope", tint: tint)
+                }
+            }
+
+            Text(ledger.status)
+                .font(.footnote.bold())
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(ledger.guidance)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 8) {
+                Label("\(ledger.payloadNotReadCount) 未读", systemImage: "lock.doc")
+                Label("\(ledger.metadataOnlyCount) metadata", systemImage: "doc.badge.gearshape")
+                Label("\(ledger.omissionSignalCount) 省略", systemImage: "eye.slash.fill")
+            }
+            .font(.caption.bold())
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+            if ledger.items.isEmpty == false {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(Array(ledger.items.prefix(4))) { item in
+                        ClawMissionPayloadSafetyLedgerItemRow(
+                            item: item,
+                            onFocusReviewKind: onFocusReviewKind
+                        )
+                    }
+                }
+            }
+        }
+        .padding(10)
+        .background(tint.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(tint.opacity(0.16), lineWidth: 1)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(accessibilitySummary)
+    }
+
+    private var accessibilitySummary: String {
+        "Payload 安全账本，\(ledger.status)，\(ledger.payloadNotReadCount) 项未读取 payload"
+    }
+
+    private var tint: Color {
+        if ledger.isReviewable == false {
+            return .secondary
+        }
+        if ledger.hasMetadataGap {
+            return .blue
+        }
+        if ledger.payloadNotReadCount == ledger.totalCount {
+            return .green
+        }
+        return .orange
+    }
+}
+
+struct ClawMissionPayloadSafetyLedgerItemRow: View {
+    let item: ClawMissionRunPayloadSafetyLedgerItem
+    let onFocusReviewKind: (String) -> Void
+
+    var body: some View {
+        Button(action: focusItem) {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: item.isFocused ? "scope" : item.icon)
+                    .font(.caption.bold())
+                    .frame(width: 28, height: 28)
+                    .background(tint.opacity(item.isFocused ? 0.22 : 0.12), in: Circle())
+                    .foregroundStyle(tint)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(item.reviewTitle)
+                        .font(.footnote.bold())
+                        .foregroundStyle(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text(item.status)
+                        .font(.caption.bold())
+                        .foregroundStyle(tint)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text(item.guidance)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .padding(.vertical, 4)
+            .padding(.horizontal, 6)
+            .background(tint.opacity(item.isFocused ? 0.08 : 0), in: RoundedRectangle(cornerRadius: 8))
+            .overlay {
+                if item.isFocused {
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(tint.opacity(0.45), lineWidth: 1)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(item.canFocusReview == false)
+        .opacity(item.canFocusReview ? 1 : 0.65)
+        .accessibilityLabel(accessibilitySummary)
+        .accessibilityHint("聚焦对应详细复核，不打开 artifact payload")
+        .accessibilityInputLabels(["聚焦\(item.reviewTitle)", "复核\(item.reviewTitle)Payload"])
+    }
+
+    private func focusItem() {
+        onFocusReviewKind(item.reviewKind)
+    }
+
+    private var accessibilitySummary: String {
+        "Payload 安全，\(item.reviewTitle)，\(item.status)，\(item.guidance)"
+    }
+
+    private var tint: Color {
+        if item.hasMetadata == false {
+            return .blue
+        }
+        if item.payloadNotRead {
+            return .green
+        }
+        if item.metadataOnly {
+            return .blue
+        }
+        return .orange
     }
 }
 

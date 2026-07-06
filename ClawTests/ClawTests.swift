@@ -609,6 +609,14 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(idleApprovalQueue.criticalOrHighCount, 0)
         XCTAssertEqual(idleApprovalQueue.metadataPendingCount, 0)
         XCTAssertNil(idleApprovalQueue.primaryReviewKind)
+        let idlePayloadLedger = idleStore.missionRunSummary.payloadSafetyLedger
+        XCTAssertFalse(idlePayloadLedger.isReviewable)
+        XCTAssertEqual(idlePayloadLedger.totalCount, 0)
+        XCTAssertEqual(idlePayloadLedger.payloadNotReadCount, 0)
+        XCTAssertEqual(idlePayloadLedger.metadataOnlyCount, 0)
+        XCTAssertEqual(idlePayloadLedger.omissionSignalCount, 0)
+        XCTAssertEqual(idlePayloadLedger.metadataPendingCount, 0)
+        XCTAssertNil(idlePayloadLedger.primaryReviewKind)
         XCTAssertNil(idleStore.missionRunSummary.activeReviewFocus(from: "delivery-safety"))
 
         let store = ClawStore(autoScanLocalArtifacts: false)
@@ -657,6 +665,19 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(focusedEvidenceIndex.focusedReviewTitle, "最终提交安全")
         XCTAssertTrue(focusedEvidenceIndex.focusedHasEvidence)
         XCTAssertTrue(focusedEvidenceIndex.items.contains { $0.reviewKind == "delivery-safety" && $0.isFocused })
+        let payloadLedger = summary.payloadSafetyLedger
+        XCTAssertTrue(payloadLedger.isReviewable)
+        XCTAssertEqual(payloadLedger.totalCount, availableDetailKinds.count)
+        XCTAssertGreaterThan(payloadLedger.payloadNotReadCount, 0)
+        XCTAssertGreaterThan(payloadLedger.metadataOnlyCount, 0)
+        XCTAssertGreaterThan(payloadLedger.omissionSignalCount, 0)
+        XCTAssertEqual(payloadLedger.metadataPendingCount, payloadLedger.items.filter { $0.hasMetadata == false }.count)
+        XCTAssertTrue(payloadLedger.items.contains { $0.reviewKind == "delivery-safety" && $0.payloadNotRead && $0.metadataOnly })
+        XCTAssertTrue(payloadLedger.items.contains { $0.reviewKind == "file-change-safety" && $0.safetyFlags.contains("file-content-omitted") })
+        let focusedPayloadLedger = summary.payloadSafetyLedger(focusedOn: "delivery-safety")
+        XCTAssertEqual(focusedPayloadLedger.focusedReviewKind, "delivery-safety")
+        XCTAssertEqual(focusedPayloadLedger.focusedReviewTitle, "最终提交安全")
+        XCTAssertTrue(focusedPayloadLedger.items.contains { $0.reviewKind == "delivery-safety" && $0.isFocused })
         let operatorStrip = summary.operatorStrip
         XCTAssertEqual(operatorStrip.lanes.map(\.id), ["gateway", "evidence", "review", "next"])
         XCTAssertEqual(operatorStrip.title, "Mission Operator")
@@ -775,6 +796,9 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(statusApprovalQueue.focusedReviewKind, statusOnlyItem.reviewKind)
         XCTAssertEqual(statusApprovalQueue.focusedReviewTitle, statusOnlyItem.title)
         XCTAssertTrue(statusApprovalQueue.items.contains { $0.reviewKind == statusOnlyItem.reviewKind && $0.isFocused })
+        let statusPayloadLedger = statusOnlySummary.payloadSafetyLedger(focusedOn: statusOnlyItem.reviewKind)
+        XCTAssertNil(statusPayloadLedger.focusedReviewKind)
+        XCTAssertEqual(statusPayloadLedger.items.map(\.reviewKind), availableDetailKinds)
         let staleFocusContext = statusOnlySummary.focusContextSummary(focusedOn: "unknown-review-kind")
         XCTAssertNil(staleFocusContext.focusedReviewKind)
         XCTAssertTrue(staleFocusContext.canClearFocus)
@@ -788,6 +812,9 @@ final class ClawTests: XCTestCase {
         let staleEvidenceTrail = statusOnlySummary.evidenceTrailSummary(focusedOn: "unknown-review-kind")
         XCTAssertNil(staleEvidenceTrail.focusedReviewKind)
         XCTAssertEqual(staleEvidenceTrail.primaryReviewKind, statusOnlyItem.reviewKind)
+        let stalePayloadLedger = statusOnlySummary.payloadSafetyLedger(focusedOn: "unknown-review-kind")
+        XCTAssertNil(stalePayloadLedger.focusedReviewKind)
+        XCTAssertEqual(stalePayloadLedger.totalCount, availableDetailKinds.count)
         XCTAssertEqual(summary.detailReviewKinds(focusedOn: nil), availableDetailKinds)
         XCTAssertEqual(summary.detailReviewKinds(focusedOn: "delivery-safety"), ["delivery-safety"])
         XCTAssertEqual(summary.detailReviewKinds(focusedOn: "gateway-status"), availableDetailKinds)
@@ -939,6 +966,31 @@ final class ClawTests: XCTestCase {
             statusApprovalQueue.focusedReviewKind ?? "",
             statusApprovalQueue.focusedReviewTitle ?? ""
         ]
+        let payloadLedgerVisibleChunks = payloadLedger.items.flatMap {
+            [
+                $0.reviewKind,
+                $0.reviewTitle,
+                $0.status,
+                $0.guidance
+            ]
+        } + [
+            payloadLedger.title,
+            payloadLedger.status,
+            payloadLedger.guidance,
+            payloadLedger.primaryReviewKind ?? "",
+            payloadLedger.primaryReviewTitle ?? "",
+            focusedPayloadLedger.title,
+            focusedPayloadLedger.status,
+            focusedPayloadLedger.guidance,
+            focusedPayloadLedger.focusedReviewKind ?? "",
+            focusedPayloadLedger.focusedReviewTitle ?? "",
+            statusPayloadLedger.title,
+            statusPayloadLedger.status,
+            statusPayloadLedger.guidance,
+            stalePayloadLedger.title,
+            stalePayloadLedger.status,
+            stalePayloadLedger.guidance
+        ]
         let focusContextVisibleChunks = [
             focusContext.title,
             focusContext.status,
@@ -971,7 +1023,7 @@ final class ClawTests: XCTestCase {
             staleDetailDock.status,
             staleDetailDock.guidance
         ]
-        let visibleText = (queueVisibleChunks + readinessVisibleChunks + nextActionVisibleChunks + evidenceVisibleChunks + operatorVisibleChunks + evidenceTrailVisibleChunks + approvalQueueVisibleChunks + focusContextVisibleChunks).joined(separator: " ")
+        let visibleText = (queueVisibleChunks + readinessVisibleChunks + nextActionVisibleChunks + evidenceVisibleChunks + operatorVisibleChunks + evidenceTrailVisibleChunks + approvalQueueVisibleChunks + payloadLedgerVisibleChunks + focusContextVisibleChunks).joined(separator: " ")
         for forbidden in ["Authorization", "Bearer", "toolArguments", "file://", "/private", "/Users", "/home", "C:\\", "stdout", "stderr", "diff"] {
             XCTAssertFalse(visibleText.contains(forbidden), "queue leaked \(forbidden)")
         }
@@ -1002,6 +1054,10 @@ final class ClawTests: XCTestCase {
         XCTAssertTrue(shellEvidenceItem.metadataReady)
         XCTAssertTrue(shellEvidenceItem.artifactKinds.contains(.commandOutput))
         XCTAssertTrue(shellEvidenceItem.isFocused)
+        let shellPayloadLedger = shellStore.missionRunSummary.payloadSafetyLedger(focusedOn: "shell-safety")
+        XCTAssertEqual(shellPayloadLedger.focusedReviewKind, "shell-safety")
+        XCTAssertTrue(shellPayloadLedger.items.contains { $0.reviewKind == "shell-safety" && $0.isFocused && $0.payloadNotRead })
+        XCTAssertTrue(shellPayloadLedger.items.contains { $0.reviewKind == "shell-safety" && $0.safetyFlags.contains("stdout-omitted") })
         let shellOperatorStrip = shellStore.missionRunSummary.operatorStrip(focusedOn: "shell-safety")
         XCTAssertEqual(shellOperatorStrip.focusedReviewKind, "shell-safety")
         XCTAssertTrue(shellOperatorStrip.lanes.contains { $0.id == "next" && $0.reviewKind == "shell-safety" && $0.isFocused })
@@ -1044,6 +1100,10 @@ final class ClawTests: XCTestCase {
                 shellEvidence.guidance,
                 shellEvidenceItem.status,
                 shellEvidenceItem.guidance,
+                shellPayloadLedger.title,
+                shellPayloadLedger.status,
+                shellPayloadLedger.guidance,
+                shellPayloadLedger.items.map { "\($0.reviewTitle) \($0.status) \($0.guidance)" }.joined(separator: " "),
                 shellOperatorStrip.status,
                 shellEvidenceTrail.title,
                 shellEvidenceTrail.status,

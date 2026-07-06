@@ -81,7 +81,7 @@ node --check Tools/claw-gateway-smoke.mjs
 - 修改 `Claw/Core/ClawModels.swift`。
 - 修改 `Claw/Services/ClawStore.swift`。
 - 修改 planner、bridge、simulator、event reducer、autonomous loop。
-- 修改 Mission Run presentation summary、Operator Strip、Loop 继续态势、Focus Context 聚焦上下文、Review Detail Dock、Review Trail 复核路径、Approval Queue 审批队列、Artifact 证据索引、复核优先队列、复核聚焦模式、复核态势摘要、下一步复核行动或 SwiftUI 展示派生模型。
+- 修改 Mission Run presentation summary、Operator Strip、Loop 继续态势、Focus Context 聚焦上下文、Review Detail Dock、Review Trail 复核路径、Approval Queue 审批队列、Payload Safety Ledger 载荷安全账本、Artifact 证据索引、复核优先队列、复核聚焦模式、复核态势摘要、下一步复核行动或 SwiftUI 展示派生模型。
 - 修改 `Tools/LogicSmoke.swift`。
 
 本地优先命令：
@@ -243,7 +243,7 @@ node Tools/claw-gateway-smoke.mjs
 - 完整 Xcode 可用时 `xcodebuild build` 应成功。
 - direct smoke 必须覆盖 artifact 落盘、workspace 文件写入、File Change Safety metadata、路径逃逸阻断审计、workspace 写入失败审计、workspace symlink 阻断、browser trace、Browser Control metadata、Shell Command Safety metadata、结构化提取、Shell dry-run/allowlist、缺少结构化 Shell 命令阻断、浏览器策略、桌面 App 审批闸门、`agentTrace` handoff status 和 mac 证据质量分层；dry-run screen/accessibility 必须进入 degradedSignals，不能进入 satisfiedSignals。
 - WebSocket smoke 必须启动一次性 Gateway，验证事件闭环、browser/file/shell/extract/agent loop 主链路、AgentTrace satisfied/degraded/missing metadata 兼容、File Change Safety metadata、路径逃逸阻断审计、workspace 写入失败审计、Browser Control metadata、Shell Command Safety metadata 和 `sessionCompleted`。
-- Swift logic smoke 必须覆盖 Mission Run Operator Strip 的空状态、lane 顺序、计数一致性、聚焦状态，Loop 继续态势的无 AgentTrace、metadata 缺失、final-submit-review、ready-to-continue、degraded/missing 计数和只聚焦 AgentTrace 行为，Focus Context 聚焦上下文的 idle、detail 聚焦、状态级聚焦、过期聚焦、Shell 高风险聚焦和敏感字符串不外显，Review Detail Dock 的 idle、全量详情、detail 聚焦、状态级回退、过期回退、Shell 高风险聚焦和敏感字符串不外显，Review Trail 复核路径的 idle、四步顺序、证据/metadata/优先/下一步计数、detail 聚焦、状态级聚焦、过期聚焦、Shell 高风险聚焦和敏感字符串不外显，Approval Queue 审批队列的 idle、发送前审批、发送后 Gateway/Delivery/AgentTrace 确认、状态级聚焦、Shell 高风险聚焦、排序稳定和敏感字符串不外显，AgentTrace handoff status 的固定枚举、metadata 缺失回退和敏感字符串不外显，Artifact 证据索引的空状态、证据类型映射、metadata/redaction count、聚焦状态，复核优先队列的排序稳定、高风险复核项、复核聚焦过滤/回退、复核态势摘要 count 一致性、下一步复核行动和敏感字符串不外显；XCTest 也应覆盖同类 presentation-layer 派生。
+- Swift logic smoke 必须覆盖 Mission Run Operator Strip 的空状态、lane 顺序、计数一致性、聚焦状态，Loop 继续态势的无 AgentTrace、metadata 缺失、final-submit-review、ready-to-continue、degraded/missing 计数和只聚焦 AgentTrace 行为，Focus Context 聚焦上下文的 idle、detail 聚焦、状态级聚焦、过期聚焦、Shell 高风险聚焦和敏感字符串不外显，Review Detail Dock 的 idle、全量详情、detail 聚焦、状态级回退、过期回退、Shell 高风险聚焦和敏感字符串不外显，Review Trail 复核路径的 idle、四步顺序、证据/metadata/优先/下一步计数、detail 聚焦、状态级聚焦、过期聚焦、Shell 高风险聚焦和敏感字符串不外显，Approval Queue 审批队列的 idle、发送前审批、发送后 Gateway/Delivery/AgentTrace 确认、状态级聚焦、Shell 高风险聚焦、排序稳定和敏感字符串不外显，Payload Safety Ledger 载荷安全账本的 idle、payload-not-read/metadata-only/省略信号计数、detail 聚焦、状态级聚焦回退、过期聚焦回退、Shell 高风险聚焦和敏感字符串不外显，AgentTrace handoff status 的固定枚举、metadata 缺失回退和敏感字符串不外显，Artifact 证据索引的空状态、证据类型映射、metadata/redaction count、聚焦状态，复核优先队列的排序稳定、高风险复核项、复核聚焦过滤/回退、复核态势摘要 count 一致性、下一步复核行动和敏感字符串不外显；XCTest 也应覆盖同类 presentation-layer 派生。
 
 ## 静态检查
 

@@ -151,6 +151,14 @@ enum LogicSmoke {
         expect(idleApprovalQueue.criticalOrHighCount == 0, "idle approval queue should not count high priority items")
         expect(idleApprovalQueue.metadataPendingCount == 0, "idle approval queue should not count metadata gaps")
         expect(idleApprovalQueue.primaryReviewKind == nil, "idle approval queue should not invent primary focus")
+        let idlePayloadLedger = missionStore.missionRunSummary.payloadSafetyLedger
+        expect(idlePayloadLedger.isReviewable == false, "idle payload ledger should not be reviewable")
+        expect(idlePayloadLedger.totalCount == 0, "idle payload ledger should not count items")
+        expect(idlePayloadLedger.payloadNotReadCount == 0, "idle payload ledger should not count payload flags")
+        expect(idlePayloadLedger.metadataOnlyCount == 0, "idle payload ledger should not count metadata-only flags")
+        expect(idlePayloadLedger.omissionSignalCount == 0, "idle payload ledger should not count omission signals")
+        expect(idlePayloadLedger.metadataPendingCount == 0, "idle payload ledger should not count metadata gaps")
+        expect(idlePayloadLedger.primaryReviewKind == nil, "idle payload ledger should not invent primary focus")
         expect(missionStore.missionRunSummary.activeReviewFocus(from: "delivery-safety") == nil, "idle active focus should not resolve")
         missionStore.phoneAgentCommand = "打开浏览器搜索资料，整理结果并发到 Slack"
         missionStore.startAutonomousComputerTakeover()
@@ -227,6 +235,31 @@ enum LogicSmoke {
         expect(
             focusedEvidenceIndex.items.contains { $0.reviewKind == "delivery-safety" && $0.isFocused },
             "evidence index should mark focused item"
+        )
+        let payloadLedger = missionSummary.payloadSafetyLedger
+        expect(payloadLedger.isReviewable, "payload ledger should be reviewable once Gateway evidence exists")
+        expect(payloadLedger.totalCount == availableDetailKinds.count, "payload ledger should mirror detail review count")
+        expect(payloadLedger.payloadNotReadCount > 0, "payload ledger should count payload-not-read flags")
+        expect(payloadLedger.metadataOnlyCount > 0, "payload ledger should count metadata-only flags")
+        expect(payloadLedger.omissionSignalCount > 0, "payload ledger should count omission signals")
+        expect(
+            payloadLedger.metadataPendingCount == payloadLedger.items.filter { $0.hasMetadata == false }.count,
+            "payload ledger should count metadata gaps"
+        )
+        expect(
+            payloadLedger.items.contains { $0.reviewKind == "delivery-safety" && $0.payloadNotRead && $0.metadataOnly },
+            "payload ledger should include delivery payload boundary"
+        )
+        expect(
+            payloadLedger.items.contains { $0.reviewKind == "file-change-safety" && $0.safetyFlags.contains("file-content-omitted") },
+            "payload ledger should include file content omission"
+        )
+        let focusedPayloadLedger = missionSummary.payloadSafetyLedger(focusedOn: "delivery-safety")
+        expect(focusedPayloadLedger.focusedReviewKind == "delivery-safety", "payload ledger should record delivery focus")
+        expect(focusedPayloadLedger.focusedReviewTitle == "最终提交安全", "payload ledger should expose delivery title")
+        expect(
+            focusedPayloadLedger.items.contains { $0.reviewKind == "delivery-safety" && $0.isFocused },
+            "focused payload ledger should mark delivery row"
         )
         let operatorStrip = missionSummary.operatorStrip
         expect(operatorStrip.lanes.map(\.id) == ["gateway", "evidence", "review", "next"], "operator strip should expose stable lanes")
@@ -388,6 +421,9 @@ enum LogicSmoke {
             statusApprovalQueue.items.contains { $0.reviewKind == statusOnlyItem.reviewKind && $0.isFocused },
             "status approval queue should mark status row"
         )
+        let statusPayloadLedger = statusOnlySummary.payloadSafetyLedger(focusedOn: statusOnlyItem.reviewKind)
+        expect(statusPayloadLedger.focusedReviewKind == nil, "status payload ledger should not focus status-only items")
+        expect(statusPayloadLedger.items.map(\.reviewKind) == availableDetailKinds, "status payload ledger should keep all details visible")
         let staleFocusContext = statusOnlySummary.focusContextSummary(focusedOn: "unknown-review-kind")
         expect(staleFocusContext.focusedReviewKind == nil, "stale focus context should not keep an unknown review kind")
         expect(staleFocusContext.canClearFocus, "stale focus context should allow clearing focus")
@@ -401,6 +437,9 @@ enum LogicSmoke {
         let staleEvidenceTrail = statusOnlySummary.evidenceTrailSummary(focusedOn: "unknown-review-kind")
         expect(staleEvidenceTrail.focusedReviewKind == nil, "stale evidence trail should not keep unknown focus")
         expect(staleEvidenceTrail.primaryReviewKind == statusOnlyItem.reviewKind, "stale evidence trail should fall back to top priority")
+        let stalePayloadLedger = statusOnlySummary.payloadSafetyLedger(focusedOn: "unknown-review-kind")
+        expect(stalePayloadLedger.focusedReviewKind == nil, "stale payload ledger should not keep unknown focus")
+        expect(stalePayloadLedger.totalCount == availableDetailKinds.count, "stale payload ledger should keep all rows")
         expect(
             missionSummary.detailReviewKinds(focusedOn: nil) == availableDetailKinds,
             "nil focus should show all detail reviews"
@@ -590,6 +629,31 @@ enum LogicSmoke {
             statusApprovalQueue.focusedReviewKind ?? "",
             statusApprovalQueue.focusedReviewTitle ?? ""
         ]
+        let payloadLedgerVisibleChunks = payloadLedger.items.flatMap {
+            [
+                $0.reviewKind,
+                $0.reviewTitle,
+                $0.status,
+                $0.guidance
+            ]
+        } + [
+            payloadLedger.title,
+            payloadLedger.status,
+            payloadLedger.guidance,
+            payloadLedger.primaryReviewKind ?? "",
+            payloadLedger.primaryReviewTitle ?? "",
+            focusedPayloadLedger.title,
+            focusedPayloadLedger.status,
+            focusedPayloadLedger.guidance,
+            focusedPayloadLedger.focusedReviewKind ?? "",
+            focusedPayloadLedger.focusedReviewTitle ?? "",
+            statusPayloadLedger.title,
+            statusPayloadLedger.status,
+            statusPayloadLedger.guidance,
+            stalePayloadLedger.title,
+            stalePayloadLedger.status,
+            stalePayloadLedger.guidance
+        ]
         let focusContextVisibleChunks = [
             focusContext.title,
             focusContext.status,
@@ -618,7 +682,7 @@ enum LogicSmoke {
             staleDetailDock.status,
             staleDetailDock.guidance
         ]
-        let queueVisibleText = (queueVisibleChunks + readinessVisibleChunks + nextActionVisibleChunks + evidenceVisibleChunks + operatorVisibleChunks + evidenceTrailVisibleChunks + approvalQueueVisibleChunks + focusContextVisibleChunks).joined(separator: " ")
+        let queueVisibleText = (queueVisibleChunks + readinessVisibleChunks + nextActionVisibleChunks + evidenceVisibleChunks + operatorVisibleChunks + evidenceTrailVisibleChunks + approvalQueueVisibleChunks + payloadLedgerVisibleChunks + focusContextVisibleChunks).joined(separator: " ")
         for forbidden in ["Authorization", "Bearer", "toolArguments", "file://", "/private", "/Users", "/home", "C:\\", "stdout", "stderr", "diff"] {
             expect(queueVisibleText.contains(forbidden) == false, "review priority queue should not expose \(forbidden)")
         }
@@ -772,6 +836,16 @@ enum LogicSmoke {
         } else {
             failures.append("shell evidence index should include shell safety")
         }
+        let shellPayloadLedger = shellMissionSummary.payloadSafetyLedger(focusedOn: "shell-safety")
+        expect(shellPayloadLedger.focusedReviewKind == "shell-safety", "shell payload ledger should record shell focus")
+        expect(
+            shellPayloadLedger.items.contains { $0.reviewKind == "shell-safety" && $0.isFocused && $0.payloadNotRead },
+            "shell payload ledger should mark focused shell payload boundary"
+        )
+        expect(
+            shellPayloadLedger.items.contains { $0.reviewKind == "shell-safety" && $0.safetyFlags.contains("stdout-omitted") },
+            "shell payload ledger should retain stdout omission as non-visible safety metadata"
+        )
         let shellOperatorStrip = shellMissionSummary.operatorStrip(focusedOn: "shell-safety")
         expect(shellOperatorStrip.focusedReviewKind == "shell-safety", "shell operator strip should record shell focus")
         expect(
@@ -824,6 +898,10 @@ enum LogicSmoke {
                 shellEvidence.title,
                 shellEvidence.status,
                 shellEvidence.guidance,
+                shellPayloadLedger.title,
+                shellPayloadLedger.status,
+                shellPayloadLedger.guidance,
+                shellPayloadLedger.items.map { "\($0.reviewTitle) \($0.status) \($0.guidance)" }.joined(separator: " "),
                 shellOperatorStrip.status,
                 shellEvidenceTrail.title,
                 shellEvidenceTrail.status,
