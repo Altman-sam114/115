@@ -3562,7 +3562,9 @@ extension ClawMissionRunSummary {
         let laneItem = queue.focusedReviewKind.flatMap { focusedKind in
             queue.items.first { $0.reviewKind == focusedKind }
         } ?? queue.items.first
-        let laneReviewTitle = queue.focusedReviewTitle ?? laneItem?.title
+        let laneReviewTitle = laneItem.flatMap { titleForNextStepReviewKind($0.reviewKind) } ??
+            queue.focusedReviewTitle ??
+            laneItem?.title
         let checklist = [
             queue.requiresHumanAction ? "人工确认" : "无需立即审批",
             queue.hasMetadataGap ? "metadata 待同步" : "metadata 已就绪",
