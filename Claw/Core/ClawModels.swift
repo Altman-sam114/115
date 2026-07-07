@@ -4512,6 +4512,7 @@ extension ClawMissionRunSummary {
         let focusedItem = focusedKind.flatMap { kind in
             items.first { $0.reviewKind == kind && $0.canFocusReview }
         }
+        let focusedReviewTitle = focusedKind.flatMap(titleForNextStepReviewKind) ?? focusedItem?.reviewTitle
         let primaryItem = focusedItem ??
             items.first(where: \.isBlocked) ??
             items.first(where: \.isRetryable) ??
@@ -4587,7 +4588,7 @@ extension ClawMissionRunSummary {
             loopCandidateCount: loopCandidateCount,
             focusedItemID: focusedItem?.id,
             focusedReviewKind: focusedItem?.reviewKind,
-            focusedReviewTitle: focusedItem?.reviewTitle,
+            focusedReviewTitle: focusedReviewTitle,
             primaryReviewKind: primaryItem?.reviewKind,
             primaryReviewTitle: primaryItem?.reviewTitle,
             canFocusPrimaryReview: primaryItem?.canFocusReview ?? false,
