@@ -659,6 +659,12 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(idleContinuationGate.blockedCount, 0)
         XCTAssertEqual(idleContinuationGate.humanActionCount, 0)
         XCTAssertNil(idleContinuationGate.primaryReviewKind)
+        let idleReviewRadar = idleStore.missionRunSummary.macAgentReviewRadar
+        XCTAssertFalse(idleReviewRadar.isReviewable)
+        XCTAssertEqual(idleReviewRadar.totalCount, 0)
+        XCTAssertEqual(idleReviewRadar.priorityCount, 0)
+        XCTAssertEqual(idleReviewRadar.metadataPendingCount, 0)
+        XCTAssertNil(idleReviewRadar.primaryReviewKind)
         XCTAssertNil(idleStore.missionRunSummary.activeReviewFocus(from: "delivery-safety"))
 
         let store = ClawStore(autoScanLocalArtifacts: false)
@@ -725,6 +731,15 @@ final class ClawTests: XCTestCase {
         let focusedPreSendContinuationGate = preSendSummary.macAgentContinuationGate(focusedOn: "approval")
         XCTAssertEqual(focusedPreSendContinuationGate.focusedReviewKind, "approval")
         XCTAssertTrue(focusedPreSendContinuationGate.items.contains { $0.reviewKind == "approval" && $0.isFocused })
+        let preSendReviewRadar = preSendSummary.macAgentReviewRadar
+        XCTAssertTrue(preSendReviewRadar.isReviewable)
+        XCTAssertEqual(preSendReviewRadar.totalCount, 5)
+        XCTAssertTrue(preSendReviewRadar.requiresHumanAction)
+        XCTAssertEqual(preSendReviewRadar.primaryReviewKind, "approval")
+        XCTAssertTrue(preSendReviewRadar.sectors.contains { $0.id == "human-handoff" && $0.reviewKind == "approval" && $0.humanActionCount > 0 })
+        let focusedPreSendReviewRadar = preSendSummary.macAgentReviewRadar(focusedOn: "approval")
+        XCTAssertEqual(focusedPreSendReviewRadar.focusedReviewKind, "approval")
+        XCTAssertTrue(focusedPreSendReviewRadar.sectors.contains { $0.reviewKind == "approval" && $0.isFocused })
 
         store.approveAndContinueAutonomousLoop()
 
@@ -849,6 +864,19 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(focusedContinuationGate.focusedReviewKind, "delivery-safety")
         XCTAssertEqual(focusedContinuationGate.focusedReviewTitle, "最终提交安全")
         XCTAssertTrue(focusedContinuationGate.items.contains { $0.reviewKind == "delivery-safety" && $0.isFocused })
+        let reviewRadar = summary.macAgentReviewRadar
+        XCTAssertTrue(reviewRadar.isReviewable)
+        XCTAssertEqual(reviewRadar.totalCount, 5)
+        XCTAssertGreaterThan(reviewRadar.priorityCount, 0)
+        XCTAssertTrue(reviewRadar.requiresHumanAction)
+        XCTAssertTrue(reviewRadar.sectors.contains { $0.id == "safety-review" && $0.priorityCount > 0 })
+        XCTAssertTrue(reviewRadar.sectors.contains { $0.id == "evidence-coverage" && $0.readyCount > 0 })
+        XCTAssertTrue(reviewRadar.sectors.contains { $0.id == "loop-continuation" && $0.reviewKind == "agent-trace" })
+        XCTAssertNotNil(reviewRadar.primaryReviewKind)
+        let focusedReviewRadar = summary.macAgentReviewRadar(focusedOn: "delivery-safety")
+        XCTAssertEqual(focusedReviewRadar.focusedReviewKind, "delivery-safety")
+        XCTAssertEqual(focusedReviewRadar.focusedReviewTitle, "最终提交安全")
+        XCTAssertTrue(focusedReviewRadar.sectors.contains { $0.reviewKind == "delivery-safety" && $0.isFocused })
         let operatorStrip = summary.operatorStrip
         XCTAssertEqual(operatorStrip.lanes.map(\.id), ["gateway", "evidence", "review", "next"])
         XCTAssertEqual(operatorStrip.title, "Mission Operator")
@@ -1020,6 +1048,10 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(statusContinuationGate.focusedReviewKind, statusOnlyItem.reviewKind)
         XCTAssertEqual(statusContinuationGate.focusedReviewTitle, statusOnlyItem.title)
         XCTAssertTrue(statusContinuationGate.items.contains { $0.reviewKind == statusOnlyItem.reviewKind && $0.isFocused })
+        let statusReviewRadar = statusOnlySummary.macAgentReviewRadar(focusedOn: statusOnlyItem.reviewKind)
+        XCTAssertEqual(statusReviewRadar.focusedReviewKind, statusOnlyItem.reviewKind)
+        XCTAssertEqual(statusReviewRadar.focusedReviewTitle, statusOnlyItem.title)
+        XCTAssertTrue(statusReviewRadar.sectors.contains { $0.reviewKind == statusOnlyItem.reviewKind && $0.isFocused })
         let staleFocusContext = statusOnlySummary.focusContextSummary(focusedOn: "unknown-review-kind")
         XCTAssertNil(staleFocusContext.focusedReviewKind)
         XCTAssertTrue(staleFocusContext.canClearFocus)
@@ -1054,6 +1086,9 @@ final class ClawTests: XCTestCase {
         let staleContinuationGate = statusOnlySummary.macAgentContinuationGate(focusedOn: "unknown-review-kind")
         XCTAssertNil(staleContinuationGate.focusedReviewKind)
         XCTAssertEqual(staleContinuationGate.totalCount, statusOnlySummary.macAgentContinuationGate.totalCount)
+        let staleReviewRadar = statusOnlySummary.macAgentReviewRadar(focusedOn: "unknown-review-kind")
+        XCTAssertNil(staleReviewRadar.focusedReviewKind)
+        XCTAssertEqual(staleReviewRadar.totalCount, statusOnlySummary.macAgentReviewRadar.totalCount)
         XCTAssertEqual(summary.detailReviewKinds(focusedOn: nil), availableDetailKinds)
         XCTAssertEqual(summary.detailReviewKinds(focusedOn: "delivery-safety"), ["delivery-safety"])
         XCTAssertEqual(summary.detailReviewKinds(focusedOn: "gateway-status"), availableDetailKinds)
@@ -1479,6 +1514,43 @@ final class ClawTests: XCTestCase {
             staleContinuationGate.status,
             staleContinuationGate.guidance
         ]
+        let reviewRadarVisibleChunks = reviewRadar.sectors.flatMap {
+            [
+                $0.title,
+                $0.status,
+                $0.guidance,
+                $0.reviewKind ?? "",
+                $0.reviewTitle ?? ""
+            ]
+        } + [
+            idleReviewRadar.title,
+            idleReviewRadar.status,
+            idleReviewRadar.guidance,
+            preSendReviewRadar.title,
+            preSendReviewRadar.status,
+            preSendReviewRadar.guidance,
+            focusedPreSendReviewRadar.title,
+            focusedPreSendReviewRadar.status,
+            focusedPreSendReviewRadar.guidance,
+            reviewRadar.title,
+            reviewRadar.status,
+            reviewRadar.guidance,
+            reviewRadar.primaryReviewKind ?? "",
+            reviewRadar.primaryReviewTitle ?? "",
+            focusedReviewRadar.title,
+            focusedReviewRadar.status,
+            focusedReviewRadar.guidance,
+            focusedReviewRadar.focusedReviewKind ?? "",
+            focusedReviewRadar.focusedReviewTitle ?? "",
+            statusReviewRadar.title,
+            statusReviewRadar.status,
+            statusReviewRadar.guidance,
+            statusReviewRadar.focusedReviewKind ?? "",
+            statusReviewRadar.focusedReviewTitle ?? "",
+            staleReviewRadar.title,
+            staleReviewRadar.status,
+            staleReviewRadar.guidance
+        ]
         let visibleText = (
             queueVisibleChunks +
                 readinessVisibleChunks +
@@ -1494,7 +1566,8 @@ final class ClawTests: XCTestCase {
                 evidenceCoverageVisibleChunks +
                 nextStepDeckVisibleChunks +
                 runTimelineVisibleChunks +
-                continuationGateVisibleChunks
+                continuationGateVisibleChunks +
+                reviewRadarVisibleChunks
         ).joined(separator: " ")
         for forbidden in ["Authorization", "Bearer", "toolArguments", "file://", "/private", "/Users", "/home", "C:\\", "stdout", "stderr", "diff"] {
             XCTAssertFalse(visibleText.contains(forbidden), "queue leaked \(forbidden)")
@@ -1599,6 +1672,13 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(shellContinuationGate.focusedReviewTitle, "Shell 命令安全")
         XCTAssertTrue(shellContinuationGate.items.contains { $0.id == "review-blockers" && $0.reviewKind == "shell-safety" && $0.isRetryable })
         XCTAssertTrue(shellContinuationGate.items.contains { $0.reviewKind == "shell-safety" && $0.isFocused })
+        let shellReviewRadar = shellStore.missionRunSummary.macAgentReviewRadar(focusedOn: "shell-safety")
+        XCTAssertTrue(shellReviewRadar.isReviewable)
+        XCTAssertTrue(shellReviewRadar.requiresHumanAction)
+        XCTAssertEqual(shellReviewRadar.focusedReviewKind, "shell-safety")
+        XCTAssertEqual(shellReviewRadar.focusedReviewTitle, "Shell 命令安全")
+        XCTAssertTrue(shellReviewRadar.sectors.contains { $0.reviewKind == "shell-safety" && $0.isFocused })
+        XCTAssertTrue(shellReviewRadar.sectors.contains { $0.id == "execution-state" && $0.blockedCount > 0 })
         XCTAssertFalse(
             [
                 shellReadiness.title,
@@ -1660,7 +1740,11 @@ final class ClawTests: XCTestCase {
                 shellContinuationGate.title,
                 shellContinuationGate.status,
                 shellContinuationGate.guidance,
-                shellContinuationGate.items.map { "\($0.title) \($0.status) \($0.guidance)" }.joined(separator: " ")
+                shellContinuationGate.items.map { "\($0.title) \($0.status) \($0.guidance)" }.joined(separator: " "),
+                shellReviewRadar.title,
+                shellReviewRadar.status,
+                shellReviewRadar.guidance,
+                shellReviewRadar.sectors.map { "\($0.title) \($0.status) \($0.guidance)" }.joined(separator: " ")
             ].joined(separator: " ").contains("stdout")
         )
     }

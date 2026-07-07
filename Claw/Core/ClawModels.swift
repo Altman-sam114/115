@@ -1705,6 +1705,53 @@ struct ClawMissionRunContinuationGateSummary: Equatable, Codable, Sendable {
     var items: [ClawMissionRunContinuationGateItem]
 }
 
+struct ClawMissionRunReviewRadarSector: Identifiable, Equatable, Codable, Sendable {
+    var id: String
+    var rank: Int
+    var title: String
+    var status: String
+    var guidance: String
+    var icon: String
+    var tone: ClawMissionRunOperatorLaneTone
+    var reviewKind: String?
+    var reviewTitle: String?
+    var canFocusReview: Bool
+    var isFocused: Bool
+    var priorityCount: Int
+    var readyCount: Int
+    var blockedCount: Int
+    var humanActionCount: Int
+    var metadataPendingCount: Int
+    var canContinueLoop: Bool
+    var isReady: Bool
+}
+
+struct ClawMissionRunReviewRadarSummary: Equatable, Codable, Sendable {
+    var title: String
+    var status: String
+    var guidance: String
+    var icon: String
+    var totalCount: Int
+    var priorityCount: Int
+    var readyCount: Int
+    var blockedCount: Int
+    var humanActionCount: Int
+    var metadataPendingCount: Int
+    var loopCandidateCount: Int
+    var focusedSectorID: String?
+    var focusedReviewKind: String?
+    var focusedReviewTitle: String?
+    var primaryReviewKind: String?
+    var primaryReviewTitle: String?
+    var canFocusPrimaryReview: Bool
+    var canContinueLoop: Bool
+    var requiresHumanAction: Bool
+    var hasMetadataGap: Bool
+    var isBlocked: Bool
+    var isReviewable: Bool
+    var sectors: [ClawMissionRunReviewRadarSector]
+}
+
 struct ClawMissionRunReviewReadinessSummary: Equatable, Codable, Sendable {
     var title: String
     var status: String
@@ -4771,6 +4818,291 @@ extension ClawMissionRunSummary {
             hasMetadataGap: hasMetadataGap,
             canContinueLoop: canContinueLoop,
             isRetryable: isRetryable
+        )
+    }
+
+    var macAgentReviewRadar: ClawMissionRunReviewRadarSummary {
+        macAgentReviewRadar(focusedOn: nil)
+    }
+
+    func macAgentReviewRadar(focusedOn reviewKind: String?) -> ClawMissionRunReviewRadarSummary {
+        let focusedKind = activeReviewFocus(from: reviewKind)
+        let readiness = reviewReadinessSummary(focusedOn: focusedKind)
+        let coverage = macAgentEvidenceCoverageMap(focusedOn: focusedKind)
+        let actionPreflight = macGatewayActionPreflightMatrix(focusedOn: focusedKind)
+        let approval = approvalQueueSummary(focusedOn: focusedKind)
+        let gate = macAgentContinuationGate(focusedOn: focusedKind)
+        let loop = loopContinuationSummary(focusedOn: focusedKind)
+        let macReadiness = macAgentReadinessBoard(focusedOn: focusedKind)
+        let sectors = reviewRadarSectors(
+            focusedOn: focusedKind,
+            readiness: readiness,
+            coverage: coverage,
+            actionPreflight: actionPreflight,
+            approval: approval,
+            gate: gate,
+            loop: loop,
+            macReadiness: macReadiness
+        )
+        let focusedSector = focusedKind.flatMap { kind in
+            sectors.first { $0.reviewKind == kind && $0.canFocusReview }
+        }
+        let focusedReviewTitle = focusedKind.flatMap(titleForNextStepReviewKind) ?? focusedSector?.reviewTitle
+        let primarySector = focusedSector ??
+            sectors.first(where: { $0.blockedCount > 0 }) ??
+            sectors.first(where: { $0.humanActionCount > 0 }) ??
+            sectors.first(where: { $0.metadataPendingCount > 0 }) ??
+            sectors.first(where: \.canContinueLoop) ??
+            sectors.sorted { lhs, rhs in
+                if lhs.priorityCount == rhs.priorityCount {
+                    return lhs.rank < rhs.rank
+                }
+                return lhs.priorityCount > rhs.priorityCount
+            }.first
+        let priorityCount = sectors.map(\.priorityCount).reduce(0, +)
+        let readyCount = sectors.filter(\.isReady).count
+        let blockedCount = sectors.map(\.blockedCount).reduce(0, +)
+        let humanActionCount = sectors.map(\.humanActionCount).reduce(0, +)
+        let metadataPendingCount = sectors.map(\.metadataPendingCount).reduce(0, +)
+        let loopCandidateCount = sectors.filter(\.canContinueLoop).count
+        let isReviewable = sectors.isEmpty == false
+        let canContinueLoop = loopCandidateCount > 0 && blockedCount == 0 && humanActionCount == 0 && metadataPendingCount == 0
+        let requiresHumanAction = humanActionCount > 0
+        let hasMetadataGap = metadataPendingCount > 0
+        let isBlocked = blockedCount > 0
+
+        let title: String
+        let status: String
+        let guidance: String
+        let icon: String
+        if isReviewable == false {
+            title = "Review Radar 待生成"
+            status = "尚无复核信号"
+            guidance = "生成任务或收到 Gateway 事件后，会把安全、证据、执行、交接和 Loop 复核压缩成雷达。"
+            icon = "scope"
+        } else if let focusedSector {
+            title = "聚焦 Review Radar"
+            status = focusedSector.title
+            guidance = "\(focusedSector.title)：\(focusedSector.guidance)"
+            icon = focusedSector.icon
+        } else if isBlocked {
+            title = "Review Radar 阻断"
+            status = "\(blockedCount) 项阻断 · \(priorityCount) 个优先信号"
+            guidance = primarySector.map { "先看 \($0.reviewTitle ?? $0.title)：\($0.guidance)" } ?? "先处理阻断复核域。"
+            icon = "scope"
+        } else if requiresHumanAction {
+            title = "Review Radar 等待人工"
+            status = "\(humanActionCount) 项需人工 · \(priorityCount) 个优先信号"
+            guidance = primarySector.map { "先确认 \($0.reviewTitle ?? $0.title)：\($0.guidance)" } ?? "先完成人工确认。"
+            icon = "person.crop.circle.badge.exclamationmark.fill"
+        } else if hasMetadataGap {
+            title = "Review Radar metadata 待同步"
+            status = "\(metadataPendingCount) 项 metadata 待同步"
+            guidance = primarySector.map { "等待 \($0.reviewTitle ?? $0.title) metadata 后再复核。" } ?? "等待 Gateway metadata 后再复核。"
+            icon = "doc.badge.clock"
+        } else if canContinueLoop {
+            title = "Review Radar 可继续"
+            status = "\(readyCount)/\(sectors.count) 个 sector 就绪"
+            guidance = "Radar 未发现阻断；仍需用户显式触发下一轮，不自动继续。"
+            icon = "scope"
+        } else {
+            title = "Mac Agent Review Radar"
+            status = "\(readyCount)/\(sectors.count) 个 sector 就绪"
+            guidance = primarySector.map { "可从 \($0.reviewTitle ?? $0.title) 开始抽查。" } ?? "可抽查当前复核雷达。"
+            icon = "scope"
+        }
+
+        return ClawMissionRunReviewRadarSummary(
+            title: title,
+            status: status,
+            guidance: guidance,
+            icon: icon,
+            totalCount: sectors.count,
+            priorityCount: priorityCount,
+            readyCount: readyCount,
+            blockedCount: blockedCount,
+            humanActionCount: humanActionCount,
+            metadataPendingCount: metadataPendingCount,
+            loopCandidateCount: loopCandidateCount,
+            focusedSectorID: focusedSector?.id,
+            focusedReviewKind: focusedSector?.reviewKind,
+            focusedReviewTitle: focusedReviewTitle,
+            primaryReviewKind: primarySector?.reviewKind,
+            primaryReviewTitle: primarySector?.reviewTitle,
+            canFocusPrimaryReview: primarySector?.canFocusReview ?? false,
+            canContinueLoop: canContinueLoop,
+            requiresHumanAction: requiresHumanAction,
+            hasMetadataGap: hasMetadataGap,
+            isBlocked: isBlocked,
+            isReviewable: isReviewable,
+            sectors: sectors
+        )
+    }
+
+    private func reviewRadarSectors(
+        focusedOn focusedKind: String?,
+        readiness: ClawMissionRunReviewReadinessSummary,
+        coverage: ClawMissionRunEvidenceCoverageMap,
+        actionPreflight: ClawMissionRunActionPreflightMatrix,
+        approval: ClawMissionRunApprovalQueueSummary,
+        gate: ClawMissionRunContinuationGateSummary,
+        loop: ClawMissionRunLoopContinuationSummary,
+        macReadiness: ClawMissionRunMacAgentReadinessBoard
+    ) -> [ClawMissionRunReviewRadarSector] {
+        let hasMissionEvidence = readiness.isReviewable ||
+            coverage.isReviewable ||
+            actionPreflight.isReviewable ||
+            approval.isReviewable ||
+            gate.isReviewable ||
+            loop.isReviewable ||
+            macReadiness.isReviewable
+        guard hasMissionEvidence else {
+            return []
+        }
+
+        return [
+            reviewRadarSector(
+                id: "safety-review",
+                rank: 10,
+                title: "安全复核",
+                status: readiness.status,
+                guidance: readiness.topActionHint ?? readiness.guidance,
+                icon: readiness.icon,
+                tone: readiness.criticalOrHighCount > 0 ? .danger : (readiness.requiresHumanAction ? .warning : .success),
+                reviewKind: readiness.topReviewKind,
+                reviewTitle: readiness.topReviewTitle,
+                canFocusReview: readiness.topReviewKind.map(focusUsesDetailReview) ?? false,
+                focusedKind: focusedKind,
+                priorityCount: readiness.criticalOrHighCount + readiness.actionablePriorityCount,
+                readyCount: readiness.availableDetailReviewCount,
+                blockedCount: gate.blockedCount,
+                humanActionCount: readiness.requiresHumanAction ? max(1, readiness.actionablePriorityCount) : 0,
+                metadataPendingCount: readiness.metadataPendingCount,
+                canContinueLoop: false,
+                isReady: readiness.isReviewable && readiness.requiresHumanAction == false && readiness.metadataPendingCount == 0
+            ),
+            reviewRadarSector(
+                id: "evidence-coverage",
+                rank: 20,
+                title: "证据覆盖",
+                status: coverage.isReviewable ? coverage.status : "等待证据",
+                guidance: coverage.guidance,
+                icon: coverage.icon,
+                tone: coverage.hasMetadataGap ? .info : (coverage.evidenceCoveredCount > 0 ? .success : .neutral),
+                reviewKind: coverage.primaryReviewKind,
+                reviewTitle: coverage.primaryReviewTitle,
+                canFocusReview: coverage.canFocusPrimaryReview,
+                focusedKind: focusedKind,
+                priorityCount: max(0, coverage.totalCount - coverage.evidenceCoveredCount) + coverage.metadataPendingCount,
+                readyCount: coverage.evidenceCoveredCount,
+                blockedCount: 0,
+                humanActionCount: coverage.requiresHumanAction ? max(1, coverage.humanActionCount) : 0,
+                metadataPendingCount: coverage.metadataPendingCount,
+                canContinueLoop: false,
+                isReady: coverage.isReviewable && coverage.hasMetadataGap == false && coverage.evidenceCoveredCount > 0
+            ),
+            reviewRadarSector(
+                id: "execution-state",
+                rank: 30,
+                title: "执行状态",
+                status: actionPreflight.isReviewable ? actionPreflight.status : "等待 action",
+                guidance: actionPreflight.guidance,
+                icon: actionPreflight.icon,
+                tone: actionPreflight.blockedCount > 0 ? .danger : (actionPreflight.metadataPendingCount > 0 ? .info : .success),
+                reviewKind: actionPreflight.primaryReviewKind,
+                reviewTitle: actionPreflight.primaryReviewTitle,
+                canFocusReview: actionPreflight.canFocusPrimaryReview,
+                focusedKind: focusedKind,
+                priorityCount: actionPreflight.blockedCount + actionPreflight.degradedCount + actionPreflight.metadataPendingCount,
+                readyCount: actionPreflight.readyCount,
+                blockedCount: actionPreflight.blockedCount,
+                humanActionCount: actionPreflight.humanActionCount,
+                metadataPendingCount: actionPreflight.metadataPendingCount,
+                canContinueLoop: false,
+                isReady: actionPreflight.isReviewable && actionPreflight.blockedCount == 0 && actionPreflight.metadataPendingCount == 0
+            ),
+            reviewRadarSector(
+                id: "human-handoff",
+                rank: 40,
+                title: "人工交接",
+                status: approval.isReviewable ? approval.status : gate.status,
+                guidance: approval.isReviewable ? approval.guidance : gate.guidance,
+                icon: approval.isReviewable ? approval.icon : gate.icon,
+                tone: approval.requiresHumanAction || gate.requiresHumanAction ? .warning : .success,
+                reviewKind: approval.primaryReviewKind ?? gate.primaryReviewKind,
+                reviewTitle: approval.primaryReviewTitle ?? gate.primaryReviewTitle,
+                canFocusReview: approval.canFocusPrimaryReview || gate.canFocusPrimaryReview,
+                focusedKind: focusedKind,
+                priorityCount: approval.criticalOrHighCount + approval.actionableCount + gate.humanActionCount,
+                readyCount: approval.totalCount,
+                blockedCount: gate.blockedCount,
+                humanActionCount: approval.requiresHumanAction ? max(1, approval.actionableCount) : gate.humanActionCount,
+                metadataPendingCount: approval.metadataPendingCount,
+                canContinueLoop: false,
+                isReady: approval.requiresHumanAction == false && gate.requiresHumanAction == false && approval.metadataPendingCount == 0
+            ),
+            reviewRadarSector(
+                id: "loop-continuation",
+                rank: 50,
+                title: "Loop 继续",
+                status: loop.isReviewable ? loop.status : "等待 AgentTrace",
+                guidance: loop.canContinueLoop ? "AgentTrace 显示可继续；仍必须由用户显式触发下一轮。" : loop.guidance,
+                icon: loop.canContinueLoop ? "arrow.forward.circle.fill" : loop.icon,
+                tone: loop.hasMetadataGap ? .info : (loop.canContinueLoop ? .success : (loop.requiresHumanAction ? .warning : .neutral)),
+                reviewKind: loop.focusReviewKind,
+                reviewTitle: loop.focusReviewTitle,
+                canFocusReview: loop.canFocusAgentTrace,
+                focusedKind: focusedKind,
+                priorityCount: loop.missingSignalCount + loop.degradedSignalCount,
+                readyCount: loop.canContinueLoop ? 1 : 0,
+                blockedCount: loop.handoffStatus == "blocked" ? 1 : 0,
+                humanActionCount: loop.requiresHumanAction ? 1 : 0,
+                metadataPendingCount: loop.hasMetadataGap ? 1 : 0,
+                canContinueLoop: loop.canContinueLoop,
+                isReady: loop.isReviewable && loop.hasMetadataGap == false && loop.requiresHumanAction == false
+            )
+        ]
+    }
+
+    private func reviewRadarSector(
+        id: String,
+        rank: Int,
+        title: String,
+        status: String,
+        guidance: String,
+        icon: String,
+        tone: ClawMissionRunOperatorLaneTone,
+        reviewKind: String?,
+        reviewTitle: String?,
+        canFocusReview: Bool,
+        focusedKind: String?,
+        priorityCount: Int,
+        readyCount: Int,
+        blockedCount: Int,
+        humanActionCount: Int,
+        metadataPendingCount: Int,
+        canContinueLoop: Bool,
+        isReady: Bool
+    ) -> ClawMissionRunReviewRadarSector {
+        ClawMissionRunReviewRadarSector(
+            id: id,
+            rank: rank,
+            title: title,
+            status: status,
+            guidance: guidance,
+            icon: icon,
+            tone: tone,
+            reviewKind: reviewKind,
+            reviewTitle: reviewTitle,
+            canFocusReview: canFocusReview && reviewKind != nil,
+            isFocused: reviewKind != nil && reviewKind == focusedKind,
+            priorityCount: priorityCount,
+            readyCount: readyCount,
+            blockedCount: blockedCount,
+            humanActionCount: humanActionCount,
+            metadataPendingCount: metadataPendingCount,
+            canContinueLoop: canContinueLoop,
+            isReady: isReady
         )
     }
 

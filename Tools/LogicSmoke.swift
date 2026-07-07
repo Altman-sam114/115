@@ -201,6 +201,12 @@ enum LogicSmoke {
         expect(idleContinuationGate.blockedCount == 0, "idle continuation gate should not count blockers")
         expect(idleContinuationGate.humanActionCount == 0, "idle continuation gate should not require human action")
         expect(idleContinuationGate.primaryReviewKind == nil, "idle continuation gate should not invent primary focus")
+        let idleReviewRadar = missionStore.missionRunSummary.macAgentReviewRadar
+        expect(idleReviewRadar.isReviewable == false, "idle review radar should not be reviewable")
+        expect(idleReviewRadar.totalCount == 0, "idle review radar should not count sectors")
+        expect(idleReviewRadar.priorityCount == 0, "idle review radar should not count priority signals")
+        expect(idleReviewRadar.metadataPendingCount == 0, "idle review radar should not count metadata gaps")
+        expect(idleReviewRadar.primaryReviewKind == nil, "idle review radar should not invent primary focus")
         expect(missionStore.missionRunSummary.activeReviewFocus(from: "delivery-safety") == nil, "idle active focus should not resolve")
         missionStore.phoneAgentCommand = "打开浏览器搜索资料，整理结果并发到 Slack"
         missionStore.startAutonomousComputerTakeover()
@@ -300,6 +306,21 @@ enum LogicSmoke {
         expect(
             focusedPreSendContinuationGate.items.contains { $0.reviewKind == "approval" && $0.isFocused },
             "focused pre-send continuation gate should mark approval row"
+        )
+        let preSendReviewRadar = missionSummary.macAgentReviewRadar
+        expect(preSendReviewRadar.isReviewable, "pre-send review radar should be reviewable")
+        expect(preSendReviewRadar.totalCount == 5, "pre-send review radar should expose fixed sectors")
+        expect(preSendReviewRadar.requiresHumanAction, "pre-send review radar should require human action")
+        expect(preSendReviewRadar.primaryReviewKind == "approval", "pre-send review radar should target approval")
+        expect(
+            preSendReviewRadar.sectors.contains { $0.id == "human-handoff" && $0.reviewKind == "approval" && $0.humanActionCount > 0 },
+            "pre-send review radar should include approval sector"
+        )
+        let focusedPreSendReviewRadar = missionSummary.macAgentReviewRadar(focusedOn: "approval")
+        expect(focusedPreSendReviewRadar.focusedReviewKind == "approval", "pre-send review radar should focus approval")
+        expect(
+            focusedPreSendReviewRadar.sectors.contains { $0.reviewKind == "approval" && $0.isFocused },
+            "focused pre-send review radar should mark approval sector"
         )
         missionStore.approveAndContinueAutonomousLoop()
         missionSummary = missionStore.missionRunSummary
@@ -514,6 +535,31 @@ enum LogicSmoke {
         expect(
             focusedContinuationGate.items.contains { $0.reviewKind == "delivery-safety" && $0.isFocused },
             "focused continuation gate should mark delivery row"
+        )
+        let reviewRadar = missionSummary.macAgentReviewRadar
+        expect(reviewRadar.isReviewable, "review radar should be reviewable once Gateway evidence exists")
+        expect(reviewRadar.totalCount == 5, "review radar should expose fixed sectors")
+        expect(reviewRadar.priorityCount > 0, "review radar should count priority signals")
+        expect(reviewRadar.requiresHumanAction, "review radar should surface human review")
+        expect(
+            reviewRadar.sectors.contains { $0.id == "safety-review" && $0.priorityCount > 0 },
+            "review radar should include safety review signals"
+        )
+        expect(
+            reviewRadar.sectors.contains { $0.id == "evidence-coverage" && $0.readyCount > 0 },
+            "review radar should include evidence coverage"
+        )
+        expect(
+            reviewRadar.sectors.contains { $0.id == "loop-continuation" && $0.reviewKind == "agent-trace" },
+            "review radar should include loop sector"
+        )
+        expect(reviewRadar.primaryReviewKind != nil, "review radar should expose primary review")
+        let focusedReviewRadar = missionSummary.macAgentReviewRadar(focusedOn: "delivery-safety")
+        expect(focusedReviewRadar.focusedReviewKind == "delivery-safety", "review radar should record delivery focus")
+        expect(focusedReviewRadar.focusedReviewTitle == "最终提交安全", "review radar should expose delivery title")
+        expect(
+            focusedReviewRadar.sectors.contains { $0.reviewKind == "delivery-safety" && $0.isFocused },
+            "focused review radar should mark delivery sector"
         )
         let operatorStrip = missionSummary.operatorStrip
         expect(operatorStrip.lanes.map(\.id) == ["gateway", "evidence", "review", "next"], "operator strip should expose stable lanes")
@@ -746,6 +792,13 @@ enum LogicSmoke {
             statusContinuationGate.items.contains { $0.reviewKind == statusOnlyItem.reviewKind && $0.isFocused },
             "status continuation gate should mark status row"
         )
+        let statusReviewRadar = statusOnlySummary.macAgentReviewRadar(focusedOn: statusOnlyItem.reviewKind)
+        expect(statusReviewRadar.focusedReviewKind == statusOnlyItem.reviewKind, "status review radar should keep status focus")
+        expect(statusReviewRadar.focusedReviewTitle == statusOnlyItem.title, "status review radar should expose status title")
+        expect(
+            statusReviewRadar.sectors.contains { $0.reviewKind == statusOnlyItem.reviewKind && $0.isFocused },
+            "status review radar should mark status sector"
+        )
         let staleFocusContext = statusOnlySummary.focusContextSummary(focusedOn: "unknown-review-kind")
         expect(staleFocusContext.focusedReviewKind == nil, "stale focus context should not keep an unknown review kind")
         expect(staleFocusContext.canClearFocus, "stale focus context should allow clearing focus")
@@ -785,6 +838,12 @@ enum LogicSmoke {
         expect(
             staleContinuationGate.totalCount == statusOnlySummary.macAgentContinuationGate.totalCount,
             "stale continuation gate should keep rows"
+        )
+        let staleReviewRadar = statusOnlySummary.macAgentReviewRadar(focusedOn: "unknown-review-kind")
+        expect(staleReviewRadar.focusedReviewKind == nil, "stale review radar should not keep unknown focus")
+        expect(
+            staleReviewRadar.totalCount == statusOnlySummary.macAgentReviewRadar.totalCount,
+            "stale review radar should keep sectors"
         )
         expect(
             missionSummary.detailReviewKinds(focusedOn: nil) == availableDetailKinds,
@@ -1261,6 +1320,45 @@ enum LogicSmoke {
             staleContinuationGate.guidance
         ]
         let continuationGateVisibleChunks = continuationGateItemChunks + continuationGateSummaryChunks
+        let reviewRadarItemChunks: [String] = reviewRadar.sectors.flatMap { sector in
+            [
+                sector.title,
+                sector.status,
+                sector.guidance,
+                sector.reviewKind ?? "",
+                sector.reviewTitle ?? ""
+            ]
+        }
+        let reviewRadarSummaryChunks: [String] = [
+            idleReviewRadar.title,
+            idleReviewRadar.status,
+            idleReviewRadar.guidance,
+            preSendReviewRadar.title,
+            preSendReviewRadar.status,
+            preSendReviewRadar.guidance,
+            focusedPreSendReviewRadar.title,
+            focusedPreSendReviewRadar.status,
+            focusedPreSendReviewRadar.guidance,
+            reviewRadar.title,
+            reviewRadar.status,
+            reviewRadar.guidance,
+            reviewRadar.primaryReviewKind ?? "",
+            reviewRadar.primaryReviewTitle ?? "",
+            focusedReviewRadar.title,
+            focusedReviewRadar.status,
+            focusedReviewRadar.guidance,
+            focusedReviewRadar.focusedReviewKind ?? "",
+            focusedReviewRadar.focusedReviewTitle ?? "",
+            statusReviewRadar.title,
+            statusReviewRadar.status,
+            statusReviewRadar.guidance,
+            statusReviewRadar.focusedReviewKind ?? "",
+            statusReviewRadar.focusedReviewTitle ?? "",
+            staleReviewRadar.title,
+            staleReviewRadar.status,
+            staleReviewRadar.guidance
+        ]
+        let reviewRadarVisibleChunks = reviewRadarItemChunks + reviewRadarSummaryChunks
         let queueVisibleText = (
             queueVisibleChunks +
                 readinessVisibleChunks +
@@ -1276,7 +1374,8 @@ enum LogicSmoke {
                 evidenceCoverageVisibleChunks +
                 nextStepDeckVisibleChunks +
                 runTimelineVisibleChunks +
-                continuationGateVisibleChunks
+                continuationGateVisibleChunks +
+                reviewRadarVisibleChunks
         ).joined(separator: " ")
         for forbidden in ["Authorization", "Bearer", "toolArguments", "file://", "/private", "/Users", "/home", "C:\\", "stdout", "stderr", "diff"] {
             expect(queueVisibleText.contains(forbidden) == false, "review priority queue should not expose \(forbidden)")
@@ -1555,6 +1654,19 @@ enum LogicSmoke {
             shellContinuationGate.items.contains { $0.reviewKind == "shell-safety" && $0.isFocused },
             "shell continuation gate should mark shell row"
         )
+        let shellReviewRadar = shellMissionSummary.macAgentReviewRadar(focusedOn: "shell-safety")
+        expect(shellReviewRadar.isReviewable, "shell review radar should be reviewable")
+        expect(shellReviewRadar.requiresHumanAction, "shell review radar should require human review")
+        expect(shellReviewRadar.focusedReviewKind == "shell-safety", "shell review radar should record shell focus")
+        expect(shellReviewRadar.focusedReviewTitle == "Shell 命令安全", "shell review radar should expose shell title")
+        expect(
+            shellReviewRadar.sectors.contains { $0.reviewKind == "shell-safety" && $0.isFocused },
+            "shell review radar should mark shell sector"
+        )
+        expect(
+            shellReviewRadar.sectors.contains { $0.id == "execution-state" && $0.blockedCount > 0 },
+            "shell review radar should surface execution blocker"
+        )
         let shellPayloadLedgerRows = shellPayloadLedger.items.map { item in
             "\(item.reviewTitle) \(item.status) \(item.guidance)"
         }.joined(separator: " ")
@@ -1578,6 +1690,9 @@ enum LogicSmoke {
         }.joined(separator: " ")
         let shellContinuationGateRows = shellContinuationGate.items.map { item in
             "\(item.title) \(item.status) \(item.guidance)"
+        }.joined(separator: " ")
+        let shellReviewRadarRows = shellReviewRadar.sectors.map { sector in
+            "\(sector.title) \(sector.status) \(sector.guidance)"
         }.joined(separator: " ")
         let shellVisibleChunks: [String] = [
             shellReadiness.title,
@@ -1637,7 +1752,11 @@ enum LogicSmoke {
             shellContinuationGate.title,
             shellContinuationGate.status,
             shellContinuationGate.guidance,
-            shellContinuationGateRows
+            shellContinuationGateRows,
+            shellReviewRadar.title,
+            shellReviewRadar.status,
+            shellReviewRadar.guidance,
+            shellReviewRadarRows
         ]
         let shellVisibleText = shellVisibleChunks.joined(separator: " ")
         expect(shellVisibleText.contains("stdout") == false, "shell readiness should not expose stdout")
