@@ -5182,13 +5182,19 @@ extension ClawMissionRunSummary {
             items.first { $0.reviewKind == kind && $0.canFocusReview }
         }
         let focusedReviewTitle = focusedKind.flatMap(titleForNextStepReviewKind) ?? focusedItem?.reviewTitle
+        let blockedItem = items.first { $0.isBlocked }
+        let humanActionItem = items.first { $0.requiresHumanAction }
+        let retryableItem = items.first { $0.isRetryable }
+        let metadataGapItem = items.first { $0.hasMetadataGap }
+        let loopCandidateItem = items.first { $0.canContinueLoop }
+        let optionalReviewItem = items.first { $0.isOptionalReview }
         let primaryItem = focusedItem ??
-            items.first(where: \.isBlocked) ??
-            items.first(where: \.requiresHumanAction) ??
-            items.first(where: \.isRetryable) ??
-            items.first(where: \.hasMetadataGap) ??
-            items.first(where: \.canContinueLoop) ??
-            items.first(where: \.isOptionalReview) ??
+            blockedItem ??
+            humanActionItem ??
+            retryableItem ??
+            metadataGapItem ??
+            loopCandidateItem ??
+            optionalReviewItem ??
             items.first
         let doneCount = items.filter(\.isDone).count
         let blockedCount = items.filter(\.isBlocked).count
