@@ -1377,7 +1377,7 @@ enum LogicSmoke {
                 continuationGateVisibleChunks +
                 reviewRadarVisibleChunks
         ).joined(separator: " ")
-        for forbidden in ["Authorization", "Bearer", "toolArguments", "file://", "/private", "/Users", "/home", "C:\\", "stdout", "stderr", "diff"] {
+        for forbidden in ["Authorization", "Bearer", "toolArguments", "file://", "/private", "/Users", "/home", "C:\\", "stdout", "stderr", "diff", "token", "header", "cookie", "secret"] {
             expect(queueVisibleText.contains(forbidden) == false, "review priority queue should not expose \(forbidden)")
         }
         if let metadataReview = missionSummary.artifactMetadataReview {
