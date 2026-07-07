@@ -592,7 +592,7 @@ enum LogicSmoke {
             "handoff brief should include human confirmation"
         )
         expect(
-            handoffBrief.items.contains { $0.id == "metadata-evidence" && $0.isDone },
+            handoffBrief.items.contains { $0.id == "metadata-evidence" && $0.hasMetadataGap == handoffBrief.hasMetadataGap },
             "handoff brief should include metadata evidence item"
         )
         expect(

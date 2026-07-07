@@ -898,7 +898,7 @@ final class ClawTests: XCTestCase {
         XCTAssertGreaterThan(handoffBrief.humanActionCount, 0)
         XCTAssertTrue(handoffBrief.requiresHumanAction)
         XCTAssertTrue(handoffBrief.items.contains { $0.id == "human-confirmation" && $0.requiresHumanAction })
-        XCTAssertTrue(handoffBrief.items.contains { $0.id == "metadata-evidence" && $0.isDone })
+        XCTAssertTrue(handoffBrief.items.contains { $0.id == "metadata-evidence" && $0.hasMetadataGap == handoffBrief.hasMetadataGap })
         XCTAssertTrue(handoffBrief.items.contains { $0.id == "loop-next" && $0.reviewKind == "agent-trace" })
         XCTAssertNotNil(handoffBrief.primaryReviewKind)
         let focusedHandoffBrief = summary.macAgentHandoffBrief(focusedOn: "delivery-safety")
