@@ -483,6 +483,13 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(desktopReview.mode, "desktop-control-dry-run")
         XCTAssertEqual(desktopReview.actionKind, "operateDesktopApp")
         XCTAssertEqual(desktopReview.targetKind, "desktopApp")
+        XCTAssertEqual(desktopReview.desktopPolicyDiagnostic, "dry-run")
+        XCTAssertEqual(desktopReview.desktopRetryableReason, "enable-desktop-control")
+        XCTAssertEqual(desktopReview.automationAttempted, false)
+        XCTAssertEqual(desktopReview.appPolicyChecked, false)
+        XCTAssertEqual(desktopReview.keyPolicyChecked, true)
+        XCTAssertTrue(desktopReview.requiresDesktopPolicyReview)
+        XCTAssertTrue(desktopReview.compactStatus.contains("policy dry-run"))
         XCTAssertEqual(desktopReview.pasteTextOmitted, true)
         XCTAssertEqual(desktopReview.allowedKeyCount, 1)
         XCTAssertEqual(desktopReview.blockedKeyCount, 1)
@@ -2672,6 +2679,11 @@ final class ClawTests: XCTestCase {
                 "mode": "message-draft-pending-approval Authorization: Bearer raw-token",
                 "actionKind": "composeMessage token=raw-token",
                 "targetKind": "message file:///private/tmp/message.txt",
+                "desktopPolicyDiagnostic": "app-blocked file:///private/tmp/app",
+                "desktopRetryableReason": "allow-desktop-app Authorization: Bearer raw-token",
+                "automationAttempted": "true",
+                "appPolicyChecked": "true",
+                "keyPolicyChecked": "false",
                 "finalSubmitRequiresApproval": "true",
                 "userApprovalRequired": "true",
                 "draftBodyOmitted": "true",
@@ -2692,6 +2704,8 @@ final class ClawTests: XCTestCase {
             review.mode ?? "",
             review.actionKind ?? "",
             review.targetKind ?? "",
+            review.desktopPolicyDiagnostic ?? "",
+            review.desktopRetryableReason ?? "",
             review.safetyFlags.joined(separator: " ")
         ].joined(separator: " ")
 
@@ -2699,6 +2713,11 @@ final class ClawTests: XCTestCase {
         XCTAssertNil(review.mode)
         XCTAssertNil(review.actionKind)
         XCTAssertNil(review.targetKind)
+        XCTAssertNil(review.desktopPolicyDiagnostic)
+        XCTAssertNil(review.desktopRetryableReason)
+        XCTAssertEqual(review.automationAttempted, true)
+        XCTAssertEqual(review.appPolicyChecked, true)
+        XCTAssertEqual(review.keyPolicyChecked, false)
         XCTAssertEqual(review.finalSubmitRequiresApproval, true)
         XCTAssertEqual(review.userApprovalRequired, true)
         XCTAssertEqual(review.draftBodyOmitted, true)

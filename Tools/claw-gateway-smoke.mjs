@@ -250,6 +250,11 @@ assertDeliverySafetyMetadata(messageDraftArtifact?.metadata, {
   mode: "message-draft-pending-approval",
   actionKind: "composeMessage",
   targetKind: "message",
+  desktopPolicyDiagnostic: "not-requested",
+  desktopRetryableReason: "none",
+  automationAttempted: false,
+  appPolicyChecked: false,
+  keyPolicyChecked: false,
   finalSubmitRequiresApproval: true,
   userApprovalRequired: true,
   draftBodyOmitted: true,
@@ -1144,11 +1149,16 @@ function assertDeliverySafetyMetadata(metadata, expected, label) {
   const allowedKeys = [
     "actionKind",
     "allowedKeyCount",
+    "appPolicyChecked",
+    "automationAttempted",
     "blockedKeyCount",
     "blockedSubmitKeyCount",
     "deliveryReview",
+    "desktopPolicyDiagnostic",
+    "desktopRetryableReason",
     "draftBodyOmitted",
     "finalSubmitRequiresApproval",
+    "keyPolicyChecked",
     "mode",
     "pasteTextOmitted",
     "safetyFlags",
@@ -1164,6 +1174,11 @@ function assertDeliverySafetyMetadata(metadata, expected, label) {
   expect(metadata.mode === expected.mode, `${label} mode metadata mismatch`);
   expect(metadata.actionKind === expected.actionKind, `${label} action kind metadata mismatch`);
   expect(metadata.targetKind === expected.targetKind, `${label} target kind metadata mismatch`);
+  expect(metadata.desktopPolicyDiagnostic === expected.desktopPolicyDiagnostic, `${label} desktop policy diagnostic mismatch`);
+  expect(metadata.desktopRetryableReason === expected.desktopRetryableReason, `${label} desktop retry reason mismatch`);
+  expect(metadata.automationAttempted === String(expected.automationAttempted), `${label} automation attempted mismatch`);
+  expect(metadata.appPolicyChecked === String(expected.appPolicyChecked), `${label} app policy checked mismatch`);
+  expect(metadata.keyPolicyChecked === String(expected.keyPolicyChecked), `${label} key policy checked mismatch`);
   expect(metadata.finalSubmitRequiresApproval === String(expected.finalSubmitRequiresApproval), `${label} final submit metadata mismatch`);
   expect(metadata.userApprovalRequired === String(expected.userApprovalRequired), `${label} approval metadata mismatch`);
   expect(metadata.draftBodyOmitted === String(expected.draftBodyOmitted), `${label} draft omission metadata mismatch`);

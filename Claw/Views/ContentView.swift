@@ -5582,6 +5582,64 @@ struct ClawGatewayDeliverySafetyReviewRow: View {
         return items
     }
 
+    private var desktopPolicyChips: [(text: String, icon: String, tint: Color)] {
+        guard review.hasMetadata else {
+            return [("策略待同步", "hourglass", .secondary)]
+        }
+        var items: [(String, String, Color)] = []
+        if let diagnostic = review.desktopPolicyDiagnostic {
+            items.append(("policy \(diagnostic)", desktopPolicyIcon(for: diagnostic), desktopPolicyTint(for: diagnostic)))
+        }
+        if let retry = review.desktopRetryableReason, retry != "none" {
+            items.append(("retry \(retry)", "arrow.clockwise.circle.fill", .orange))
+        }
+        if let attempted = review.automationAttempted {
+            items.append((attempted ? "automation attempted" : "automation skipped", attempted ? "cursorarrow.click.2" : "pause.circle.fill", attempted ? .orange : .secondary))
+        }
+        if let appChecked = review.appPolicyChecked {
+            items.append((appChecked ? "app policy checked" : "app policy skipped", appChecked ? "checkmark.shield.fill" : "shield.slash.fill", appChecked ? .blue : .secondary))
+        }
+        if let keyChecked = review.keyPolicyChecked {
+            items.append((keyChecked ? "key policy checked" : "key policy skipped", keyChecked ? "keyboard" : "keyboard.badge.ellipsis", keyChecked ? .blue : .secondary))
+        }
+        if items.isEmpty {
+            items.append(("桌面策略待同步", "hourglass", .secondary))
+        }
+        return items
+    }
+
+    private func desktopPolicyIcon(for diagnostic: String) -> String {
+        switch diagnostic {
+        case "not-requested":
+            return "minus.circle.fill"
+        case "dry-run":
+            return "hand.raised.fill"
+        case "platform-unavailable":
+            return "desktopcomputer.trianglebadge.exclamationmark"
+        case "missing-target":
+            return "questionmark.circle.fill"
+        case "app-blocked", "key-blocked":
+            return "lock.trianglebadge.exclamationmark.fill"
+        case "automation-attempted":
+            return "cursorarrow.click.2"
+        case "automation-failed":
+            return "exclamationmark.triangle.fill"
+        default:
+            return "shield.lefthalf.filled"
+        }
+    }
+
+    private func desktopPolicyTint(for diagnostic: String) -> Color {
+        switch diagnostic {
+        case "not-requested":
+            return .secondary
+        case "automation-attempted":
+            return .blue
+        default:
+            return .orange
+        }
+    }
+
     private var safetyChips: [(text: String, icon: String, tint: Color)] {
         guard review.hasMetadata else {
             return [(text: "metadata 待同步", icon: "hourglass", tint: .secondary)]
@@ -5631,6 +5689,14 @@ struct ClawGatewayDeliverySafetyReviewRow: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     ForEach(Array(omissionChips.enumerated()), id: \.offset) { _, chip in
+                        PhoneAgentTag(text: chip.text, icon: chip.icon, tint: chip.tint)
+                    }
+                }
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(Array(desktopPolicyChips.enumerated()), id: \.offset) { _, chip in
                         PhoneAgentTag(text: chip.text, icon: chip.icon, tint: chip.tint)
                     }
                 }

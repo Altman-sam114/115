@@ -859,17 +859,17 @@ final class ClawStore: ObservableObject {
         }
 
         if let review = gatewayDeliverySafetyReview {
-            let blocked = review.finalSubmitRequiresApproval == true || review.submitBlocked == true || review.userApprovalRequired == true
+            let blocked = review.requiresDesktopPolicyReview
             add(
                 id: "delivery-safety",
                 rank: blocked ? 30 : 82,
                 severity: review.hasMetadata == false ? .high : (blocked ? .high : .info),
                 title: "最终提交安全",
                 status: review.compactStatus,
-                reason: review.hasMetadata ? "草稿或桌面提交需要人工复核。" : "草稿/提交 metadata 待同步。",
+                reason: review.hasMetadata ? "草稿或桌面策略诊断需要人工复核。" : "草稿/提交 metadata 待同步。",
                 icon: "hand.raised.fill",
                 reviewKind: "delivery-safety",
-                actionHint: blocked ? "确认草稿和提交闸门" : "抽查提交策略",
+                actionHint: blocked ? "确认桌面策略和提交闸门" : "抽查提交策略",
                 isActionable: blocked || review.hasMetadata == false,
                 hasMetadata: review.hasMetadata
             )
@@ -2871,11 +2871,23 @@ enum ClawGatewaySimulator {
         if pasteTextOmitted {
             safetyFlags.append("paste-text-omitted")
         }
+        let desktopPolicy = deliveryDesktopPolicyDiagnostics(
+            actionKind: actionKind,
+            mode: mode,
+            submitBlocked: submitBlocked,
+            blockedKeyCount: blockedKeyCount,
+            blockedSubmitKeyCount: blockedSubmitKeyCount
+        )
         return [
             "deliveryReview": "finalSubmitGate",
             "mode": mode,
             "actionKind": actionKind.rawValue,
             "targetKind": targetKind,
+            "desktopPolicyDiagnostic": desktopPolicy.diagnostic,
+            "desktopRetryableReason": desktopPolicy.retryableReason,
+            "automationAttempted": String(desktopPolicy.automationAttempted),
+            "appPolicyChecked": String(desktopPolicy.appPolicyChecked),
+            "keyPolicyChecked": String(desktopPolicy.keyPolicyChecked),
             "finalSubmitRequiresApproval": String(finalSubmitRequiresApproval),
             "userApprovalRequired": String(userApprovalRequired),
             "draftBodyOmitted": String(draftBodyOmitted),
@@ -2886,6 +2898,36 @@ enum ClawGatewaySimulator {
             "blockedSubmitKeyCount": String(blockedSubmitKeyCount),
             "safetyFlags": safetyFlags.joined(separator: ",")
         ]
+    }
+
+    private static func deliveryDesktopPolicyDiagnostics(
+        actionKind: ClawMobileActionKind,
+        mode: String,
+        submitBlocked: Bool,
+        blockedKeyCount: Int,
+        blockedSubmitKeyCount: Int
+    ) -> (diagnostic: String, retryableReason: String, automationAttempted: Bool, appPolicyChecked: Bool, keyPolicyChecked: Bool) {
+        guard actionKind == .operateDesktopApp else {
+            return ("not-requested", "none", false, false, false)
+        }
+        let keyPolicyChecked = blockedKeyCount > 0
+        switch mode {
+        case "desktop-control-dry-run":
+            return ("dry-run", "enable-desktop-control", false, false, keyPolicyChecked)
+        case "desktop-control-unavailable":
+            return ("platform-unavailable", "requires-macos", false, false, keyPolicyChecked)
+        case "desktop-control-policy-blocked":
+            return ("app-blocked", "allow-desktop-app", false, true, keyPolicyChecked)
+        case "desktop-control-failed":
+            return ("automation-failed", "automation-failed", true, true, true)
+        case "desktop-control-paused", "desktop-control-completed":
+            if submitBlocked || blockedSubmitKeyCount > 0 {
+                return ("key-blocked", "user-final-submit", true, true, true)
+            }
+            return ("automation-attempted", "none", true, true, true)
+        default:
+            return ("not-requested", "none", false, false, keyPolicyChecked)
+        }
     }
 }
 

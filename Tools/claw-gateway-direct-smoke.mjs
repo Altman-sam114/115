@@ -205,6 +205,11 @@ assertDeliverySafetyMetadata(desktopDeliveryArtifact?.metadata, {
   mode: "desktop-control-dry-run",
   actionKind: "operateDesktopApp",
   targetKind: "desktopApp",
+  desktopPolicyDiagnostic: "dry-run",
+  desktopRetryableReason: "enable-desktop-control",
+  automationAttempted: false,
+  appPolicyChecked: false,
+  keyPolicyChecked: true,
   finalSubmitRequiresApproval: true,
   userApprovalRequired: true,
   draftBodyOmitted: true,
@@ -220,6 +225,11 @@ assertDeliverySafetyMetadata(messageDraftArtifact?.metadata, {
   mode: "message-draft-pending-approval",
   actionKind: "composeMessage",
   targetKind: "message",
+  desktopPolicyDiagnostic: "not-requested",
+  desktopRetryableReason: "none",
+  automationAttempted: false,
+  appPolicyChecked: false,
+  keyPolicyChecked: false,
   finalSubmitRequiresApproval: true,
   userApprovalRequired: true,
   draftBodyOmitted: true,
@@ -423,6 +433,26 @@ const desktopPolicyEvents = await runEmitEvents({
 expect(desktopPolicyEvents.some((event) => event.kind === "actionFailed" && event.actionKind === "operateDesktopApp"), "desktop app policy should fail when app is not allowlisted");
 const desktopPolicyArtifacts = await readArtifacts(desktopPolicyEvents, "screenshot");
 expect(desktopPolicyArtifacts.some((artifact) => artifact.targetApp === "Slack" && artifact.mode === "policy-blocked"), "missing desktop app policy-blocked artifact");
+const desktopPolicyArtifact = findArtifactByTitle(desktopPolicyEvents, "screenshot", "desktop-app-policy-");
+assertDeliverySafetyMetadata(desktopPolicyArtifact?.metadata, {
+  mode: "desktop-control-policy-blocked",
+  actionKind: "operateDesktopApp",
+  targetKind: "desktopApp",
+  desktopPolicyDiagnostic: "app-blocked",
+  desktopRetryableReason: "allow-desktop-app",
+  automationAttempted: false,
+  appPolicyChecked: true,
+  keyPolicyChecked: true,
+  finalSubmitRequiresApproval: true,
+  userApprovalRequired: true,
+  draftBodyOmitted: true,
+  pasteTextOmitted: true,
+  submitBlocked: true,
+  allowedKeyCount: 1,
+  blockedKeyCount: 1,
+  blockedSubmitKeyCount: 1,
+  safetyFlags: ["metadata-only", "final-submit-gated", "user-approval-required", "tool-arguments-omitted", "artifact-payload-not-read", "draft-body-omitted", "paste-text-omitted"],
+}, "desktop app policy delivery safety");
 await assertArtifactsExist(desktopPolicyEvents);
 const desktopPolicySnapshot = await assertCapabilitySnapshot(desktopPolicyEvents, {
   allowedActionKinds: envelope.gateway.allowedActionKinds,
@@ -1232,11 +1262,16 @@ function assertDeliverySafetyMetadata(metadata, expected, label) {
   const allowedKeys = [
     "actionKind",
     "allowedKeyCount",
+    "appPolicyChecked",
+    "automationAttempted",
     "blockedKeyCount",
     "blockedSubmitKeyCount",
     "deliveryReview",
+    "desktopPolicyDiagnostic",
+    "desktopRetryableReason",
     "draftBodyOmitted",
     "finalSubmitRequiresApproval",
+    "keyPolicyChecked",
     "mode",
     "pasteTextOmitted",
     "safetyFlags",
@@ -1252,6 +1287,11 @@ function assertDeliverySafetyMetadata(metadata, expected, label) {
   expect(metadata.mode === expected.mode, `${label} mode metadata mismatch`);
   expect(metadata.actionKind === expected.actionKind, `${label} action kind metadata mismatch`);
   expect(metadata.targetKind === expected.targetKind, `${label} target kind metadata mismatch`);
+  expect(metadata.desktopPolicyDiagnostic === expected.desktopPolicyDiagnostic, `${label} desktop policy diagnostic mismatch`);
+  expect(metadata.desktopRetryableReason === expected.desktopRetryableReason, `${label} desktop retry reason mismatch`);
+  expect(metadata.automationAttempted === String(expected.automationAttempted), `${label} automation attempted mismatch`);
+  expect(metadata.appPolicyChecked === String(expected.appPolicyChecked), `${label} app policy checked mismatch`);
+  expect(metadata.keyPolicyChecked === String(expected.keyPolicyChecked), `${label} key policy checked mismatch`);
   expect(metadata.finalSubmitRequiresApproval === String(expected.finalSubmitRequiresApproval), `${label} final submit metadata mismatch`);
   expect(metadata.userApprovalRequired === String(expected.userApprovalRequired), `${label} approval metadata mismatch`);
   expect(metadata.draftBodyOmitted === String(expected.draftBodyOmitted), `${label} draft omission metadata mismatch`);

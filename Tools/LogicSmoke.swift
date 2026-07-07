@@ -1689,6 +1689,13 @@ enum LogicSmoke {
             expect(desktopDeliveryReview.mode == "desktop-control-dry-run", "desktop delivery review should expose dry-run mode")
             expect(desktopDeliveryReview.actionKind == "operateDesktopApp", "desktop delivery review should expose action kind")
             expect(desktopDeliveryReview.targetKind == "desktopApp", "desktop delivery review should expose target kind")
+            expect(desktopDeliveryReview.desktopPolicyDiagnostic == "dry-run", "desktop delivery review should expose policy diagnostic")
+            expect(desktopDeliveryReview.desktopRetryableReason == "enable-desktop-control", "desktop delivery review should expose retryable reason")
+            expect(desktopDeliveryReview.automationAttempted == false, "desktop delivery review should expose automation attempt state")
+            expect(desktopDeliveryReview.appPolicyChecked == false, "desktop delivery review should expose app policy state")
+            expect(desktopDeliveryReview.keyPolicyChecked == true, "desktop delivery review should expose key policy state")
+            expect(desktopDeliveryReview.requiresDesktopPolicyReview, "desktop delivery review should require policy review")
+            expect(desktopDeliveryReview.compactStatus.contains("policy dry-run"), "desktop delivery review should summarize policy diagnostic")
             expect(desktopDeliveryReview.pasteTextOmitted == true, "desktop delivery review should omit paste text")
             expect(desktopDeliveryReview.blockedSubmitKeyCount == 1, "desktop delivery review should count blocked submit key")
             expect(desktopDeliveryReview.safetyFlags.contains("paste-text-omitted"), "desktop delivery review should expose paste omission flag")
@@ -2386,6 +2393,11 @@ enum LogicSmoke {
                 "mode": "message-draft-pending-approval Authorization: Bearer raw-token",
                 "actionKind": "composeMessage token=raw-token",
                 "targetKind": "message file:///private/tmp/message.txt",
+                "desktopPolicyDiagnostic": "app-blocked file:///private/tmp/app",
+                "desktopRetryableReason": "allow-desktop-app Authorization: Bearer raw-token",
+                "automationAttempted": "true",
+                "appPolicyChecked": "true",
+                "keyPolicyChecked": "false",
                 "finalSubmitRequiresApproval": "true",
                 "userApprovalRequired": "true",
                 "draftBodyOmitted": "true",
@@ -2405,12 +2417,19 @@ enum LogicSmoke {
                 sensitiveDeliveryReview.mode ?? "",
                 sensitiveDeliveryReview.actionKind ?? "",
                 sensitiveDeliveryReview.targetKind ?? "",
+                sensitiveDeliveryReview.desktopPolicyDiagnostic ?? "",
+                sensitiveDeliveryReview.desktopRetryableReason ?? "",
                 sensitiveDeliveryReview.safetyFlags.joined(separator: " ")
             ].joined(separator: " ")
             expect(sensitiveDeliveryReview.hasMetadata, "delivery safety review should parse review metadata")
             expect(sensitiveDeliveryReview.mode == nil, "delivery safety review should reject unsafe mode")
             expect(sensitiveDeliveryReview.actionKind == nil, "delivery safety review should reject unsafe action kind")
             expect(sensitiveDeliveryReview.targetKind == nil, "delivery safety review should reject unsafe target kind")
+            expect(sensitiveDeliveryReview.desktopPolicyDiagnostic == nil, "delivery safety review should reject unsafe desktop diagnostic")
+            expect(sensitiveDeliveryReview.desktopRetryableReason == nil, "delivery safety review should reject unsafe desktop retry reason")
+            expect(sensitiveDeliveryReview.automationAttempted == true, "delivery safety review should parse automation attempted boolean")
+            expect(sensitiveDeliveryReview.appPolicyChecked == true, "delivery safety review should parse app policy boolean")
+            expect(sensitiveDeliveryReview.keyPolicyChecked == false, "delivery safety review should parse key policy boolean")
             expect(sensitiveDeliveryReview.finalSubmitRequiresApproval == true, "delivery safety review should parse final submit boolean")
             expect(visibleText.contains("Authorization") == false, "delivery safety review should redact Authorization")
             expect(visibleText.contains("Bearer") == false, "delivery safety review should redact bearer token")

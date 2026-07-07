@@ -2192,6 +2192,11 @@ struct ClawGatewayArtifactMetadataReviewSummary: Equatable, Codable, Sendable {
             "completenessstatus": "completenessStatus",
             "decision": "decision",
             "desktopcontrolstate": "desktopControlState",
+            "desktoppolicydiagnostic": "desktopPolicyDiagnostic",
+            "desktopretryablereason": "desktopRetryableReason",
+            "automationattempted": "automationAttempted",
+            "apppolicychecked": "appPolicyChecked",
+            "keypolicychecked": "keyPolicyChecked",
             "deliveryreview": "deliveryReview",
             "digestmatchesfirst": "digestMatchesFirst",
             "actionkind": "actionKind",
@@ -2596,6 +2601,11 @@ struct ClawGatewayDeliverySafetyReviewSummary: Equatable, Codable, Sendable {
     var mode: String?
     var actionKind: String?
     var targetKind: String?
+    var desktopPolicyDiagnostic: String?
+    var desktopRetryableReason: String?
+    var automationAttempted: Bool?
+    var appPolicyChecked: Bool?
+    var keyPolicyChecked: Bool?
     var finalSubmitRequiresApproval: Bool?
     var userApprovalRequired: Bool?
     var draftBodyOmitted: Bool?
@@ -2612,9 +2622,28 @@ struct ClawGatewayDeliverySafetyReviewSummary: Equatable, Codable, Sendable {
             return "已收到草稿或桌面提交 artifact，metadata 待同步。"
         }
         let gate = finalSubmitRequiresApproval == true || submitBlocked == true ? "最终提交已拦截" : "最终提交待复核"
+        let policy = desktopPolicyDiagnostic.map { "policy \($0)" } ?? "policy 待复核"
         let draft = draftBodyOmitted == true ? "正文省略" : "正文状态待复核"
         let keys = blockedSubmitKeyCount.map { "submit keys \($0)" } ?? "submit keys 待复核"
-        return "\(gate) · \(draft) · \(keys)"
+        return "\(gate) · \(policy) · \(draft) · \(keys)"
+    }
+
+    var requiresDesktopPolicyReview: Bool {
+        guard hasMetadata else {
+            return true
+        }
+        if actionKind == "operateDesktopApp" {
+            if desktopPolicyDiagnostic == nil || desktopRetryableReason == nil || automationAttempted == nil || appPolicyChecked == nil || keyPolicyChecked == nil {
+                return true
+            }
+            if ["dry-run", "platform-unavailable", "missing-target", "app-blocked", "key-blocked", "automation-failed"].contains(desktopPolicyDiagnostic ?? "") {
+                return true
+            }
+            if automationAttempted == true {
+                return true
+            }
+        }
+        return finalSubmitRequiresApproval == true || submitBlocked == true || userApprovalRequired == true
     }
 
     static func latest(from session: ClawGatewaySession?) -> ClawGatewayDeliverySafetyReviewSummary? {
@@ -2638,6 +2667,11 @@ struct ClawGatewayDeliverySafetyReviewSummary: Equatable, Codable, Sendable {
             mode: allowedMode(metadata["mode"]),
             actionKind: allowedActionKind(metadata["actionKind"]),
             targetKind: allowedTargetKind(metadata["targetKind"]),
+            desktopPolicyDiagnostic: allowedDesktopPolicyDiagnostic(metadata["desktopPolicyDiagnostic"]),
+            desktopRetryableReason: allowedDesktopRetryableReason(metadata["desktopRetryableReason"]),
+            automationAttempted: ClawArtifactMetadataParser.boolValue(metadata["automationAttempted"]),
+            appPolicyChecked: ClawArtifactMetadataParser.boolValue(metadata["appPolicyChecked"]),
+            keyPolicyChecked: ClawArtifactMetadataParser.boolValue(metadata["keyPolicyChecked"]),
             finalSubmitRequiresApproval: ClawArtifactMetadataParser.boolValue(metadata["finalSubmitRequiresApproval"]),
             userApprovalRequired: ClawArtifactMetadataParser.boolValue(metadata["userApprovalRequired"]),
             draftBodyOmitted: ClawArtifactMetadataParser.boolValue(metadata["draftBodyOmitted"]),
@@ -2685,6 +2719,40 @@ struct ClawGatewayDeliverySafetyReviewSummary: Equatable, Codable, Sendable {
             return nil
         }
         let allowed = ["message", "email", "desktopApp"]
+        return allowed.contains(clean) ? clean : nil
+    }
+
+    private static func allowedDesktopPolicyDiagnostic(_ value: String?) -> String? {
+        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
+            return nil
+        }
+        let allowed = [
+            "not-requested",
+            "dry-run",
+            "platform-unavailable",
+            "missing-target",
+            "app-blocked",
+            "key-blocked",
+            "automation-attempted",
+            "automation-failed"
+        ]
+        return allowed.contains(clean) ? clean : nil
+    }
+
+    private static func allowedDesktopRetryableReason(_ value: String?) -> String? {
+        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
+            return nil
+        }
+        let allowed = [
+            "none",
+            "enable-desktop-control",
+            "requires-macos",
+            "provide-target-app",
+            "allow-desktop-app",
+            "allow-desktop-key",
+            "automation-failed",
+            "user-final-submit"
+        ]
         return allowed.contains(clean) ? clean : nil
     }
 

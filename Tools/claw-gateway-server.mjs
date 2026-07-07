@@ -2456,11 +2456,21 @@ function deliverySafetyMetadata(action, details = {}) {
   if (details.pasteTextOmitted) {
     safetyFlags.push("paste-text-omitted");
   }
+  const desktopPolicy = desktopPolicyDiagnostics(action, {
+    ...details,
+    blockedKeyCount,
+    blockedSubmitKeyCount,
+  });
   return compactMetadata({
     deliveryReview: "finalSubmitGate",
     mode: details.mode,
     actionKind,
     targetKind,
+    desktopPolicyDiagnostic: desktopPolicy.diagnostic,
+    desktopRetryableReason: desktopPolicy.retryableReason,
+    automationAttempted: desktopPolicy.automationAttempted,
+    appPolicyChecked: desktopPolicy.appPolicyChecked,
+    keyPolicyChecked: desktopPolicy.keyPolicyChecked,
     finalSubmitRequiresApproval,
     userApprovalRequired,
     draftBodyOmitted: Boolean(details.draftBodyOmitted),
@@ -2471,6 +2481,82 @@ function deliverySafetyMetadata(action, details = {}) {
     blockedSubmitKeyCount,
     safetyFlags,
   });
+}
+
+function desktopPolicyDiagnostics(action, details = {}) {
+  if (action.kind !== "operateDesktopApp") {
+    return {
+      diagnostic: "not-requested",
+      retryableReason: "none",
+      automationAttempted: false,
+      appPolicyChecked: false,
+      keyPolicyChecked: false,
+    };
+  }
+  const mode = details.mode || "";
+  const automationAttempted = ["desktop-control-paused", "desktop-control-completed", "desktop-control-failed"].includes(mode);
+  const keyPolicyChecked = Number(details.blockedKeyCount || 0) > 0 || Array.isArray(details.keyPlan?.allowed);
+  if (mode === "desktop-control-dry-run") {
+    return {
+      diagnostic: "dry-run",
+      retryableReason: "enable-desktop-control",
+      automationAttempted: false,
+      appPolicyChecked: false,
+      keyPolicyChecked,
+    };
+  }
+  if (mode === "desktop-control-unavailable") {
+    return {
+      diagnostic: "platform-unavailable",
+      retryableReason: "requires-macos",
+      automationAttempted: false,
+      appPolicyChecked: false,
+      keyPolicyChecked,
+    };
+  }
+  if (details.missingTarget) {
+    return {
+      diagnostic: "missing-target",
+      retryableReason: "provide-target-app",
+      automationAttempted: false,
+      appPolicyChecked: false,
+      keyPolicyChecked,
+    };
+  }
+  if (mode === "desktop-control-policy-blocked") {
+    return {
+      diagnostic: "app-blocked",
+      retryableReason: "allow-desktop-app",
+      automationAttempted: false,
+      appPolicyChecked: true,
+      keyPolicyChecked,
+    };
+  }
+  if (mode === "desktop-control-failed") {
+    return {
+      diagnostic: "automation-failed",
+      retryableReason: "automation-failed",
+      automationAttempted: true,
+      appPolicyChecked: true,
+      keyPolicyChecked,
+    };
+  }
+  if (Number(details.blockedSubmitKeyCount || 0) > 0 || details.submitBlocked === true) {
+    return {
+      diagnostic: "key-blocked",
+      retryableReason: "user-final-submit",
+      automationAttempted,
+      appPolicyChecked: true,
+      keyPolicyChecked: true,
+    };
+  }
+  return {
+    diagnostic: automationAttempted ? "automation-attempted" : "not-requested",
+    retryableReason: "none",
+    automationAttempted,
+    appPolicyChecked: automationAttempted,
+    keyPolicyChecked,
+  };
 }
 
 async function desktopAppAction(action, index, config) {
@@ -2576,6 +2662,7 @@ async function desktopAppAction(action, index, config) {
           draftBodyOmitted: true,
           pasteTextOmitted: Boolean(pasteText),
           submitBlocked: true,
+          missingTarget: true,
           keyPlan,
         }),
       ),
