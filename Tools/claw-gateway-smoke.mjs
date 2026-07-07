@@ -137,7 +137,7 @@ const capabilitySnapshot = await assertCapabilitySnapshot(events, {
 expect(capabilitySnapshot.envelope.allowedActionKinds.includes("controlBrowser"), "websocket snapshot missing controlBrowser allowlist");
 expect(capabilitySnapshot.envelope.allowedActionKinds.includes("observeScreen"), "websocket snapshot missing observeScreen allowlist");
 const accessibilityTrees = await readArtifacts(events, "accessibilityTree");
-const accessibilityTree = accessibilityTrees.find((tree) => tree.accessibilityTree === "observeSummary");
+const accessibilityTree = accessibilityTrees.find((tree) => typeof tree?.mode === "string");
 assertAccessibilityTreeArtifact(findArtifact(events, "accessibilityTree"), accessibilityTree, {
   mode: ["dry-run"],
   policy: "dry-run",
