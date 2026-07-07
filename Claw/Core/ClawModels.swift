@@ -5540,7 +5540,7 @@ extension ClawMissionRunSummary {
             tone = .neutral
             controlState = "idle"
             primaryActionTitle = nil
-        } else if let focusedKind {
+        } else if focusedKind != nil {
             title = "Control Snapshot 聚焦中"
             status = focusedReviewTitle ?? "聚焦复核"
             guidance = focus.guidance
