@@ -1752,6 +1752,55 @@ struct ClawMissionRunReviewRadarSummary: Equatable, Codable, Sendable {
     var sectors: [ClawMissionRunReviewRadarSector]
 }
 
+struct ClawMissionRunHandoffBriefItem: Identifiable, Equatable, Codable, Sendable {
+    var id: String
+    var rank: Int
+    var title: String
+    var status: String
+    var guidance: String
+    var icon: String
+    var tone: ClawMissionRunOperatorLaneTone
+    var reviewKind: String?
+    var reviewTitle: String?
+    var canFocusReview: Bool
+    var isFocused: Bool
+    var isDone: Bool
+    var requiresHumanAction: Bool
+    var isBlocked: Bool
+    var isRetryable: Bool
+    var hasMetadataGap: Bool
+    var canContinueLoop: Bool
+    var isOptionalReview: Bool
+}
+
+struct ClawMissionRunHandoffBriefSummary: Equatable, Codable, Sendable {
+    var title: String
+    var status: String
+    var guidance: String
+    var icon: String
+    var totalCount: Int
+    var doneCount: Int
+    var blockedCount: Int
+    var humanActionCount: Int
+    var retryableCount: Int
+    var metadataPendingCount: Int
+    var loopCandidateCount: Int
+    var optionalReviewCount: Int
+    var focusedItemID: String?
+    var focusedReviewKind: String?
+    var focusedReviewTitle: String?
+    var primaryReviewKind: String?
+    var primaryReviewTitle: String?
+    var canFocusPrimaryReview: Bool
+    var canContinueLoop: Bool
+    var requiresHumanAction: Bool
+    var hasMetadataGap: Bool
+    var isBlocked: Bool
+    var isRetryable: Bool
+    var isReviewable: Bool
+    var items: [ClawMissionRunHandoffBriefItem]
+}
+
 struct ClawMissionRunReviewReadinessSummary: Equatable, Codable, Sendable {
     var title: String
     var status: String
@@ -5103,6 +5152,293 @@ extension ClawMissionRunSummary {
             metadataPendingCount: metadataPendingCount,
             canContinueLoop: canContinueLoop,
             isReady: isReady
+        )
+    }
+
+    var macAgentHandoffBrief: ClawMissionRunHandoffBriefSummary {
+        macAgentHandoffBrief(focusedOn: nil)
+    }
+
+    func macAgentHandoffBrief(focusedOn reviewKind: String?) -> ClawMissionRunHandoffBriefSummary {
+        let focusedKind = activeReviewFocus(from: reviewKind)
+        let radar = macAgentReviewRadar(focusedOn: focusedKind)
+        let gate = macAgentContinuationGate(focusedOn: focusedKind)
+        let deck = macAgentNextStepDeck(focusedOn: focusedKind)
+        let timeline = macAgentRunTimeline(focusedOn: focusedKind)
+        let approval = approvalQueueSummary(focusedOn: focusedKind)
+        let focus = focusContextSummary(focusedOn: focusedKind)
+        let loop = loopContinuationSummary(focusedOn: focusedKind)
+        let items = handoffBriefItems(
+            focusedOn: focusedKind,
+            radar: radar,
+            gate: gate,
+            deck: deck,
+            timeline: timeline,
+            approval: approval,
+            focus: focus,
+            loop: loop
+        )
+        let focusedItem = focusedKind.flatMap { kind in
+            items.first { $0.reviewKind == kind && $0.canFocusReview }
+        }
+        let focusedReviewTitle = focusedKind.flatMap(titleForNextStepReviewKind) ?? focusedItem?.reviewTitle
+        let primaryItem = focusedItem ??
+            items.first(where: \.isBlocked) ??
+            items.first(where: \.requiresHumanAction) ??
+            items.first(where: \.isRetryable) ??
+            items.first(where: \.hasMetadataGap) ??
+            items.first(where: \.canContinueLoop) ??
+            items.first(where: \.isOptionalReview) ??
+            items.first
+        let doneCount = items.filter(\.isDone).count
+        let blockedCount = items.filter(\.isBlocked).count
+        let humanActionCount = items.filter(\.requiresHumanAction).count
+        let retryableCount = items.filter(\.isRetryable).count
+        let metadataPendingCount = items.filter(\.hasMetadataGap).count
+        let loopCandidateCount = items.filter(\.canContinueLoop).count
+        let optionalReviewCount = items.filter(\.isOptionalReview).count
+        let isReviewable = items.isEmpty == false
+        let canContinueLoop = loopCandidateCount > 0 && blockedCount == 0 && humanActionCount == 0 && metadataPendingCount == 0
+        let requiresHumanAction = humanActionCount > 0
+        let hasMetadataGap = metadataPendingCount > 0
+        let isBlocked = blockedCount > 0
+        let isRetryable = retryableCount > 0
+
+        let title: String
+        let status: String
+        let guidance: String
+        let icon: String
+        if isReviewable == false {
+            title = "Handoff Brief 待生成"
+            status = "尚无可交接信息"
+            guidance = "生成任务或收到 Gateway 事件后，会汇总人工接手时应先看的复核项。"
+            icon = "person.crop.circle.badge.questionmark"
+        } else if let focusedItem {
+            title = "聚焦 Handoff Brief"
+            status = focusedItem.title
+            guidance = "\(focusedItem.title)：\(focusedItem.guidance)"
+            icon = focusedItem.icon
+        } else if isBlocked {
+            title = "Handoff Brief 阻断"
+            status = "\(blockedCount) 项阻断 · \(retryableCount) 项可重试"
+            guidance = primaryItem.map { "交接先看 \($0.reviewTitle ?? $0.title)：\($0.guidance)" } ?? "先处理阻断项。"
+            icon = "person.crop.circle.badge.exclamationmark.fill"
+        } else if requiresHumanAction {
+            title = "Handoff Brief 等待人工"
+            status = "\(humanActionCount) 项需人工 · \(doneCount)/\(items.count) 项完成"
+            guidance = primaryItem.map { "交接先确认 \($0.reviewTitle ?? $0.title)：\($0.guidance)" } ?? "先处理人工确认项。"
+            icon = "person.crop.circle.badge.checkmark"
+        } else if isRetryable {
+            title = "Handoff Brief 可重试复核"
+            status = "\(retryableCount) 项可重试 · \(doneCount)/\(items.count) 项完成"
+            guidance = primaryItem.map { "先复核 \($0.reviewTitle ?? $0.title) 后再决定是否重试。" } ?? "先复核可重试项。"
+            icon = "arrow.clockwise.circle.fill"
+        } else if hasMetadataGap {
+            title = "Handoff Brief metadata 待同步"
+            status = "\(metadataPendingCount) 项 metadata 待同步"
+            guidance = primaryItem.map { "等待 \($0.reviewTitle ?? $0.title) metadata 后再交接。" } ?? "等待 Gateway metadata 后再交接。"
+            icon = "doc.badge.clock"
+        } else if canContinueLoop {
+            title = "Handoff Brief 可继续"
+            status = "可由用户显式触发下一轮"
+            guidance = "交接未发现阻断；仍必须由用户显式触发下一轮，不自动继续。"
+            icon = "arrow.forward.circle.fill"
+        } else {
+            title = "Mac Agent Handoff Brief"
+            status = "\(doneCount)/\(items.count) 项完成"
+            guidance = primaryItem.map { "可从 \($0.reviewTitle ?? $0.title) 开始抽查。" } ?? "可抽查当前交接简报。"
+            icon = "person.text.rectangle.fill"
+        }
+
+        return ClawMissionRunHandoffBriefSummary(
+            title: title,
+            status: status,
+            guidance: guidance,
+            icon: icon,
+            totalCount: items.count,
+            doneCount: doneCount,
+            blockedCount: blockedCount,
+            humanActionCount: humanActionCount,
+            retryableCount: retryableCount,
+            metadataPendingCount: metadataPendingCount,
+            loopCandidateCount: loopCandidateCount,
+            optionalReviewCount: optionalReviewCount,
+            focusedItemID: focusedItem?.id,
+            focusedReviewKind: focusedItem?.reviewKind,
+            focusedReviewTitle: focusedReviewTitle,
+            primaryReviewKind: primaryItem?.reviewKind,
+            primaryReviewTitle: primaryItem?.reviewTitle,
+            canFocusPrimaryReview: primaryItem?.canFocusReview ?? false,
+            canContinueLoop: canContinueLoop,
+            requiresHumanAction: requiresHumanAction,
+            hasMetadataGap: hasMetadataGap,
+            isBlocked: isBlocked,
+            isRetryable: isRetryable,
+            isReviewable: isReviewable,
+            items: items
+        )
+    }
+
+    private func handoffBriefItems(
+        focusedOn focusedKind: String?,
+        radar: ClawMissionRunReviewRadarSummary,
+        gate: ClawMissionRunContinuationGateSummary,
+        deck: ClawMissionRunNextStepDeck,
+        timeline: ClawMissionRunTimelineSummary,
+        approval: ClawMissionRunApprovalQueueSummary,
+        focus: ClawMissionRunFocusContextSummary,
+        loop: ClawMissionRunLoopContinuationSummary
+    ) -> [ClawMissionRunHandoffBriefItem] {
+        let hasMissionEvidence = radar.isReviewable || gate.isReviewable || deck.isReviewable || timeline.isReviewable || approval.isReviewable || focus.focusedReviewKind != nil || loop.isReviewable
+        guard hasMissionEvidence else {
+            return []
+        }
+
+        return [
+            handoffBriefItem(
+                id: "blockers",
+                rank: 10,
+                title: "阻断与重试",
+                status: "\(gate.blockedCount + radar.blockedCount) 阻断 · \(gate.retryableCount) 可重试",
+                guidance: gate.isBlocked || radar.isBlocked ? "先处理阻断或可重试复核；不会自动重试。" : "当前未发现阻断，仍可人工抽查失败路径。",
+                icon: gate.isBlocked || radar.isBlocked ? "xmark.octagon.fill" : "checkmark.circle.fill",
+                tone: gate.isBlocked || radar.isBlocked ? .danger : (gate.isRetryable ? .warning : .success),
+                reviewKind: gate.primaryReviewKind ?? radar.primaryReviewKind,
+                reviewTitle: gate.primaryReviewTitle ?? radar.primaryReviewTitle,
+                canFocusReview: gate.canFocusPrimaryReview || radar.canFocusPrimaryReview,
+                focusedKind: focusedKind,
+                isDone: gate.isBlocked == false && radar.isBlocked == false && gate.isRetryable == false,
+                requiresHumanAction: gate.isBlocked || radar.isBlocked || gate.isRetryable,
+                isBlocked: gate.isBlocked || radar.isBlocked,
+                isRetryable: gate.isRetryable,
+                hasMetadataGap: false,
+                canContinueLoop: false,
+                isOptionalReview: false
+            ),
+            handoffBriefItem(
+                id: "human-confirmation",
+                rank: 20,
+                title: "人工确认",
+                status: approval.isReviewable ? approval.status : gate.status,
+                guidance: approval.requiresHumanAction || gate.requiresHumanAction ? "先完成手机审批、Gateway 等待确认、最终提交或交接复核。" : "当前没有待处理人工确认。",
+                icon: approval.requiresHumanAction || gate.requiresHumanAction ? "hand.raised.fill" : "checkmark.seal.fill",
+                tone: approval.requiresHumanAction || gate.requiresHumanAction ? .warning : .success,
+                reviewKind: approval.primaryReviewKind ?? gate.primaryReviewKind,
+                reviewTitle: approval.primaryReviewTitle ?? gate.primaryReviewTitle,
+                canFocusReview: approval.canFocusPrimaryReview || gate.canFocusPrimaryReview,
+                focusedKind: focusedKind,
+                isDone: approval.requiresHumanAction == false && gate.requiresHumanAction == false,
+                requiresHumanAction: approval.requiresHumanAction || gate.requiresHumanAction,
+                isBlocked: false,
+                isRetryable: false,
+                hasMetadataGap: approval.hasMetadataGap || gate.hasMetadataGap,
+                canContinueLoop: false,
+                isOptionalReview: false
+            ),
+            handoffBriefItem(
+                id: "metadata-evidence",
+                rank: 30,
+                title: "metadata 与证据",
+                status: "\(radar.metadataPendingCount + gate.metadataPendingCount + timeline.metadataPendingCount) metadata · \(timeline.evidenceStepCount) 证据步",
+                guidance: radar.hasMetadataGap || gate.hasMetadataGap || timeline.hasMetadataGap ? "等待 Gateway metadata 或证据摘要补齐；不打开 artifact payload。" : "metadata 和证据摘要已可交接复核。",
+                icon: radar.hasMetadataGap || gate.hasMetadataGap || timeline.hasMetadataGap ? "doc.badge.clock" : "paperclip.circle.fill",
+                tone: radar.hasMetadataGap || gate.hasMetadataGap || timeline.hasMetadataGap ? .info : .success,
+                reviewKind: radar.primaryReviewKind ?? gate.primaryReviewKind ?? timeline.primaryReviewKind,
+                reviewTitle: radar.primaryReviewTitle ?? gate.primaryReviewTitle ?? timeline.primaryReviewTitle,
+                canFocusReview: radar.canFocusPrimaryReview || gate.canFocusPrimaryReview || timeline.canFocusPrimaryReview,
+                focusedKind: focusedKind,
+                isDone: radar.hasMetadataGap == false && gate.hasMetadataGap == false && timeline.hasMetadataGap == false,
+                requiresHumanAction: false,
+                isBlocked: false,
+                isRetryable: false,
+                hasMetadataGap: radar.hasMetadataGap || gate.hasMetadataGap || timeline.hasMetadataGap,
+                canContinueLoop: false,
+                isOptionalReview: false
+            ),
+            handoffBriefItem(
+                id: "loop-next",
+                rank: 40,
+                title: "Loop 下一轮",
+                status: loop.isReviewable ? loop.status : "等待 AgentTrace",
+                guidance: loop.canContinueLoop ? "AgentTrace 显示可继续；仍必须由用户显式触发下一轮。" : loop.guidance,
+                icon: loop.canContinueLoop ? "arrow.forward.circle.fill" : loop.icon,
+                tone: loop.hasMetadataGap ? .info : (loop.canContinueLoop ? .success : (loop.requiresHumanAction ? .warning : .neutral)),
+                reviewKind: loop.focusReviewKind,
+                reviewTitle: loop.focusReviewTitle,
+                canFocusReview: loop.canFocusAgentTrace,
+                focusedKind: focusedKind,
+                isDone: loop.isReviewable && loop.hasMetadataGap == false && loop.requiresHumanAction == false,
+                requiresHumanAction: loop.requiresHumanAction,
+                isBlocked: loop.handoffStatus == "blocked",
+                isRetryable: false,
+                hasMetadataGap: loop.hasMetadataGap,
+                canContinueLoop: loop.canContinueLoop,
+                isOptionalReview: false
+            ),
+            handoffBriefItem(
+                id: "spot-check",
+                rank: 50,
+                title: "抽查复核",
+                status: focus.focusedReviewKind != nil ? focus.status : (deck.primaryReviewTitle ?? radar.primaryReviewTitle ?? deck.status),
+                guidance: focus.focusedReviewKind != nil ? focus.guidance : "交接前可抽查最高优先复核摘要；只改变本地聚焦。",
+                icon: focus.focusedReviewKind != nil ? focus.icon : "doc.text.magnifyingglass",
+                tone: focus.hasMetadataGap ? .info : (focus.requiresHumanAction ? .warning : .success),
+                reviewKind: focus.focusedReviewKind ?? deck.primaryReviewKind ?? radar.primaryReviewKind,
+                reviewTitle: focus.focusedReviewTitle ?? deck.primaryReviewTitle ?? radar.primaryReviewTitle,
+                canFocusReview: focus.canFocusDetailReview || deck.canFocusPrimaryReview || radar.canFocusPrimaryReview,
+                focusedKind: focusedKind,
+                isDone: focus.hasMetadataGap == false && focus.requiresHumanAction == false,
+                requiresHumanAction: focus.requiresHumanAction,
+                isBlocked: false,
+                isRetryable: deck.isRetryable,
+                hasMetadataGap: focus.hasMetadataGap,
+                canContinueLoop: false,
+                isOptionalReview: true
+            )
+        ].sorted { lhs, rhs in
+            lhs.rank == rhs.rank ? lhs.id < rhs.id : lhs.rank < rhs.rank
+        }
+    }
+
+    private func handoffBriefItem(
+        id: String,
+        rank: Int,
+        title: String,
+        status: String,
+        guidance: String,
+        icon: String,
+        tone: ClawMissionRunOperatorLaneTone,
+        reviewKind: String?,
+        reviewTitle: String?,
+        canFocusReview: Bool,
+        focusedKind: String?,
+        isDone: Bool,
+        requiresHumanAction: Bool,
+        isBlocked: Bool,
+        isRetryable: Bool,
+        hasMetadataGap: Bool,
+        canContinueLoop: Bool,
+        isOptionalReview: Bool
+    ) -> ClawMissionRunHandoffBriefItem {
+        ClawMissionRunHandoffBriefItem(
+            id: id,
+            rank: rank,
+            title: title,
+            status: status,
+            guidance: guidance,
+            icon: icon,
+            tone: tone,
+            reviewKind: reviewKind,
+            reviewTitle: reviewTitle,
+            canFocusReview: canFocusReview && reviewKind != nil,
+            isFocused: reviewKind != nil && reviewKind == focusedKind,
+            isDone: isDone,
+            requiresHumanAction: requiresHumanAction,
+            isBlocked: isBlocked,
+            isRetryable: isRetryable,
+            hasMetadataGap: hasMetadataGap,
+            canContinueLoop: canContinueLoop,
+            isOptionalReview: isOptionalReview
         )
     }
 

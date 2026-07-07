@@ -207,6 +207,12 @@ enum LogicSmoke {
         expect(idleReviewRadar.priorityCount == 0, "idle review radar should not count priority signals")
         expect(idleReviewRadar.metadataPendingCount == 0, "idle review radar should not count metadata gaps")
         expect(idleReviewRadar.primaryReviewKind == nil, "idle review radar should not invent primary focus")
+        let idleHandoffBrief = missionStore.missionRunSummary.macAgentHandoffBrief
+        expect(idleHandoffBrief.isReviewable == false, "idle handoff brief should not be reviewable")
+        expect(idleHandoffBrief.totalCount == 0, "idle handoff brief should not count items")
+        expect(idleHandoffBrief.blockedCount == 0, "idle handoff brief should not count blockers")
+        expect(idleHandoffBrief.metadataPendingCount == 0, "idle handoff brief should not count metadata gaps")
+        expect(idleHandoffBrief.primaryReviewKind == nil, "idle handoff brief should not invent primary focus")
         expect(missionStore.missionRunSummary.activeReviewFocus(from: "delivery-safety") == nil, "idle active focus should not resolve")
         missionStore.phoneAgentCommand = "打开浏览器搜索资料，整理结果并发到 Slack"
         missionStore.startAutonomousComputerTakeover()
@@ -321,6 +327,21 @@ enum LogicSmoke {
         expect(
             focusedPreSendReviewRadar.sectors.contains { $0.reviewKind == "approval" && $0.isFocused },
             "focused pre-send review radar should mark approval sector"
+        )
+        let preSendHandoffBrief = missionSummary.macAgentHandoffBrief
+        expect(preSendHandoffBrief.isReviewable, "pre-send handoff brief should be reviewable")
+        expect(preSendHandoffBrief.totalCount == 5, "pre-send handoff brief should expose fixed items")
+        expect(preSendHandoffBrief.requiresHumanAction, "pre-send handoff brief should require human action")
+        expect(preSendHandoffBrief.primaryReviewKind == "approval", "pre-send handoff brief should target approval")
+        expect(
+            preSendHandoffBrief.items.contains { $0.id == "human-confirmation" && $0.reviewKind == "approval" && $0.requiresHumanAction },
+            "pre-send handoff brief should include approval item"
+        )
+        let focusedPreSendHandoffBrief = missionSummary.macAgentHandoffBrief(focusedOn: "approval")
+        expect(focusedPreSendHandoffBrief.focusedReviewKind == "approval", "pre-send handoff brief should focus approval")
+        expect(
+            focusedPreSendHandoffBrief.items.contains { $0.reviewKind == "approval" && $0.isFocused },
+            "focused pre-send handoff brief should mark approval item"
         )
         missionStore.approveAndContinueAutonomousLoop()
         missionSummary = missionStore.missionRunSummary
@@ -561,6 +582,31 @@ enum LogicSmoke {
             focusedReviewRadar.sectors.contains { $0.reviewKind == "delivery-safety" && $0.isFocused },
             "focused review radar should mark delivery sector"
         )
+        let handoffBrief = missionSummary.macAgentHandoffBrief
+        expect(handoffBrief.isReviewable, "handoff brief should be reviewable once Gateway evidence exists")
+        expect(handoffBrief.totalCount == 5, "handoff brief should expose fixed items")
+        expect(handoffBrief.humanActionCount > 0, "handoff brief should count human handoff")
+        expect(handoffBrief.requiresHumanAction, "handoff brief should surface human review")
+        expect(
+            handoffBrief.items.contains { $0.id == "human-confirmation" && $0.requiresHumanAction },
+            "handoff brief should include human confirmation"
+        )
+        expect(
+            handoffBrief.items.contains { $0.id == "metadata-evidence" && $0.isDone },
+            "handoff brief should include metadata evidence item"
+        )
+        expect(
+            handoffBrief.items.contains { $0.id == "loop-next" && $0.reviewKind == "agent-trace" },
+            "handoff brief should include loop item"
+        )
+        expect(handoffBrief.primaryReviewKind != nil, "handoff brief should expose primary review")
+        let focusedHandoffBrief = missionSummary.macAgentHandoffBrief(focusedOn: "delivery-safety")
+        expect(focusedHandoffBrief.focusedReviewKind == "delivery-safety", "handoff brief should record delivery focus")
+        expect(focusedHandoffBrief.focusedReviewTitle == "最终提交安全", "handoff brief should expose delivery title")
+        expect(
+            focusedHandoffBrief.items.contains { $0.reviewKind == "delivery-safety" && $0.isFocused },
+            "focused handoff brief should mark delivery item"
+        )
         let operatorStrip = missionSummary.operatorStrip
         expect(operatorStrip.lanes.map(\.id) == ["gateway", "evidence", "review", "next"], "operator strip should expose stable lanes")
         expect(operatorStrip.title == "Mission Operator", "operator strip should expose stable title")
@@ -799,6 +845,13 @@ enum LogicSmoke {
             statusReviewRadar.sectors.contains { $0.reviewKind == statusOnlyItem.reviewKind && $0.isFocused },
             "status review radar should mark status sector"
         )
+        let statusHandoffBrief = statusOnlySummary.macAgentHandoffBrief(focusedOn: statusOnlyItem.reviewKind)
+        expect(statusHandoffBrief.focusedReviewKind == statusOnlyItem.reviewKind, "status handoff brief should keep status focus")
+        expect(statusHandoffBrief.focusedReviewTitle == statusOnlyItem.title, "status handoff brief should expose status title")
+        expect(
+            statusHandoffBrief.items.contains { $0.reviewKind == statusOnlyItem.reviewKind && $0.isFocused },
+            "status handoff brief should mark status item"
+        )
         let staleFocusContext = statusOnlySummary.focusContextSummary(focusedOn: "unknown-review-kind")
         expect(staleFocusContext.focusedReviewKind == nil, "stale focus context should not keep an unknown review kind")
         expect(staleFocusContext.canClearFocus, "stale focus context should allow clearing focus")
@@ -844,6 +897,12 @@ enum LogicSmoke {
         expect(
             staleReviewRadar.totalCount == statusOnlySummary.macAgentReviewRadar.totalCount,
             "stale review radar should keep sectors"
+        )
+        let staleHandoffBrief = statusOnlySummary.macAgentHandoffBrief(focusedOn: "unknown-review-kind")
+        expect(staleHandoffBrief.focusedReviewKind == nil, "stale handoff brief should not keep unknown focus")
+        expect(
+            staleHandoffBrief.totalCount == statusOnlySummary.macAgentHandoffBrief.totalCount,
+            "stale handoff brief should keep items"
         )
         expect(
             missionSummary.detailReviewKinds(focusedOn: nil) == availableDetailKinds,
@@ -1359,6 +1418,45 @@ enum LogicSmoke {
             staleReviewRadar.guidance
         ]
         let reviewRadarVisibleChunks = reviewRadarItemChunks + reviewRadarSummaryChunks
+        let handoffBriefItemChunks: [String] = handoffBrief.items.flatMap { item in
+            [
+                item.title,
+                item.status,
+                item.guidance,
+                item.reviewKind ?? "",
+                item.reviewTitle ?? ""
+            ]
+        }
+        let handoffBriefSummaryChunks: [String] = [
+            idleHandoffBrief.title,
+            idleHandoffBrief.status,
+            idleHandoffBrief.guidance,
+            preSendHandoffBrief.title,
+            preSendHandoffBrief.status,
+            preSendHandoffBrief.guidance,
+            focusedPreSendHandoffBrief.title,
+            focusedPreSendHandoffBrief.status,
+            focusedPreSendHandoffBrief.guidance,
+            handoffBrief.title,
+            handoffBrief.status,
+            handoffBrief.guidance,
+            handoffBrief.primaryReviewKind ?? "",
+            handoffBrief.primaryReviewTitle ?? "",
+            focusedHandoffBrief.title,
+            focusedHandoffBrief.status,
+            focusedHandoffBrief.guidance,
+            focusedHandoffBrief.focusedReviewKind ?? "",
+            focusedHandoffBrief.focusedReviewTitle ?? "",
+            statusHandoffBrief.title,
+            statusHandoffBrief.status,
+            statusHandoffBrief.guidance,
+            statusHandoffBrief.focusedReviewKind ?? "",
+            statusHandoffBrief.focusedReviewTitle ?? "",
+            staleHandoffBrief.title,
+            staleHandoffBrief.status,
+            staleHandoffBrief.guidance
+        ]
+        let handoffBriefVisibleChunks = handoffBriefItemChunks + handoffBriefSummaryChunks
         let queueVisibleText = (
             queueVisibleChunks +
                 readinessVisibleChunks +
@@ -1375,7 +1473,8 @@ enum LogicSmoke {
                 nextStepDeckVisibleChunks +
                 runTimelineVisibleChunks +
                 continuationGateVisibleChunks +
-                reviewRadarVisibleChunks
+                reviewRadarVisibleChunks +
+                handoffBriefVisibleChunks
         ).joined(separator: " ")
         for forbidden in ["Authorization", "Bearer", "toolArguments", "file://", "/private", "/Users", "/home", "C:\\", "stdout", "stderr", "diff", "raw-token", "header", "cookie", "secret"] {
             expect(queueVisibleText.contains(forbidden) == false, "review priority queue should not expose \(forbidden)")
@@ -1667,6 +1766,19 @@ enum LogicSmoke {
             shellReviewRadar.sectors.contains { $0.id == "execution-state" && $0.blockedCount > 0 },
             "shell review radar should surface execution blocker"
         )
+        let shellHandoffBrief = shellMissionSummary.macAgentHandoffBrief(focusedOn: "shell-safety")
+        expect(shellHandoffBrief.isReviewable, "shell handoff brief should be reviewable")
+        expect(shellHandoffBrief.requiresHumanAction, "shell handoff brief should require human review")
+        expect(shellHandoffBrief.focusedReviewKind == "shell-safety", "shell handoff brief should record shell focus")
+        expect(shellHandoffBrief.focusedReviewTitle == "Shell 命令安全", "shell handoff brief should expose shell title")
+        expect(
+            shellHandoffBrief.items.contains { $0.reviewKind == "shell-safety" && $0.isFocused },
+            "shell handoff brief should mark shell item"
+        )
+        expect(
+            shellHandoffBrief.items.contains { $0.id == "blockers" && $0.isBlocked },
+            "shell handoff brief should surface blocker"
+        )
         let shellPayloadLedgerRows = shellPayloadLedger.items.map { item in
             "\(item.reviewTitle) \(item.status) \(item.guidance)"
         }.joined(separator: " ")
@@ -1693,6 +1805,9 @@ enum LogicSmoke {
         }.joined(separator: " ")
         let shellReviewRadarRows = shellReviewRadar.sectors.map { sector in
             "\(sector.title) \(sector.status) \(sector.guidance)"
+        }.joined(separator: " ")
+        let shellHandoffBriefRows = shellHandoffBrief.items.map { item in
+            "\(item.title) \(item.status) \(item.guidance)"
         }.joined(separator: " ")
         let shellVisibleChunks: [String] = [
             shellReadiness.title,
@@ -1756,7 +1871,11 @@ enum LogicSmoke {
             shellReviewRadar.title,
             shellReviewRadar.status,
             shellReviewRadar.guidance,
-            shellReviewRadarRows
+            shellReviewRadarRows,
+            shellHandoffBrief.title,
+            shellHandoffBrief.status,
+            shellHandoffBrief.guidance,
+            shellHandoffBriefRows
         ]
         let shellVisibleText = shellVisibleChunks.joined(separator: " ")
         expect(shellVisibleText.contains("stdout") == false, "shell readiness should not expose stdout")
