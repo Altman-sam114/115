@@ -1658,6 +1658,53 @@ struct ClawMissionRunTimelineSummary: Equatable, Codable, Sendable {
     var steps: [ClawMissionRunTimelineStep]
 }
 
+struct ClawMissionRunContinuationGateItem: Identifiable, Equatable, Codable, Sendable {
+    var id: String
+    var rank: Int
+    var title: String
+    var status: String
+    var guidance: String
+    var icon: String
+    var tone: ClawMissionRunOperatorLaneTone
+    var reviewKind: String?
+    var reviewTitle: String?
+    var canFocusReview: Bool
+    var isFocused: Bool
+    var isReady: Bool
+    var isBlocked: Bool
+    var requiresHumanAction: Bool
+    var hasMetadataGap: Bool
+    var canContinueLoop: Bool
+    var isRetryable: Bool
+}
+
+struct ClawMissionRunContinuationGateSummary: Equatable, Codable, Sendable {
+    var title: String
+    var status: String
+    var guidance: String
+    var icon: String
+    var totalCount: Int
+    var readyCount: Int
+    var blockedCount: Int
+    var humanActionCount: Int
+    var metadataPendingCount: Int
+    var retryableCount: Int
+    var loopCandidateCount: Int
+    var focusedItemID: String?
+    var focusedReviewKind: String?
+    var focusedReviewTitle: String?
+    var primaryReviewKind: String?
+    var primaryReviewTitle: String?
+    var canFocusPrimaryReview: Bool
+    var canContinueLoop: Bool
+    var requiresHumanAction: Bool
+    var hasMetadataGap: Bool
+    var isBlocked: Bool
+    var isRetryable: Bool
+    var isReviewable: Bool
+    var items: [ClawMissionRunContinuationGateItem]
+}
+
 struct ClawMissionRunReviewReadinessSummary: Equatable, Codable, Sendable {
     var title: String
     var status: String
@@ -4439,6 +4486,291 @@ extension ClawMissionRunSummary {
 
     private func timelineStepHasMetadataGap(_ step: ClawMissionRunTimelineStep) -> Bool {
         step.hasMetadata == false && (step.hasResult || step.hasEvidence || step.requiresHumanAction)
+    }
+
+    var macAgentContinuationGate: ClawMissionRunContinuationGateSummary {
+        macAgentContinuationGate(focusedOn: nil)
+    }
+
+    func macAgentContinuationGate(focusedOn reviewKind: String?) -> ClawMissionRunContinuationGateSummary {
+        let focusedKind = activeReviewFocus(from: reviewKind)
+        let deck = macAgentNextStepDeck(focusedOn: focusedKind)
+        let timeline = macAgentRunTimeline(focusedOn: focusedKind)
+        let approval = approvalQueueSummary(focusedOn: focusedKind)
+        let readiness = reviewReadinessSummary(focusedOn: focusedKind)
+        let loop = loopContinuationSummary(focusedOn: focusedKind)
+        let macReadiness = macAgentReadinessBoard(focusedOn: focusedKind)
+        let items = continuationGateItems(
+            focusedOn: focusedKind,
+            deck: deck,
+            timeline: timeline,
+            approval: approval,
+            readiness: readiness,
+            loop: loop,
+            macReadiness: macReadiness
+        )
+        let focusedItem = focusedKind.flatMap { kind in
+            items.first { $0.reviewKind == kind && $0.canFocusReview }
+        }
+        let primaryItem = focusedItem ??
+            items.first(where: \.isBlocked) ??
+            items.first(where: \.isRetryable) ??
+            items.first(where: \.requiresHumanAction) ??
+            items.first(where: \.hasMetadataGap) ??
+            items.first(where: \.canContinueLoop) ??
+            items.first
+        let readyCount = items.filter(\.isReady).count
+        let blockedCount = items.filter(\.isBlocked).count
+        let humanActionCount = items.filter(\.requiresHumanAction).count
+        let metadataPendingCount = items.filter(\.hasMetadataGap).count
+        let retryableCount = items.filter(\.isRetryable).count
+        let loopCandidateCount = items.filter(\.canContinueLoop).count
+        let isReviewable = items.isEmpty == false
+        let canContinueLoop = loopCandidateCount > 0 && blockedCount == 0 && humanActionCount == 0 && metadataPendingCount == 0
+        let requiresHumanAction = humanActionCount > 0 || approval.requiresHumanAction || readiness.requiresHumanAction
+        let hasMetadataGap = metadataPendingCount > 0
+        let isBlocked = blockedCount > 0
+        let isRetryable = retryableCount > 0
+
+        let title: String
+        let status: String
+        let guidance: String
+        let icon: String
+        if isReviewable == false {
+            title = "Continuation Gate 待生成"
+            status = "尚无可继续证据"
+            guidance = "生成任务或收到 Gateway 事件后，会汇总候选、时间线、审批、metadata 和 Loop 继续状态。"
+            icon = "signpost.right.and.left"
+        } else if let focusedItem {
+            title = "聚焦 Continuation Gate"
+            status = focusedItem.title
+            guidance = "\(focusedItem.title)：\(focusedItem.guidance)"
+            icon = focusedItem.icon
+        } else if isBlocked {
+            title = "Continuation Gate 阻断"
+            status = "\(blockedCount) 项阻断 · \(retryableCount) 项可重试"
+            guidance = primaryItem.map { "先复核 \($0.reviewTitle ?? $0.title)：\($0.guidance)" } ?? "先处理阻断后再判断能否继续。"
+            icon = "xmark.octagon.fill"
+        } else if requiresHumanAction {
+            title = "Continuation Gate 等待人工"
+            status = "\(humanActionCount) 项需人工确认"
+            guidance = primaryItem.map { "先确认 \($0.reviewTitle ?? $0.title)：\($0.guidance)" } ?? "先完成人工审批、交接或复核。"
+            icon = "hand.raised.fill"
+        } else if hasMetadataGap {
+            title = "Continuation Gate metadata 待同步"
+            status = "\(metadataPendingCount) 项 metadata 待同步"
+            guidance = primaryItem.map { "等待 \($0.reviewTitle ?? $0.title) metadata 后再继续。" } ?? "等待 Gateway metadata 后再继续。"
+            icon = "doc.badge.clock"
+        } else if canContinueLoop {
+            title = "Continuation Gate 可继续"
+            status = "可由用户显式触发下一轮"
+            guidance = "当前闸门未发现阻断；仍必须由用户显式触发下一轮，不自动继续。"
+            icon = "arrow.forward.circle.fill"
+        } else {
+            title = "Continuation Gate 可抽查"
+            status = "\(readyCount)/\(items.count) 项就绪"
+            guidance = primaryItem.map { "可从 \($0.reviewTitle ?? $0.title) 开始抽查。" } ?? "可继续抽查现有复核摘要。"
+            icon = "checkmark.seal.fill"
+        }
+
+        return ClawMissionRunContinuationGateSummary(
+            title: title,
+            status: status,
+            guidance: guidance,
+            icon: icon,
+            totalCount: items.count,
+            readyCount: readyCount,
+            blockedCount: blockedCount,
+            humanActionCount: humanActionCount,
+            metadataPendingCount: metadataPendingCount,
+            retryableCount: retryableCount,
+            loopCandidateCount: loopCandidateCount,
+            focusedItemID: focusedItem?.id,
+            focusedReviewKind: focusedItem?.reviewKind,
+            focusedReviewTitle: focusedItem?.reviewTitle,
+            primaryReviewKind: primaryItem?.reviewKind,
+            primaryReviewTitle: primaryItem?.reviewTitle,
+            canFocusPrimaryReview: primaryItem?.canFocusReview ?? false,
+            canContinueLoop: canContinueLoop,
+            requiresHumanAction: requiresHumanAction,
+            hasMetadataGap: hasMetadataGap,
+            isBlocked: isBlocked,
+            isRetryable: isRetryable,
+            isReviewable: isReviewable,
+            items: items
+        )
+    }
+
+    private func continuationGateItems(
+        focusedOn focusedKind: String?,
+        deck: ClawMissionRunNextStepDeck,
+        timeline: ClawMissionRunTimelineSummary,
+        approval: ClawMissionRunApprovalQueueSummary,
+        readiness: ClawMissionRunReviewReadinessSummary,
+        loop: ClawMissionRunLoopContinuationSummary,
+        macReadiness: ClawMissionRunMacAgentReadinessBoard
+    ) -> [ClawMissionRunContinuationGateItem] {
+        let hasMissionEvidence = deck.isReviewable || timeline.isReviewable || approval.isReviewable || readiness.isReviewable || loop.isReviewable || macReadiness.isReviewable
+        guard hasMissionEvidence else {
+            return []
+        }
+
+        var items: [ClawMissionRunContinuationGateItem] = []
+        items.append(
+            continuationGateItem(
+                id: "review-blockers",
+                rank: 10,
+                title: "阻断复核",
+                status: "\(deck.blockedCount + timeline.blockedCount) 阻断 · \(deck.retryableCount) 可重试",
+                guidance: deck.isBlocked || timeline.blockedCount > 0 ? "先处理失败、阻断或可重试复核；不会自动重试。" : "当前候选和时间线未报告阻断。",
+                icon: deck.isBlocked || timeline.blockedCount > 0 ? "exclamationmark.triangle.fill" : "checkmark.circle.fill",
+                tone: deck.isBlocked || timeline.blockedCount > 0 ? .danger : (deck.isRetryable ? .warning : .success),
+                reviewKind: deck.primaryReviewKind ?? timeline.primaryReviewKind,
+                reviewTitle: deck.primaryReviewTitle ?? timeline.primaryReviewTitle,
+                canFocusReview: deck.canFocusPrimaryReview || timeline.canFocusPrimaryReview,
+                focusedKind: focusedKind,
+                isReady: deck.isBlocked == false && timeline.blockedCount == 0 && deck.isRetryable == false,
+                isBlocked: deck.isBlocked || timeline.blockedCount > 0,
+                requiresHumanAction: deck.isBlocked || timeline.blockedCount > 0 || deck.isRetryable,
+                hasMetadataGap: false,
+                canContinueLoop: false,
+                isRetryable: deck.isRetryable
+            )
+        )
+
+        items.append(
+            continuationGateItem(
+                id: "human-confirmation",
+                rank: 20,
+                title: "人工确认",
+                status: approval.isReviewable ? approval.status : readiness.status,
+                guidance: approval.requiresHumanAction || readiness.requiresHumanAction || requiresUserApproval ? "先完成手机审批、Gateway 等待确认、最终提交或交接复核。" : "当前没有待处理人工确认。",
+                icon: approval.requiresHumanAction || readiness.requiresHumanAction || requiresUserApproval ? "person.crop.circle.badge.checkmark" : "checkmark.seal.fill",
+                tone: approval.requiresHumanAction || readiness.requiresHumanAction || requiresUserApproval ? .warning : .success,
+                reviewKind: approval.primaryReviewKind ?? readiness.topReviewKind,
+                reviewTitle: approval.primaryReviewTitle ?? readiness.topReviewTitle,
+                canFocusReview: approval.canFocusPrimaryReview || (readiness.topReviewKind.map(focusUsesDetailReview) ?? false),
+                focusedKind: focusedKind,
+                isReady: approval.requiresHumanAction == false && readiness.requiresHumanAction == false && requiresUserApproval == false,
+                isBlocked: false,
+                requiresHumanAction: approval.requiresHumanAction || readiness.requiresHumanAction || requiresUserApproval,
+                hasMetadataGap: approval.hasMetadataGap || readiness.metadataPendingCount > 0,
+                canContinueLoop: false,
+                isRetryable: false
+            )
+        )
+
+        items.append(
+            continuationGateItem(
+                id: "metadata-evidence",
+                rank: 30,
+                title: "metadata 与证据",
+                status: "\(timeline.metadataPendingCount + deck.metadataPendingCount + macReadiness.metadataPendingCount) metadata · \(timeline.evidenceStepCount) 证据步",
+                guidance: timeline.hasMetadataGap || deck.hasMetadataGap || macReadiness.hasMetadataGap ? "等待 Gateway metadata 或证据摘要补齐；不打开 artifact payload。" : "证据摘要和 metadata 闸门已可复核。",
+                icon: timeline.hasMetadataGap || deck.hasMetadataGap || macReadiness.hasMetadataGap ? "doc.badge.clock" : "paperclip.circle.fill",
+                tone: timeline.hasMetadataGap || deck.hasMetadataGap || macReadiness.hasMetadataGap ? .info : .success,
+                reviewKind: timeline.primaryReviewKind ?? deck.primaryReviewKind ?? macReadiness.primaryReviewKind,
+                reviewTitle: timeline.primaryReviewTitle ?? deck.primaryReviewTitle ?? macReadiness.primaryReviewTitle,
+                canFocusReview: timeline.canFocusPrimaryReview || deck.canFocusPrimaryReview || macReadiness.canFocusPrimaryReview,
+                focusedKind: focusedKind,
+                isReady: timeline.hasMetadataGap == false && deck.hasMetadataGap == false && macReadiness.hasMetadataGap == false,
+                isBlocked: false,
+                requiresHumanAction: false,
+                hasMetadataGap: timeline.hasMetadataGap || deck.hasMetadataGap || macReadiness.hasMetadataGap,
+                canContinueLoop: false,
+                isRetryable: false
+            )
+        )
+
+        items.append(
+            continuationGateItem(
+                id: "loop-continuation",
+                rank: 40,
+                title: "Loop 继续",
+                status: loop.isReviewable ? loop.status : "等待 AgentTrace",
+                guidance: loop.canContinueLoop ? "AgentTrace 显示可继续；复核后由用户显式触发下一轮，不会自动继续。" : loop.guidance,
+                icon: loop.canContinueLoop ? "arrow.forward.circle.fill" : loop.icon,
+                tone: loop.hasMetadataGap ? .info : (loop.canContinueLoop ? .success : (loop.requiresHumanAction ? .warning : .neutral)),
+                reviewKind: loop.focusReviewKind,
+                reviewTitle: loop.focusReviewTitle,
+                canFocusReview: loop.canFocusAgentTrace,
+                focusedKind: focusedKind,
+                isReady: loop.isReviewable && loop.hasMetadataGap == false && loop.requiresHumanAction == false,
+                isBlocked: loop.handoffStatus == "blocked",
+                requiresHumanAction: loop.requiresHumanAction,
+                hasMetadataGap: loop.hasMetadataGap,
+                canContinueLoop: loop.canContinueLoop,
+                isRetryable: false
+            )
+        )
+
+        if deck.isReviewable && deck.isBlocked == false && deck.requiresHumanAction == false {
+            items.append(
+                continuationGateItem(
+                    id: "spot-check",
+                    rank: 50,
+                    title: "抽查入口",
+                    status: deck.primaryReviewTitle ?? deck.status,
+                    guidance: "继续前可抽查最高优先复核摘要；只改变本地聚焦。",
+                    icon: deck.icon,
+                    tone: deck.hasMetadataGap ? .info : .success,
+                    reviewKind: deck.primaryReviewKind,
+                    reviewTitle: deck.primaryReviewTitle,
+                    canFocusReview: deck.canFocusPrimaryReview,
+                    focusedKind: focusedKind,
+                    isReady: deck.hasMetadataGap == false,
+                    isBlocked: false,
+                    requiresHumanAction: false,
+                    hasMetadataGap: deck.hasMetadataGap,
+                    canContinueLoop: false,
+                    isRetryable: false
+                )
+            )
+        }
+
+        return items.sorted { lhs, rhs in
+            lhs.rank == rhs.rank ? lhs.id < rhs.id : lhs.rank < rhs.rank
+        }
+    }
+
+    private func continuationGateItem(
+        id: String,
+        rank: Int,
+        title: String,
+        status: String,
+        guidance: String,
+        icon: String,
+        tone: ClawMissionRunOperatorLaneTone,
+        reviewKind: String?,
+        reviewTitle: String?,
+        canFocusReview: Bool,
+        focusedKind: String?,
+        isReady: Bool,
+        isBlocked: Bool,
+        requiresHumanAction: Bool,
+        hasMetadataGap: Bool,
+        canContinueLoop: Bool,
+        isRetryable: Bool
+    ) -> ClawMissionRunContinuationGateItem {
+        ClawMissionRunContinuationGateItem(
+            id: id,
+            rank: rank,
+            title: title,
+            status: status,
+            guidance: guidance,
+            icon: icon,
+            tone: tone,
+            reviewKind: reviewKind,
+            reviewTitle: reviewTitle,
+            canFocusReview: canFocusReview && reviewKind != nil,
+            isFocused: reviewKind != nil && reviewKind == focusedKind,
+            isReady: isReady,
+            isBlocked: isBlocked,
+            requiresHumanAction: requiresHumanAction,
+            hasMetadataGap: hasMetadataGap,
+            canContinueLoop: canContinueLoop,
+            isRetryable: isRetryable
+        )
     }
 
     func macAgentReadinessBoard(focusedOn reviewKind: String?) -> ClawMissionRunMacAgentReadinessBoard {

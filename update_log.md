@@ -15,12 +15,49 @@
 
 - 项目方向：OpenClaw 式电脑接管智能体，iPhone 作为控制台，桌面 Claw Gateway 作为执行端。
 - 当前 schema：`claw.computer.control.v1`。
-- 当前核心闭环：用户自然语言任务 -> `PhoneAgentPlanner` -> `ClawMobileTask` -> `ClawMobileEnvelope` -> 模拟事件流或带有界重连/ping 可观测性和进程内 task replay guard 的 WebSocket Gateway -> `ClawGatewayEvent` -> session reducer -> Mission Run / Operator Strip / Loop 继续态势 / Mac Agent Readiness Board 就绪看板 / Mac Gateway Action Preflight Matrix 动作预检矩阵 / Mac Agent Evidence Coverage Map 证据覆盖图 / Mac Agent Next Step Deck 下一步候选卡组 / Mac Agent Run Timeline 执行时间线 / Focus Context 聚焦上下文 / Review Detail Dock / Review Trail 复核路径 / Approval Queue 审批队列 / Payload Safety Ledger 载荷安全账本 / Artifact 证据索引 / 复核态势摘要 / 复核优先队列 / 复核聚焦详情 / Live Gateway 连接健康 / Artifact metadata 复核摘要 / 文件变更安全复核摘要 / Shell 命令安全复核摘要 / 提取完整性复核摘要 / 浏览器控制计划复核摘要 / 草稿最终提交安全复核摘要 / Gateway 能力复核摘要 / Accessibility 复核摘要 / Replay Guard 复核摘要 / AgentTrace handoff 复核 UI / iPad 多栏工作台展示和审批。
+- 当前核心闭环：用户自然语言任务 -> `PhoneAgentPlanner` -> `ClawMobileTask` -> `ClawMobileEnvelope` -> 模拟事件流或带有界重连/ping 可观测性和进程内 task replay guard 的 WebSocket Gateway -> `ClawGatewayEvent` -> session reducer -> Mission Run / Operator Strip / Loop 继续态势 / Mac Agent Readiness Board 就绪看板 / Mac Gateway Action Preflight Matrix 动作预检矩阵 / Mac Agent Evidence Coverage Map 证据覆盖图 / Mac Agent Next Step Deck 下一步候选卡组 / Mac Agent Run Timeline 执行时间线 / Mac Agent Continuation Gate 继续闸门 / Focus Context 聚焦上下文 / Review Detail Dock / Review Trail 复核路径 / Approval Queue 审批队列 / Payload Safety Ledger 载荷安全账本 / Artifact 证据索引 / 复核态势摘要 / 复核优先队列 / 复核聚焦详情 / Live Gateway 连接健康 / Artifact metadata 复核摘要 / 文件变更安全复核摘要 / Shell 命令安全复核摘要 / 提取完整性复核摘要 / 浏览器控制计划复核摘要 / 草稿最终提交安全复核摘要 / Gateway 能力复核摘要 / Accessibility 复核摘要 / Replay Guard 复核摘要 / AgentTrace handoff 复核 UI / iPad 多栏工作台展示和审批。
 - 当前 Gateway 能力：进程内 task replay guard、session-start 能力快照 `auditLog`、屏幕观察 dry-run/截图/窗口元数据/受控 Accessibility 摘要策略、浏览器 HTML/URL trace、带 metadata-only 计划复核的浏览器打开/搜索计划、workspace 文件写入与 metadata-only 文件变更安全复核、Shell dry-run/allowlist 执行与 metadata-only Shell 命令安全复核、带 metadata-only 完整性复核的结构化提取、带 metadata-only 草稿/最终提交安全复核的 messageDraft/桌面 App 审批闸门、带 readiness/checklist/risk/stop/handoff status、mac 证据质量分层与安全 metadata 的 `runAgentLoop`/`agentTrace`。
 - 当前协作闭环：默认 `main` 直推，GitHub Actions 生成未加密 `ci-results` 结果包，Agent C 下载并核对 manifest/JUnit/日志后验收。
 - 当前主要遗留：完整 macOS Accessibility bridge、Playwright/browser-use 兼容控制器、真实多轮 agent loop、live Gateway 后台保活/真实心跳协议/配对、完整 artifact 内容复核体验。
 
 ## 历史记录
+
+### v0.43 / Mac Agent Continuation Gate 继续闸门
+
+日期：2026-07-07
+
+核心变更：
+
+- 新增 `ClawMissionRunContinuationGateItem` 和 `ClawMissionRunContinuationGateSummary`，`ClawMissionRunSummary` 可从 Next Step Deck、Run Timeline、Approval Queue、Review Readiness、Loop 继续态势和 Mac Agent Readiness Board 派生继续闸门。
+- Gate 固定汇总阻断/可重试、人工确认、metadata/证据缺口、Loop 可继续和抽查入口；idle 不虚构可继续状态，AgentTrace 可继续时仍提示用户显式触发下一轮。
+- compact Mission Run 在 Run Timeline 后展示 Gate；iPad/mac 右侧 Mission Review Detail Dock 也在 Run Timeline 后、Review Trail 前复用同一 Gate 和共享聚焦状态。
+- Gate row 只改变本地聚焦，不执行 Gateway 动作，不审批、不发送、不重试、不自动继续；不读取或展示 action `toolArguments` 原文、artifact `reference`、Gateway `file://` payload、`auditTrail` 原文、文件内容、命令输出、stdout/stderr、diff、网页正文、草稿正文、token、header、cookie 或 secret。
+- XCTest 和 Swift logic smoke 覆盖 idle、发送前审批闸门、发送后人工/metadata/Loop 闸门、detail 聚焦、状态级聚焦、过期聚焦、Shell 高风险/可重试和敏感字符串不外显。
+- 同步 README、协议、flow/flowchart、测试说明和 Agent A 提示词；本轮不新增 schema/event/action/artifact kind，不改变 Gateway JS 或执行权限。
+
+关键文件：
+
+- `Claw/Core/ClawModels.swift`
+- `Claw/Views/ContentView.swift`
+- `ClawTests/ClawTests.swift`
+- `Tools/LogicSmoke.swift`
+- `README.md`
+- `Docs/claw-mobile-gateway-protocol.md`
+- `md/flow/flow.md`
+- `md/flow/flowchart.md`
+- `md/test/test.md`
+- `md/prompt/v0（核心智能能力）/v0.43（MacAgentContinuationGate）.md`
+- `update_log.md`
+
+验证结果：
+
+- 本地只运行非编译静态检查；Swift logic smoke、iOS build、XCTest 编译、Gateway smoke 和 `node --check` 均等待云端 workflow 覆盖。
+- GitHub Actions 结果包待本轮提交并 push 后由 Agent C 下载复判。
+
+遗留事项：
+
+- 当前 Continuation Gate 是手机端 presentation-layer 继续闸门，不是自动执行授权、自动审批、自动重试、自动继续、完整 payload viewer、完整 forensic timeline 或完整 Gateway readiness。
+- 完整 macOS Accessibility bridge、Playwright/browser-use 兼容控制器、完整 artifact payload 复核体验和真实多轮 agent loop 仍是后续遗留。
 
 ### v0.42 / Mac Agent Run Timeline 执行时间线
 

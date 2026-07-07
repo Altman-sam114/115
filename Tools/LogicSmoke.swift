@@ -194,6 +194,13 @@ enum LogicSmoke {
         expect(idleRunTimeline.completedCount == 0, "idle run timeline should not count completed steps")
         expect(idleRunTimeline.metadataPendingCount == 0, "idle run timeline should not count metadata gaps")
         expect(idleRunTimeline.primaryReviewKind == nil, "idle run timeline should not invent primary focus")
+        let idleContinuationGate = missionStore.missionRunSummary.macAgentContinuationGate
+        expect(idleContinuationGate.isReviewable == false, "idle continuation gate should not be reviewable")
+        expect(idleContinuationGate.totalCount == 0, "idle continuation gate should not count rows")
+        expect(idleContinuationGate.readyCount == 0, "idle continuation gate should not count ready rows")
+        expect(idleContinuationGate.blockedCount == 0, "idle continuation gate should not count blockers")
+        expect(idleContinuationGate.humanActionCount == 0, "idle continuation gate should not require human action")
+        expect(idleContinuationGate.primaryReviewKind == nil, "idle continuation gate should not invent primary focus")
         expect(missionStore.missionRunSummary.activeReviewFocus(from: "delivery-safety") == nil, "idle active focus should not resolve")
         missionStore.phoneAgentCommand = "打开浏览器搜索资料，整理结果并发到 Slack"
         missionStore.startAutonomousComputerTakeover()
@@ -278,6 +285,21 @@ enum LogicSmoke {
         expect(
             focusedPreSendRunTimeline.steps.contains { $0.reviewKind == "approval" && $0.isFocused },
             "focused pre-send run timeline should mark approval row"
+        )
+        let preSendContinuationGate = missionSummary.macAgentContinuationGate
+        expect(preSendContinuationGate.isReviewable, "pre-send continuation gate should be reviewable")
+        expect(preSendContinuationGate.requiresHumanAction, "pre-send continuation gate should require human action")
+        expect(preSendContinuationGate.primaryReviewKind == "approval", "pre-send continuation gate should target approval")
+        expect(preSendContinuationGate.canFocusPrimaryReview, "pre-send continuation gate should focus approval")
+        expect(
+            preSendContinuationGate.items.contains { $0.id == "human-confirmation" && $0.reviewKind == "approval" && $0.requiresHumanAction },
+            "pre-send continuation gate should include approval gate"
+        )
+        let focusedPreSendContinuationGate = missionSummary.macAgentContinuationGate(focusedOn: "approval")
+        expect(focusedPreSendContinuationGate.focusedReviewKind == "approval", "pre-send continuation gate should focus approval")
+        expect(
+            focusedPreSendContinuationGate.items.contains { $0.reviewKind == "approval" && $0.isFocused },
+            "focused pre-send continuation gate should mark approval row"
         )
         missionStore.approveAndContinueAutonomousLoop()
         missionSummary = missionStore.missionRunSummary
@@ -470,6 +492,28 @@ enum LogicSmoke {
         expect(
             focusedRunTimeline.steps.contains { $0.reviewKind == "delivery-safety" && $0.isFocused },
             "focused run timeline should mark delivery row"
+        )
+        let continuationGate = missionSummary.macAgentContinuationGate
+        expect(continuationGate.isReviewable, "continuation gate should be reviewable once Gateway evidence exists")
+        expect(continuationGate.totalCount > 0, "continuation gate should expose rows")
+        expect(continuationGate.items.map(\.rank) == continuationGate.items.map(\.rank).sorted(), "continuation gate should be rank sorted")
+        expect(continuationGate.requiresHumanAction, "continuation gate should surface human review")
+        expect(continuationGate.humanActionCount > 0, "continuation gate should count human gates")
+        expect(
+            continuationGate.items.contains { $0.id == "human-confirmation" && $0.requiresHumanAction },
+            "continuation gate should include human confirmation"
+        )
+        expect(
+            continuationGate.items.contains { $0.id == "loop-continuation" && $0.reviewKind == "agent-trace" },
+            "continuation gate should include loop continuation"
+        )
+        expect(continuationGate.primaryReviewKind != nil, "continuation gate should expose primary review")
+        let focusedContinuationGate = missionSummary.macAgentContinuationGate(focusedOn: "delivery-safety")
+        expect(focusedContinuationGate.focusedReviewKind == "delivery-safety", "continuation gate should record delivery focus")
+        expect(focusedContinuationGate.focusedReviewTitle == "最终提交安全", "continuation gate should expose delivery title")
+        expect(
+            focusedContinuationGate.items.contains { $0.reviewKind == "delivery-safety" && $0.isFocused },
+            "focused continuation gate should mark delivery row"
         )
         let operatorStrip = missionSummary.operatorStrip
         expect(operatorStrip.lanes.map(\.id) == ["gateway", "evidence", "review", "next"], "operator strip should expose stable lanes")
@@ -695,6 +739,13 @@ enum LogicSmoke {
             statusRunTimeline.steps.contains { $0.reviewKind == statusOnlyItem.reviewKind && $0.isFocused },
             "status run timeline should mark status row"
         )
+        let statusContinuationGate = statusOnlySummary.macAgentContinuationGate(focusedOn: statusOnlyItem.reviewKind)
+        expect(statusContinuationGate.focusedReviewKind == statusOnlyItem.reviewKind, "status continuation gate should keep status focus")
+        expect(statusContinuationGate.focusedReviewTitle == statusOnlyItem.title, "status continuation gate should expose status title")
+        expect(
+            statusContinuationGate.items.contains { $0.reviewKind == statusOnlyItem.reviewKind && $0.isFocused },
+            "status continuation gate should mark status row"
+        )
         let staleFocusContext = statusOnlySummary.focusContextSummary(focusedOn: "unknown-review-kind")
         expect(staleFocusContext.focusedReviewKind == nil, "stale focus context should not keep an unknown review kind")
         expect(staleFocusContext.canClearFocus, "stale focus context should allow clearing focus")
@@ -729,6 +780,12 @@ enum LogicSmoke {
         let staleRunTimeline = statusOnlySummary.macAgentRunTimeline(focusedOn: "unknown-review-kind")
         expect(staleRunTimeline.focusedReviewKind == nil, "stale run timeline should not keep unknown focus")
         expect(staleRunTimeline.totalCount >= statusOnlySummary.actionPreflightItems.count, "stale run timeline should keep steps")
+        let staleContinuationGate = statusOnlySummary.macAgentContinuationGate(focusedOn: "unknown-review-kind")
+        expect(staleContinuationGate.focusedReviewKind == nil, "stale continuation gate should not keep unknown focus")
+        expect(
+            staleContinuationGate.totalCount == statusOnlySummary.macAgentContinuationGate.totalCount,
+            "stale continuation gate should keep rows"
+        )
         expect(
             missionSummary.detailReviewKinds(focusedOn: nil) == availableDetailKinds,
             "nil focus should show all detail reviews"
@@ -1165,6 +1222,45 @@ enum LogicSmoke {
             staleRunTimeline.guidance
         ]
         let runTimelineVisibleChunks = runTimelineItemChunks + runTimelineSummaryChunks
+        let continuationGateItemChunks: [String] = continuationGate.items.flatMap { item in
+            [
+                item.title,
+                item.status,
+                item.guidance,
+                item.reviewKind ?? "",
+                item.reviewTitle ?? ""
+            ]
+        }
+        let continuationGateSummaryChunks: [String] = [
+            idleContinuationGate.title,
+            idleContinuationGate.status,
+            idleContinuationGate.guidance,
+            preSendContinuationGate.title,
+            preSendContinuationGate.status,
+            preSendContinuationGate.guidance,
+            focusedPreSendContinuationGate.title,
+            focusedPreSendContinuationGate.status,
+            focusedPreSendContinuationGate.guidance,
+            continuationGate.title,
+            continuationGate.status,
+            continuationGate.guidance,
+            continuationGate.primaryReviewKind ?? "",
+            continuationGate.primaryReviewTitle ?? "",
+            focusedContinuationGate.title,
+            focusedContinuationGate.status,
+            focusedContinuationGate.guidance,
+            focusedContinuationGate.focusedReviewKind ?? "",
+            focusedContinuationGate.focusedReviewTitle ?? "",
+            statusContinuationGate.title,
+            statusContinuationGate.status,
+            statusContinuationGate.guidance,
+            statusContinuationGate.focusedReviewKind ?? "",
+            statusContinuationGate.focusedReviewTitle ?? "",
+            staleContinuationGate.title,
+            staleContinuationGate.status,
+            staleContinuationGate.guidance
+        ]
+        let continuationGateVisibleChunks = continuationGateItemChunks + continuationGateSummaryChunks
         let queueVisibleText = (
             queueVisibleChunks +
                 readinessVisibleChunks +
@@ -1179,7 +1275,8 @@ enum LogicSmoke {
                 actionPreflightVisibleChunks +
                 evidenceCoverageVisibleChunks +
                 nextStepDeckVisibleChunks +
-                runTimelineVisibleChunks
+                runTimelineVisibleChunks +
+                continuationGateVisibleChunks
         ).joined(separator: " ")
         for forbidden in ["Authorization", "Bearer", "toolArguments", "file://", "/private", "/Users", "/home", "C:\\", "stdout", "stderr", "diff"] {
             expect(queueVisibleText.contains(forbidden) == false, "review priority queue should not expose \(forbidden)")
@@ -1444,6 +1541,20 @@ enum LogicSmoke {
             shellRunTimeline.steps.contains { $0.reviewKind == "shell-safety" && $0.isRetryable },
             "shell run timeline should carry retryable shell state"
         )
+        let shellContinuationGate = shellMissionSummary.macAgentContinuationGate(focusedOn: "shell-safety")
+        expect(shellContinuationGate.isReviewable, "shell continuation gate should be reviewable")
+        expect(shellContinuationGate.requiresHumanAction, "shell continuation gate should require human review")
+        expect(shellContinuationGate.isRetryable, "shell continuation gate should surface retryable failure")
+        expect(shellContinuationGate.focusedReviewKind == "shell-safety", "shell continuation gate should record shell focus")
+        expect(shellContinuationGate.focusedReviewTitle == "Shell 命令安全", "shell continuation gate should expose shell title")
+        expect(
+            shellContinuationGate.items.contains { $0.id == "review-blockers" && $0.reviewKind == "shell-safety" && $0.isRetryable },
+            "shell continuation gate should point retryable blocker at shell safety"
+        )
+        expect(
+            shellContinuationGate.items.contains { $0.reviewKind == "shell-safety" && $0.isFocused },
+            "shell continuation gate should mark shell row"
+        )
         let shellPayloadLedgerRows = shellPayloadLedger.items.map { item in
             "\(item.reviewTitle) \(item.status) \(item.guidance)"
         }.joined(separator: " ")
@@ -1463,6 +1574,9 @@ enum LogicSmoke {
             "\(item.reviewTitle) \(item.status) \(item.guidance)"
         }.joined(separator: " ")
         let shellNextStepDeckRows = shellNextStepDeck.candidates.map { item in
+            "\(item.title) \(item.status) \(item.guidance)"
+        }.joined(separator: " ")
+        let shellContinuationGateRows = shellContinuationGate.items.map { item in
             "\(item.title) \(item.status) \(item.guidance)"
         }.joined(separator: " ")
         let shellVisibleChunks: [String] = [
@@ -1519,7 +1633,11 @@ enum LogicSmoke {
             shellRunTimeline.title,
             shellRunTimeline.status,
             shellRunTimeline.guidance,
-            shellRunTimeline.steps.map { "\($0.title) \($0.status) \($0.guidance)" }.joined(separator: " ")
+            shellRunTimeline.steps.map { "\($0.title) \($0.status) \($0.guidance)" }.joined(separator: " "),
+            shellContinuationGate.title,
+            shellContinuationGate.status,
+            shellContinuationGate.guidance,
+            shellContinuationGateRows
         ]
         let shellVisibleText = shellVisibleChunks.joined(separator: " ")
         expect(shellVisibleText.contains("stdout") == false, "shell readiness should not expose stdout")
