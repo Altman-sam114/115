@@ -2382,8 +2382,11 @@ struct ClawGatewayBrowserControlReviewSummary: Equatable, Codable, Sendable {
     var mode: String?
     var actionKind: String?
     var browserControlPolicy: String?
+    var policyDiagnostic: String?
+    var retryableReason: String?
     var browserControlRequested: Bool?
     var openInBrowser: Bool?
+    var openAttempted: Bool?
     var targetURLPresent: Bool?
     var searchQueryPresent: Bool?
     var localHTMLInput: Bool?
@@ -2391,11 +2394,31 @@ struct ClawGatewayBrowserControlReviewSummary: Equatable, Codable, Sendable {
     var networkBlocked: Bool?
     var appAllowlistEnforced: Bool?
     var hostAllowlistEnforced: Bool?
+    var appPolicyChecked: Bool?
+    var hostPolicyChecked: Bool?
     var executed: Bool?
     var timedOut: Bool?
     var resultStatus: String?
     var safetyFlags: [String]
     var isRedacted: Bool
+
+    var requiresPolicyReview: Bool {
+        guard hasMetadata else {
+            return true
+        }
+        if networkBlocked == true || resultStatus == "failed" || timedOut == true {
+            return true
+        }
+        if let policyDiagnostic {
+            return [
+                "platform-unavailable",
+                "app-blocked",
+                "host-blocked",
+                "automation-failed"
+            ].contains(policyDiagnostic)
+        }
+        return false
+    }
 
     var compactStatus: String {
         guard hasMetadata else {
@@ -2418,7 +2441,8 @@ struct ClawGatewayBrowserControlReviewSummary: Equatable, Codable, Sendable {
         } else {
             network = "network 待复核"
         }
-        return "\(policy) · \(request) · \(network)"
+        let diagnostic = policyDiagnostic.map { "diagnostic \($0)" } ?? "diagnostic 待复核"
+        return "\(policy) · \(diagnostic) · \(request) · \(network)"
     }
 
     static func latest(from session: ClawGatewaySession?) -> ClawGatewayBrowserControlReviewSummary? {
@@ -2442,8 +2466,11 @@ struct ClawGatewayBrowserControlReviewSummary: Equatable, Codable, Sendable {
             mode: allowedMode(metadata["mode"]),
             actionKind: allowedActionKind(metadata["actionKind"]),
             browserControlPolicy: allowedPolicy(metadata["browserControlPolicy"]),
+            policyDiagnostic: allowedPolicyDiagnostic(metadata["policyDiagnostic"]),
+            retryableReason: allowedRetryableReason(metadata["retryableReason"]),
             browserControlRequested: ClawArtifactMetadataParser.boolValue(metadata["browserControlRequested"]),
             openInBrowser: ClawArtifactMetadataParser.boolValue(metadata["openInBrowser"]),
+            openAttempted: ClawArtifactMetadataParser.boolValue(metadata["openAttempted"]),
             targetURLPresent: ClawArtifactMetadataParser.boolValue(metadata["targetURLPresent"]),
             searchQueryPresent: ClawArtifactMetadataParser.boolValue(metadata["searchQueryPresent"]),
             localHTMLInput: ClawArtifactMetadataParser.boolValue(metadata["localHTMLInput"]),
@@ -2451,6 +2478,8 @@ struct ClawGatewayBrowserControlReviewSummary: Equatable, Codable, Sendable {
             networkBlocked: ClawArtifactMetadataParser.boolValue(metadata["networkBlocked"]),
             appAllowlistEnforced: ClawArtifactMetadataParser.boolValue(metadata["appAllowlistEnforced"]),
             hostAllowlistEnforced: ClawArtifactMetadataParser.boolValue(metadata["hostAllowlistEnforced"]),
+            appPolicyChecked: ClawArtifactMetadataParser.boolValue(metadata["appPolicyChecked"]),
+            hostPolicyChecked: ClawArtifactMetadataParser.boolValue(metadata["hostPolicyChecked"]),
             executed: ClawArtifactMetadataParser.boolValue(metadata["executed"]),
             timedOut: ClawArtifactMetadataParser.boolValue(metadata["timedOut"]),
             resultStatus: allowedResultStatus(metadata["resultStatus"]),
@@ -2500,6 +2529,37 @@ struct ClawGatewayBrowserControlReviewSummary: Equatable, Codable, Sendable {
             return nil
         }
         let allowed = ["not-requested", "dry-run", "enabled"]
+        return allowed.contains(clean) ? clean : nil
+    }
+
+    private static func allowedPolicyDiagnostic(_ value: String?) -> String? {
+        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
+            return nil
+        }
+        let allowed = [
+            "not-requested",
+            "dry-run",
+            "platform-unavailable",
+            "app-blocked",
+            "host-blocked",
+            "opened",
+            "automation-failed"
+        ]
+        return allowed.contains(clean) ? clean : nil
+    }
+
+    private static func allowedRetryableReason(_ value: String?) -> String? {
+        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
+            return nil
+        }
+        let allowed = [
+            "none",
+            "enable-browser-control",
+            "requires-macos",
+            "allow-browser-app",
+            "allow-browser-host",
+            "automation-failed"
+        ]
         return allowed.contains(clean) ? clean : nil
     }
 

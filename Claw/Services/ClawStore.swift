@@ -910,17 +910,17 @@ final class ClawStore: ObservableObject {
         }
 
         if let review = gatewayBrowserControlReview {
-            let needsReview = review.hasMetadata == false || review.networkBlocked == true || review.resultStatus == "failed"
+            let needsReview = review.requiresPolicyReview
             add(
                 id: "browser-control",
                 rank: needsReview ? 48 : 88,
                 severity: review.hasMetadata == false ? .medium : (needsReview ? .medium : .low),
                 title: "浏览器控制",
                 status: review.compactStatus,
-                reason: review.hasMetadata ? "浏览器动作按策略和 presence 复核。" : "浏览器 metadata 待同步。",
+                reason: review.hasMetadata ? "浏览器策略诊断只展示固定枚举和 presence。" : "浏览器 metadata 待同步。",
                 icon: "safari.fill",
                 reviewKind: "browser-control",
-                actionHint: needsReview ? "确认浏览器策略和网络状态" : "抽查浏览器计划",
+                actionHint: needsReview ? "确认策略诊断和重试原因" : "抽查浏览器计划",
                 isActionable: needsReview,
                 hasMetadata: review.hasMetadata
             )
@@ -2768,8 +2768,11 @@ enum ClawGatewaySimulator {
             "mode": mode,
             "actionKind": ClawMobileActionKind.controlBrowser.rawValue,
             "browserControlPolicy": "dry-run",
+            "policyDiagnostic": "dry-run",
+            "retryableReason": "enable-browser-control",
             "browserControlRequested": "true",
             "openInBrowser": "true",
+            "openAttempted": "false",
             "targetURLPresent": "true",
             "searchQueryPresent": "true",
             "localHTMLInput": "false",
@@ -2777,6 +2780,8 @@ enum ClawGatewaySimulator {
             "networkBlocked": "false",
             "appAllowlistEnforced": "false",
             "hostAllowlistEnforced": "false",
+            "appPolicyChecked": "false",
+            "hostPolicyChecked": "false",
             "executed": "false",
             "timedOut": "false",
             "resultStatus": resultStatus,

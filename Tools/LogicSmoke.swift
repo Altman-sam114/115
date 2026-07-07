@@ -1642,20 +1642,29 @@ enum LogicSmoke {
             expect(browserReview.mode == "browser-control-dry-run", "browser control review should expose dry-run mode")
             expect(browserReview.actionKind == "controlBrowser", "browser control review should expose action kind")
             expect(browserReview.browserControlPolicy == "dry-run", "browser control review should expose browser policy")
+            expect(browserReview.policyDiagnostic == "dry-run", "browser control review should expose policy diagnostic")
+            expect(browserReview.retryableReason == "enable-browser-control", "browser control review should expose retryable reason")
             expect(browserReview.browserControlRequested == true, "browser control review should expose requested open")
             expect(browserReview.targetURLPresent == true, "browser control review should expose URL presence without value")
             expect(browserReview.searchQueryPresent == true, "browser control review should expose search presence without value")
+            expect(browserReview.openAttempted == false, "browser control review should expose open attempt state")
+            expect(browserReview.appPolicyChecked == false, "browser control review should expose app policy checked state")
+            expect(browserReview.hostPolicyChecked == false, "browser control review should expose host policy checked state")
             expect(browserReview.networkBlocked == false, "browser control review should expose network block state")
             expect(browserReview.resultStatus == "succeeded", "browser control review should expose result status")
+            expect(browserReview.requiresPolicyReview == false, "browser control review should not require review for dry-run metadata")
             expect(browserReview.safetyFlags.contains("url-omitted"), "browser control review should omit URL")
             expect(browserReview.safetyFlags.contains("search-query-omitted"), "browser control review should omit search query")
             expect(browserReview.compactStatus.contains("policy dry-run"), "browser control review should summarize policy")
+            expect(browserReview.compactStatus.contains("diagnostic dry-run"), "browser control review should summarize diagnostic")
         } else {
             failures.append("mission summary should derive browser control review")
         }
         if let browserArtifacts = missionStore.clawGatewaySessions.first?.results.first(where: { $0.actionKind == .controlBrowser })?.artifacts,
            let browserControlReview = ClawGatewayBrowserControlReviewSummary.latest(from: browserArtifacts) {
             expect(browserControlReview.mode == "browser-control-dry-run", "browser result review should expose dry-run mode")
+            expect(browserControlReview.policyDiagnostic == "dry-run", "browser result review should expose policy diagnostic")
+            expect(browserControlReview.retryableReason == "enable-browser-control", "browser result review should expose retryable reason")
             expect(browserControlReview.executed == false, "browser result review should expose execution state")
             expect(browserControlReview.timedOut == false, "browser result review should expose timeout state")
             expect(browserControlReview.safetyFlags.contains("candidate-labels-omitted"), "browser result review should omit candidate labels")
@@ -2298,8 +2307,11 @@ enum LogicSmoke {
                 "mode": "browser-control-dry-run Authorization: Bearer raw-token",
                 "actionKind": "controlBrowser token=raw-token",
                 "browserControlPolicy": "enabled https://example.com/private",
+                "policyDiagnostic": "host-blocked https://example.com/private",
+                "retryableReason": "allow-browser-host file:///tmp/log.txt",
                 "browserControlRequested": "true",
                 "openInBrowser": "true",
+                "openAttempted": "false",
                 "targetURLPresent": "true",
                 "searchQueryPresent": "true",
                 "localHTMLInput": "true",
@@ -2307,6 +2319,8 @@ enum LogicSmoke {
                 "networkBlocked": "true",
                 "appAllowlistEnforced": "true",
                 "hostAllowlistEnforced": "true",
+                "appPolicyChecked": "true",
+                "hostPolicyChecked": "true",
                 "executed": "false",
                 "timedOut": "false",
                 "resultStatus": "failed file:///private/tmp/log.txt",
@@ -2321,6 +2335,8 @@ enum LogicSmoke {
                 sensitiveBrowserReview.mode ?? "",
                 sensitiveBrowserReview.actionKind ?? "",
                 sensitiveBrowserReview.browserControlPolicy ?? "",
+                sensitiveBrowserReview.policyDiagnostic ?? "",
+                sensitiveBrowserReview.retryableReason ?? "",
                 sensitiveBrowserReview.resultStatus ?? "",
                 sensitiveBrowserReview.safetyFlags.joined(separator: " ")
             ].joined(separator: " ")
@@ -2328,7 +2344,12 @@ enum LogicSmoke {
             expect(sensitiveBrowserReview.mode == nil, "browser control review should reject unsafe mode")
             expect(sensitiveBrowserReview.actionKind == nil, "browser control review should reject unsafe action kind")
             expect(sensitiveBrowserReview.browserControlPolicy == nil, "browser control review should reject unsafe policy")
+            expect(sensitiveBrowserReview.policyDiagnostic == nil, "browser control review should reject unsafe diagnostic")
+            expect(sensitiveBrowserReview.retryableReason == nil, "browser control review should reject unsafe retry reason")
             expect(sensitiveBrowserReview.resultStatus == nil, "browser control review should reject unsafe result")
+            expect(sensitiveBrowserReview.openAttempted == false, "browser control review should keep open attempt boolean")
+            expect(sensitiveBrowserReview.appPolicyChecked == true, "browser control review should keep app policy boolean")
+            expect(sensitiveBrowserReview.hostPolicyChecked == true, "browser control review should keep host policy boolean")
             expect(sensitiveBrowserReview.targetURLPresent == true, "browser control review should keep URL presence boolean")
             expect(sensitiveBrowserReview.searchQueryPresent == true, "browser control review should keep search presence boolean")
             expect(sensitiveBrowserReview.safetyFlags.contains("url-omitted"), "browser control review should expose URL omission flag")

@@ -28,7 +28,7 @@ Claw 的当前主链路是：用户在 iPhone 输入电脑任务，App 生成可
   -> ClawGatewayFileChangeSafetyReviewSummary 从 manageFiles artifact metadata 派生文件变更安全复核摘要
   -> ClawGatewayShellCommandSafetyReviewSummary 从 runShellCommand artifact metadata 派生 Shell 命令安全复核摘要
   -> ClawGatewayExtractionCompletenessReviewSummary 从 extractData artifact metadata 派生提取完整性复核摘要
-  -> ClawGatewayBrowserControlReviewSummary 从 controlBrowser artifact metadata 派生浏览器控制计划复核摘要
+  -> ClawGatewayBrowserControlReviewSummary 从 controlBrowser artifact metadata 派生浏览器控制计划和策略诊断复核摘要
   -> ClawGatewayDeliverySafetyReviewSummary 从 messageDraft/operateDesktopApp artifact metadata 派生草稿/最终提交安全复核摘要
   -> ClawGatewayCapabilityReviewSummary 从 snapshot metadata 派生能力复核摘要
   -> ClawGatewayAccessibilityReviewSummary 从 accessibilityTree metadata 派生观察复核摘要
@@ -207,7 +207,7 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 当前 action handler：
 
 - `observeScreen`：dry-run、macOS 截图、窗口元数据或受 `CLAW_ALLOW_ACCESSIBILITY_OBSERVE=1` 控制的前台 Accessibility 只读摘要。
-- `controlBrowser`：HTML/URL trace、浏览器打开/搜索计划、metadata-only Browser Control 复核、受 allowlist 的 macOS 浏览器控制。
+- `controlBrowser`：HTML/URL trace、浏览器打开/搜索计划、metadata-only Browser Control 策略诊断复核、受 allowlist 的 macOS 浏览器控制。
 - `manageFiles`：workspace 内结构化写文件，路径逃逸、workspace symlink 组件和 no-follow 写入失败会被阻断；既有 `fileDiff` artifact event 和路径阻断/写入失败 `auditLog` event 附 metadata-only 文件变更安全复核摘要；metadata 只含 workspace policy、写入状态、计数、presence 和 omission flags，不含 raw path、workspace path、文件内容、diff、patch 或 `toolArguments`。
 - `runShellCommand`：结构化命令 dry-run 或 allowlist 执行，并在既有 `commandOutput` artifact event 上附 metadata-only Shell 命令安全复核摘要；metadata 只含结构化命令 presence、解析/policy/allowlist/执行/exit code/stdout/stderr presence 和 omission flags，不含 raw command、cwd/path、stdout/stderr 内容或 `toolArguments`。
 - `extractData`：消费同 session artifact 生成结构化数据，并在输出 artifact event metadata 上附完整性状态、row count、来源计数、source kind 和 safety flags；metadata 不含 row 内容、URL/path、命令输出或 `toolArguments`。
@@ -270,7 +270,7 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 - `ClawGatewayFileChangeSafetyReviewSummary`：手机端从 `manageFiles` 的 `fileDiff`、路径阻断或写入失败 artifact metadata 派生文件变更安全复核摘要，只展示 workspace policy、写入尝试/成功、路径逃逸阻断、变更计数、path/content/diff 省略状态和 safety flags，不读取 Gateway `file://` 内容，不展示 raw path、workspace/sessionWorkspace、文件名/目录名、文件内容、diff、patch、token、header 或 `toolArguments`。
 - `ClawGatewayShellCommandSafetyReviewSummary`：手机端从 `runShellCommand` 的 `commandOutput` artifact metadata 派生 Shell 命令安全复核摘要，只展示结构化命令 presence、解析状态、Shell policy、allowlist match、执行状态、exit code presence/zero、stdout/stderr presence 和 command/stdout/stderr/cwd 省略状态，不读取 Gateway `file://` 内容，不展示 raw command、binary/args、cwd/path、stdout/stderr 内容、token、header、自然语言 instruction 或 `toolArguments`。
 - `ClawGatewayExtractionCompletenessReviewSummary`：手机端从 `extractData` 输出 artifact metadata 派生提取完整性复核摘要，只展示提取模式、完整性状态、row count、来源 artifact 计数、source kind 和 safety flags，不读取 Gateway `file://` 内容，不展示 row 内容、URL/path、命令输出、网页正文、草稿正文或 `toolArguments`。
-- `ClawGatewayBrowserControlReviewSummary`：手机端从 `controlBrowser` 的 `browserTrace` 和 `browser-control-*.json` artifact metadata 派生浏览器控制计划复核摘要，只展示请求、策略、URL/search presence、HTML 输入、network fetch/blocked、app/host allowlist、执行状态和 omission flags，不读取 Gateway `file://` 内容，不展示 raw URL、search query、HTML/page text、form fields、candidate labels、stdout/stderr 或 `toolArguments`。
+- `ClawGatewayBrowserControlReviewSummary`：手机端从 `controlBrowser` 的 `browserTrace` 和 `browser-control-*.json` artifact metadata 派生浏览器控制计划和策略诊断复核摘要，只展示请求、策略、固定 policy diagnostic、固定 retryable reason、open attempted、URL/search presence、HTML 输入、network fetch/blocked、app/host allowlist、策略检查、执行状态和 omission flags，不读取 Gateway `file://` 内容，不展示 raw URL、search query、HTML/page text、form fields、candidate labels、browser app name、host、allowlist 值、stdout/stderr 或 `toolArguments`。
 - `ClawGatewayDeliverySafetyReviewSummary`：手机端从 `messageDraft` 和 `operateDesktopApp` artifact metadata 派生草稿/最终提交安全复核摘要，只展示最终提交闸门、用户确认、正文/paste 省略和按键计数，不读取 Gateway `file://` 内容，不展示草稿正文、paste text、按键原文、URL/path、联系人或 `toolArguments`。
 - `ClawGatewayCapabilityReviewSummary`：手机端从 `gateway-capability-snapshot.json` `auditLog` metadata 派生的能力复核摘要，只展示短 token 指纹、allowlist、capability state、`accessibilityTreeState` 和 safety flags，不读取 Gateway `file://` 内容，UI 可见字符串统一走 metadata 脱敏路径。
 - `ClawGatewayAccessibilityReviewSummary`：手机端从 `accessibilityTree` artifact metadata 派生的观察复核摘要，只展示 mode、policy、节点数、候选控件数、platform、redaction 和 safety flags，不读取 Gateway `file://` 内容，UI 可见字符串统一走 metadata 脱敏路径。
@@ -327,7 +327,7 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 - `extractData` 完整性 metadata 只能用于手机端复核展示，不能成为执行计划来源，不能放入 row 内容、URL/path、命令输出、网页正文、草稿正文、联系人、token 或 `toolArguments`；手机端展示前必须统一脱敏敏感值。
 - File Change Safety metadata 只能用于手机端复核展示，不能成为执行计划来源，不能放入 raw path、workspace/sessionWorkspace、文件名/目录名、文件内容、diff hunk、patch、stdout/stderr、token、Authorization/header、cookie、secret 或 `toolArguments`；metadata 缺失时必须显示“metadata 待同步”，不能假定写入安全。
 - Shell Command Safety metadata 只能用于手机端复核展示，不能成为执行计划来源，不能放入 raw command、binary/args、cwd、workspace/session path、stdout/stderr 内容、token、Authorization/header、cookie、secret、自然语言 instruction 或 `toolArguments`；metadata 缺失时必须显示“metadata 待同步”，不能假定命令安全、已阻断或已执行。
-- Browser Control metadata 只能用于手机端复核展示，不能成为执行计划来源，不能放入 raw URL、search query、HTML/page text、form fields、candidate labels、stdout/stderr、token、Authorization/header 或 `toolArguments`；metadata 缺失时必须显示“metadata 待同步”，不能假定安全或已执行。
+- Browser Control metadata 只能用于手机端复核展示，不能成为执行计划来源，不能放入 raw URL、search query、HTML/page text、form fields、candidate labels、browser app name、host、allowlist 值、stdout/stderr、token、Authorization/header 或 `toolArguments`；policy diagnostic 和 retryable reason 只能是固定枚举；metadata 缺失时必须显示“metadata 待同步”，不能假定安全或已执行。
 - Delivery Safety metadata 只能用于手机端复核展示，不能成为执行计划来源，不能放入草稿正文、paste text、按键原文、URL/path、联系人、token、Authorization/header 或 `toolArguments`；metadata 缺失时必须显示“metadata 待同步”，不能假定安全。
 - Agent C 验收必须基于 `origin/main` 最新 run 的未加密结果包，不能只看 Agent B 文字汇报。
 - 云端失败默认用 main 追加修复 commit 处理，不默认回滚或引入候选分支。

@@ -809,16 +809,21 @@ function assertBrowserControlReviewMetadata(metadata, expected, label) {
   const allowedKeys = [
     "actionKind",
     "appAllowlistEnforced",
+    "appPolicyChecked",
     "browserControlPolicy",
     "browserControlRequested",
     "browserReview",
     "executed",
     "hostAllowlistEnforced",
+    "hostPolicyChecked",
     "localHTMLInput",
     "mode",
     "networkBlocked",
     "networkFetchAttempted",
+    "openAttempted",
     "openInBrowser",
+    "policyDiagnostic",
+    "retryableReason",
     "resultStatus",
     "safetyFlags",
     "searchQueryPresent",
@@ -833,8 +838,16 @@ function assertBrowserControlReviewMetadata(metadata, expected, label) {
   expect(metadata.mode === expected.mode, `${label} mode metadata mismatch`);
   expect(metadata.actionKind === "controlBrowser", `${label} action kind metadata mismatch`);
   expect(metadata.browserControlPolicy === expected.browserControlPolicy, `${label} browser policy metadata mismatch`);
+  const expectedDiagnostic = expected.policyDiagnostic ?? browserPolicyDiagnosticForMode(expected.mode);
+  const expectedRetryableReason = expected.retryableReason ?? browserRetryableReasonForMode(expected.mode);
+  const expectedOpenAttempted = expected.openAttempted ?? ["browser-control-opened", "browser-control-failed"].includes(expected.mode);
+  const expectedAppPolicyChecked = expected.appPolicyChecked ?? ["browser-control-policy-blocked", "browser-control-host-blocked", "browser-control-opened", "browser-control-failed"].includes(expected.mode);
+  const expectedHostPolicyChecked = expected.hostPolicyChecked ?? ["browser-control-host-blocked", "browser-control-opened", "browser-control-failed"].includes(expected.mode);
+  expect(metadata.policyDiagnostic === expectedDiagnostic, `${label} policy diagnostic metadata mismatch`);
+  expect(metadata.retryableReason === expectedRetryableReason, `${label} retryable reason metadata mismatch`);
   expect(metadata.browserControlRequested === String(expected.browserControlRequested), `${label} request metadata mismatch`);
   expect(metadata.openInBrowser === String(expected.openInBrowser), `${label} openInBrowser metadata mismatch`);
+  expect(metadata.openAttempted === String(expectedOpenAttempted), `${label} openAttempted metadata mismatch`);
   expect(metadata.targetURLPresent === String(expected.targetURLPresent), `${label} URL presence metadata mismatch`);
   expect(metadata.searchQueryPresent === String(expected.searchQueryPresent), `${label} search presence metadata mismatch`);
   expect(metadata.localHTMLInput === String(expected.localHTMLInput), `${label} HTML input metadata mismatch`);
@@ -842,6 +855,8 @@ function assertBrowserControlReviewMetadata(metadata, expected, label) {
   expect(metadata.networkBlocked === String(expected.networkBlocked), `${label} network block metadata mismatch`);
   expect(metadata.appAllowlistEnforced === String(expected.appAllowlistEnforced), `${label} app allowlist metadata mismatch`);
   expect(metadata.hostAllowlistEnforced === String(expected.hostAllowlistEnforced), `${label} host allowlist metadata mismatch`);
+  expect(metadata.appPolicyChecked === String(expectedAppPolicyChecked), `${label} app policy checked metadata mismatch`);
+  expect(metadata.hostPolicyChecked === String(expectedHostPolicyChecked), `${label} host policy checked metadata mismatch`);
   expect(metadata.executed === String(expected.executed), `${label} executed metadata mismatch`);
   expect(metadata.timedOut === String(expected.timedOut), `${label} timeout metadata mismatch`);
   expect(metadata.resultStatus === expected.resultStatus, `${label} result status metadata mismatch`);
@@ -864,6 +879,30 @@ function assertBrowserControlReviewMetadata(metadata, expected, label) {
   ]) {
     expect(!serialized.includes(forbidden), `${label} metadata leaked ${forbidden}`);
   }
+}
+
+function browserPolicyDiagnosticForMode(mode) {
+  return ({
+    "browser-control-not-requested": "not-requested",
+    "browser-control-dry-run": "dry-run",
+    "browser-control-unavailable": "platform-unavailable",
+    "browser-control-policy-blocked": "app-blocked",
+    "browser-control-host-blocked": "host-blocked",
+    "browser-control-opened": "opened",
+    "browser-control-failed": "automation-failed",
+  })[mode];
+}
+
+function browserRetryableReasonForMode(mode) {
+  return ({
+    "browser-control-not-requested": "none",
+    "browser-control-dry-run": "enable-browser-control",
+    "browser-control-unavailable": "requires-macos",
+    "browser-control-policy-blocked": "allow-browser-app",
+    "browser-control-host-blocked": "allow-browser-host",
+    "browser-control-opened": "none",
+    "browser-control-failed": "automation-failed",
+  })[mode];
 }
 
 function assertFileChangeSafetyMetadata(metadata, expected, label) {

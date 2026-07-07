@@ -427,22 +427,31 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(review.mode, "browser-control-dry-run")
         XCTAssertEqual(review.actionKind, "controlBrowser")
         XCTAssertEqual(review.browserControlPolicy, "dry-run")
+        XCTAssertEqual(review.policyDiagnostic, "dry-run")
+        XCTAssertEqual(review.retryableReason, "enable-browser-control")
         XCTAssertEqual(review.browserControlRequested, true)
         XCTAssertEqual(review.openInBrowser, true)
+        XCTAssertEqual(review.openAttempted, false)
         XCTAssertEqual(review.targetURLPresent, true)
         XCTAssertEqual(review.searchQueryPresent, true)
         XCTAssertEqual(review.networkFetchAttempted, false)
         XCTAssertEqual(review.networkBlocked, false)
+        XCTAssertEqual(review.appPolicyChecked, false)
+        XCTAssertEqual(review.hostPolicyChecked, false)
         XCTAssertEqual(review.resultStatus, "succeeded")
+        XCTAssertFalse(review.requiresPolicyReview)
         XCTAssertTrue(review.safetyFlags.contains("metadata-only"))
         XCTAssertTrue(review.safetyFlags.contains("url-omitted"))
         XCTAssertTrue(review.safetyFlags.contains("search-query-omitted"))
         XCTAssertTrue(review.safetyFlags.contains("tool-arguments-omitted"))
         XCTAssertTrue(review.compactStatus.contains("policy dry-run"))
+        XCTAssertTrue(review.compactStatus.contains("diagnostic dry-run"))
 
         let browserResult = try XCTUnwrap(store.clawGatewaySessions.first?.results.first { $0.actionKind == .controlBrowser })
         let browserReview = try XCTUnwrap(ClawGatewayBrowserControlReviewSummary.latest(from: browserResult.artifacts))
         XCTAssertEqual(browserReview.mode, "browser-control-dry-run")
+        XCTAssertEqual(browserReview.policyDiagnostic, "dry-run")
+        XCTAssertEqual(browserReview.retryableReason, "enable-browser-control")
         XCTAssertEqual(browserReview.browserControlRequested, true)
         XCTAssertEqual(browserReview.executed, false)
         XCTAssertEqual(browserReview.timedOut, false)
@@ -2559,8 +2568,11 @@ final class ClawTests: XCTestCase {
                 "mode": "browser-control-dry-run Authorization: Bearer raw-token",
                 "actionKind": "controlBrowser token=raw-token",
                 "browserControlPolicy": "enabled https://example.com/private",
+                "policyDiagnostic": "host-blocked https://example.com/private",
+                "retryableReason": "allow-browser-host file:///tmp/log.txt",
                 "browserControlRequested": "true",
                 "openInBrowser": "true",
+                "openAttempted": "false",
                 "targetURLPresent": "true",
                 "searchQueryPresent": "true",
                 "localHTMLInput": "true",
@@ -2568,6 +2580,8 @@ final class ClawTests: XCTestCase {
                 "networkBlocked": "true",
                 "appAllowlistEnforced": "true",
                 "hostAllowlistEnforced": "true",
+                "appPolicyChecked": "true",
+                "hostPolicyChecked": "true",
                 "executed": "false",
                 "timedOut": "false",
                 "resultStatus": "failed file:///private/tmp/log.txt",
@@ -2583,6 +2597,8 @@ final class ClawTests: XCTestCase {
             review.mode ?? "",
             review.actionKind ?? "",
             review.browserControlPolicy ?? "",
+            review.policyDiagnostic ?? "",
+            review.retryableReason ?? "",
             review.resultStatus ?? "",
             review.safetyFlags.joined(separator: " ")
         ].joined(separator: " ")
@@ -2591,9 +2607,12 @@ final class ClawTests: XCTestCase {
         XCTAssertNil(review.mode)
         XCTAssertNil(review.actionKind)
         XCTAssertNil(review.browserControlPolicy)
+        XCTAssertNil(review.policyDiagnostic)
+        XCTAssertNil(review.retryableReason)
         XCTAssertNil(review.resultStatus)
         XCTAssertEqual(review.browserControlRequested, true)
         XCTAssertEqual(review.openInBrowser, true)
+        XCTAssertEqual(review.openAttempted, false)
         XCTAssertEqual(review.targetURLPresent, true)
         XCTAssertEqual(review.searchQueryPresent, true)
         XCTAssertEqual(review.localHTMLInput, true)
@@ -2601,6 +2620,8 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(review.networkBlocked, true)
         XCTAssertEqual(review.appAllowlistEnforced, true)
         XCTAssertEqual(review.hostAllowlistEnforced, true)
+        XCTAssertEqual(review.appPolicyChecked, true)
+        XCTAssertEqual(review.hostPolicyChecked, true)
         XCTAssertEqual(review.executed, false)
         XCTAssertEqual(review.timedOut, false)
         XCTAssertTrue(review.safetyFlags.contains("metadata-only"))

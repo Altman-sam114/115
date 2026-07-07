@@ -5356,6 +5356,9 @@ struct ClawGatewayBrowserControlReviewRow: View {
         if let resultStatus = review.resultStatus {
             items.append(("result \(resultStatus)", resultStatus == "failed" ? "exclamationmark.triangle.fill" : "checkmark.circle.fill", resultStatus == "failed" ? .orange : .green))
         }
+        if let policyDiagnostic = review.policyDiagnostic {
+            items.append(("diagnostic \(policyDiagnostic)", diagnosticIcon(for: policyDiagnostic), diagnosticTint(for: policyDiagnostic)))
+        }
         if items.isEmpty {
             items.append(("metadata 待同步", "hourglass", .secondary))
         }
@@ -5402,13 +5405,51 @@ struct ClawGatewayBrowserControlReviewRow: View {
         if let hostAllowlistEnforced = review.hostAllowlistEnforced {
             items.append((hostAllowlistEnforced ? "host allowlist" : "host dry-run", "globe.badge.chevron.backward", hostAllowlistEnforced ? .blue : .secondary))
         }
+        if let appPolicyChecked = review.appPolicyChecked {
+            items.append((appPolicyChecked ? "app policy checked" : "app policy 未检查", "checkmark.shield.fill", appPolicyChecked ? .blue : .secondary))
+        }
+        if let hostPolicyChecked = review.hostPolicyChecked {
+            items.append((hostPolicyChecked ? "host policy checked" : "host policy 未检查", "network.badge.shield.half.filled", hostPolicyChecked ? .blue : .secondary))
+        }
+        if let openAttempted = review.openAttempted {
+            items.append((openAttempted ? "已尝试打开" : "未尝试打开", openAttempted ? "play.circle.fill" : "pause.circle.fill", openAttempted ? .green : .secondary))
+        }
         if let executed = review.executed {
             items.append((executed ? "已执行打开" : "未执行打开", executed ? "play.circle.fill" : "pause.circle.fill", executed ? .green : .secondary))
+        }
+        if let retryableReason = review.retryableReason, retryableReason != "none" {
+            items.append(("retry \(retryableReason)", "arrow.clockwise.circle.fill", .orange))
         }
         if items.isEmpty {
             items.append(("策略状态待同步", "hourglass", .secondary))
         }
         return items
+    }
+
+    private func diagnosticIcon(for diagnostic: String) -> String {
+        switch diagnostic {
+        case "opened":
+            return "checkmark.circle.fill"
+        case "app-blocked", "host-blocked", "platform-unavailable", "automation-failed":
+            return "exclamationmark.triangle.fill"
+        case "dry-run":
+            return "testtube.2"
+        default:
+            return "info.circle.fill"
+        }
+    }
+
+    private func diagnosticTint(for diagnostic: String) -> Color {
+        switch diagnostic {
+        case "opened":
+            return .green
+        case "app-blocked", "host-blocked", "platform-unavailable", "automation-failed":
+            return .orange
+        case "dry-run":
+            return .blue
+        default:
+            return .secondary
+        }
     }
 
     private var safetyChips: [(text: String, icon: String, tint: Color)] {
