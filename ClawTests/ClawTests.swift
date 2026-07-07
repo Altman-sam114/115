@@ -2137,9 +2137,18 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(review.maxCandidateControls, 20)
         XCTAssertEqual(review.nodeCount, 1)
         XCTAssertEqual(review.candidateControlCount, 2)
+        XCTAssertEqual(review.signalQuality, "dry-run")
+        XCTAssertEqual(review.evidenceTier, "degraded")
+        XCTAssertEqual(review.controlCoverage, "candidate-controls")
+        XCTAssertEqual(review.valuesOmitted, true)
+        XCTAssertEqual(review.passwordFieldsOmitted, true)
+        XCTAssertEqual(review.rawTextOmitted, true)
+        XCTAssertEqual(review.actionExecutionSupported, false)
+        XCTAssertTrue(review.requiresSignalReview)
         XCTAssertEqual(review.platform, "simulated")
         XCTAssertEqual(review.redaction, "maskSensitiveText")
         XCTAssertTrue(review.safetyFlags.contains("action-execution-not-supported"))
+        XCTAssertTrue(review.compactStatus.contains("signal dry-run"))
         XCTAssertTrue(review.compactStatus.contains("ax dry-run"))
         XCTAssertTrue(review.compactStatus.contains("controls 2/20"))
         XCTAssertTrue(review.isRedacted)
@@ -3045,6 +3054,13 @@ final class ClawTests: XCTestCase {
                 "maxCandidateControls": "12",
                 "nodeCount": "1",
                 "candidateControlCount": "8",
+                "signalQuality": "accessibility-summary",
+                "evidenceTier": "satisfied",
+                "controlCoverage": "candidate-controls",
+                "valuesOmitted": "true",
+                "passwordFieldsOmitted": "true",
+                "rawTextOmitted": "true",
+                "actionExecutionSupported": "false",
                 "platform": "darwin",
                 "redaction": "maskSensitiveText",
                 "safetyFlags": "observe-only,values-omitted,password-fields-omitted"
@@ -3061,6 +3077,14 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(review.maxCandidateControls, 12)
         XCTAssertEqual(review.nodeCount, 1)
         XCTAssertEqual(review.candidateControlCount, 8)
+        XCTAssertEqual(review.signalQuality, "accessibility-summary")
+        XCTAssertEqual(review.evidenceTier, "satisfied")
+        XCTAssertEqual(review.controlCoverage, "candidate-controls")
+        XCTAssertEqual(review.valuesOmitted, true)
+        XCTAssertEqual(review.passwordFieldsOmitted, true)
+        XCTAssertEqual(review.rawTextOmitted, true)
+        XCTAssertEqual(review.actionExecutionSupported, false)
+        XCTAssertFalse(review.requiresSignalReview)
         XCTAssertEqual(review.platform, "darwin")
         XCTAssertEqual(review.redaction, "maskSensitiveText")
         XCTAssertTrue(review.safetyFlags.contains("values-omitted"))
@@ -3086,6 +3110,13 @@ final class ClawTests: XCTestCase {
                 "accessibilityTree": "observeSummary",
                 "mode": "dry-run Authorization: Bearer raw-token",
                 "accessibilityPolicy": "dry-run",
+                "signalQuality": "permission-missing file:///tmp/private.txt",
+                "evidenceTier": "degraded Authorization: Bearer raw-token",
+                "controlCoverage": "candidate-controls /private/tmp/path",
+                "valuesOmitted": "true",
+                "passwordFieldsOmitted": "true",
+                "rawTextOmitted": "true",
+                "actionExecutionSupported": "false",
                 "redaction": "workspace=/private/tmp/claw-work",
                 "safetyFlags": "observe-only,headers={Authorization: Bearer raw-token},file:///tmp/private.txt"
             ]
@@ -3093,9 +3124,19 @@ final class ClawTests: XCTestCase {
         let sensitiveReview = try XCTUnwrap(ClawGatewayAccessibilityReviewSummary.latest(from: [sensitiveArtifact]))
         let visibleText = [
             sensitiveReview.compactStatus,
+            sensitiveReview.signalQuality ?? "",
+            sensitiveReview.evidenceTier ?? "",
+            sensitiveReview.controlCoverage ?? "",
             sensitiveReview.redaction ?? "",
             sensitiveReview.safetyFlags.joined(separator: " ")
         ].joined(separator: " ")
+        XCTAssertNil(sensitiveReview.signalQuality)
+        XCTAssertNil(sensitiveReview.evidenceTier)
+        XCTAssertNil(sensitiveReview.controlCoverage)
+        XCTAssertEqual(sensitiveReview.valuesOmitted, true)
+        XCTAssertEqual(sensitiveReview.passwordFieldsOmitted, true)
+        XCTAssertEqual(sensitiveReview.rawTextOmitted, true)
+        XCTAssertEqual(sensitiveReview.actionExecutionSupported, false)
         XCTAssertFalse(visibleText.contains("Authorization"))
         XCTAssertFalse(visibleText.contains("Bearer"))
         XCTAssertFalse(visibleText.contains("raw-token"))

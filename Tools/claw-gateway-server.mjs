@@ -1394,6 +1394,7 @@ function countAccessibilityCandidates(nodes) {
 }
 
 function accessibilityTreeMetadata(tree) {
+  const signal = accessibilitySignalMetadata(tree);
   return compactMetadata({
     accessibilityTree: "observeSummary",
     mode: tree.mode,
@@ -1402,6 +1403,13 @@ function accessibilityTreeMetadata(tree) {
     maxCandidateControls: tree.maxCandidateControls,
     nodeCount: tree.nodeCount,
     candidateControlCount: tree.candidateControlCount,
+    signalQuality: signal.signalQuality,
+    evidenceTier: signal.evidenceTier,
+    controlCoverage: signal.controlCoverage,
+    valuesOmitted: signal.valuesOmitted,
+    passwordFieldsOmitted: signal.passwordFieldsOmitted,
+    rawTextOmitted: signal.rawTextOmitted,
+    actionExecutionSupported: signal.actionExecutionSupported,
     platform: tree.platform,
     redaction: tree.redaction,
     safetyFlags: [
@@ -1412,6 +1420,38 @@ function accessibilityTreeMetadata(tree) {
       "structured-arguments-only",
     ],
   });
+}
+
+function accessibilitySignalMetadata(tree) {
+  const signalQuality = ({
+    "not-requested": "not-requested",
+    "dry-run": "dry-run",
+    "window-metadata": "window-metadata",
+    "accessibility-summary": "accessibility-summary",
+    "accessibility-failed": "permission-missing",
+    "accessibility-unavailable": "platform-unavailable",
+  })[tree?.mode] || "dry-run";
+  const evidenceTier = signalQuality === "accessibility-summary"
+    ? "satisfied"
+    : signalQuality === "not-requested"
+      ? "missing"
+      : "degraded";
+  const candidateControlCount = Number(tree?.candidateControlCount || 0);
+  const nodeCount = Number(tree?.nodeCount || 0);
+  const controlCoverage = candidateControlCount > 0
+    ? "candidate-controls"
+    : nodeCount > 0
+      ? "window-only"
+      : "none";
+  return {
+    signalQuality,
+    evidenceTier,
+    controlCoverage,
+    valuesOmitted: tree?.safety?.values !== "visible",
+    passwordFieldsOmitted: tree?.safety?.passwordFields !== "visible",
+    rawTextOmitted: tree?.safety?.textPolicy !== "raw-text-visible",
+    actionExecutionSupported: tree?.safety?.actionExecution === "supported",
+  };
 }
 
 async function controlBrowserAction(action, index, config) {

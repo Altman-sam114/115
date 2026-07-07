@@ -818,6 +818,29 @@ function assertAccessibilityTreeArtifact(artifact, tree, { mode, policy, label }
   expect(Boolean(artifact), `${label} missing artifact`);
   expect(artifact.kind === "accessibilityTree", `${label} artifact kind mismatch`);
   expect(artifact.isRedacted === true, `${label} artifact should be redacted`);
+  const allowedKeys = [
+    "accessibilityPolicy",
+    "accessibilityTree",
+    "actionExecutionSupported",
+    "candidateControlCount",
+    "controlCoverage",
+    "evidenceTier",
+    "includeAccessibilityTree",
+    "maxCandidateControls",
+    "mode",
+    "nodeCount",
+    "passwordFieldsOmitted",
+    "platform",
+    "rawTextOmitted",
+    "redaction",
+    "safetyFlags",
+    "signalQuality",
+    "valuesOmitted",
+  ].sort();
+  expect(
+    Object.keys(artifact.metadata || {}).sort().join(",") === allowedKeys.join(","),
+    `${label} accessibility metadata includes unexpected keys`,
+  );
   expect(artifact.metadata?.accessibilityTree === "observeSummary", `${label} metadata kind mismatch`);
   expect(mode.includes(tree?.mode), `${label} unexpected mode ${tree?.mode}`);
   expect(artifact.metadata?.mode === tree?.mode, `${label} metadata mode mismatch`);
@@ -826,12 +849,48 @@ function assertAccessibilityTreeArtifact(artifact, tree, { mode, policy, label }
   expect(Number(artifact.metadata?.maxCandidateControls) === tree?.maxCandidateControls, `${label} max controls metadata mismatch`);
   expect(Number(artifact.metadata?.nodeCount) === tree?.nodeCount, `${label} node count metadata mismatch`);
   expect(Number(artifact.metadata?.candidateControlCount) === tree?.candidateControlCount, `${label} candidate count metadata mismatch`);
+  expect(artifact.metadata?.signalQuality === accessibilitySignalQualityForMode(tree?.mode), `${label} signal quality metadata mismatch`);
+  expect(artifact.metadata?.evidenceTier === accessibilityEvidenceTierForMode(tree?.mode), `${label} evidence tier metadata mismatch`);
+  expect(artifact.metadata?.controlCoverage === accessibilityControlCoverage(tree), `${label} control coverage metadata mismatch`);
+  expect(artifact.metadata?.valuesOmitted === "true", `${label} values omission metadata mismatch`);
+  expect(artifact.metadata?.passwordFieldsOmitted === "true", `${label} password omission metadata mismatch`);
+  expect(artifact.metadata?.rawTextOmitted === "true", `${label} raw text omission metadata mismatch`);
+  expect(artifact.metadata?.actionExecutionSupported === "false", `${label} action execution metadata mismatch`);
   expect(tree?.safety?.actionExecution === "not-supported", `${label} should not support actions`);
   expect(artifact.metadata?.safetyFlags?.includes("action-execution-not-supported"), `${label} missing safety flag`);
   const serialized = JSON.stringify({ metadata: artifact.metadata, tree });
   for (const forbidden of [token, "Authorization", "Bearer", "toolArguments", "shellCommand", "pasteText", "/sessions/"]) {
     expect(!serialized.includes(forbidden), `${label} leaked ${forbidden}`);
   }
+}
+
+function accessibilitySignalQualityForMode(mode) {
+  return ({
+    "not-requested": "not-requested",
+    "dry-run": "dry-run",
+    "window-metadata": "window-metadata",
+    "accessibility-summary": "accessibility-summary",
+    "accessibility-failed": "permission-missing",
+    "accessibility-unavailable": "platform-unavailable",
+  })[mode] || "dry-run";
+}
+
+function accessibilityEvidenceTierForMode(mode) {
+  const signalQuality = accessibilitySignalQualityForMode(mode);
+  if (signalQuality === "accessibility-summary") {
+    return "satisfied";
+  }
+  return signalQuality === "not-requested" ? "missing" : "degraded";
+}
+
+function accessibilityControlCoverage(tree) {
+  if (Number(tree?.candidateControlCount || 0) > 0) {
+    return "candidate-controls";
+  }
+  if (Number(tree?.nodeCount || 0) > 0) {
+    return "window-only";
+  }
+  return "none";
 }
 
 function assertAgentTraceMetadata(metadata, trace, label) {

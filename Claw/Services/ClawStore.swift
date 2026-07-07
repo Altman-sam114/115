@@ -944,17 +944,17 @@ final class ClawStore: ObservableObject {
         }
 
         if let review = gatewayAccessibilityReview {
-            let unavailable = review.hasMetadata == false || review.accessibilityPolicy?.contains("unavailable") == true || review.mode?.contains("unavailable") == true
+            let unavailable = review.requiresSignalReview
             add(
                 id: "accessibility",
                 rank: unavailable ? 58 : 92,
                 severity: review.hasMetadata == false ? .medium : (unavailable ? .medium : .low),
                 title: "Accessibility 观察",
                 status: review.compactStatus,
-                reason: review.hasMetadata ? "只读观察摘要可用于复核屏幕依据。" : "Accessibility metadata 待同步。",
+                reason: review.hasMetadata ? "只读观察信号质量只展示固定枚举和计数。" : "Accessibility metadata 待同步。",
                 icon: "accessibility.fill",
                 reviewKind: "accessibility",
-                actionHint: unavailable ? "检查观察权限和候选控件" : "抽查观察摘要",
+                actionHint: unavailable ? "检查观察信号质量和权限状态" : "抽查观察摘要",
                 isActionable: unavailable,
                 hasMetadata: review.hasMetadata
             )
@@ -2735,6 +2735,13 @@ enum ClawGatewaySimulator {
             "maxCandidateControls": "20",
             "nodeCount": "1",
             "candidateControlCount": "2",
+            "signalQuality": "dry-run",
+            "evidenceTier": "degraded",
+            "controlCoverage": "candidate-controls",
+            "valuesOmitted": "true",
+            "passwordFieldsOmitted": "true",
+            "rawTextOmitted": "true",
+            "actionExecutionSupported": "false",
             "platform": "simulated",
             "redaction": "maskSensitiveText",
             "safetyFlags": "observe-only,values-omitted,password-fields-omitted,action-execution-not-supported,structured-arguments-only"

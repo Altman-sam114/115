@@ -5775,6 +5775,15 @@ struct ClawGatewayAccessibilityReviewRow: View {
         if let policy = review.accessibilityPolicy {
             items.append(("policy \(policy)", "checkmark.shield.fill", tint(forMode: policy)))
         }
+        if let signalQuality = review.signalQuality {
+            items.append(("signal \(signalQuality)", signalIcon(for: signalQuality), signalTint(for: signalQuality)))
+        }
+        if let evidenceTier = review.evidenceTier {
+            items.append(("evidence \(evidenceTier)", evidenceIcon(for: evidenceTier), evidenceTint(for: evidenceTier)))
+        }
+        if let controlCoverage = review.controlCoverage {
+            items.append(("coverage \(controlCoverage)", "point.3.connected.trianglepath.dotted", coverageTint(for: controlCoverage)))
+        }
         if let candidateControlCount = review.candidateControlCount {
             if let maxCandidateControls = review.maxCandidateControls {
                 items.append(("controls \(candidateControlCount)/\(maxCandidateControls)", "point.3.connected.trianglepath.dotted", .purple))
@@ -5801,6 +5810,18 @@ struct ClawGatewayAccessibilityReviewRow: View {
         }
         if let include = review.includeAccessibilityTree {
             items.append((include ? "tree requested" : "tree skipped", include ? "checkmark.circle.fill" : "minus.circle.fill", include ? .green : .secondary))
+        }
+        if let valuesOmitted = review.valuesOmitted {
+            items.append((valuesOmitted ? "values omitted" : "values visible", valuesOmitted ? "eye.slash.fill" : "eye.fill", valuesOmitted ? .orange : .red))
+        }
+        if let passwordFieldsOmitted = review.passwordFieldsOmitted {
+            items.append((passwordFieldsOmitted ? "password omitted" : "password visible", passwordFieldsOmitted ? "lock.fill" : "lock.open.fill", passwordFieldsOmitted ? .orange : .red))
+        }
+        if let rawTextOmitted = review.rawTextOmitted {
+            items.append((rawTextOmitted ? "raw text omitted" : "raw text visible", rawTextOmitted ? "doc.text.magnifyingglass" : "doc.text.fill", rawTextOmitted ? .orange : .red))
+        }
+        if let actionExecutionSupported = review.actionExecutionSupported {
+            items.append((actionExecutionSupported ? "actions supported" : "observe-only", actionExecutionSupported ? "play.circle.fill" : "eye.fill", actionExecutionSupported ? .red : .purple))
         }
         return items
     }
@@ -5876,6 +5897,65 @@ struct ClawGatewayAccessibilityReviewRow: View {
             return .orange
         case "not-requested", "disabled":
             return .secondary
+        default:
+            return .secondary
+        }
+    }
+
+    private func signalIcon(for signal: String) -> String {
+        switch signal {
+        case "accessibility-summary":
+            return "checkmark.circle.fill"
+        case "permission-missing", "platform-unavailable":
+            return "exclamationmark.triangle.fill"
+        case "dry-run", "window-metadata":
+            return "eye.fill"
+        default:
+            return "hourglass"
+        }
+    }
+
+    private func signalTint(for signal: String) -> Color {
+        switch signal {
+        case "accessibility-summary":
+            return .green
+        case "permission-missing", "platform-unavailable":
+            return .orange
+        case "dry-run", "window-metadata":
+            return .blue
+        default:
+            return .secondary
+        }
+    }
+
+    private func evidenceIcon(for tier: String) -> String {
+        switch tier {
+        case "satisfied":
+            return "checkmark.seal.fill"
+        case "degraded":
+            return "exclamationmark.circle.fill"
+        default:
+            return "minus.circle.fill"
+        }
+    }
+
+    private func evidenceTint(for tier: String) -> Color {
+        switch tier {
+        case "satisfied":
+            return .green
+        case "degraded":
+            return .orange
+        default:
+            return .secondary
+        }
+    }
+
+    private func coverageTint(for coverage: String) -> Color {
+        switch coverage {
+        case "candidate-controls":
+            return .purple
+        case "window-only":
+            return .blue
         default:
             return .secondary
         }

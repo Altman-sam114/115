@@ -30,7 +30,7 @@ flowchart TD
   RPLAY -->|"首次"| H["Gateway action handlers<br/>屏幕、浏览器、文件、Shell、提取、桌面 App、agent loop"]
   H --> ART["Artifacts<br/>screenshot、accessibilityTree、browserTrace、fileDiff、commandOutput、agentTrace 证据策略"]
   SNAP --> SART["sessionArtifacts<br/>无 action 绑定的 session 级 artifact"]
-  ART --> AXMETA["accessibilityTree metadata<br/>mode、policy、节点数、候选控件、安全标志"]
+  ART --> AXMETA["accessibilityTree metadata<br/>signal quality、evidence tier、控件覆盖、省略标志、observe-only"]
   ART --> AMETA["artifact metadata review<br/>覆盖率、脱敏数、安全键值、safety flags"]
   ART --> FCMETA["file change safety metadata<br/>workspace policy、写入状态、变更计数、省略标志"]
   ART --> SHMETA["shell command safety metadata<br/>结构化命令、policy、allowlist、执行状态、省略标志"]
@@ -83,7 +83,7 @@ flowchart TD
   REPLAY -->|"首次"| POL["actionPolicy<br/>检查 approval 和 allowedActionKinds"]
   POL -->|不允许| SKIP["actionSkipped<br/>写 auditLog 说明原因"]
   POL -->|允许| KIND{"action.kind"}
-  KIND --> OBS["observeScreen<br/>dry-run、macOS 截图、窗口元数据或受控 Accessibility 摘要"]
+  KIND --> OBS["observeScreen<br/>dry-run、macOS 截图、窗口元数据或受控 Accessibility 摘要与信号质量 metadata"]
   KIND --> BRO["controlBrowser<br/>HTML/URL trace、浏览器打开/搜索计划和 policy diagnostics metadata 复核"]
   KIND --> FILE["manageFiles<br/>workspace 内结构化写文件、路径逃逸阻断、File Change Safety metadata"]
   KIND --> SH["runShellCommand<br/>结构化命令 dry-run 或 allowlist 执行、Shell Command Safety metadata"]

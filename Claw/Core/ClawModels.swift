@@ -3084,10 +3084,39 @@ struct ClawGatewayAccessibilityReviewSummary: Equatable, Codable, Sendable {
     var maxCandidateControls: Int?
     var nodeCount: Int?
     var candidateControlCount: Int?
+    var signalQuality: String?
+    var evidenceTier: String?
+    var controlCoverage: String?
+    var valuesOmitted: Bool?
+    var passwordFieldsOmitted: Bool?
+    var rawTextOmitted: Bool?
+    var actionExecutionSupported: Bool?
     var platform: String?
     var redaction: String?
     var safetyFlags: [String]
     var isRedacted: Bool
+
+    var requiresSignalReview: Bool {
+        guard hasMetadata else {
+            return true
+        }
+        if signalQuality == nil || evidenceTier == nil || controlCoverage == nil || actionExecutionSupported != false {
+            return true
+        }
+        if ["accessibility-failed", "accessibility-unavailable"].contains(mode ?? "") {
+            return true
+        }
+        if evidenceTier == "missing" || evidenceTier == "degraded" {
+            return true
+        }
+        if ["permission-missing", "platform-unavailable"].contains(signalQuality ?? "") {
+            return true
+        }
+        if actionExecutionSupported == true {
+            return true
+        }
+        return false
+    }
 
     var compactStatus: String {
         guard hasMetadata else {
@@ -3095,6 +3124,7 @@ struct ClawGatewayAccessibilityReviewSummary: Equatable, Codable, Sendable {
         }
         let modeText = mode.map { "ax \($0)" } ?? "ax 待复核"
         let policyText = accessibilityPolicy.map { "policy \($0)" } ?? "policy 待复核"
+        let qualityText = signalQuality.map { "signal \($0)" } ?? "signal 待复核"
         let controlText: String
         if let candidateControlCount, let maxCandidateControls {
             controlText = "controls \(candidateControlCount)/\(maxCandidateControls)"
@@ -3103,7 +3133,7 @@ struct ClawGatewayAccessibilityReviewSummary: Equatable, Codable, Sendable {
         } else {
             controlText = "controls 待复核"
         }
-        return "\(modeText) · \(policyText) · \(controlText)"
+        return "\(modeText) · \(policyText) · \(qualityText) · \(controlText)"
     }
 
     static func latest(from session: ClawGatewaySession?) -> ClawGatewayAccessibilityReviewSummary? {
@@ -3131,11 +3161,49 @@ struct ClawGatewayAccessibilityReviewSummary: Equatable, Codable, Sendable {
             maxCandidateControls: ClawArtifactMetadataParser.intValue(metadata["maxCandidateControls"]),
             nodeCount: ClawArtifactMetadataParser.intValue(metadata["nodeCount"]),
             candidateControlCount: ClawArtifactMetadataParser.intValue(metadata["candidateControlCount"]),
+            signalQuality: allowedSignalQuality(metadata["signalQuality"]),
+            evidenceTier: allowedEvidenceTier(metadata["evidenceTier"]),
+            controlCoverage: allowedControlCoverage(metadata["controlCoverage"]),
+            valuesOmitted: ClawArtifactMetadataParser.boolValue(metadata["valuesOmitted"]),
+            passwordFieldsOmitted: ClawArtifactMetadataParser.boolValue(metadata["passwordFieldsOmitted"]),
+            rawTextOmitted: ClawArtifactMetadataParser.boolValue(metadata["rawTextOmitted"]),
+            actionExecutionSupported: ClawArtifactMetadataParser.boolValue(metadata["actionExecutionSupported"]),
             platform: ClawArtifactMetadataDisplaySanitizer.safeValue(metadata["platform"]),
             redaction: ClawArtifactMetadataDisplaySanitizer.safeValue(metadata["redaction"]),
             safetyFlags: ClawArtifactMetadataDisplaySanitizer.safeList(metadata["safetyFlags"]),
             isRedacted: latest.isRedacted
         )
+    }
+
+    private static func allowedSignalQuality(_ value: String?) -> String? {
+        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
+            return nil
+        }
+        let allowed = [
+            "not-requested",
+            "dry-run",
+            "window-metadata",
+            "accessibility-summary",
+            "permission-missing",
+            "platform-unavailable"
+        ]
+        return allowed.contains(clean) ? clean : nil
+    }
+
+    private static func allowedEvidenceTier(_ value: String?) -> String? {
+        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
+            return nil
+        }
+        let allowed = ["missing", "degraded", "satisfied"]
+        return allowed.contains(clean) ? clean : nil
+    }
+
+    private static func allowedControlCoverage(_ value: String?) -> String? {
+        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
+            return nil
+        }
+        let allowed = ["none", "window-only", "candidate-controls"]
+        return allowed.contains(clean) ? clean : nil
     }
 }
 
