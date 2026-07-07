@@ -151,6 +151,11 @@ enum LogicSmoke {
         expect(idleApprovalQueue.criticalOrHighCount == 0, "idle approval queue should not count high priority items")
         expect(idleApprovalQueue.metadataPendingCount == 0, "idle approval queue should not count metadata gaps")
         expect(idleApprovalQueue.primaryReviewKind == nil, "idle approval queue should not invent primary focus")
+        let idleApprovalFastLane = missionStore.missionRunSummary.approvalFastLane
+        expect(idleApprovalFastLane.isReviewable == false, "idle approval fast lane should not be reviewable")
+        expect(idleApprovalFastLane.laneState == "idle", "idle approval fast lane should expose idle")
+        expect(idleApprovalFastLane.requiresHumanAction == false, "idle approval fast lane should not require human")
+        expect(idleApprovalFastLane.primaryReviewKind == nil, "idle approval fast lane should not invent focus")
         let idlePayloadLedger = missionStore.missionRunSummary.payloadSafetyLedger
         expect(idlePayloadLedger.isReviewable == false, "idle payload ledger should not be reviewable")
         expect(idlePayloadLedger.totalCount == 0, "idle payload ledger should not count items")
@@ -242,6 +247,16 @@ enum LogicSmoke {
             focusedPreSendApprovalQueue.items.contains { $0.reviewKind == "approval" && $0.isFocused },
             "focused approval queue should mark approval row"
         )
+        let preSendApprovalFastLane = missionSummary.approvalFastLane
+        expect(preSendApprovalFastLane.isReviewable, "pre-send approval fast lane should be reviewable")
+        expect(preSendApprovalFastLane.laneState == "waiting-human", "pre-send approval fast lane should wait for human")
+        expect(preSendApprovalFastLane.requiresHumanAction, "pre-send approval fast lane should require human")
+        expect(preSendApprovalFastLane.primaryReviewKind == "approval", "pre-send approval fast lane should target approval")
+        expect(preSendApprovalFastLane.canFocusPrimaryReview, "pre-send approval fast lane should focus approval")
+        expect(preSendApprovalFastLane.checklist.contains("人工确认"), "pre-send approval fast lane should include human checklist")
+        let focusedPreSendApprovalFastLane = missionSummary.approvalFastLane(focusedOn: "approval")
+        expect(focusedPreSendApprovalFastLane.laneState == "focused", "focused pre-send approval fast lane should show focus")
+        expect(focusedPreSendApprovalFastLane.primaryReviewKind == "approval", "focused pre-send approval fast lane should keep approval")
         let preSendActionPreflight = missionSummary.macGatewayActionPreflightMatrix
         expect(preSendActionPreflight.isReviewable, "pre-send action preflight should be reviewable")
         expect(preSendActionPreflight.totalCount == missionSummary.actionPreflightItems.count, "pre-send action preflight should mirror action rows")
@@ -714,6 +729,18 @@ enum LogicSmoke {
             focusedApprovalQueue.items.contains { $0.reviewKind == "delivery-safety" && $0.isFocused },
             "focused approval queue should mark delivery row"
         )
+        let approvalFastLane = missionSummary.approvalFastLane
+        expect(approvalFastLane.isReviewable, "approval fast lane should be reviewable")
+        expect(approvalFastLane.requiresHumanAction, "approval fast lane should require human")
+        expect(approvalFastLane.primaryReviewKind != nil, "approval fast lane should expose primary review")
+        expect(
+            ["waiting-human", "metadata-pending", "reviewable"].contains(approvalFastLane.laneState),
+            "approval fast lane should expose stable post-send state"
+        )
+        let focusedApprovalFastLane = missionSummary.approvalFastLane(focusedOn: "delivery-safety")
+        expect(focusedApprovalFastLane.laneState == "focused", "focused approval fast lane should show focus")
+        expect(focusedApprovalFastLane.primaryReviewKind == "delivery-safety", "focused approval fast lane should target delivery")
+        expect(focusedApprovalFastLane.primaryReviewTitle == "最终提交安全", "focused approval fast lane should expose delivery title")
         let focusContext = missionSummary.focusContextSummary
         expect(focusContext.isReviewable, "focus context should be reviewable once Gateway evidence exists")
         expect(focusContext.canClearFocus == false, "unfocused context should not expose clear focus")
@@ -798,6 +825,10 @@ enum LogicSmoke {
             statusApprovalQueue.items.contains { $0.reviewKind == statusOnlyItem.reviewKind && $0.isFocused },
             "status approval queue should mark status row"
         )
+        let statusApprovalFastLane = statusOnlySummary.approvalFastLane(focusedOn: statusOnlyItem.reviewKind)
+        expect(statusApprovalFastLane.laneState == "focused", "status approval fast lane should show focus")
+        expect(statusApprovalFastLane.primaryReviewKind == statusOnlyItem.reviewKind, "status approval fast lane should keep status")
+        expect(statusApprovalFastLane.primaryReviewTitle == statusOnlyItem.title, "status approval fast lane should expose status title")
         let statusPayloadLedger = statusOnlySummary.payloadSafetyLedger(focusedOn: statusOnlyItem.reviewKind)
         expect(statusPayloadLedger.focusedReviewKind == nil, "status payload ledger should not focus status-only items")
         expect(statusPayloadLedger.items.map(\.reviewKind) == availableDetailKinds, "status payload ledger should keep all details visible")
@@ -945,6 +976,15 @@ enum LogicSmoke {
         expect(
             staleControlSnapshot.controlState == statusOnlySummary.controlSnapshot.controlState,
             "stale control snapshot should fall back to default state"
+        )
+        let staleApprovalFastLane = statusOnlySummary.approvalFastLane(focusedOn: "unknown-review-kind")
+        expect(
+            staleApprovalFastLane.laneState == statusOnlySummary.approvalFastLane.laneState,
+            "stale approval fast lane should fall back to default state"
+        )
+        expect(
+            staleApprovalFastLane.primaryReviewKind == statusOnlySummary.approvalFastLane.primaryReviewKind,
+            "stale approval fast lane should keep default primary"
         )
         expect(
             missionSummary.detailReviewKinds(focusedOn: nil) == availableDetailKinds,
@@ -1134,7 +1174,30 @@ enum LogicSmoke {
             statusApprovalQueue.status,
             statusApprovalQueue.guidance,
             statusApprovalQueue.focusedReviewKind ?? "",
-            statusApprovalQueue.focusedReviewTitle ?? ""
+            statusApprovalQueue.focusedReviewTitle ?? "",
+            idleApprovalFastLane.title,
+            idleApprovalFastLane.status,
+            idleApprovalFastLane.guidance,
+            preSendApprovalFastLane.title,
+            preSendApprovalFastLane.status,
+            preSendApprovalFastLane.guidance,
+            focusedPreSendApprovalFastLane.title,
+            focusedPreSendApprovalFastLane.status,
+            focusedPreSendApprovalFastLane.guidance,
+            approvalFastLane.title,
+            approvalFastLane.status,
+            approvalFastLane.guidance,
+            approvalFastLane.primaryReviewKind ?? "",
+            approvalFastLane.primaryReviewTitle ?? "",
+            focusedApprovalFastLane.title,
+            focusedApprovalFastLane.status,
+            focusedApprovalFastLane.guidance,
+            statusApprovalFastLane.title,
+            statusApprovalFastLane.status,
+            statusApprovalFastLane.guidance,
+            staleApprovalFastLane.title,
+            staleApprovalFastLane.status,
+            staleApprovalFastLane.guidance
         ]
         let approvalQueueVisibleChunks = approvalQueueItemChunks + approvalQueueSummaryChunks
         let payloadLedgerItemChunks: [String] = payloadLedger.items.flatMap { item in
@@ -1734,6 +1797,12 @@ enum LogicSmoke {
             shellApprovalQueue.items.contains { $0.reviewKind == "shell-safety" && $0.hasMetadata },
             "shell approval queue should mark shell metadata ready"
         )
+        let shellApprovalFastLane = shellMissionSummary.approvalFastLane(focusedOn: "shell-safety")
+        expect(shellApprovalFastLane.isReviewable, "shell approval fast lane should be reviewable")
+        expect(shellApprovalFastLane.laneState == "focused", "shell approval fast lane should expose focus")
+        expect(shellApprovalFastLane.primaryReviewKind == "shell-safety", "shell approval fast lane should keep shell focus")
+        expect(shellApprovalFastLane.primaryReviewTitle == "Shell 命令安全", "shell approval fast lane should expose shell title")
+        expect(shellApprovalFastLane.requiresHumanAction, "shell approval fast lane should require human")
         let shellMacReadiness = shellMissionSummary.macAgentReadinessBoard(focusedOn: "shell-safety")
         expect(shellMacReadiness.isReviewable, "shell mac readiness should be reviewable")
         expect(shellMacReadiness.requiresHumanAction, "shell mac readiness should require human review")
@@ -1912,6 +1981,10 @@ enum LogicSmoke {
             shellApprovalQueue.status,
             shellApprovalQueue.guidance,
             shellApprovalQueueRows,
+            shellApprovalFastLane.title,
+            shellApprovalFastLane.status,
+            shellApprovalFastLane.guidance,
+            shellApprovalFastLane.primaryReviewTitle ?? "",
             shellMacReadiness.title,
             shellMacReadiness.status,
             shellMacReadiness.guidance,

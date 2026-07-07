@@ -1403,6 +1403,25 @@ struct ClawMissionRunApprovalQueueSummary: Equatable, Codable, Sendable {
     var items: [ClawMissionRunApprovalQueueItem]
 }
 
+struct ClawMissionRunApprovalFastLaneSummary: Equatable, Codable, Sendable {
+    var title: String
+    var status: String
+    var guidance: String
+    var icon: String
+    var tone: ClawMissionRunOperatorLaneTone
+    var laneState: String
+    var primaryReviewKind: String?
+    var primaryReviewTitle: String?
+    var primaryActionTitle: String?
+    var actionKindTitle: String?
+    var approvalTitle: String?
+    var checklist: [String]
+    var canFocusPrimaryReview: Bool
+    var requiresHumanAction: Bool
+    var hasMetadataGap: Bool
+    var isReviewable: Bool
+}
+
 struct ClawMissionRunPayloadSafetyLedgerItem: Identifiable, Equatable, Codable, Sendable {
     var id: String { reviewKind }
     var reviewKind: String
@@ -3531,6 +3550,91 @@ extension ClawMissionRunSummary {
             hasMetadataGap: hasMetadataGap,
             isReviewable: isReviewable,
             items: items
+        )
+    }
+
+    var approvalFastLane: ClawMissionRunApprovalFastLaneSummary {
+        approvalFastLane(focusedOn: nil)
+    }
+
+    func approvalFastLane(focusedOn reviewKind: String?) -> ClawMissionRunApprovalFastLaneSummary {
+        let queue = approvalQueueSummary(focusedOn: reviewKind)
+        let laneItem = queue.focusedReviewKind.flatMap { focusedKind in
+            queue.items.first { $0.reviewKind == focusedKind }
+        } ?? queue.items.first
+        let checklist = [
+            queue.requiresHumanAction ? "人工确认" : "无需立即审批",
+            queue.hasMetadataGap ? "metadata 待同步" : "metadata 已就绪",
+            laneItem?.hasMetadata == true ? "安全摘要可复核" : "仅显示安全状态"
+        ]
+
+        let title: String
+        let status: String
+        let guidance: String
+        let icon: String
+        let tone: ClawMissionRunOperatorLaneTone
+        let laneState: String
+        let primaryActionTitle: String?
+
+        if queue.isReviewable == false {
+            title = "Approval Fast Lane 待生成"
+            status = "暂无审批快车道"
+            guidance = "生成任务或收到 Gateway 等待确认事件后，会显示首要人工确认入口。"
+            icon = "checkmark.seal"
+            tone = .neutral
+            laneState = "idle"
+            primaryActionTitle = nil
+        } else if let laneItem, laneItem.isFocused {
+            title = "Approval Fast Lane 聚焦中"
+            status = laneItem.title
+            guidance = "只聚焦 \(laneItem.title)，不会批准、发送或继续。"
+            icon = "scope"
+            tone = laneItem.isActionable ? .warning : .info
+            laneState = "focused"
+            primaryActionTitle = "查看\(laneItem.title)"
+        } else if queue.requiresHumanAction {
+            title = "Approval Fast Lane 等待人工"
+            status = laneItem.map { "\($0.title) · \($0.status)" } ?? queue.status
+            guidance = laneItem.map { "先复核 \($0.title)：\($0.reason)" } ?? "先处理可行动确认项。"
+            icon = "hand.raised.fill"
+            tone = .warning
+            laneState = "waiting-human"
+            primaryActionTitle = laneItem.map { "聚焦\($0.title)" }
+        } else if queue.hasMetadataGap {
+            title = "Approval Fast Lane metadata 待同步"
+            status = queue.status
+            guidance = "等待 Gateway metadata 后再确认审批状态。"
+            icon = "doc.badge.clock"
+            tone = .info
+            laneState = "metadata-pending"
+            primaryActionTitle = laneItem.map { "聚焦\($0.title)" }
+        } else {
+            title = "Approval Fast Lane 可抽查"
+            status = laneItem.map { "\($0.title) · \($0.status)" } ?? queue.status
+            guidance = laneItem.map { "可抽查 \($0.title)，不会自动审批或继续。" } ?? "审批队列已同步，可抽查。"
+            icon = "checkmark.seal.fill"
+            tone = .success
+            laneState = "reviewable"
+            primaryActionTitle = laneItem.map { "聚焦\($0.title)" }
+        }
+
+        return ClawMissionRunApprovalFastLaneSummary(
+            title: title,
+            status: status,
+            guidance: guidance,
+            icon: icon,
+            tone: tone,
+            laneState: laneState,
+            primaryReviewKind: laneItem?.reviewKind,
+            primaryReviewTitle: laneItem?.title,
+            primaryActionTitle: primaryActionTitle,
+            actionKindTitle: laneItem?.actionKindTitle,
+            approvalTitle: laneItem?.approvalTitle,
+            checklist: checklist,
+            canFocusPrimaryReview: laneItem?.canFocusReview ?? false,
+            requiresHumanAction: queue.requiresHumanAction,
+            hasMetadataGap: queue.hasMetadataGap,
+            isReviewable: queue.isReviewable
         )
     }
 

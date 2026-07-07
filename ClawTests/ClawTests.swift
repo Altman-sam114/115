@@ -609,6 +609,11 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(idleApprovalQueue.criticalOrHighCount, 0)
         XCTAssertEqual(idleApprovalQueue.metadataPendingCount, 0)
         XCTAssertNil(idleApprovalQueue.primaryReviewKind)
+        let idleApprovalFastLane = idleStore.missionRunSummary.approvalFastLane
+        XCTAssertFalse(idleApprovalFastLane.isReviewable)
+        XCTAssertEqual(idleApprovalFastLane.laneState, "idle")
+        XCTAssertFalse(idleApprovalFastLane.requiresHumanAction)
+        XCTAssertNil(idleApprovalFastLane.primaryReviewKind)
         let idlePayloadLedger = idleStore.missionRunSummary.payloadSafetyLedger
         XCTAssertFalse(idlePayloadLedger.isReviewable)
         XCTAssertEqual(idlePayloadLedger.totalCount, 0)
@@ -696,6 +701,16 @@ final class ClawTests: XCTestCase {
         let focusedPreSendApprovalQueue = preSendSummary.approvalQueueSummary(focusedOn: "approval")
         XCTAssertEqual(focusedPreSendApprovalQueue.focusedReviewKind, "approval")
         XCTAssertTrue(focusedPreSendApprovalQueue.items.contains { $0.reviewKind == "approval" && $0.isFocused })
+        let preSendApprovalFastLane = preSendSummary.approvalFastLane
+        XCTAssertTrue(preSendApprovalFastLane.isReviewable)
+        XCTAssertEqual(preSendApprovalFastLane.laneState, "waiting-human")
+        XCTAssertTrue(preSendApprovalFastLane.requiresHumanAction)
+        XCTAssertEqual(preSendApprovalFastLane.primaryReviewKind, "approval")
+        XCTAssertTrue(preSendApprovalFastLane.canFocusPrimaryReview)
+        XCTAssertTrue(preSendApprovalFastLane.checklist.contains("人工确认"))
+        let focusedPreSendApprovalFastLane = preSendSummary.approvalFastLane(focusedOn: "approval")
+        XCTAssertEqual(focusedPreSendApprovalFastLane.laneState, "focused")
+        XCTAssertEqual(focusedPreSendApprovalFastLane.primaryReviewKind, "approval")
         let preSendActionPreflight = preSendSummary.macGatewayActionPreflightMatrix
         XCTAssertTrue(preSendActionPreflight.isReviewable)
         XCTAssertEqual(preSendActionPreflight.totalCount, preSendSummary.actionPreflightItems.count)
@@ -970,6 +985,15 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(focusedApprovalQueue.focusedReviewKind, "delivery-safety")
         XCTAssertNotNil(focusedApprovalQueue.focusedReviewTitle)
         XCTAssertTrue(focusedApprovalQueue.items.contains { $0.reviewKind == "delivery-safety" && $0.isFocused })
+        let approvalFastLane = summary.approvalFastLane
+        XCTAssertTrue(approvalFastLane.isReviewable)
+        XCTAssertTrue(approvalFastLane.requiresHumanAction)
+        XCTAssertNotNil(approvalFastLane.primaryReviewKind)
+        XCTAssertTrue(["waiting-human", "metadata-pending", "reviewable"].contains(approvalFastLane.laneState))
+        let focusedApprovalFastLane = summary.approvalFastLane(focusedOn: "delivery-safety")
+        XCTAssertEqual(focusedApprovalFastLane.laneState, "focused")
+        XCTAssertEqual(focusedApprovalFastLane.primaryReviewKind, "delivery-safety")
+        XCTAssertEqual(focusedApprovalFastLane.primaryReviewTitle, "最终提交安全")
         let focusContext = summary.focusContextSummary
         XCTAssertTrue(focusContext.isReviewable)
         XCTAssertFalse(focusContext.canClearFocus)
@@ -1048,6 +1072,10 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(statusApprovalQueue.focusedReviewKind, statusOnlyItem.reviewKind)
         XCTAssertEqual(statusApprovalQueue.focusedReviewTitle, statusOnlyItem.title)
         XCTAssertTrue(statusApprovalQueue.items.contains { $0.reviewKind == statusOnlyItem.reviewKind && $0.isFocused })
+        let statusApprovalFastLane = statusOnlySummary.approvalFastLane(focusedOn: statusOnlyItem.reviewKind)
+        XCTAssertEqual(statusApprovalFastLane.laneState, "focused")
+        XCTAssertEqual(statusApprovalFastLane.primaryReviewKind, statusOnlyItem.reviewKind)
+        XCTAssertEqual(statusApprovalFastLane.primaryReviewTitle, statusOnlyItem.title)
         let statusPayloadLedger = statusOnlySummary.payloadSafetyLedger(focusedOn: statusOnlyItem.reviewKind)
         XCTAssertNil(statusPayloadLedger.focusedReviewKind)
         XCTAssertEqual(statusPayloadLedger.items.map(\.reviewKind), availableDetailKinds)
@@ -1157,6 +1185,9 @@ final class ClawTests: XCTestCase {
         let staleControlSnapshot = statusOnlySummary.controlSnapshot(focusedOn: "unknown-review-kind")
         XCTAssertNil(staleControlSnapshot.focusedReviewKind)
         XCTAssertEqual(staleControlSnapshot.controlState, statusOnlySummary.controlSnapshot.controlState)
+        let staleApprovalFastLane = statusOnlySummary.approvalFastLane(focusedOn: "unknown-review-kind")
+        XCTAssertEqual(staleApprovalFastLane.laneState, statusOnlySummary.approvalFastLane.laneState)
+        XCTAssertEqual(staleApprovalFastLane.primaryReviewKind, statusOnlySummary.approvalFastLane.primaryReviewKind)
         XCTAssertEqual(summary.detailReviewKinds(focusedOn: nil), availableDetailKinds)
         XCTAssertEqual(summary.detailReviewKinds(focusedOn: "delivery-safety"), ["delivery-safety"])
         XCTAssertEqual(summary.detailReviewKinds(focusedOn: "gateway-status"), availableDetailKinds)
@@ -1306,7 +1337,30 @@ final class ClawTests: XCTestCase {
             statusApprovalQueue.status,
             statusApprovalQueue.guidance,
             statusApprovalQueue.focusedReviewKind ?? "",
-            statusApprovalQueue.focusedReviewTitle ?? ""
+            statusApprovalQueue.focusedReviewTitle ?? "",
+            idleApprovalFastLane.title,
+            idleApprovalFastLane.status,
+            idleApprovalFastLane.guidance,
+            preSendApprovalFastLane.title,
+            preSendApprovalFastLane.status,
+            preSendApprovalFastLane.guidance,
+            focusedPreSendApprovalFastLane.title,
+            focusedPreSendApprovalFastLane.status,
+            focusedPreSendApprovalFastLane.guidance,
+            approvalFastLane.title,
+            approvalFastLane.status,
+            approvalFastLane.guidance,
+            approvalFastLane.primaryReviewKind ?? "",
+            approvalFastLane.primaryReviewTitle ?? "",
+            focusedApprovalFastLane.title,
+            focusedApprovalFastLane.status,
+            focusedApprovalFastLane.guidance,
+            statusApprovalFastLane.title,
+            statusApprovalFastLane.status,
+            statusApprovalFastLane.guidance,
+            staleApprovalFastLane.title,
+            staleApprovalFastLane.status,
+            staleApprovalFastLane.guidance
         ]
         let payloadLedgerVisibleChunks = payloadLedger.items.flatMap {
             [
@@ -1749,6 +1803,12 @@ final class ClawTests: XCTestCase {
         XCTAssertTrue(shellApprovalQueue.requiresHumanAction)
         XCTAssertTrue(shellApprovalQueue.items.contains { $0.reviewKind == "shell-safety" && $0.isFocused })
         XCTAssertTrue(shellApprovalQueue.items.contains { $0.reviewKind == "shell-safety" && $0.hasMetadata })
+        let shellApprovalFastLane = shellStore.missionRunSummary.approvalFastLane(focusedOn: "shell-safety")
+        XCTAssertTrue(shellApprovalFastLane.isReviewable)
+        XCTAssertEqual(shellApprovalFastLane.laneState, "focused")
+        XCTAssertEqual(shellApprovalFastLane.primaryReviewKind, "shell-safety")
+        XCTAssertEqual(shellApprovalFastLane.primaryReviewTitle, "Shell 命令安全")
+        XCTAssertTrue(shellApprovalFastLane.requiresHumanAction)
         let shellMacReadiness = shellStore.missionRunSummary.macAgentReadinessBoard(focusedOn: "shell-safety")
         XCTAssertTrue(shellMacReadiness.isReviewable)
         XCTAssertTrue(shellMacReadiness.requiresHumanAction)
@@ -1855,6 +1915,10 @@ final class ClawTests: XCTestCase {
                 shellApprovalQueue.status,
                 shellApprovalQueue.guidance,
                 shellApprovalQueue.items.map { "\($0.title) \($0.status) \($0.reason)" }.joined(separator: " "),
+                shellApprovalFastLane.title,
+                shellApprovalFastLane.status,
+                shellApprovalFastLane.guidance,
+                shellApprovalFastLane.primaryReviewTitle ?? "",
                 shellMacReadiness.title,
                 shellMacReadiness.status,
                 shellMacReadiness.guidance,

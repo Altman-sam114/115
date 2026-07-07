@@ -650,6 +650,7 @@ struct ClawMissionRunPanel: View {
         let focusContext = summary.focusContextSummary(focusedOn: focusedReviewKind)
         let evidenceTrail = summary.evidenceTrailSummary(focusedOn: activeFocusedReviewKind)
         let approvalQueue = summary.approvalQueueSummary(focusedOn: activeFocusedReviewKind)
+        let approvalFastLane = summary.approvalFastLane(focusedOn: activeFocusedReviewKind)
         let payloadSafetyLedger = summary.payloadSafetyLedger(focusedOn: activeFocusedReviewKind)
         VStack(alignment: .leading, spacing: 14) {
             SectionHeader(title: "Mission Run", icon: "flag.checkered")
@@ -799,6 +800,7 @@ struct ClawMissionRunPanel: View {
 
             ClawMissionApprovalQueueView(
                 summary: approvalQueue,
+                fastLane: approvalFastLane,
                 onFocusReviewKind: focusReviewKind
             )
 
@@ -910,6 +912,7 @@ struct ClawMissionReviewDetailDockView: View {
         let reviewRadar = summary.macAgentReviewRadar(focusedOn: activeFocusedReviewKind)
         let handoffBrief = summary.macAgentHandoffBrief(focusedOn: activeFocusedReviewKind)
         let approvalQueue = summary.approvalQueueSummary(focusedOn: activeFocusedReviewKind)
+        let approvalFastLane = summary.approvalFastLane(focusedOn: activeFocusedReviewKind)
         let payloadSafetyLedger = summary.payloadSafetyLedger(focusedOn: activeFocusedReviewKind)
 
         VStack(alignment: .leading, spacing: 12) {
@@ -1010,6 +1013,7 @@ struct ClawMissionReviewDetailDockView: View {
 
                 ClawMissionApprovalQueueView(
                     summary: approvalQueue,
+                    fastLane: approvalFastLane,
                     onFocusReviewKind: focusReviewKind
                 )
 
@@ -2038,10 +2042,16 @@ struct ClawMissionPayloadSafetyLedgerItemRow: View {
 
 struct ClawMissionApprovalQueueView: View {
     let summary: ClawMissionRunApprovalQueueSummary
+    let fastLane: ClawMissionRunApprovalFastLaneSummary
     let onFocusReviewKind: (String) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            ClawMissionApprovalFastLaneView(
+                lane: fastLane,
+                onFocusReviewKind: onFocusReviewKind
+            )
+
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Label(summary.title, systemImage: summary.icon)
                     .font(.subheadline.bold())
@@ -2110,6 +2120,96 @@ struct ClawMissionApprovalQueueView: View {
             return .blue
         }
         return .green
+    }
+}
+
+struct ClawMissionApprovalFastLaneView: View {
+    let lane: ClawMissionRunApprovalFastLaneSummary
+    let onFocusReviewKind: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Label(lane.title, systemImage: lane.icon)
+                    .font(.subheadline.bold())
+                    .foregroundStyle(tint)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Spacer(minLength: 0)
+
+                PhoneAgentTag(text: lane.laneState, icon: "bolt.fill", tint: tint)
+            }
+
+            Text(lane.status)
+                .font(.footnote.bold())
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(lane.guidance)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 6) {
+                ForEach(lane.checklist, id: \.self) { item in
+                    PhoneAgentTag(text: item, icon: "checkmark.circle", tint: tint)
+                }
+            }
+
+            HStack(spacing: 6) {
+                if let actionKindTitle = lane.actionKindTitle {
+                    PhoneAgentTag(text: actionKindTitle, icon: "slider.horizontal.3", tint: .blue)
+                }
+                if let approvalTitle = lane.approvalTitle {
+                    PhoneAgentTag(text: approvalTitle, icon: "checkmark.seal.fill", tint: .orange)
+                }
+                if lane.requiresHumanAction {
+                    PhoneAgentTag(text: "人工", icon: "hand.raised.fill", tint: .orange)
+                }
+                if lane.hasMetadataGap {
+                    PhoneAgentTag(text: "metadata", icon: "doc.badge.clock", tint: .blue)
+                }
+            }
+
+            if lane.canFocusPrimaryReview,
+               let reviewKind = lane.primaryReviewKind,
+               let actionTitle = lane.primaryActionTitle {
+                Button(actionTitle, systemImage: "scope") {
+                    onFocusReviewKind(reviewKind)
+                }
+                .font(.caption.bold())
+                .buttonStyle(.borderless)
+                .accessibilityHint("只聚焦审批复核项，不批准、不发送、不重试、不继续、不执行 Gateway 动作")
+                .accessibilityInputLabels([actionTitle, "聚焦审批快车道"])
+            }
+        }
+        .padding(9)
+        .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(tint.opacity(0.18), lineWidth: 1)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(accessibilitySummary)
+    }
+
+    private var accessibilitySummary: String {
+        "Approval Fast Lane，\(lane.status)，\(lane.guidance)"
+    }
+
+    private var tint: Color {
+        switch lane.tone {
+        case .neutral:
+            return .secondary
+        case .info:
+            return .blue
+        case .success:
+            return .green
+        case .warning:
+            return .orange
+        case .danger:
+            return .red
+        }
     }
 }
 
