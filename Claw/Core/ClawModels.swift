@@ -1801,6 +1801,27 @@ struct ClawMissionRunHandoffBriefSummary: Equatable, Codable, Sendable {
     var items: [ClawMissionRunHandoffBriefItem]
 }
 
+struct ClawMissionRunControlSnapshotSummary: Equatable, Codable, Sendable {
+    var title: String
+    var status: String
+    var guidance: String
+    var icon: String
+    var tone: ClawMissionRunOperatorLaneTone
+    var controlState: String
+    var focusedReviewKind: String?
+    var focusedReviewTitle: String?
+    var primaryReviewKind: String?
+    var primaryReviewTitle: String?
+    var primaryActionTitle: String?
+    var canFocusPrimaryReview: Bool
+    var canContinueLoop: Bool
+    var requiresHumanAction: Bool
+    var hasMetadataGap: Bool
+    var isBlocked: Bool
+    var isRetryable: Bool
+    var isReviewable: Bool
+}
+
 struct ClawMissionRunReviewReadinessSummary: Equatable, Codable, Sendable {
     var title: String
     var status: String
@@ -5445,6 +5466,157 @@ extension ClawMissionRunSummary {
             hasMetadataGap: hasMetadataGap,
             canContinueLoop: canContinueLoop,
             isOptionalReview: isOptionalReview
+        )
+    }
+
+    var controlSnapshot: ClawMissionRunControlSnapshotSummary {
+        controlSnapshot(focusedOn: nil)
+    }
+
+    func controlSnapshot(focusedOn reviewKind: String?) -> ClawMissionRunControlSnapshotSummary {
+        let focusedKind = activeReviewFocus(from: reviewKind)
+        let handoff = macAgentHandoffBrief(focusedOn: focusedKind)
+        let gate = macAgentContinuationGate(focusedOn: focusedKind)
+        let radar = macAgentReviewRadar(focusedOn: focusedKind)
+        let approval = approvalQueueSummary(focusedOn: focusedKind)
+        let loop = loopContinuationSummary(focusedOn: focusedKind)
+        let focus = focusContextSummary(focusedOn: focusedKind)
+        let operatorState = operatorStrip(focusedOn: focusedKind)
+
+        let isReviewable = handoff.isReviewable ||
+            gate.isReviewable ||
+            radar.isReviewable ||
+            approval.isReviewable ||
+            loop.isReviewable ||
+            focus.focusedReviewKind != nil
+        let isBlocked = handoff.isBlocked || gate.isBlocked || radar.isBlocked || blockedCount > 0
+        let isRetryable = handoff.isRetryable || gate.isRetryable || retryableCount > 0
+        let requiresHumanAction = handoff.requiresHumanAction ||
+            gate.requiresHumanAction ||
+            approval.requiresHumanAction ||
+            loop.requiresHumanAction ||
+            requiresUserApproval
+        let hasMetadataGap = handoff.hasMetadataGap ||
+            gate.hasMetadataGap ||
+            radar.hasMetadataGap ||
+            approval.hasMetadataGap ||
+            loop.hasMetadataGap
+        let canContinueLoop = handoff.canContinueLoop || gate.canContinueLoop || loop.canContinueLoop
+
+        let primaryReviewKind = focusedKind ??
+            handoff.primaryReviewKind ??
+            gate.primaryReviewKind ??
+            radar.primaryReviewKind ??
+            approval.primaryReviewKind ??
+            loop.focusReviewKind
+        let primaryReviewTitle = primaryReviewKind.flatMap(titleForNextStepReviewKind) ??
+            handoff.primaryReviewTitle ??
+            gate.primaryReviewTitle ??
+            radar.primaryReviewTitle ??
+            approval.primaryReviewTitle ??
+            loop.focusReviewTitle
+        let primaryKindCanFocus = primaryReviewKind.flatMap { activeReviewFocus(from: $0) } != nil
+        let canFocusPrimaryReview = primaryKindCanFocus ||
+            handoff.canFocusPrimaryReview ||
+            gate.canFocusPrimaryReview ||
+            radar.canFocusPrimaryReview ||
+            approval.canFocusPrimaryReview ||
+            loop.canFocusAgentTrace
+        let focusedReviewTitle = focusedKind.flatMap(titleForNextStepReviewKind) ?? focus.focusedReviewTitle
+
+        let title: String
+        let status: String
+        let guidance: String
+        let icon: String
+        let tone: ClawMissionRunOperatorLaneTone
+        let controlState: String
+        let primaryActionTitle: String?
+
+        if isReviewable == false {
+            title = "Control Snapshot 待生成"
+            status = "尚无 Mac 控制态势"
+            guidance = "生成任务或收到 Gateway 事件后，会显示当前是否可继续控制。"
+            icon = "macwindow.badge.plus"
+            tone = .neutral
+            controlState = "idle"
+            primaryActionTitle = nil
+        } else if let focusedKind {
+            title = "Control Snapshot 聚焦中"
+            status = focusedReviewTitle ?? "聚焦复核"
+            guidance = focus.guidance
+            icon = "scope"
+            tone = focus.hasMetadataGap ? .info : (focus.requiresHumanAction ? .warning : .success)
+            controlState = "focused"
+            primaryActionTitle = focusedReviewTitle.map { "查看\($0)" } ?? "查看聚焦复核"
+        } else if isBlocked {
+            title = "Control Snapshot 阻断"
+            status = "\(max(handoff.blockedCount, gate.blockedCount)) 项阻断 · \(max(handoff.retryableCount, gate.retryableCount)) 项可重试"
+            guidance = primaryReviewTitle.map { "先处理 \($0)，不会自动重试或继续。" } ?? "先处理阻断复核，不会自动重试或继续。"
+            icon = "xmark.octagon.fill"
+            tone = .danger
+            controlState = "blocked"
+            primaryActionTitle = primaryReviewTitle.map { "聚焦\($0)" }
+        } else if requiresHumanAction {
+            title = "Control Snapshot 等待人工"
+            status = "\(handoff.humanActionCount + approval.actionableCount) 项需人工"
+            guidance = primaryReviewTitle.map { "先确认 \($0)，手机端不会自动审批或发送。" } ?? "先完成手机审批或人工复核。"
+            icon = "hand.raised.fill"
+            tone = .warning
+            controlState = "waiting-human"
+            primaryActionTitle = primaryReviewTitle.map { "聚焦\($0)" }
+        } else if isRetryable {
+            title = "Control Snapshot 可重试复核"
+            status = "\(max(handoff.retryableCount, retryableCount)) 项可重试"
+            guidance = primaryReviewTitle.map { "先复核 \($0)，再由用户决定是否重试。" } ?? "先复核可重试项，再由用户决定是否重试。"
+            icon = "arrow.clockwise.circle.fill"
+            tone = .warning
+            controlState = "retryable"
+            primaryActionTitle = primaryReviewTitle.map { "聚焦\($0)" }
+        } else if hasMetadataGap {
+            title = "Control Snapshot metadata 待同步"
+            status = "\(handoff.metadataPendingCount + gate.metadataPendingCount + radar.metadataPendingCount) 项 metadata 待同步"
+            guidance = primaryReviewTitle.map { "等待 \($0) metadata 后再继续复核。" } ?? "等待 Gateway metadata 后再继续复核。"
+            icon = "doc.badge.clock"
+            tone = .info
+            controlState = "metadata-pending"
+            primaryActionTitle = primaryReviewTitle.map { "聚焦\($0)" }
+        } else if canContinueLoop {
+            title = "Control Snapshot 可继续"
+            status = "可由用户显式触发下一轮"
+            guidance = "当前控制态势未发现阻断；仍必须由用户显式触发下一轮。"
+            icon = "arrow.forward.circle.fill"
+            tone = .success
+            controlState = "ready-to-continue"
+            primaryActionTitle = primaryReviewTitle.map { "聚焦\($0)" } ?? "查看下一轮"
+        } else {
+            title = "Mac Agent Control Snapshot"
+            status = operatorState.status
+            guidance = primaryReviewTitle.map { "可先抽查 \($0)，再决定是否继续。" } ?? "控制态势可抽查，未自动继续。"
+            icon = "macwindow.and.cursorarrow"
+            tone = .success
+            controlState = "reviewable"
+            primaryActionTitle = primaryReviewTitle.map { "聚焦\($0)" }
+        }
+
+        return ClawMissionRunControlSnapshotSummary(
+            title: title,
+            status: status,
+            guidance: guidance,
+            icon: icon,
+            tone: tone,
+            controlState: controlState,
+            focusedReviewKind: focusedKind,
+            focusedReviewTitle: focusedReviewTitle,
+            primaryReviewKind: primaryReviewKind,
+            primaryReviewTitle: primaryReviewTitle,
+            primaryActionTitle: primaryActionTitle,
+            canFocusPrimaryReview: canFocusPrimaryReview && primaryReviewKind != nil,
+            canContinueLoop: canContinueLoop,
+            requiresHumanAction: requiresHumanAction,
+            hasMetadataGap: hasMetadataGap,
+            isBlocked: isBlocked,
+            isRetryable: isRetryable,
+            isReviewable: isReviewable
         )
     }
 

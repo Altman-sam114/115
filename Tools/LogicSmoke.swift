@@ -213,6 +213,11 @@ enum LogicSmoke {
         expect(idleHandoffBrief.blockedCount == 0, "idle handoff brief should not count blockers")
         expect(idleHandoffBrief.metadataPendingCount == 0, "idle handoff brief should not count metadata gaps")
         expect(idleHandoffBrief.primaryReviewKind == nil, "idle handoff brief should not invent primary focus")
+        let idleControlSnapshot = missionStore.missionRunSummary.controlSnapshot
+        expect(idleControlSnapshot.isReviewable == false, "idle control snapshot should not be reviewable")
+        expect(idleControlSnapshot.controlState == "idle", "idle control snapshot should expose idle state")
+        expect(idleControlSnapshot.canContinueLoop == false, "idle control snapshot should not continue")
+        expect(idleControlSnapshot.primaryReviewKind == nil, "idle control snapshot should not invent focus")
         expect(missionStore.missionRunSummary.activeReviewFocus(from: "delivery-safety") == nil, "idle active focus should not resolve")
         missionStore.phoneAgentCommand = "打开浏览器搜索资料，整理结果并发到 Slack"
         missionStore.startAutonomousComputerTakeover()
@@ -343,6 +348,16 @@ enum LogicSmoke {
             focusedPreSendHandoffBrief.items.contains { $0.reviewKind == "approval" && $0.isFocused },
             "focused pre-send handoff brief should mark approval item"
         )
+        let preSendControlSnapshot = missionSummary.controlSnapshot
+        expect(preSendControlSnapshot.isReviewable, "pre-send control snapshot should be reviewable")
+        expect(preSendControlSnapshot.controlState == "waiting-human", "pre-send control snapshot should wait for human")
+        expect(preSendControlSnapshot.requiresHumanAction, "pre-send control snapshot should require approval")
+        expect(preSendControlSnapshot.primaryReviewKind == "approval", "pre-send control snapshot should focus approval")
+        expect(preSendControlSnapshot.canFocusPrimaryReview, "pre-send control snapshot should allow approval focus")
+        let focusedPreSendControlSnapshot = missionSummary.controlSnapshot(focusedOn: "approval")
+        expect(focusedPreSendControlSnapshot.controlState == "focused", "focused pre-send control snapshot should show focus")
+        expect(focusedPreSendControlSnapshot.focusedReviewKind == "approval", "focused pre-send control snapshot should record approval")
+        expect(focusedPreSendControlSnapshot.primaryReviewKind == "approval", "focused pre-send control snapshot should keep approval primary")
         missionStore.approveAndContinueAutonomousLoop()
         missionSummary = missionStore.missionRunSummary
         expect(missionSummary.primaryActionKind == .continueAfterReview, "mission summary should expose review action")
@@ -607,6 +622,22 @@ enum LogicSmoke {
             focusedHandoffBrief.items.contains { $0.reviewKind == "delivery-safety" && $0.isFocused },
             "focused handoff brief should mark delivery item"
         )
+        let controlSnapshot = missionSummary.controlSnapshot
+        expect(controlSnapshot.isReviewable, "control snapshot should be reviewable once Gateway evidence exists")
+        expect(
+            ["waiting-human", "metadata-pending", "ready-to-continue", "reviewable"].contains(controlSnapshot.controlState),
+            "control snapshot should expose stable post-send state"
+        )
+        expect(
+            controlSnapshot.requiresHumanAction == (handoffBrief.requiresHumanAction || missionSummary.requiresUserApproval),
+            "control snapshot should mirror human action state"
+        )
+        expect(controlSnapshot.primaryReviewKind != nil, "control snapshot should expose primary review")
+        let focusedControlSnapshot = missionSummary.controlSnapshot(focusedOn: "delivery-safety")
+        expect(focusedControlSnapshot.controlState == "focused", "focused control snapshot should expose focus state")
+        expect(focusedControlSnapshot.focusedReviewKind == "delivery-safety", "focused control snapshot should record delivery focus")
+        expect(focusedControlSnapshot.focusedReviewTitle == "最终提交安全", "focused control snapshot should expose delivery title")
+        expect(focusedControlSnapshot.primaryReviewKind == "delivery-safety", "focused control snapshot should keep delivery primary")
         let operatorStrip = missionSummary.operatorStrip
         expect(operatorStrip.lanes.map(\.id) == ["gateway", "evidence", "review", "next"], "operator strip should expose stable lanes")
         expect(operatorStrip.title == "Mission Operator", "operator strip should expose stable title")
@@ -852,6 +883,11 @@ enum LogicSmoke {
             statusHandoffBrief.items.contains { $0.reviewKind == statusOnlyItem.reviewKind && $0.isFocused },
             "status handoff brief should mark status item"
         )
+        let statusControlSnapshot = statusOnlySummary.controlSnapshot(focusedOn: statusOnlyItem.reviewKind)
+        expect(statusControlSnapshot.controlState == "focused", "status control snapshot should expose focus state")
+        expect(statusControlSnapshot.focusedReviewKind == statusOnlyItem.reviewKind, "status control snapshot should keep status focus")
+        expect(statusControlSnapshot.focusedReviewTitle == statusOnlyItem.title, "status control snapshot should expose status title")
+        expect(statusControlSnapshot.primaryReviewKind == statusOnlyItem.reviewKind, "status control snapshot should keep status primary")
         let staleFocusContext = statusOnlySummary.focusContextSummary(focusedOn: "unknown-review-kind")
         expect(staleFocusContext.focusedReviewKind == nil, "stale focus context should not keep an unknown review kind")
         expect(staleFocusContext.canClearFocus, "stale focus context should allow clearing focus")
@@ -903,6 +939,12 @@ enum LogicSmoke {
         expect(
             staleHandoffBrief.totalCount == statusOnlySummary.macAgentHandoffBrief.totalCount,
             "stale handoff brief should keep items"
+        )
+        let staleControlSnapshot = statusOnlySummary.controlSnapshot(focusedOn: "unknown-review-kind")
+        expect(staleControlSnapshot.focusedReviewKind == nil, "stale control snapshot should not keep unknown focus")
+        expect(
+            staleControlSnapshot.controlState == statusOnlySummary.controlSnapshot.controlState,
+            "stale control snapshot should fall back to default state"
         )
         expect(
             missionSummary.detailReviewKinds(focusedOn: nil) == availableDetailKinds,
@@ -1457,6 +1499,33 @@ enum LogicSmoke {
             staleHandoffBrief.guidance
         ]
         let handoffBriefVisibleChunks = handoffBriefItemChunks + handoffBriefSummaryChunks
+        let controlSnapshotVisibleChunks: [String] = [
+            idleControlSnapshot.title,
+            idleControlSnapshot.status,
+            idleControlSnapshot.guidance,
+            preSendControlSnapshot.title,
+            preSendControlSnapshot.status,
+            preSendControlSnapshot.guidance,
+            focusedPreSendControlSnapshot.title,
+            focusedPreSendControlSnapshot.status,
+            focusedPreSendControlSnapshot.guidance,
+            controlSnapshot.title,
+            controlSnapshot.status,
+            controlSnapshot.guidance,
+            controlSnapshot.primaryReviewKind ?? "",
+            controlSnapshot.primaryReviewTitle ?? "",
+            focusedControlSnapshot.title,
+            focusedControlSnapshot.status,
+            focusedControlSnapshot.guidance,
+            focusedControlSnapshot.focusedReviewKind ?? "",
+            focusedControlSnapshot.focusedReviewTitle ?? "",
+            statusControlSnapshot.title,
+            statusControlSnapshot.status,
+            statusControlSnapshot.guidance,
+            staleControlSnapshot.title,
+            staleControlSnapshot.status,
+            staleControlSnapshot.guidance
+        ]
         let queueVisibleText = (
             queueVisibleChunks +
                 readinessVisibleChunks +
@@ -1474,7 +1543,8 @@ enum LogicSmoke {
                 runTimelineVisibleChunks +
                 continuationGateVisibleChunks +
                 reviewRadarVisibleChunks +
-                handoffBriefVisibleChunks
+                handoffBriefVisibleChunks +
+                controlSnapshotVisibleChunks
         ).joined(separator: " ")
         for forbidden in ["Authorization", "Bearer", "toolArguments", "file://", "/private", "/Users", "/home", "C:\\", "stdout", "stderr", "diff", "raw-token", "header", "cookie", "secret"] {
             expect(queueVisibleText.contains(forbidden) == false, "review priority queue should not expose \(forbidden)")
@@ -1779,6 +1849,13 @@ enum LogicSmoke {
             shellHandoffBrief.items.contains { $0.id == "blockers" && $0.isBlocked },
             "shell handoff brief should surface blocker"
         )
+        let shellControlSnapshot = shellMissionSummary.controlSnapshot(focusedOn: "shell-safety")
+        expect(shellControlSnapshot.isReviewable, "shell control snapshot should be reviewable")
+        expect(shellControlSnapshot.controlState == "focused", "shell control snapshot should expose focus state")
+        expect(shellControlSnapshot.focusedReviewKind == "shell-safety", "shell control snapshot should record shell focus")
+        expect(shellControlSnapshot.focusedReviewTitle == "Shell 命令安全", "shell control snapshot should expose shell title")
+        expect(shellControlSnapshot.primaryReviewKind == "shell-safety", "shell control snapshot should keep shell primary")
+        expect(shellControlSnapshot.requiresHumanAction, "shell control snapshot should require human review")
         let shellPayloadLedgerRows = shellPayloadLedger.items.map { item in
             "\(item.reviewTitle) \(item.status) \(item.guidance)"
         }.joined(separator: " ")
@@ -1875,7 +1952,11 @@ enum LogicSmoke {
             shellHandoffBrief.title,
             shellHandoffBrief.status,
             shellHandoffBrief.guidance,
-            shellHandoffBriefRows
+            shellHandoffBriefRows,
+            shellControlSnapshot.title,
+            shellControlSnapshot.status,
+            shellControlSnapshot.guidance,
+            shellControlSnapshot.primaryReviewTitle ?? ""
         ]
         let shellVisibleText = shellVisibleChunks.joined(separator: " ")
         expect(shellVisibleText.contains("stdout") == false, "shell readiness should not expose stdout")

@@ -636,6 +636,7 @@ struct ClawMissionRunPanel: View {
         let artifactEvidenceIndex = summary.artifactEvidenceIndex(focusedOn: activeFocusedReviewKind)
         let reviewReadinessSummary = summary.reviewReadinessSummary(focusedOn: activeFocusedReviewKind)
         let nextReviewAction = summary.nextReviewAction(focusedOn: activeFocusedReviewKind)
+        let controlSnapshot = summary.controlSnapshot(focusedOn: activeFocusedReviewKind)
         let operatorStrip = summary.operatorStrip(focusedOn: activeFocusedReviewKind)
         let loopContinuation = summary.loopContinuationSummary(focusedOn: activeFocusedReviewKind)
         let macAgentReadiness = summary.macAgentReadinessBoard(focusedOn: activeFocusedReviewKind)
@@ -697,6 +698,11 @@ struct ClawMissionRunPanel: View {
                 ProgressView(value: Double(summary.progressCurrent), total: Double(summary.progressTotal))
                     .tint(phaseTint(for: summary))
             }
+
+            ClawMissionRunControlSnapshotView(
+                snapshot: controlSnapshot,
+                onFocusReviewKind: focusReviewKind
+            )
 
             ClawMissionRunOperatorStripView(
                 strip: operatorStrip,
@@ -893,6 +899,7 @@ struct ClawMissionReviewDetailDockView: View {
         let activeFocusedReviewKind = summary.activeReviewFocus(from: focusedReviewKind)
         let dock = summary.reviewDetailDockSummary(focusedOn: focusedReviewKind)
         let focusContext = summary.focusContextSummary(focusedOn: focusedReviewKind)
+        let controlSnapshot = summary.controlSnapshot(focusedOn: activeFocusedReviewKind)
         let evidenceTrail = summary.evidenceTrailSummary(focusedOn: activeFocusedReviewKind)
         let macAgentReadiness = summary.macAgentReadinessBoard(focusedOn: activeFocusedReviewKind)
         let actionPreflightMatrix = summary.macGatewayActionPreflightMatrix(focusedOn: activeFocusedReviewKind)
@@ -944,6 +951,11 @@ struct ClawMissionReviewDetailDockView: View {
                     PhoneAgentTag(text: "聚焦已更新", icon: "arrow.triangle.2.circlepath", tint: .orange)
                 }
             }
+
+            ClawMissionRunControlSnapshotView(
+                snapshot: controlSnapshot,
+                onFocusReviewKind: focusReviewKind
+            )
 
             if dock.isReviewable {
                 ClawMissionMacAgentReadinessBoardView(
@@ -1156,6 +1168,101 @@ struct ClawMissionRunOperatorStripView: View {
 
     private var accessibilitySummary: String {
         "Mission Operator，\(strip.status)"
+    }
+}
+
+struct ClawMissionRunControlSnapshotView: View {
+    let snapshot: ClawMissionRunControlSnapshotSummary
+    let onFocusReviewKind: (String) -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: snapshot.icon)
+                .font(.headline.bold())
+                .frame(width: 34, height: 34)
+                .background(tint.opacity(0.14), in: Circle())
+                .foregroundStyle(tint)
+
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(snapshot.title)
+                        .font(.subheadline.bold())
+                        .foregroundStyle(tint)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Spacer(minLength: 0)
+
+                    PhoneAgentTag(text: snapshot.controlState, icon: "switch.2", tint: tint)
+                }
+
+                Text(snapshot.status)
+                    .font(.footnote.bold())
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(snapshot.guidance)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 6) {
+                    PhoneAgentTag(
+                        text: snapshot.canContinueLoop ? "显式下一轮" : "等待复核",
+                        icon: snapshot.canContinueLoop ? "arrow.forward.circle.fill" : "doc.text.magnifyingglass",
+                        tint: snapshot.canContinueLoop ? .green : .secondary
+                    )
+                    if snapshot.requiresHumanAction {
+                        PhoneAgentTag(text: "人工", icon: "hand.raised.fill", tint: .orange)
+                    }
+                    if snapshot.hasMetadataGap {
+                        PhoneAgentTag(text: "metadata", icon: "doc.badge.clock", tint: .blue)
+                    }
+                    if snapshot.isRetryable {
+                        PhoneAgentTag(text: "可重试", icon: "arrow.clockwise.circle.fill", tint: .orange)
+                    }
+                }
+
+                if snapshot.canFocusPrimaryReview,
+                   let reviewKind = snapshot.primaryReviewKind,
+                   let actionTitle = snapshot.primaryActionTitle {
+                    Button(actionTitle, systemImage: "scope") {
+                        onFocusReviewKind(reviewKind)
+                    }
+                    .font(.caption.bold())
+                    .buttonStyle(.borderless)
+                    .accessibilityHint("只聚焦对应复核项，不执行 Gateway 动作、不审批、不发送、不重试、不继续")
+                    .accessibilityInputLabels([actionTitle, "聚焦控制态势"])
+                }
+            }
+        }
+        .padding(10)
+        .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(tint.opacity(0.18), lineWidth: 1)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(accessibilitySummary)
+    }
+
+    private var accessibilitySummary: String {
+        "Control Snapshot，\(snapshot.status)，\(snapshot.guidance)"
+    }
+
+    private var tint: Color {
+        switch snapshot.tone {
+        case .neutral:
+            return .secondary
+        case .info:
+            return .blue
+        case .success:
+            return .green
+        case .warning:
+            return .orange
+        case .danger:
+            return .red
+        }
     }
 }
 

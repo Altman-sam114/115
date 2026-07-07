@@ -671,6 +671,11 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(idleHandoffBrief.blockedCount, 0)
         XCTAssertEqual(idleHandoffBrief.metadataPendingCount, 0)
         XCTAssertNil(idleHandoffBrief.primaryReviewKind)
+        let idleControlSnapshot = idleStore.missionRunSummary.controlSnapshot
+        XCTAssertFalse(idleControlSnapshot.isReviewable)
+        XCTAssertEqual(idleControlSnapshot.controlState, "idle")
+        XCTAssertFalse(idleControlSnapshot.canContinueLoop)
+        XCTAssertNil(idleControlSnapshot.primaryReviewKind)
         XCTAssertNil(idleStore.missionRunSummary.activeReviewFocus(from: "delivery-safety"))
 
         let store = ClawStore(autoScanLocalArtifacts: false)
@@ -755,6 +760,16 @@ final class ClawTests: XCTestCase {
         let focusedPreSendHandoffBrief = preSendSummary.macAgentHandoffBrief(focusedOn: "approval")
         XCTAssertEqual(focusedPreSendHandoffBrief.focusedReviewKind, "approval")
         XCTAssertTrue(focusedPreSendHandoffBrief.items.contains { $0.reviewKind == "approval" && $0.isFocused })
+        let preSendControlSnapshot = preSendSummary.controlSnapshot
+        XCTAssertTrue(preSendControlSnapshot.isReviewable)
+        XCTAssertEqual(preSendControlSnapshot.controlState, "waiting-human")
+        XCTAssertTrue(preSendControlSnapshot.requiresHumanAction)
+        XCTAssertEqual(preSendControlSnapshot.primaryReviewKind, "approval")
+        XCTAssertTrue(preSendControlSnapshot.canFocusPrimaryReview)
+        let focusedPreSendControlSnapshot = preSendSummary.controlSnapshot(focusedOn: "approval")
+        XCTAssertEqual(focusedPreSendControlSnapshot.controlState, "focused")
+        XCTAssertEqual(focusedPreSendControlSnapshot.focusedReviewKind, "approval")
+        XCTAssertEqual(focusedPreSendControlSnapshot.primaryReviewKind, "approval")
 
         store.approveAndContinueAutonomousLoop()
 
@@ -905,6 +920,16 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(focusedHandoffBrief.focusedReviewKind, "delivery-safety")
         XCTAssertEqual(focusedHandoffBrief.focusedReviewTitle, "最终提交安全")
         XCTAssertTrue(focusedHandoffBrief.items.contains { $0.reviewKind == "delivery-safety" && $0.isFocused })
+        let controlSnapshot = summary.controlSnapshot
+        XCTAssertTrue(controlSnapshot.isReviewable)
+        XCTAssertTrue(["waiting-human", "metadata-pending", "ready-to-continue", "reviewable"].contains(controlSnapshot.controlState))
+        XCTAssertEqual(controlSnapshot.requiresHumanAction, handoffBrief.requiresHumanAction || summary.requiresUserApproval)
+        XCTAssertNotNil(controlSnapshot.primaryReviewKind)
+        let focusedControlSnapshot = summary.controlSnapshot(focusedOn: "delivery-safety")
+        XCTAssertEqual(focusedControlSnapshot.controlState, "focused")
+        XCTAssertEqual(focusedControlSnapshot.focusedReviewKind, "delivery-safety")
+        XCTAssertEqual(focusedControlSnapshot.focusedReviewTitle, "最终提交安全")
+        XCTAssertEqual(focusedControlSnapshot.primaryReviewKind, "delivery-safety")
         let operatorStrip = summary.operatorStrip
         XCTAssertEqual(operatorStrip.lanes.map(\.id), ["gateway", "evidence", "review", "next"])
         XCTAssertEqual(operatorStrip.title, "Mission Operator")
@@ -1084,6 +1109,11 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(statusHandoffBrief.focusedReviewKind, statusOnlyItem.reviewKind)
         XCTAssertEqual(statusHandoffBrief.focusedReviewTitle, statusOnlyItem.title)
         XCTAssertTrue(statusHandoffBrief.items.contains { $0.reviewKind == statusOnlyItem.reviewKind && $0.isFocused })
+        let statusControlSnapshot = statusOnlySummary.controlSnapshot(focusedOn: statusOnlyItem.reviewKind)
+        XCTAssertEqual(statusControlSnapshot.controlState, "focused")
+        XCTAssertEqual(statusControlSnapshot.focusedReviewKind, statusOnlyItem.reviewKind)
+        XCTAssertEqual(statusControlSnapshot.focusedReviewTitle, statusOnlyItem.title)
+        XCTAssertEqual(statusControlSnapshot.primaryReviewKind, statusOnlyItem.reviewKind)
         let staleFocusContext = statusOnlySummary.focusContextSummary(focusedOn: "unknown-review-kind")
         XCTAssertNil(staleFocusContext.focusedReviewKind)
         XCTAssertTrue(staleFocusContext.canClearFocus)
@@ -1124,6 +1154,9 @@ final class ClawTests: XCTestCase {
         let staleHandoffBrief = statusOnlySummary.macAgentHandoffBrief(focusedOn: "unknown-review-kind")
         XCTAssertNil(staleHandoffBrief.focusedReviewKind)
         XCTAssertEqual(staleHandoffBrief.totalCount, statusOnlySummary.macAgentHandoffBrief.totalCount)
+        let staleControlSnapshot = statusOnlySummary.controlSnapshot(focusedOn: "unknown-review-kind")
+        XCTAssertNil(staleControlSnapshot.focusedReviewKind)
+        XCTAssertEqual(staleControlSnapshot.controlState, statusOnlySummary.controlSnapshot.controlState)
         XCTAssertEqual(summary.detailReviewKinds(focusedOn: nil), availableDetailKinds)
         XCTAssertEqual(summary.detailReviewKinds(focusedOn: "delivery-safety"), ["delivery-safety"])
         XCTAssertEqual(summary.detailReviewKinds(focusedOn: "gateway-status"), availableDetailKinds)
@@ -1640,7 +1673,34 @@ final class ClawTests: XCTestCase {
                 runTimelineVisibleChunks +
                 continuationGateVisibleChunks +
                 reviewRadarVisibleChunks +
-                handoffBriefVisibleChunks
+                handoffBriefVisibleChunks +
+                [
+                    idleControlSnapshot.title,
+                    idleControlSnapshot.status,
+                    idleControlSnapshot.guidance,
+                    preSendControlSnapshot.title,
+                    preSendControlSnapshot.status,
+                    preSendControlSnapshot.guidance,
+                    focusedPreSendControlSnapshot.title,
+                    focusedPreSendControlSnapshot.status,
+                    focusedPreSendControlSnapshot.guidance,
+                    controlSnapshot.title,
+                    controlSnapshot.status,
+                    controlSnapshot.guidance,
+                    controlSnapshot.primaryReviewKind ?? "",
+                    controlSnapshot.primaryReviewTitle ?? "",
+                    focusedControlSnapshot.title,
+                    focusedControlSnapshot.status,
+                    focusedControlSnapshot.guidance,
+                    focusedControlSnapshot.focusedReviewKind ?? "",
+                    focusedControlSnapshot.focusedReviewTitle ?? "",
+                    statusControlSnapshot.title,
+                    statusControlSnapshot.status,
+                    statusControlSnapshot.guidance,
+                    staleControlSnapshot.title,
+                    staleControlSnapshot.status,
+                    staleControlSnapshot.guidance
+                ]
         ).joined(separator: " ")
         for forbidden in ["Authorization", "Bearer", "toolArguments", "file://", "/private", "/Users", "/home", "C:\\", "stdout", "stderr", "diff", "raw-token", "header", "cookie", "secret"] {
             XCTAssertFalse(visibleText.contains(forbidden), "queue leaked \(forbidden)")
@@ -1759,6 +1819,13 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(shellHandoffBrief.focusedReviewTitle, "Shell 命令安全")
         XCTAssertTrue(shellHandoffBrief.items.contains { $0.reviewKind == "shell-safety" && $0.isFocused })
         XCTAssertTrue(shellHandoffBrief.items.contains { $0.id == "blockers" && $0.isBlocked })
+        let shellControlSnapshot = shellStore.missionRunSummary.controlSnapshot(focusedOn: "shell-safety")
+        XCTAssertTrue(shellControlSnapshot.isReviewable)
+        XCTAssertEqual(shellControlSnapshot.controlState, "focused")
+        XCTAssertEqual(shellControlSnapshot.focusedReviewKind, "shell-safety")
+        XCTAssertEqual(shellControlSnapshot.focusedReviewTitle, "Shell 命令安全")
+        XCTAssertEqual(shellControlSnapshot.primaryReviewKind, "shell-safety")
+        XCTAssertTrue(shellControlSnapshot.requiresHumanAction)
         XCTAssertFalse(
             [
                 shellReadiness.title,
@@ -1828,7 +1895,11 @@ final class ClawTests: XCTestCase {
                 shellHandoffBrief.title,
                 shellHandoffBrief.status,
                 shellHandoffBrief.guidance,
-                shellHandoffBrief.items.map { "\($0.title) \($0.status) \($0.guidance)" }.joined(separator: " ")
+                shellHandoffBrief.items.map { "\($0.title) \($0.status) \($0.guidance)" }.joined(separator: " "),
+                shellControlSnapshot.title,
+                shellControlSnapshot.status,
+                shellControlSnapshot.guidance,
+                shellControlSnapshot.primaryReviewTitle ?? ""
             ].joined(separator: " ").contains("stdout")
         )
     }
