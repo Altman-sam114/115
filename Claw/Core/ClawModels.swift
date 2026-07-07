@@ -1613,6 +1613,51 @@ struct ClawMissionRunNextStepDeck: Equatable, Codable, Sendable {
     var candidates: [ClawMissionRunNextStepCandidate]
 }
 
+struct ClawMissionRunTimelineStep: Identifiable, Equatable, Codable, Sendable {
+    var id: String
+    var rank: Int
+    var title: String
+    var status: String
+    var guidance: String
+    var icon: String
+    var tone: ClawMissionRunOperatorLaneTone
+    var reviewKind: String?
+    var reviewTitle: String?
+    var canFocusReview: Bool
+    var isFocused: Bool
+    var hasResult: Bool
+    var hasEvidence: Bool
+    var hasMetadata: Bool
+    var requiresHumanAction: Bool
+    var isBlocked: Bool
+    var isRetryable: Bool
+    var isSummaryStep: Bool
+}
+
+struct ClawMissionRunTimelineSummary: Equatable, Codable, Sendable {
+    var title: String
+    var status: String
+    var guidance: String
+    var icon: String
+    var totalCount: Int
+    var actionStepCount: Int
+    var completedCount: Int
+    var blockedCount: Int
+    var humanActionCount: Int
+    var metadataPendingCount: Int
+    var evidenceStepCount: Int
+    var focusedStepID: String?
+    var focusedReviewKind: String?
+    var focusedReviewTitle: String?
+    var primaryReviewKind: String?
+    var primaryReviewTitle: String?
+    var canFocusPrimaryReview: Bool
+    var requiresHumanAction: Bool
+    var hasMetadataGap: Bool
+    var isReviewable: Bool
+    var steps: [ClawMissionRunTimelineStep]
+}
+
 struct ClawMissionRunReviewReadinessSummary: Equatable, Codable, Sendable {
     var title: String
     var status: String
@@ -4149,6 +4194,251 @@ extension ClawMissionRunSummary {
         default:
             return nil
         }
+    }
+
+    var macAgentRunTimeline: ClawMissionRunTimelineSummary {
+        macAgentRunTimeline(focusedOn: nil)
+    }
+
+    func macAgentRunTimeline(focusedOn reviewKind: String?) -> ClawMissionRunTimelineSummary {
+        let focusedKind = activeReviewFocus(from: reviewKind)
+        let actionPreflight = macGatewayActionPreflightMatrix(focusedOn: focusedKind)
+        let coverage = macAgentEvidenceCoverageMap(focusedOn: focusedKind)
+        let approval = approvalQueueSummary(focusedOn: focusedKind)
+        let readiness = reviewReadinessSummary(focusedOn: focusedKind)
+
+        var steps = actionPreflight.items.map { item in
+            timelineStep(forAction: item, coverage: coverage, focusedOn: focusedKind)
+        }
+
+        if coverage.isReviewable {
+            steps.append(
+                timelineEvidenceStep(
+                    coverage: coverage,
+                    focusedOn: focusedKind,
+                    rank: steps.count
+                )
+            )
+        }
+
+        if approval.isReviewable || readiness.isReviewable || requiresUserApproval {
+            steps.append(
+                timelineHandoffStep(
+                    approval: approval,
+                    readiness: readiness,
+                    focusedOn: focusedKind,
+                    rank: steps.count
+                )
+            )
+        }
+
+        let focusedStep = focusedKind.flatMap { kind in
+            steps.first { $0.reviewKind == kind && $0.canFocusReview }
+        }
+        let primaryStep = focusedStep ??
+            steps.first(where: \.isBlocked) ??
+            steps.first(where: \.requiresHumanAction) ??
+            steps.first(where: timelineStepHasMetadataGap) ??
+            steps.first(where: { $0.hasResult == false && $0.isSummaryStep == false }) ??
+            steps.first
+        let isReviewable = steps.isEmpty == false
+        let actionStepCount = steps.filter { $0.isSummaryStep == false }.count
+        let completedCount = steps.filter { $0.hasResult && $0.isBlocked == false }.count
+        let blockedCount = steps.filter(\.isBlocked).count
+        let humanActionCount = steps.filter(\.requiresHumanAction).count
+        let metadataPendingCount = steps.filter(timelineStepHasMetadataGap).count
+        let evidenceStepCount = steps.filter(\.hasEvidence).count
+        let requiresHumanAction = humanActionCount > 0 || approval.requiresHumanAction || readiness.requiresHumanAction
+        let hasMetadataGap = metadataPendingCount > 0 || approval.hasMetadataGap
+
+        let title: String
+        let status: String
+        let guidance: String
+        let icon: String
+        if isReviewable == false {
+            title = "Run Timeline 待生成"
+            status = "尚无 action 或 Gateway 结果"
+            guidance = "生成任务后会按 action 顺序串起审批、执行、证据和交接状态。"
+            icon = "timeline.selection"
+        } else if let focusedStep {
+            title = "聚焦 Run Timeline"
+            status = focusedStep.title
+            guidance = "\(focusedStep.title)：\(focusedStep.guidance)"
+            icon = focusedStep.icon
+        } else if blockedCount > 0 {
+            title = "Run Timeline 存在阻断"
+            status = "\(blockedCount) 项阻断 · \(completedCount)/\(steps.count) 步完成"
+            guidance = primaryStep.map { "先看 \($0.title)：\($0.guidance)" } ?? "先处理阻断步骤。"
+            icon = "timeline.selection"
+        } else if requiresHumanAction {
+            title = "Run Timeline 等待人工"
+            status = "\(humanActionCount) 步需人工 · \(completedCount)/\(steps.count) 步完成"
+            guidance = primaryStep.map { "先确认 \($0.title)：\($0.guidance)" } ?? "先处理人工确认步骤。"
+            icon = "person.crop.circle.badge.exclamationmark.fill"
+        } else if hasMetadataGap {
+            title = "Run Timeline metadata 待同步"
+            status = "\(metadataPendingCount) 步 metadata 待同步"
+            guidance = primaryStep.map { "等待 \($0.title) metadata 后再复核时间线。" } ?? "等待 Gateway metadata 后再复核时间线。"
+            icon = "doc.badge.clock"
+        } else {
+            title = "Mac Agent Run Timeline"
+            status = "\(completedCount)/\(steps.count) 步完成 · \(evidenceStepCount) 步有证据"
+            guidance = "时间线只展示安全摘要和聚焦入口，不打开 artifact payload。"
+            icon = "timeline.selection"
+        }
+
+        return ClawMissionRunTimelineSummary(
+            title: title,
+            status: status,
+            guidance: guidance,
+            icon: icon,
+            totalCount: steps.count,
+            actionStepCount: actionStepCount,
+            completedCount: completedCount,
+            blockedCount: blockedCount,
+            humanActionCount: humanActionCount,
+            metadataPendingCount: metadataPendingCount,
+            evidenceStepCount: evidenceStepCount,
+            focusedStepID: focusedStep?.id,
+            focusedReviewKind: focusedStep?.reviewKind,
+            focusedReviewTitle: focusedStep?.reviewTitle,
+            primaryReviewKind: primaryStep?.reviewKind,
+            primaryReviewTitle: primaryStep?.reviewTitle,
+            canFocusPrimaryReview: primaryStep?.canFocusReview ?? false,
+            requiresHumanAction: requiresHumanAction,
+            hasMetadataGap: hasMetadataGap,
+            isReviewable: isReviewable,
+            steps: steps
+        )
+    }
+
+    private func timelineStep(
+        forAction item: ClawMissionRunActionPreflightItem,
+        coverage: ClawMissionRunEvidenceCoverageMap,
+        focusedOn focusedKind: String?
+    ) -> ClawMissionRunTimelineStep {
+        let coverageItem = item.reviewKind.flatMap { kind in
+            coverage.items.first { $0.reviewKind == kind }
+        }
+        let hasEvidence = coverageItem?.hasEvidence ?? false
+        let hasMetadata = item.hasMetadata || (coverageItem?.hasMetadata ?? false)
+        let guidance: String
+        if item.hasResult && hasEvidence {
+            guidance = "Gateway 已回传结果和可复核证据；仍只显示安全摘要。"
+        } else {
+            guidance = item.guidance
+        }
+
+        return ClawMissionRunTimelineStep(
+            id: "action-\(item.id)",
+            rank: item.rank,
+            title: item.title,
+            status: item.status,
+            guidance: guidance,
+            icon: item.icon,
+            tone: item.tone,
+            reviewKind: item.reviewKind,
+            reviewTitle: item.reviewTitle,
+            canFocusReview: item.canFocusReview,
+            isFocused: item.reviewKind != nil && item.reviewKind == focusedKind,
+            hasResult: item.hasResult,
+            hasEvidence: hasEvidence,
+            hasMetadata: hasMetadata,
+            requiresHumanAction: item.requiresHumanAction,
+            isBlocked: item.isBlocked,
+            isRetryable: item.isRetryable,
+            isSummaryStep: false
+        )
+    }
+
+    private func timelineEvidenceStep(
+        coverage: ClawMissionRunEvidenceCoverageMap,
+        focusedOn focusedKind: String?,
+        rank: Int
+    ) -> ClawMissionRunTimelineStep {
+        let reviewKind = coverage.primaryReviewKind
+        let hasMetadata = coverage.metadataPendingCount == 0 && coverage.metadataReadyCount > 0
+        let tone: ClawMissionRunOperatorLaneTone
+        if coverage.requiresHumanAction && coverage.evidenceCoveredCount == 0 {
+            tone = .warning
+        } else if coverage.hasMetadataGap {
+            tone = .info
+        } else if coverage.evidenceCoveredCount > 0 {
+            tone = .success
+        } else {
+            tone = .neutral
+        }
+        let status: String
+        if coverage.evidenceCoveredCount > 0 {
+            status = "\(coverage.evidenceCoveredCount)/\(coverage.totalCount) 类证据"
+        } else {
+            status = "等待 Gateway 证据"
+        }
+
+        return ClawMissionRunTimelineStep(
+            id: "evidence-sync",
+            rank: rank,
+            title: "证据同步",
+            status: status,
+            guidance: coverage.guidance,
+            icon: coverage.icon,
+            tone: tone,
+            reviewKind: reviewKind,
+            reviewTitle: coverage.primaryReviewTitle,
+            canFocusReview: coverage.canFocusPrimaryReview,
+            isFocused: reviewKind != nil && reviewKind == focusedKind,
+            hasResult: coverage.evidenceCoveredCount > 0,
+            hasEvidence: coverage.evidenceCoveredCount > 0,
+            hasMetadata: hasMetadata,
+            requiresHumanAction: coverage.requiresHumanAction,
+            isBlocked: false,
+            isRetryable: false,
+            isSummaryStep: true
+        )
+    }
+
+    private func timelineHandoffStep(
+        approval: ClawMissionRunApprovalQueueSummary,
+        readiness: ClawMissionRunReviewReadinessSummary,
+        focusedOn focusedKind: String?,
+        rank: Int
+    ) -> ClawMissionRunTimelineStep {
+        let reviewKind = approval.primaryReviewKind ?? readiness.topReviewKind
+        let reviewTitle = approval.primaryReviewTitle ?? readiness.topReviewTitle
+        let hasMetadata = approval.hasMetadataGap == false && readiness.metadataPendingCount == 0
+        let requiresHumanAction = approval.requiresHumanAction || readiness.requiresHumanAction || requiresUserApproval
+        let tone: ClawMissionRunOperatorLaneTone = requiresHumanAction ? .warning : (hasMetadata ? .success : .info)
+        let status: String
+        if approval.isReviewable {
+            status = "\(approval.actionableCount) 项可处理 · \(approval.totalCount) 项确认"
+        } else {
+            status = readiness.status
+        }
+
+        return ClawMissionRunTimelineStep(
+            id: "human-handoff",
+            rank: rank,
+            title: "人工交接",
+            status: status,
+            guidance: approval.isReviewable ? approval.guidance : readiness.guidance,
+            icon: requiresHumanAction ? "hand.raised.fill" : "checkmark.seal.fill",
+            tone: tone,
+            reviewKind: reviewKind,
+            reviewTitle: reviewTitle,
+            canFocusReview: approval.canFocusPrimaryReview || (reviewKind.map(focusUsesDetailReview) ?? false),
+            isFocused: reviewKind != nil && reviewKind == focusedKind,
+            hasResult: approval.isReviewable || readiness.isReviewable,
+            hasEvidence: readiness.isReviewable,
+            hasMetadata: hasMetadata,
+            requiresHumanAction: requiresHumanAction,
+            isBlocked: false,
+            isRetryable: false,
+            isSummaryStep: true
+        )
+    }
+
+    private func timelineStepHasMetadataGap(_ step: ClawMissionRunTimelineStep) -> Bool {
+        step.hasMetadata == false && (step.hasResult || step.hasEvidence || step.requiresHumanAction)
     }
 
     func macAgentReadinessBoard(focusedOn reviewKind: String?) -> ClawMissionRunMacAgentReadinessBoard {

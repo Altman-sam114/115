@@ -642,6 +642,7 @@ struct ClawMissionRunPanel: View {
         let actionPreflightMatrix = summary.macGatewayActionPreflightMatrix(focusedOn: activeFocusedReviewKind)
         let evidenceCoverageMap = summary.macAgentEvidenceCoverageMap(focusedOn: activeFocusedReviewKind)
         let nextStepDeck = summary.macAgentNextStepDeck(focusedOn: activeFocusedReviewKind)
+        let runTimeline = summary.macAgentRunTimeline(focusedOn: activeFocusedReviewKind)
         let focusContext = summary.focusContextSummary(focusedOn: focusedReviewKind)
         let evidenceTrail = summary.evidenceTrailSummary(focusedOn: activeFocusedReviewKind)
         let approvalQueue = summary.approvalQueueSummary(focusedOn: activeFocusedReviewKind)
@@ -721,6 +722,11 @@ struct ClawMissionRunPanel: View {
 
             ClawMissionMacAgentNextStepDeckView(
                 deck: nextStepDeck,
+                onFocusReviewKind: focusReviewKind
+            )
+
+            ClawMissionMacAgentRunTimelineView(
+                timeline: runTimeline,
                 onFocusReviewKind: focusReviewKind
             )
 
@@ -874,6 +880,7 @@ struct ClawMissionReviewDetailDockView: View {
         let actionPreflightMatrix = summary.macGatewayActionPreflightMatrix(focusedOn: activeFocusedReviewKind)
         let evidenceCoverageMap = summary.macAgentEvidenceCoverageMap(focusedOn: activeFocusedReviewKind)
         let nextStepDeck = summary.macAgentNextStepDeck(focusedOn: activeFocusedReviewKind)
+        let runTimeline = summary.macAgentRunTimeline(focusedOn: activeFocusedReviewKind)
         let approvalQueue = summary.approvalQueueSummary(focusedOn: activeFocusedReviewKind)
         let payloadSafetyLedger = summary.payloadSafetyLedger(focusedOn: activeFocusedReviewKind)
 
@@ -935,6 +942,11 @@ struct ClawMissionReviewDetailDockView: View {
 
                 ClawMissionMacAgentNextStepDeckView(
                     deck: nextStepDeck,
+                    onFocusReviewKind: focusReviewKind
+                )
+
+                ClawMissionMacAgentRunTimelineView(
+                    timeline: runTimeline,
                     onFocusReviewKind: focusReviewKind
                 )
 
@@ -2828,6 +2840,197 @@ struct ClawMissionMacAgentNextStepCandidateRow: View {
 
     private var tint: Color {
         switch candidate.tone {
+        case .neutral:
+            return .secondary
+        case .info:
+            return .blue
+        case .success:
+            return .green
+        case .warning:
+            return .orange
+        case .danger:
+            return .red
+        }
+    }
+}
+
+struct ClawMissionMacAgentRunTimelineView: View {
+    let timeline: ClawMissionRunTimelineSummary
+    let onFocusReviewKind: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Label(timeline.title, systemImage: timeline.icon)
+                    .font(.subheadline.bold())
+                    .foregroundStyle(tint)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Spacer(minLength: 0)
+
+                if let focusedReviewTitle = timeline.focusedReviewTitle {
+                    PhoneAgentTag(text: focusedReviewTitle, icon: "scope", tint: tint)
+                }
+            }
+
+            Text(timeline.status)
+                .font(.footnote.bold())
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(timeline.guidance)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 8) {
+                Label("\(timeline.actionStepCount) action", systemImage: "slider.horizontal.3")
+                Label("\(timeline.completedCount) 完成", systemImage: "checkmark.circle.fill")
+                Label("\(timeline.evidenceStepCount) 证据", systemImage: "paperclip")
+                Label("\(timeline.humanActionCount) 人工", systemImage: "hand.raised.fill")
+            }
+            .font(.caption.bold())
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+            if timeline.steps.isEmpty == false {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(Array(timeline.steps.prefix(8))) { step in
+                        ClawMissionMacAgentRunTimelineStepRow(
+                            step: step,
+                            onFocusReviewKind: onFocusReviewKind
+                        )
+                    }
+                }
+            }
+        }
+        .padding(10)
+        .background(tint.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(tint.opacity(0.16), lineWidth: 1)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(accessibilitySummary)
+    }
+
+    private var accessibilitySummary: String {
+        "Run Timeline，\(timeline.status)，\(timeline.completedCount) 步完成，\(timeline.metadataPendingCount) 步 metadata 待同步"
+    }
+
+    private var tint: Color {
+        if timeline.isReviewable == false {
+            return .secondary
+        }
+        if timeline.blockedCount > 0 {
+            return .red
+        }
+        if timeline.requiresHumanAction {
+            return .orange
+        }
+        if timeline.hasMetadataGap {
+            return .blue
+        }
+        return .green
+    }
+}
+
+struct ClawMissionMacAgentRunTimelineStepRow: View {
+    let step: ClawMissionRunTimelineStep
+    let onFocusReviewKind: (String) -> Void
+
+    var body: some View {
+        Group {
+            if step.canFocusReview, let reviewKind = step.reviewKind {
+                Button {
+                    onFocusReviewKind(reviewKind)
+                } label: {
+                    rowContent
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("聚焦对应复核项，不打开 artifact payload、不读取 auditTrail、不执行 Gateway 动作、不审批、不发送")
+                .accessibilityInputLabels(accessibilityInputLabels)
+            } else {
+                rowContent
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(accessibilitySummary)
+    }
+
+    private var rowContent: some View {
+        HStack(alignment: .top, spacing: 8) {
+            VStack(spacing: 3) {
+                Image(systemName: step.isFocused ? "scope" : step.icon)
+                    .font(.caption.bold())
+                    .frame(width: 28, height: 28)
+                    .background(tint.opacity(step.isFocused ? 0.22 : 0.12), in: Circle())
+                    .foregroundStyle(tint)
+
+                if step.isSummaryStep == false {
+                    Text("\(step.rank + 1)")
+                        .font(.caption2.bold())
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(step.title)
+                    .font(.footnote.bold())
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(step.status)
+                    .font(.caption.bold())
+                    .foregroundStyle(tint)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(step.guidance)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 6) {
+                    PhoneAgentTag(text: step.hasResult ? "结果" : "待结果", icon: step.hasResult ? "checkmark.circle.fill" : "clock", tint: step.hasResult ? .green : .secondary)
+                    PhoneAgentTag(text: step.hasEvidence ? "证据" : "待证据", icon: "paperclip", tint: step.hasEvidence ? .green : .secondary)
+                    PhoneAgentTag(text: step.hasMetadata ? "metadata" : "待 metadata", icon: "doc.badge.clock", tint: step.hasMetadata ? .green : .orange)
+                    if step.requiresHumanAction {
+                        PhoneAgentTag(text: "人工", icon: "hand.raised.fill", tint: .orange)
+                    }
+                    if step.isRetryable {
+                        PhoneAgentTag(text: "可重试", icon: "arrow.clockwise.circle.fill", tint: .orange)
+                    }
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .padding(.vertical, 4)
+        .padding(.horizontal, 6)
+        .background(tint.opacity(step.isFocused ? 0.08 : 0), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            if step.isFocused {
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(tint.opacity(0.45), lineWidth: 1)
+            }
+        }
+    }
+
+    private var accessibilityInputLabels: [String] {
+        if let reviewTitle = step.reviewTitle {
+            return ["聚焦\(reviewTitle)", "查看\(step.title)时间线"]
+        }
+        return ["聚焦\(step.title)", "查看时间线"]
+    }
+
+    private var accessibilitySummary: String {
+        "\(step.title)，\(step.status)，\(step.guidance)"
+    }
+
+    private var tint: Color {
+        switch step.tone {
         case .neutral:
             return .secondary
         case .info:

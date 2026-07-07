@@ -187,6 +187,13 @@ enum LogicSmoke {
         expect(idleNextStepDeck.candidates.isEmpty, "idle next step deck should have no candidate rows")
         expect(idleNextStepDeck.primaryReviewKind == nil, "idle next step deck should not invent primary focus")
         expect(idleNextStepDeck.focusedReviewKind == nil, "idle next step deck should not invent focused review")
+        let idleRunTimeline = missionStore.missionRunSummary.macAgentRunTimeline
+        expect(idleRunTimeline.isReviewable == false, "idle run timeline should not be reviewable")
+        expect(idleRunTimeline.totalCount == 0, "idle run timeline should not count steps")
+        expect(idleRunTimeline.actionStepCount == 0, "idle run timeline should not count actions")
+        expect(idleRunTimeline.completedCount == 0, "idle run timeline should not count completed steps")
+        expect(idleRunTimeline.metadataPendingCount == 0, "idle run timeline should not count metadata gaps")
+        expect(idleRunTimeline.primaryReviewKind == nil, "idle run timeline should not invent primary focus")
         expect(missionStore.missionRunSummary.activeReviewFocus(from: "delivery-safety") == nil, "idle active focus should not resolve")
         missionStore.phoneAgentCommand = "打开浏览器搜索资料，整理结果并发到 Slack"
         missionStore.startAutonomousComputerTakeover()
@@ -256,6 +263,21 @@ enum LogicSmoke {
         expect(
             focusedPreSendNextStepDeck.candidates.contains { $0.reviewKind == "approval" && $0.isFocused },
             "focused pre-send next step deck should mark approval row"
+        )
+        let preSendRunTimeline = missionSummary.macAgentRunTimeline
+        expect(preSendRunTimeline.isReviewable, "pre-send run timeline should be reviewable")
+        expect(preSendRunTimeline.actionStepCount == missionSummary.actionPreflightItems.count, "pre-send run timeline should mirror action rows")
+        expect(preSendRunTimeline.humanActionCount > 0, "pre-send run timeline should surface human gates")
+        expect(preSendRunTimeline.requiresHumanAction, "pre-send run timeline should require human action")
+        expect(
+            preSendRunTimeline.steps.contains { $0.reviewKind == "approval" && $0.requiresHumanAction && $0.hasResult == false },
+            "pre-send run timeline should include approval action step"
+        )
+        let focusedPreSendRunTimeline = missionSummary.macAgentRunTimeline(focusedOn: "approval")
+        expect(focusedPreSendRunTimeline.focusedReviewKind == "approval", "pre-send run timeline should focus approval")
+        expect(
+            focusedPreSendRunTimeline.steps.contains { $0.reviewKind == "approval" && $0.isFocused },
+            "focused pre-send run timeline should mark approval row"
         )
         missionStore.approveAndContinueAutonomousLoop()
         missionSummary = missionStore.missionRunSummary
@@ -428,6 +450,26 @@ enum LogicSmoke {
         expect(
             focusedNextStepDeck.candidates.contains { $0.reviewKind == "delivery-safety" && $0.isFocused },
             "focused next step deck should mark delivery candidate"
+        )
+        let runTimeline = missionSummary.macAgentRunTimeline
+        expect(runTimeline.isReviewable, "run timeline should be reviewable once task or Gateway evidence exists")
+        expect(runTimeline.actionStepCount == missionSummary.actionPreflightItems.count, "run timeline should mirror action rows")
+        expect(runTimeline.completedCount > 0, "run timeline should count completed steps")
+        expect(runTimeline.evidenceStepCount > 0, "run timeline should count evidence steps")
+        expect(runTimeline.humanActionCount > 0, "run timeline should surface human gates")
+        expect(runTimeline.requiresHumanAction, "run timeline should require human review")
+        expect(runTimeline.steps.contains { $0.id == "evidence-sync" && $0.hasEvidence }, "run timeline should include evidence sync step")
+        expect(runTimeline.steps.contains { $0.id == "human-handoff" && $0.requiresHumanAction }, "run timeline should include human handoff step")
+        expect(
+            runTimeline.steps.contains { $0.reviewKind == "browser-control" && $0.hasResult && $0.hasEvidence },
+            "run timeline should join browser result with evidence"
+        )
+        let focusedRunTimeline = missionSummary.macAgentRunTimeline(focusedOn: "delivery-safety")
+        expect(focusedRunTimeline.focusedReviewKind == "delivery-safety", "run timeline should record delivery focus")
+        expect(focusedRunTimeline.focusedReviewTitle == "最终提交安全", "run timeline should expose delivery title")
+        expect(
+            focusedRunTimeline.steps.contains { $0.reviewKind == "delivery-safety" && $0.isFocused },
+            "focused run timeline should mark delivery row"
         )
         let operatorStrip = missionSummary.operatorStrip
         expect(operatorStrip.lanes.map(\.id) == ["gateway", "evidence", "review", "next"], "operator strip should expose stable lanes")
@@ -646,6 +688,13 @@ enum LogicSmoke {
             statusNextStepDeck.candidates.contains { $0.reviewKind == statusOnlyItem.reviewKind && $0.isFocused },
             "status next step deck should mark status candidate"
         )
+        let statusRunTimeline = statusOnlySummary.macAgentRunTimeline(focusedOn: statusOnlyItem.reviewKind)
+        expect(statusRunTimeline.focusedReviewKind == statusOnlyItem.reviewKind, "status run timeline should keep status focus")
+        expect(statusRunTimeline.focusedReviewTitle == statusOnlyItem.title, "status run timeline should expose status title")
+        expect(
+            statusRunTimeline.steps.contains { $0.reviewKind == statusOnlyItem.reviewKind && $0.isFocused },
+            "status run timeline should mark status row"
+        )
         let staleFocusContext = statusOnlySummary.focusContextSummary(focusedOn: "unknown-review-kind")
         expect(staleFocusContext.focusedReviewKind == nil, "stale focus context should not keep an unknown review kind")
         expect(staleFocusContext.canClearFocus, "stale focus context should allow clearing focus")
@@ -677,6 +726,9 @@ enum LogicSmoke {
             staleNextStepDeck.totalCount == statusOnlySummary.macAgentNextStepDeck.totalCount,
             "stale next step deck should keep candidates"
         )
+        let staleRunTimeline = statusOnlySummary.macAgentRunTimeline(focusedOn: "unknown-review-kind")
+        expect(staleRunTimeline.focusedReviewKind == nil, "stale run timeline should not keep unknown focus")
+        expect(staleRunTimeline.totalCount >= statusOnlySummary.actionPreflightItems.count, "stale run timeline should keep steps")
         expect(
             missionSummary.detailReviewKinds(focusedOn: nil) == availableDetailKinds,
             "nil focus should show all detail reviews"
@@ -1074,6 +1126,45 @@ enum LogicSmoke {
             staleNextStepDeck.guidance
         ]
         let nextStepDeckVisibleChunks = nextStepDeckItemChunks + nextStepDeckSummaryChunks
+        let runTimelineItemChunks: [String] = runTimeline.steps.flatMap { step in
+            [
+                step.title,
+                step.status,
+                step.guidance,
+                step.reviewKind ?? "",
+                step.reviewTitle ?? ""
+            ]
+        }
+        let runTimelineSummaryChunks: [String] = [
+            idleRunTimeline.title,
+            idleRunTimeline.status,
+            idleRunTimeline.guidance,
+            preSendRunTimeline.title,
+            preSendRunTimeline.status,
+            preSendRunTimeline.guidance,
+            focusedPreSendRunTimeline.title,
+            focusedPreSendRunTimeline.status,
+            focusedPreSendRunTimeline.guidance,
+            runTimeline.title,
+            runTimeline.status,
+            runTimeline.guidance,
+            runTimeline.primaryReviewKind ?? "",
+            runTimeline.primaryReviewTitle ?? "",
+            focusedRunTimeline.title,
+            focusedRunTimeline.status,
+            focusedRunTimeline.guidance,
+            focusedRunTimeline.focusedReviewKind ?? "",
+            focusedRunTimeline.focusedReviewTitle ?? "",
+            statusRunTimeline.title,
+            statusRunTimeline.status,
+            statusRunTimeline.guidance,
+            statusRunTimeline.focusedReviewKind ?? "",
+            statusRunTimeline.focusedReviewTitle ?? "",
+            staleRunTimeline.title,
+            staleRunTimeline.status,
+            staleRunTimeline.guidance
+        ]
+        let runTimelineVisibleChunks = runTimelineItemChunks + runTimelineSummaryChunks
         let queueVisibleText = (
             queueVisibleChunks +
                 readinessVisibleChunks +
@@ -1087,7 +1178,8 @@ enum LogicSmoke {
                 macReadinessVisibleChunks +
                 actionPreflightVisibleChunks +
                 evidenceCoverageVisibleChunks +
-                nextStepDeckVisibleChunks
+                nextStepDeckVisibleChunks +
+                runTimelineVisibleChunks
         ).joined(separator: " ")
         for forbidden in ["Authorization", "Bearer", "toolArguments", "file://", "/private", "/Users", "/home", "C:\\", "stdout", "stderr", "diff"] {
             expect(queueVisibleText.contains(forbidden) == false, "review priority queue should not expose \(forbidden)")
@@ -1339,6 +1431,19 @@ enum LogicSmoke {
             shellNextStepDeck.candidates.contains { $0.reviewKind == "shell-safety" && $0.isFocused },
             "shell next step deck should mark shell candidate"
         )
+        let shellRunTimeline = shellMissionSummary.macAgentRunTimeline(focusedOn: "shell-safety")
+        expect(shellRunTimeline.isReviewable, "shell run timeline should be reviewable")
+        expect(shellRunTimeline.requiresHumanAction, "shell run timeline should require human review")
+        expect(shellRunTimeline.focusedReviewKind == "shell-safety", "shell run timeline should record shell focus")
+        expect(shellRunTimeline.focusedReviewTitle == "Shell 命令安全", "shell run timeline should expose shell title")
+        expect(
+            shellRunTimeline.steps.contains { $0.reviewKind == "shell-safety" && $0.isFocused && $0.hasEvidence },
+            "shell run timeline should mark focused shell evidence"
+        )
+        expect(
+            shellRunTimeline.steps.contains { $0.reviewKind == "shell-safety" && $0.isRetryable },
+            "shell run timeline should carry retryable shell state"
+        )
         let shellPayloadLedgerRows = shellPayloadLedger.items.map { item in
             "\(item.reviewTitle) \(item.status) \(item.guidance)"
         }.joined(separator: " ")
@@ -1410,7 +1515,11 @@ enum LogicSmoke {
             shellNextStepDeck.title,
             shellNextStepDeck.status,
             shellNextStepDeck.guidance,
-            shellNextStepDeckRows
+            shellNextStepDeckRows,
+            shellRunTimeline.title,
+            shellRunTimeline.status,
+            shellRunTimeline.guidance,
+            shellRunTimeline.steps.map { "\($0.title) \($0.status) \($0.guidance)" }.joined(separator: " ")
         ]
         let shellVisibleText = shellVisibleChunks.joined(separator: " ")
         expect(shellVisibleText.contains("stdout") == false, "shell readiness should not expose stdout")
