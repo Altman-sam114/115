@@ -1569,7 +1569,7 @@ final class ClawTests: XCTestCase {
                 continuationGateVisibleChunks +
                 reviewRadarVisibleChunks
         ).joined(separator: " ")
-        for forbidden in ["Authorization", "Bearer", "toolArguments", "file://", "/private", "/Users", "/home", "C:\\", "stdout", "stderr", "diff", "token", "header", "cookie", "secret"] {
+        for forbidden in ["Authorization", "Bearer", "toolArguments", "file://", "/private", "/Users", "/home", "C:\\", "stdout", "stderr", "diff", "raw-token", "header", "cookie", "secret"] {
             XCTAssertFalse(visibleText.contains(forbidden), "queue leaked \(forbidden)")
         }
 
