@@ -2665,7 +2665,7 @@ enum LogicSmoke {
         expect(fallbackStrip.healthState == "fallback", "mission health strip should mark fallback state")
         expect(fallbackStrip.hasFallback, "mission health strip should expose fallback")
         expect(fallbackStrip.guidance.contains("Authorization") == false, "mission health strip should not expose headers")
-        let fallbackControl = store.missionRunSummary.controlSnapshot(liveHealth: fallbackStrip)
+        let fallbackControl = store.missionRunSummary.controlSnapshot(focusedOn: nil, liveHealth: fallbackStrip)
         expect(fallbackControl.hasLiveFallback, "control snapshot should expose live fallback signal")
         expect(fallbackControl.liveHealthState == "fallback", "control snapshot should expose live health state")
         expect((fallbackControl.liveHealthStatus ?? "").contains("Authorization") == false, "control snapshot live status should redact headers")

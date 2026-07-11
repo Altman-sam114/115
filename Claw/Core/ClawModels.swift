@@ -6043,7 +6043,7 @@ extension ClawMissionRunSummary {
     }
 
     func controlSnapshot(
-        focusedOn reviewKind: String?,
+        focusedOn reviewKind: String? = nil,
         liveHealth: ClawMissionRunLiveGatewayHealthStrip? = nil
     ) -> ClawMissionRunControlSnapshotSummary {
         let focusedKind = activeReviewFocus(from: reviewKind)
@@ -6170,7 +6170,7 @@ extension ClawMissionRunSummary {
             primaryActionTitle = primaryReviewTitle.map { "聚焦\($0)" }
         }
 
-        var finalTitle = title
+        let finalTitle = title
         var finalStatus = status
         var finalGuidance = guidance
         var finalTone = tone
@@ -6189,7 +6189,6 @@ extension ClawMissionRunSummary {
                 finalStatus = "\(status) · live 同步中"
             }
             // Keep title focused/blocked semantics; only annotate status/guidance.
-            _ = finalTitle
         }
 
         return ClawMissionRunControlSnapshotSummary(

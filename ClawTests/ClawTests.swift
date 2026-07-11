@@ -3556,7 +3556,7 @@ final class ClawTests: XCTestCase {
         XCTAssertFalse(strip.canAttemptLive)
         XCTAssertFalse(strip.guidance.contains("Authorization"))
         XCTAssertFalse(strip.status.contains("Authorization"))
-        let control = store.missionRunSummary.controlSnapshot(liveHealth: strip)
+        let control = store.missionRunSummary.controlSnapshot(focusedOn: nil, liveHealth: strip)
         XCTAssertTrue(control.hasLiveFallback)
         XCTAssertFalse(control.hasLiveError)
         XCTAssertEqual(control.liveHealthState, "fallback")
