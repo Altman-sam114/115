@@ -103,6 +103,11 @@ assertFileChangeSafetyMetadata(pathEscapeArtifact?.metadata, {
   contentOmitted: true,
   diffOmitted: true,
   resultStatus: "failed",
+  filePolicyDiagnostic: "path-escape-blocked",
+  fileRetryableReason: "fix-workspace-scope",
+  policyChecked: true,
+  workspacePolicyChecked: true,
+  pathPolicyChecked: true,
   safetyFlags: ["metadata-only", "tool-arguments-omitted", "raw-path-omitted", "workspace-path-omitted", "file-content-omitted", "diff-content-omitted", "artifact-payload-not-read", "session-workspace-only", "path-escape-blocked", "no-file-written"],
 }, "websocket path escape file change");
 const writeFailureArtifact = findArtifactByTitle(events, "auditLog", "file-change-failed-6");
@@ -123,6 +128,11 @@ assertFileChangeSafetyMetadata(writeFailureArtifact?.metadata, {
   contentOmitted: true,
   diffOmitted: true,
   resultStatus: "failed",
+  filePolicyDiagnostic: "workspace-write-failed",
+  fileRetryableReason: "retry-write",
+  policyChecked: true,
+  workspacePolicyChecked: true,
+  pathPolicyChecked: true,
   safetyFlags: ["metadata-only", "tool-arguments-omitted", "raw-path-omitted", "workspace-path-omitted", "file-content-omitted", "diff-content-omitted", "artifact-payload-not-read", "session-workspace-only", "write-failed"],
 }, "websocket write failure file change");
 
