@@ -1705,6 +1705,12 @@ enum LogicSmoke {
         if let fileChangeReview = missionSummary.gatewayFileChangeSafetyReview {
             expect(fileChangeReview.reviewCount == 1, "mission summary should count file change artifacts")
             expect(fileChangeReview.hasMetadata, "file change review should include metadata")
+            expect(fileChangeReview.filePolicyDiagnostic == "write-succeeded", "file change review should expose policy diagnostic")
+            expect(fileChangeReview.fileRetryableReason == "none", "file change review should expose retry reason")
+            expect(fileChangeReview.policyChecked == true, "file change review should expose policy checked")
+            expect(fileChangeReview.workspacePolicyChecked == true, "file change review should expose workspace policy checked")
+            expect(fileChangeReview.pathPolicyChecked == true, "file change review should expose path policy checked")
+            expect(fileChangeReview.requiresFilePolicyReview == false, "successful write should not require policy review")
             expect(fileChangeReview.mode == "workspace-write", "file change review should expose workspace-write mode")
             expect(fileChangeReview.actionKind == "manageFiles", "file change review should expose manageFiles action")
             expect(fileChangeReview.workspacePolicy == "session-workspace-only", "file change review should expose workspace policy")
@@ -2462,6 +2468,11 @@ enum LogicSmoke {
                 "mode": "workspace-write Authorization: Bearer raw-token",
                 "actionKind": "manageFiles token=raw-token",
                 "workspacePolicy": "session-workspace-only /private/tmp/workspace",
+                "filePolicyDiagnostic": "write-succeeded file:///private/tmp/diff",
+                "fileRetryableReason": "none Authorization: Bearer raw-token",
+                "policyChecked": "true",
+                "workspacePolicyChecked": "true",
+                "pathPolicyChecked": "true",
                 "workspaceScoped": "true",
                 "pathEscapeBlocked": "false",
                 "writeAttempted": "true",
@@ -2496,7 +2507,13 @@ enum LogicSmoke {
             expect(sensitiveFileReview.mode == nil, "file change review should reject unsafe mode")
             expect(sensitiveFileReview.actionKind == nil, "file change review should reject unsafe action kind")
             expect(sensitiveFileReview.workspacePolicy == nil, "file change review should reject unsafe workspace policy")
+            expect(sensitiveFileReview.filePolicyDiagnostic == nil, "file change review should reject unsafe diagnostic")
+            expect(sensitiveFileReview.fileRetryableReason == nil, "file change review should reject unsafe retry reason")
             expect(sensitiveFileReview.resultStatus == nil, "file change review should reject unsafe result status")
+            expect(sensitiveFileReview.policyChecked == true, "file change review should keep policy checked boolean")
+            expect(sensitiveFileReview.workspacePolicyChecked == true, "file change review should keep workspace policy boolean")
+            expect(sensitiveFileReview.pathPolicyChecked == true, "file change review should keep path policy boolean")
+            expect(sensitiveFileReview.requiresFilePolicyReview, "file change review should require review when diagnostic rejected")
             expect(sensitiveFileReview.writeSucceeded == true, "file change review should keep write success boolean")
             expect(sensitiveFileReview.createdFileCount == 1, "file change review should keep safe counts")
             expect(sensitiveFileReview.safetyFlags.contains("raw-path-omitted"), "file change review should expose raw path omission flag")

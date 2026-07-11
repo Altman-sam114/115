@@ -1972,6 +1972,45 @@ function escapeHTML(text) {
     .replace(/'/g, "&#39;");
 }
 
+function filePolicyDiagnostics(details = {}) {
+  const policyChecked = true;
+  const workspacePolicyChecked = true;
+  if (details.pathEscapeBlocked || details.mode === "workspace-path-blocked") {
+    return {
+      diagnostic: "path-escape-blocked",
+      retryableReason: "fix-workspace-scope",
+      policyChecked,
+      workspacePolicyChecked,
+      pathPolicyChecked: true,
+    };
+  }
+  if (details.writeFailed || details.mode === "workspace-write-failed" || (details.writeAttempted && !details.writeSucceeded)) {
+    return {
+      diagnostic: "workspace-write-failed",
+      retryableReason: details.writeFailed ? "retry-write" : "review-write-failure",
+      policyChecked,
+      workspacePolicyChecked,
+      pathPolicyChecked: true,
+    };
+  }
+  if (details.writeSucceeded || details.mode === "workspace-write") {
+    return {
+      diagnostic: details.writeSucceeded ? "write-succeeded" : "write-attempted",
+      retryableReason: "none",
+      policyChecked,
+      workspacePolicyChecked,
+      pathPolicyChecked: true,
+    };
+  }
+  return {
+    diagnostic: "not-requested",
+    retryableReason: "none",
+    policyChecked: false,
+    workspacePolicyChecked: false,
+    pathPolicyChecked: false,
+  };
+}
+
 function fileChangeReviewMetadata(action, details = {}) {
   const safetyFlags = [
     "metadata-only",
@@ -1990,6 +2029,7 @@ function fileChangeReviewMetadata(action, details = {}) {
   if (details.writeFailed) {
     safetyFlags.push("write-failed");
   }
+  const filePolicy = filePolicyDiagnostics(details);
   return compactMetadata({
     fileChangeReview: "workspaceWrite",
     mode: details.mode || "workspace-write",
@@ -2008,6 +2048,11 @@ function fileChangeReviewMetadata(action, details = {}) {
     contentOmitted: true,
     diffOmitted: true,
     resultStatus: details.resultStatus,
+    filePolicyDiagnostic: filePolicy.diagnostic,
+    fileRetryableReason: filePolicy.retryableReason,
+    policyChecked: filePolicy.policyChecked,
+    workspacePolicyChecked: filePolicy.workspacePolicyChecked,
+    pathPolicyChecked: filePolicy.pathPolicyChecked,
     safetyFlags,
   });
 }

@@ -2254,6 +2254,10 @@ struct ClawGatewayArtifactMetadataReviewSummary: Equatable, Codable, Sendable {
             "exitcodepresent": "exitCodePresent",
             "exitcodezero": "exitCodeZero",
             "shellpolicy": "shellPolicy",
+            "filepolicydiagnostic": "filePolicyDiagnostic",
+            "fileretryablereason": "fileRetryableReason",
+            "workspacepolicychecked": "workspacePolicyChecked",
+            "pathpolicychecked": "pathPolicyChecked",
             "shellpolicydiagnostic": "shellPolicyDiagnostic",
             "shellretryablereason": "shellRetryableReason",
             "policychecked": "policyChecked",
@@ -2782,6 +2786,11 @@ struct ClawGatewayFileChangeSafetyReviewSummary: Equatable, Codable, Sendable {
     var mode: String?
     var actionKind: String?
     var workspacePolicy: String?
+    var filePolicyDiagnostic: String?
+    var fileRetryableReason: String?
+    var policyChecked: Bool?
+    var workspacePolicyChecked: Bool?
+    var pathPolicyChecked: Bool?
     var workspaceScoped: Bool?
     var pathEscapeBlocked: Bool?
     var writeAttempted: Bool?
@@ -2802,6 +2811,7 @@ struct ClawGatewayFileChangeSafetyReviewSummary: Equatable, Codable, Sendable {
         guard hasMetadata else {
             return "已收到文件变更 artifact，metadata 待同步。"
         }
+        let diagnostic = filePolicyDiagnostic.map { "diagnostic \($0)" } ?? "diagnostic 待复核"
         let scope = workspacePolicy ?? "workspace 待复核"
         let changes = [
             createdFileCount.map { "created \($0)" },
@@ -2811,7 +2821,26 @@ struct ClawGatewayFileChangeSafetyReviewSummary: Equatable, Codable, Sendable {
             .compactMap { $0 }
             .joined(separator: " · ")
         let status = resultStatus ?? "result 待复核"
-        return "\(scope) · \(changes.isEmpty ? "changes 待复核" : changes) · \(status)"
+        return "\(diagnostic) · \(scope) · \(changes.isEmpty ? "changes 待复核" : changes) · \(status)"
+    }
+
+    var requiresFilePolicyReview: Bool {
+        guard hasMetadata else {
+            return true
+        }
+        if filePolicyDiagnostic == nil || fileRetryableReason == nil || policyChecked == nil || workspacePolicyChecked == nil || pathPolicyChecked == nil {
+            return true
+        }
+        if ["path-escape-blocked", "workspace-write-failed"].contains(filePolicyDiagnostic ?? "") {
+            return true
+        }
+        if resultStatus == "failed" || pathEscapeBlocked == true || writeSucceeded == false {
+            return true
+        }
+        if fileRetryableReason != nil && fileRetryableReason != "none" {
+            return true
+        }
+        return false
     }
 
     static func latest(from session: ClawGatewaySession?) -> ClawGatewayFileChangeSafetyReviewSummary? {
@@ -2835,6 +2864,11 @@ struct ClawGatewayFileChangeSafetyReviewSummary: Equatable, Codable, Sendable {
             mode: allowedMode(metadata["mode"]),
             actionKind: allowedActionKind(metadata["actionKind"]),
             workspacePolicy: allowedWorkspacePolicy(metadata["workspacePolicy"]),
+            filePolicyDiagnostic: allowedFilePolicyDiagnostic(metadata["filePolicyDiagnostic"]),
+            fileRetryableReason: allowedFileRetryableReason(metadata["fileRetryableReason"]),
+            policyChecked: ClawArtifactMetadataParser.boolValue(metadata["policyChecked"]),
+            workspacePolicyChecked: ClawArtifactMetadataParser.boolValue(metadata["workspacePolicyChecked"]),
+            pathPolicyChecked: ClawArtifactMetadataParser.boolValue(metadata["pathPolicyChecked"]),
             workspaceScoped: ClawArtifactMetadataParser.boolValue(metadata["workspaceScoped"]),
             pathEscapeBlocked: ClawArtifactMetadataParser.boolValue(metadata["pathEscapeBlocked"]),
             writeAttempted: ClawArtifactMetadataParser.boolValue(metadata["writeAttempted"]),
@@ -2878,6 +2912,34 @@ struct ClawGatewayFileChangeSafetyReviewSummary: Equatable, Codable, Sendable {
             return nil
         }
         return clean == "session-workspace-only" ? clean : nil
+    }
+
+    private static func allowedFilePolicyDiagnostic(_ value: String?) -> String? {
+        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
+            return nil
+        }
+        let allowed = [
+            "not-requested",
+            "path-escape-blocked",
+            "workspace-write-failed",
+            "write-attempted",
+            "write-succeeded"
+        ]
+        return allowed.contains(clean) ? clean : nil
+    }
+
+    private static func allowedFileRetryableReason(_ value: String?) -> String? {
+        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
+            return nil
+        }
+        let allowed = [
+            "none",
+            "provide-workspace-path",
+            "fix-workspace-scope",
+            "retry-write",
+            "review-write-failure"
+        ]
+        return allowed.contains(clean) ? clean : nil
     }
 
     private static func allowedResultStatus(_ value: String?) -> String? {

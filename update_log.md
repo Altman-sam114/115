@@ -22,6 +22,47 @@
 
 ## 历史记录
 
+### v0.52 / File Change Policy Diagnostics 文件变更策略诊断
+
+日期：2026-07-12
+
+核心变更：
+
+- Gateway `manageFiles` metadata 增加固定 `filePolicyDiagnostic`、`fileRetryableReason`、`policyChecked`、`workspacePolicyChecked` 和 `pathPolicyChecked`。
+- 诊断枚举覆盖 not-requested、path-escape-blocked、workspace-write-failed、write-attempted 和 write-succeeded；retry reason 覆盖 none、provide-workspace-path、fix-workspace-scope、retry-write 和 review-write-failure。
+- `ClawGatewayFileChangeSafetyReviewSummary` 解析 allowlist 新字段并派生 `requiresFilePolicyReview`；UI chips 与复核优先队列同步。
+- Simulator、Gateway smoke、XCTest 和 LogicSmoke 覆盖固定键、成功写入、路径逃逸、写入失败、敏感值拒绝。
+- 同步 README、协议、flow/flowchart、测试说明和 Agent A 提示词；不扩大 workspace 写权限，不读取 raw path/content/diff。
+
+关键文件：
+
+- `Tools/claw-gateway-server.mjs`
+- `Tools/claw-gateway-direct-smoke.mjs`
+- `Tools/claw-gateway-smoke.mjs`
+- `Claw/Core/ClawModels.swift`
+- `Claw/Services/ClawStore.swift`
+- `Claw/Views/ContentView.swift`
+- `ClawTests/ClawTests.swift`
+- `Tools/LogicSmoke.swift`
+- `README.md`
+- `Docs/claw-mobile-gateway-protocol.md`
+- `md/flow/flow.md`
+- `md/flow/flowchart.md`
+- `md/test/test.md`
+- `md/prompt/v0（核心智能能力）/v0.52（FileChangePolicyDiagnostics）.md`
+- `update_log.md`
+
+验证结果：
+
+- 本地只运行非编译静态检查；build/smoke 等待云端 workflow。
+- GitHub Actions 结果包待本轮 push 后由 Agent C 下载复判。
+
+遗留事项：
+
+- 当前 File Change Policy Diagnostics 是 metadata-only 复核，不是完整 payload viewer 或跨 workspace 写权限扩展。
+- 完整 macOS Accessibility bridge、Playwright/browser-use、真实多轮 agent loop、live Gateway 保活/配对和完整 artifact 内容复核体验仍是后续遗留。
+
+
 ### v0.51 / Shell Command Policy Diagnostics Shell 命令策略诊断
 
 日期：2026-07-12

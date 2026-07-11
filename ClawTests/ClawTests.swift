@@ -510,6 +510,12 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(review.mode, "workspace-write")
         XCTAssertEqual(review.actionKind, "manageFiles")
         XCTAssertEqual(review.workspacePolicy, "session-workspace-only")
+        XCTAssertEqual(review.filePolicyDiagnostic, "write-succeeded")
+        XCTAssertEqual(review.fileRetryableReason, "none")
+        XCTAssertEqual(review.policyChecked, true)
+        XCTAssertEqual(review.workspacePolicyChecked, true)
+        XCTAssertEqual(review.pathPolicyChecked, true)
+        XCTAssertFalse(review.requiresFilePolicyReview)
         XCTAssertEqual(review.workspaceScoped, true)
         XCTAssertEqual(review.pathEscapeBlocked, false)
         XCTAssertEqual(review.writeAttempted, true)
@@ -528,6 +534,7 @@ final class ClawTests: XCTestCase {
         XCTAssertTrue(review.safetyFlags.contains("workspace-path-omitted"))
         XCTAssertTrue(review.safetyFlags.contains("file-content-omitted"))
         XCTAssertTrue(review.safetyFlags.contains("diff-content-omitted"))
+        XCTAssertTrue(review.compactStatus.contains("diagnostic write-succeeded"))
         XCTAssertTrue(review.compactStatus.contains("session-workspace-only"))
         XCTAssertTrue(review.compactStatus.contains("created 1"))
 
@@ -2769,6 +2776,11 @@ final class ClawTests: XCTestCase {
                 "mode": "workspace-write Authorization: Bearer raw-token",
                 "actionKind": "manageFiles token=raw-token",
                 "workspacePolicy": "session-workspace-only /private/tmp/workspace",
+                "filePolicyDiagnostic": "write-succeeded file:///private/tmp/diff",
+                "fileRetryableReason": "none Authorization: Bearer raw-token",
+                "policyChecked": "true",
+                "workspacePolicyChecked": "true",
+                "pathPolicyChecked": "true",
                 "workspaceScoped": "true",
                 "pathEscapeBlocked": "false",
                 "writeAttempted": "true",
@@ -2797,6 +2809,8 @@ final class ClawTests: XCTestCase {
             review.mode ?? "",
             review.actionKind ?? "",
             review.workspacePolicy ?? "",
+            review.filePolicyDiagnostic ?? "",
+            review.fileRetryableReason ?? "",
             review.resultStatus ?? "",
             review.safetyFlags.joined(separator: " ")
         ].joined(separator: " ")
@@ -2805,7 +2819,13 @@ final class ClawTests: XCTestCase {
         XCTAssertNil(review.mode)
         XCTAssertNil(review.actionKind)
         XCTAssertNil(review.workspacePolicy)
+        XCTAssertNil(review.filePolicyDiagnostic)
+        XCTAssertNil(review.fileRetryableReason)
         XCTAssertNil(review.resultStatus)
+        XCTAssertEqual(review.policyChecked, true)
+        XCTAssertEqual(review.workspacePolicyChecked, true)
+        XCTAssertEqual(review.pathPolicyChecked, true)
+        XCTAssertTrue(review.requiresFilePolicyReview)
         XCTAssertEqual(review.workspaceScoped, true)
         XCTAssertEqual(review.pathEscapeBlocked, false)
         XCTAssertEqual(review.writeAttempted, true)

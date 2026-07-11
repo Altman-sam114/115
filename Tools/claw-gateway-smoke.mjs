@@ -78,6 +78,11 @@ assertFileChangeSafetyMetadata(fileDiffArtifact?.metadata, {
   contentOmitted: true,
   diffOmitted: true,
   resultStatus: "succeeded",
+  filePolicyDiagnostic: "write-succeeded",
+  fileRetryableReason: "none",
+  policyChecked: true,
+  workspacePolicyChecked: true,
+  pathPolicyChecked: true,
   safetyFlags: ["metadata-only", "tool-arguments-omitted", "raw-path-omitted", "workspace-path-omitted", "file-content-omitted", "diff-content-omitted", "artifact-payload-not-read", "session-workspace-only"],
 }, "websocket file change");
 const pathEscapeArtifact = findArtifactByTitle(events, "auditLog", "file-change-blocked-4");
@@ -1012,14 +1017,19 @@ function assertFileChangeSafetyMetadata(metadata, expected, label) {
     "deletedFileCount",
     "diffOmitted",
     "fileChangeReview",
+    "filePolicyDiagnostic",
+    "fileRetryableReason",
     "mode",
     "modifiedFileCount",
     "pathEscapeBlocked",
+    "pathPolicyChecked",
+    "policyChecked",
     "rawPathOmitted",
     "requestedPathPresent",
     "resultStatus",
     "safetyFlags",
     "workspacePolicy",
+    "workspacePolicyChecked",
     "workspaceScoped",
     "writeAttempted",
     "writeSucceeded",
@@ -1046,6 +1056,11 @@ function assertFileChangeSafetyMetadata(metadata, expected, label) {
   expect(metadata.contentOmitted === String(expected.contentOmitted), `${label} content omission metadata mismatch`);
   expect(metadata.diffOmitted === String(expected.diffOmitted), `${label} diff omission metadata mismatch`);
   expect(metadata.resultStatus === expected.resultStatus, `${label} result status metadata mismatch`);
+  expect(metadata.filePolicyDiagnostic === expected.filePolicyDiagnostic, `${label} file policy diagnostic mismatch`);
+  expect(metadata.fileRetryableReason === expected.fileRetryableReason, `${label} file retry reason mismatch`);
+  expect(metadata.policyChecked === String(expected.policyChecked), `${label} policy checked mismatch`);
+  expect(metadata.workspacePolicyChecked === String(expected.workspacePolicyChecked), `${label} workspace policy checked mismatch`);
+  expect(metadata.pathPolicyChecked === String(expected.pathPolicyChecked), `${label} path policy checked mismatch`);
   for (const flag of expected.safetyFlags) {
     expect(metadata.safetyFlags.includes(flag), `${label} missing safety flag ${flag}`);
   }

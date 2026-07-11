@@ -893,17 +893,17 @@ final class ClawStore: ObservableObject {
         }
 
         if let review = gatewayFileChangeSafetyReview {
-            let needsReview = review.hasMetadata == false || review.pathEscapeBlocked == true || review.writeSucceeded == false || review.resultStatus == "failed"
+            let needsReview = review.requiresFilePolicyReview
             add(
                 id: "file-change-safety",
                 rank: needsReview ? 38 : 86,
                 severity: review.hasMetadata == false ? .high : (needsReview ? .high : .info),
                 title: "文件变更安全",
                 status: review.compactStatus,
-                reason: review.hasMetadata ? "只展示 workspace 写入复核状态。" : "文件变更 metadata 待同步。",
+                reason: review.hasMetadata ? "只展示文件变更策略诊断和写入状态。" : "文件变更 metadata 待同步。",
                 icon: "folder.badge.gearshape.fill",
                 reviewKind: "file-change-safety",
-                actionHint: needsReview ? "确认 workspace policy 和写入结果" : "抽查文件变更",
+                actionHint: needsReview ? "确认文件策略、workspace 范围和写入结果" : "抽查文件变更",
                 isActionable: needsReview,
                 hasMetadata: review.hasMetadata
             )
@@ -2815,6 +2815,11 @@ enum ClawGatewaySimulator {
             "contentOmitted": "true",
             "diffOmitted": "true",
             "resultStatus": "succeeded",
+            "filePolicyDiagnostic": "write-succeeded",
+            "fileRetryableReason": "none",
+            "policyChecked": "true",
+            "workspacePolicyChecked": "true",
+            "pathPolicyChecked": "true",
             "safetyFlags": "metadata-only,tool-arguments-omitted,raw-path-omitted,workspace-path-omitted,file-content-omitted,diff-content-omitted,artifact-payload-not-read,session-workspace-only"
         ]
     }

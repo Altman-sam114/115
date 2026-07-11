@@ -4867,6 +4867,12 @@ struct ClawGatewayFileChangeSafetyReviewRow: View {
             return [("metadata 待同步", "hourglass", .secondary)]
         }
         var items: [(String, String, Color)] = []
+        if let diagnostic = review.filePolicyDiagnostic {
+            items.append((diagnostic, filePolicyIcon(for: diagnostic), filePolicyTint(for: diagnostic)))
+        }
+        if let retry = review.fileRetryableReason, retry != "none" {
+            items.append(("retry \(retry)", "arrow.triangle.2.circlepath", .orange))
+        }
         if let mode = review.mode {
             items.append((mode, "folder.badge.gearshape", statusTint))
         }
@@ -4883,6 +4889,56 @@ struct ClawGatewayFileChangeSafetyReviewRow: View {
             items.append(("metadata 待同步", "hourglass", .secondary))
         }
         return items
+    }
+
+    private var filePolicyCheckChips: [(text: String, icon: String, tint: Color)] {
+        guard review.hasMetadata else {
+            return [("策略检查待同步", "hourglass", .secondary)]
+        }
+        var items: [(String, String, Color)] = []
+        if let policyChecked = review.policyChecked {
+            items.append((policyChecked ? "policy checked" : "policy skipped", policyChecked ? "checkmark.shield.fill" : "shield.slash.fill", policyChecked ? .blue : .secondary))
+        }
+        if let workspaceChecked = review.workspacePolicyChecked {
+            items.append((workspaceChecked ? "workspace policy checked" : "workspace policy skipped", workspaceChecked ? "internaldrive.fill" : "internaldrive", workspaceChecked ? .blue : .secondary))
+        }
+        if let pathChecked = review.pathPolicyChecked {
+            items.append((pathChecked ? "path policy checked" : "path policy skipped", pathChecked ? "lock.shield.fill" : "lock.open.fill", pathChecked ? .blue : .secondary))
+        }
+        if items.isEmpty {
+            items.append(("策略检查待复核", "hourglass", .secondary))
+        }
+        return items
+    }
+
+    private func filePolicyIcon(for diagnostic: String) -> String {
+        switch diagnostic {
+        case "not-requested":
+            return "minus.circle.fill"
+        case "path-escape-blocked":
+            return "lock.trianglebadge.exclamationmark.fill"
+        case "workspace-write-failed":
+            return "exclamationmark.triangle.fill"
+        case "write-attempted":
+            return "square.and.pencil"
+        case "write-succeeded":
+            return "checkmark.circle.fill"
+        default:
+            return "shield.lefthalf.filled"
+        }
+    }
+
+    private func filePolicyTint(for diagnostic: String) -> Color {
+        switch diagnostic {
+        case "write-succeeded":
+            return .green
+        case "write-attempted":
+            return .blue
+        case "path-escape-blocked", "workspace-write-failed":
+            return .orange
+        default:
+            return .secondary
+        }
     }
 
     private var changeChips: [(text: String, icon: String, tint: Color)] {
@@ -4989,7 +5045,16 @@ struct ClawGatewayFileChangeSafetyReviewRow: View {
                 }
             }
 
+
             ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(Array(filePolicyCheckChips.enumerated()), id: \.offset) { _, chip in
+                        PhoneAgentTag(text: chip.text, icon: chip.icon, tint: chip.tint)
+                    }
+                }
+            }
+
+ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     ForEach(Array(changeChips.enumerated()), id: \.offset) { _, chip in
                         PhoneAgentTag(text: chip.text, icon: chip.icon, tint: chip.tint)
