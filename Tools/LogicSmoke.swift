@@ -2320,9 +2320,17 @@ enum LogicSmoke {
                 sensitiveExtractionReview.compactStatus,
                 sensitiveExtractionReview.mode ?? "",
                 sensitiveExtractionReview.completenessStatus ?? "",
+                sensitiveExtractionReview.extractionPolicyDiagnostic ?? "",
+                sensitiveExtractionReview.extractionRetryableReason ?? "",
                 sensitiveExtractionReview.sourceArtifactKinds.joined(separator: " "),
                 sensitiveExtractionReview.safetyFlags.joined(separator: " ")
             ].joined(separator: " ")
+            expect(sensitiveExtractionReview.extractionPolicyDiagnostic == nil, "extraction review should reject unsafe diagnostic")
+            expect(sensitiveExtractionReview.extractionRetryableReason == nil, "extraction review should reject unsafe retry reason")
+            expect(sensitiveExtractionReview.policyChecked == true, "extraction review should keep policy checked boolean")
+            expect(sensitiveExtractionReview.sourceCoverageChecked == true, "extraction review should keep source coverage boolean")
+            expect(sensitiveExtractionReview.completenessChecked == true, "extraction review should keep completeness checked boolean")
+            expect(sensitiveExtractionReview.requiresExtractionPolicyReview, "extraction review should require review when diagnostic rejected")
             expect(visibleText.contains("Authorization") == false, "extraction review should redact Authorization")
             expect(visibleText.contains("Bearer") == false, "extraction review should redact bearer token")
             expect(visibleText.contains("raw-token") == false, "extraction review should redact raw token")
