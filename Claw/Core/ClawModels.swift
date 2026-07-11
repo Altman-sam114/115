@@ -1900,6 +1900,12 @@ struct ClawMissionRunControlSnapshotSummary: Equatable, Codable, Sendable {
     var isBlocked: Bool
     var isRetryable: Bool
     var isReviewable: Bool
+    var liveHealthState: String?
+    var liveHealthStatus: String?
+    var canAttemptLive: Bool
+    var hasLiveFallback: Bool
+    var hasLiveError: Bool
+    var lastPingSucceeded: Bool?
 }
 
 struct ClawMissionRunReviewReadinessSummary: Equatable, Codable, Sendable {
@@ -6033,10 +6039,13 @@ extension ClawMissionRunSummary {
     }
 
     var controlSnapshot: ClawMissionRunControlSnapshotSummary {
-        controlSnapshot(focusedOn: nil)
+        controlSnapshot(focusedOn: nil, liveHealth: nil)
     }
 
-    func controlSnapshot(focusedOn reviewKind: String?) -> ClawMissionRunControlSnapshotSummary {
+    func controlSnapshot(
+        focusedOn reviewKind: String?,
+        liveHealth: ClawMissionRunLiveGatewayHealthStrip? = nil
+    ) -> ClawMissionRunControlSnapshotSummary {
         let focusedKind = activeReviewFocus(from: reviewKind)
         let handoff = macAgentHandoffBrief(focusedOn: focusedKind)
         let gate = macAgentContinuationGate(focusedOn: focusedKind)
@@ -6161,12 +6170,34 @@ extension ClawMissionRunSummary {
             primaryActionTitle = primaryReviewTitle.map { "聚焦\($0)" }
         }
 
+        var finalTitle = title
+        var finalStatus = status
+        var finalGuidance = guidance
+        var finalTone = tone
+        if let liveHealth {
+            if liveHealth.hasError, isBlocked == false, focusedKind == nil {
+                finalTone = .danger
+                finalStatus = "\(status) · live 需复核"
+                finalGuidance = "\(guidance) Live：\(liveHealth.status)"
+            } else if liveHealth.hasFallback, isBlocked == false, focusedKind == nil {
+                if finalTone == .success || finalTone == .neutral {
+                    finalTone = .warning
+                }
+                finalStatus = "\(status) · live 已回退"
+                finalGuidance = "\(guidance) Live：\(liveHealth.status)"
+            } else if liveHealth.healthState == "streaming", focusedKind == nil {
+                finalStatus = "\(status) · live 同步中"
+            }
+            // Keep title focused/blocked semantics; only annotate status/guidance.
+            _ = finalTitle
+        }
+
         return ClawMissionRunControlSnapshotSummary(
-            title: title,
-            status: status,
-            guidance: guidance,
+            title: finalTitle,
+            status: finalStatus,
+            guidance: finalGuidance,
             icon: icon,
-            tone: tone,
+            tone: finalTone,
             controlState: controlState,
             focusedReviewKind: focusedKind,
             focusedReviewTitle: focusedReviewTitle,
@@ -6179,7 +6210,13 @@ extension ClawMissionRunSummary {
             hasMetadataGap: hasMetadataGap,
             isBlocked: isBlocked,
             isRetryable: isRetryable,
-            isReviewable: isReviewable
+            isReviewable: isReviewable,
+            liveHealthState: liveHealth?.healthState,
+            liveHealthStatus: liveHealth?.status,
+            canAttemptLive: liveHealth?.canAttemptLive ?? false,
+            hasLiveFallback: liveHealth?.hasFallback ?? false,
+            hasLiveError: liveHealth?.hasError ?? false,
+            lastPingSucceeded: liveHealth?.lastPingSucceeded
         )
     }
 

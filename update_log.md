@@ -22,6 +22,43 @@
 
 ## 历史记录
 
+### v0.56 / Control Snapshot Live Health Signal 控制态势连接健康信号
+
+日期：2026-07-12
+
+核心变更：
+
+- `ClawMissionRunControlSnapshotSummary` 增加 live health 只读信号：`liveHealthState`、`liveHealthStatus`、`canAttemptLive`、`hasLiveFallback`、`hasLiveError`、`lastPingSucceeded`。
+- `controlSnapshot(focusedOn:liveHealth:)` 可选并入 v0.55 Health Strip；fallback/error 时注解 status/guidance/tone。
+- Control Snapshot UI 展示 live 回退/需复核/可 live/ping chips。
+- Mission Run 与 Dock 传入 `store.missionRunLiveGatewayHealthStrip`。
+- XCTest / LogicSmoke 覆盖 fallback 信号与脱敏。
+- 同步 README、flow、test、protocol 和 Agent A 提示词。
+
+关键文件：
+
+- `Claw/Core/ClawModels.swift`
+- `Claw/Views/ContentView.swift`
+- `ClawTests/ClawTests.swift`
+- `Tools/LogicSmoke.swift`
+- `README.md`
+- `Docs/claw-mobile-gateway-protocol.md`
+- `md/flow/flow.md`
+- `md/test/test.md`
+- `md/prompt/v0（核心智能能力）/v0.56（ControlSnapshotLiveHealthSignal）.md`
+- `update_log.md`
+
+验证结果：
+
+- 本地只运行非编译静态检查；build/smoke 等待云端 workflow。
+- GitHub Actions 结果包待本轮 push 后由 Agent C 下载复判。
+
+遗留事项：
+
+- 不是真实心跳协议、后台保活或配对服务。
+- 完整 Accessibility bridge、Playwright/browser-use、真实多轮 agent loop 和完整 artifact payload 复核体验仍是后续遗留。
+
+
 ### v0.55 / Mission Run Live Gateway Health Strip 连接健康条
 
 日期：2026-07-12

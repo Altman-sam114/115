@@ -73,7 +73,7 @@ ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci-results.yml"); put
 - 修改 `Claw/Core/ClawModels.swift`。
 - 修改 `Claw/Services/ClawStore.swift`。
 - 修改 planner、bridge、simulator、event reducer、autonomous loop。
-- 修改 Mission Run presentation summary、Approval Fast Lane 审批快车道、Mac Agent Control Snapshot 控制态势快照、Operator Strip、Loop 继续态势、Mac Agent Readiness Board、Policy Diagnostics Board 就绪看板、Mac Gateway Action Preflight Matrix 动作预检矩阵、Mac Agent Evidence Coverage Map 证据覆盖图、Mac Agent Next Step Deck 下一步候选卡组、Mac Agent Run Timeline 执行时间线、Mac Agent Continuation Gate 继续闸门、Mac Agent Review Radar 复核雷达、Mac Agent Handoff Brief 人工交接简报、Focus Context 聚焦上下文、Review Detail Dock、Review Trail 复核路径、Approval Queue 审批队列、Payload Safety Ledger 载荷安全账本、Artifact 证据索引、复核优先队列、复核聚焦模式、复核态势摘要、下一步复核行动或 SwiftUI 展示派生模型。
+- 修改 Mission Run presentation summary、Approval Fast Lane 审批快车道、Mac Agent Control Snapshot（含 Live Health 信号） 控制态势快照、Operator Strip、Loop 继续态势、Mac Agent Readiness Board、Policy Diagnostics Board 就绪看板、Mac Gateway Action Preflight Matrix 动作预检矩阵、Mac Agent Evidence Coverage Map 证据覆盖图、Mac Agent Next Step Deck 下一步候选卡组、Mac Agent Run Timeline 执行时间线、Mac Agent Continuation Gate 继续闸门、Mac Agent Review Radar 复核雷达、Mac Agent Handoff Brief 人工交接简报、Focus Context 聚焦上下文、Review Detail Dock、Review Trail 复核路径、Approval Queue 审批队列、Payload Safety Ledger 载荷安全账本、Artifact 证据索引、复核优先队列、复核聚焦模式、复核态势摘要、下一步复核行动或 SwiftUI 展示派生模型。
 - 修改 `Tools/LogicSmoke（含 Mission Run Live Gateway Health Strip）.swift`。
 
 本地规则：

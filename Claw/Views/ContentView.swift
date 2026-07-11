@@ -637,7 +637,7 @@ struct ClawMissionRunPanel: View {
         let reviewReadinessSummary = summary.reviewReadinessSummary(focusedOn: activeFocusedReviewKind)
         let nextReviewAction = summary.nextReviewAction(focusedOn: activeFocusedReviewKind)
         let liveGatewayHealthStrip = store.missionRunLiveGatewayHealthStrip
-        let controlSnapshot = summary.controlSnapshot(focusedOn: activeFocusedReviewKind)
+        let controlSnapshot = summary.controlSnapshot(focusedOn: activeFocusedReviewKind, liveHealth: liveGatewayHealthStrip)
         let operatorStrip = summary.operatorStrip(focusedOn: activeFocusedReviewKind)
         let loopContinuation = summary.loopContinuationSummary(focusedOn: activeFocusedReviewKind)
         let macAgentReadiness = summary.macAgentReadinessBoard(focusedOn: activeFocusedReviewKind)
@@ -911,7 +911,7 @@ struct ClawMissionReviewDetailDockView: View {
         let dock = summary.reviewDetailDockSummary(focusedOn: focusedReviewKind)
         let focusContext = summary.focusContextSummary(focusedOn: focusedReviewKind)
         let liveGatewayHealthStrip = store.missionRunLiveGatewayHealthStrip
-        let controlSnapshot = summary.controlSnapshot(focusedOn: activeFocusedReviewKind)
+        let controlSnapshot = summary.controlSnapshot(focusedOn: activeFocusedReviewKind, liveHealth: liveGatewayHealthStrip)
         let evidenceTrail = summary.evidenceTrailSummary(focusedOn: activeFocusedReviewKind)
         let macAgentReadiness = summary.macAgentReadinessBoard(focusedOn: activeFocusedReviewKind)
         let macAgentPolicyDiagnostics = summary.macAgentPolicyDiagnosticsBoard(focusedOn: activeFocusedReviewKind)
@@ -1242,6 +1242,16 @@ struct ClawMissionRunControlSnapshotView: View {
                     }
                     if snapshot.isRetryable {
                         PhoneAgentTag(text: "可重试", icon: "arrow.clockwise.circle.fill", tint: .orange)
+                    }
+                    if snapshot.hasLiveError {
+                        PhoneAgentTag(text: "live 需复核", icon: "waveform.path.ecg.rectangle.fill", tint: .red)
+                    } else if snapshot.hasLiveFallback {
+                        PhoneAgentTag(text: "live 回退", icon: "arrow.uturn.backward.circle.fill", tint: .orange)
+                    } else if snapshot.canAttemptLive {
+                        PhoneAgentTag(text: "可 live", icon: "bolt.fill", tint: .green)
+                    }
+                    if let ping = snapshot.lastPingSucceeded {
+                        PhoneAgentTag(text: ping ? "ping ok" : "ping failed", icon: ping ? "waveform.circle.fill" : "waveform.path.ecg", tint: ping ? .green : .orange)
                     }
                 }
 
