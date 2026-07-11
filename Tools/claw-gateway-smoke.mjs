@@ -958,11 +958,6 @@ function assertBrowserControlReviewMetadata(metadata, expected, label) {
   expect(metadata.executed === String(expected.executed), `${label} executed metadata mismatch`);
   expect(metadata.timedOut === String(expected.timedOut), `${label} timeout metadata mismatch`);
   expect(metadata.resultStatus === expected.resultStatus, `${label} result status metadata mismatch`);
-  expect(metadata.shellPolicyDiagnostic === expected.shellPolicyDiagnostic, `${label} shell policy diagnostic mismatch`);
-  expect(metadata.shellRetryableReason === expected.shellRetryableReason, `${label} shell retry reason mismatch`);
-  expect(metadata.policyChecked === String(expected.policyChecked), `${label} policy checked mismatch`);
-  expect(metadata.binaryAllowlistChecked === String(expected.binaryAllowlistChecked), `${label} binary allowlist checked mismatch`);
-  expect(metadata.structuredCommandChecked === String(expected.structuredCommandChecked), `${label} structured command checked mismatch`);
   for (const flag of expected.safetyFlags) {
     expect(metadata.safetyFlags.includes(flag), `${label} missing safety flag ${flag}`);
   }
@@ -1136,6 +1131,11 @@ function assertShellCommandSafetyMetadata(metadata, expected, label) {
   expect(metadata.stderrOmitted === "true", `${label} stderr omission metadata mismatch`);
   expect(metadata.cwdOmitted === "true", `${label} cwd omission metadata mismatch`);
   expect(metadata.resultStatus === expected.resultStatus, `${label} result status metadata mismatch`);
+  expect(metadata.shellPolicyDiagnostic === expected.shellPolicyDiagnostic, `${label} shell policy diagnostic mismatch`);
+  expect(metadata.shellRetryableReason === expected.shellRetryableReason, `${label} shell retry reason mismatch`);
+  expect(metadata.policyChecked === String(expected.policyChecked), `${label} policy checked mismatch`);
+  expect(metadata.binaryAllowlistChecked === String(expected.binaryAllowlistChecked), `${label} binary allowlist checked mismatch`);
+  expect(metadata.structuredCommandChecked === String(expected.structuredCommandChecked), `${label} structured command checked mismatch`);
   for (const flag of expected.safetyFlags) {
     expect(metadata.safetyFlags.includes(flag), `${label} missing safety flag ${flag}`);
   }
