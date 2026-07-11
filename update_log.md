@@ -22,6 +22,44 @@
 
 ## 历史记录
 
+### v0.55 / Mission Run Live Gateway Health Strip 连接健康条
+
+日期：2026-07-12
+
+核心变更：
+
+- 新增 presentation-layer `ClawMissionRunLiveGatewayHealthStrip`，从既有 `ClawGatewayLiveHealthSummary` 派生 title/status/guidance/healthState/checklist。
+- `ClawStore.missionRunLiveGatewayHealthStrip` 供 Mission Run 直接读取，不改 transport 协议。
+- compact Mission Run 与 iPad Dock 在 Control Snapshot 后展示健康条；只读展示 preflight、ack、fallback、ping、reconnect 状态。
+- XCTest / LogicSmoke 覆盖 fallback/streaming/ping 与脱敏。
+- 同步 README、flow/flowchart、test、protocol 和 Agent A 提示词。
+
+关键文件：
+
+- `Claw/Core/ClawModels.swift`
+- `Claw/Services/ClawStore.swift`
+- `Claw/Views/ContentView.swift`
+- `ClawTests/ClawTests.swift`
+- `Tools/LogicSmoke.swift`
+- `README.md`
+- `Docs/claw-mobile-gateway-protocol.md`
+- `md/flow/flow.md`
+- `md/flow/flowchart.md`
+- `md/test/test.md`
+- `md/prompt/v0（核心智能能力）/v0.55（MissionRunLiveGatewayHealthStrip）.md`
+- `update_log.md`
+
+验证结果：
+
+- 本地只运行非编译静态检查；build/smoke 等待云端 workflow。
+- GitHub Actions 结果包待本轮 push 后由 Agent C 下载复判。
+
+遗留事项：
+
+- 健康条不是真实心跳协议、后台保活、配对服务或自动重连策略。
+- 完整 Accessibility bridge、Playwright/browser-use、真实多轮 agent loop 和完整 artifact payload 复核体验仍是后续遗留。
+
+
 ### v0.54 / Mission Run Policy Diagnostics Board 策略诊断看板
 
 日期：2026-07-12

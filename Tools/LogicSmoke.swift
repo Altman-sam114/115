@@ -2661,6 +2661,10 @@ enum LogicSmoke {
         expect(store.gatewayLiveHealthSummary.hasFallback, "live health should mark fallback")
         expect(store.gatewayLiveHealthSummary.canAttemptLive == false, "live health should preserve preflight status")
         expect(store.gatewayLiveHealthSummary.detailLine.contains("Authorization") == false, "live health should not expose headers")
+        let fallbackStrip = store.missionRunLiveGatewayHealthStrip
+        expect(fallbackStrip.healthState == "fallback", "mission health strip should mark fallback state")
+        expect(fallbackStrip.hasFallback, "mission health strip should expose fallback")
+        expect(fallbackStrip.guidance.contains("Authorization") == false, "mission health strip should not expose headers")
 
         let liveProgressStore = ClawStore(autoScanLocalArtifacts: false)
         liveProgressStore.gatewayDispatchMode = .liveGateway
@@ -2693,6 +2697,11 @@ enum LogicSmoke {
         expect(liveProgressStore.gatewayLiveHealthSummary.transportAttemptCount == 2, "live health should parse transport attempts")
         expect(liveProgressStore.gatewayLiveHealthSummary.reconnectCount == 1, "live health should parse reconnect count")
         expect(liveProgressStore.gatewayLiveHealthSummary.lastPingSucceeded == true, "live health should parse ping status")
+        let streamingStrip = liveProgressStore.missionRunLiveGatewayHealthStrip
+        expect(streamingStrip.lastPingSucceeded == true, "mission health strip should expose ping")
+        expect(streamingStrip.transportAttemptCount == 2, "mission health strip should expose attempts")
+        expect(streamingStrip.reconnectCount == 1, "mission health strip should expose reconnects")
+        expect(["streaming", "completed", "ready", "pending", "error", "fallback"].contains(streamingStrip.healthState), "mission health strip should expose fixed health state")
         expect(liveProgressStore.gatewayLiveHealthSummary.lastTransportErrorSummary == "network_lost", "live health should parse safe transport error")
 
         let sensitiveTaskID = UUID()

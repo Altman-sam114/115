@@ -636,6 +636,7 @@ struct ClawMissionRunPanel: View {
         let artifactEvidenceIndex = summary.artifactEvidenceIndex(focusedOn: activeFocusedReviewKind)
         let reviewReadinessSummary = summary.reviewReadinessSummary(focusedOn: activeFocusedReviewKind)
         let nextReviewAction = summary.nextReviewAction(focusedOn: activeFocusedReviewKind)
+        let liveGatewayHealthStrip = store.missionRunLiveGatewayHealthStrip
         let controlSnapshot = summary.controlSnapshot(focusedOn: activeFocusedReviewKind)
         let operatorStrip = summary.operatorStrip(focusedOn: activeFocusedReviewKind)
         let loopContinuation = summary.loopContinuationSummary(focusedOn: activeFocusedReviewKind)
@@ -705,6 +706,8 @@ struct ClawMissionRunPanel: View {
                 snapshot: controlSnapshot,
                 onFocusReviewKind: focusReviewKind
             )
+
+            ClawMissionRunLiveGatewayHealthStripView(strip: liveGatewayHealthStrip)
 
             ClawMissionRunOperatorStripView(
                 strip: operatorStrip,
@@ -907,6 +910,7 @@ struct ClawMissionReviewDetailDockView: View {
         let activeFocusedReviewKind = summary.activeReviewFocus(from: focusedReviewKind)
         let dock = summary.reviewDetailDockSummary(focusedOn: focusedReviewKind)
         let focusContext = summary.focusContextSummary(focusedOn: focusedReviewKind)
+        let liveGatewayHealthStrip = store.missionRunLiveGatewayHealthStrip
         let controlSnapshot = summary.controlSnapshot(focusedOn: activeFocusedReviewKind)
         let evidenceTrail = summary.evidenceTrailSummary(focusedOn: activeFocusedReviewKind)
         let macAgentReadiness = summary.macAgentReadinessBoard(focusedOn: activeFocusedReviewKind)
@@ -966,6 +970,8 @@ struct ClawMissionReviewDetailDockView: View {
                 snapshot: controlSnapshot,
                 onFocusReviewKind: focusReviewKind
             )
+
+            ClawMissionRunLiveGatewayHealthStripView(strip: liveGatewayHealthStrip)
 
             if dock.isReviewable {
                 ClawMissionMacAgentReadinessBoardView(
@@ -4573,6 +4579,69 @@ struct ClawGatewayLiveRequestCard: View {
             }
         }
         .panelCard()
+    }
+}
+
+struct ClawMissionRunLiveGatewayHealthStripView: View {
+    let strip: ClawMissionRunLiveGatewayHealthStrip
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Label(strip.title, systemImage: strip.icon)
+                    .font(.subheadline.bold())
+                    .foregroundStyle(tint)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                PhoneAgentTag(text: strip.connectionStateTitle, icon: "antenna.radiowaves.left.and.right", tint: tint)
+            }
+
+            Text(strip.status)
+                .font(.footnote.bold())
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(strip.guidance)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(Array(strip.checklist.enumerated()), id: \.offset) { _, item in
+                        PhoneAgentTag(text: item, icon: "circle.fill", tint: tint)
+                    }
+                    PhoneAgentTag(text: "\(strip.eventCount) 事件", icon: "number", tint: .purple)
+                    if strip.transportAttemptCount > 0 {
+                        PhoneAgentTag(text: "attempt \(strip.transportAttemptCount)", icon: "arrow.triangle.2.circlepath", tint: .blue)
+                    }
+                    if strip.reconnectCount > 0 {
+                        PhoneAgentTag(text: "reconnect \(strip.reconnectCount)", icon: "arrow.clockwise.circle.fill", tint: .orange)
+                    }
+                    if let ping = strip.lastPingSucceeded {
+                        PhoneAgentTag(text: ping ? "ping ok" : "ping failed", icon: ping ? "waveform.circle.fill" : "waveform.path.ecg", tint: ping ? .green : .orange)
+                    }
+                }
+            }
+        }
+        .padding(10)
+        .background(tint.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(tint.opacity(0.16), lineWidth: 1)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Mission Run Live Gateway 健康条，\(strip.status)")
+    }
+
+    private var tint: Color {
+        switch strip.tone {
+        case .success: return .green
+        case .warning: return .orange
+        case .danger: return .red
+        case .info: return .blue
+        case .neutral: return .secondary
+        }
     }
 }
 

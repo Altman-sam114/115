@@ -1403,6 +1403,27 @@ struct ClawMissionRunApprovalQueueSummary: Equatable, Codable, Sendable {
     var items: [ClawMissionRunApprovalQueueItem]
 }
 
+struct ClawMissionRunLiveGatewayHealthStrip: Equatable, Codable, Sendable {
+    var title: String
+    var status: String
+    var guidance: String
+    var icon: String
+    var tone: ClawMissionRunOperatorLaneTone
+    var healthState: String
+    var connectionStateTitle: String
+    var canAttemptLive: Bool
+    var hasGatewayAck: Bool
+    var hasFallback: Bool
+    var hasError: Bool
+    var isCompleted: Bool
+    var eventCount: Int
+    var transportAttemptCount: Int
+    var reconnectCount: Int
+    var lastPingSucceeded: Bool?
+    var checklist: [String]
+    var isReviewable: Bool
+}
+
 struct ClawMissionRunApprovalFastLaneSummary: Equatable, Codable, Sendable {
     var title: String
     var status: String
@@ -8161,6 +8182,97 @@ struct ClawGatewayLiveHealthSummary: Equatable, Codable, Sendable {
             return "\(preflightMessage) 最新事件 \(eventText)：\(latestEventSummary)"
         }
         return "\(preflightMessage) 最新事件 \(eventText)。"
+    }
+}
+
+
+extension ClawGatewayLiveHealthSummary {
+    func asMissionRunHealthStrip() -> ClawMissionRunLiveGatewayHealthStrip {
+        let healthState: String
+        let title: String
+        let guidance: String
+        let icon: String
+        let tone: ClawMissionRunOperatorLaneTone
+
+        if hasError {
+            healthState = "error"
+            title = "Live Gateway 需复核"
+            guidance = "连接、事件或 transport 异常；先看 Gateway 会话健康，不要自动重试。"
+            icon = "waveform.path.ecg.rectangle.fill"
+            tone = .danger
+        } else if hasFallback {
+            healthState = "fallback"
+            title = "Live Gateway 已回退"
+            guidance = "live 不可用或失败后已回退模拟；Mission Run 仍可复核模拟证据。"
+            icon = "arrow.uturn.backward.circle.fill"
+            tone = .warning
+        } else if isCompleted {
+            healthState = "completed"
+            title = "Live Gateway 已完成"
+            guidance = "会话已完成；可抽查事件与 artifact，不代表后台保活。"
+            icon = "checkmark.circle.fill"
+            tone = .success
+        } else if connectionState == .streaming {
+            healthState = "streaming"
+            title = "Live Gateway 同步中"
+            guidance = hasGatewayAck ? "已收到桌面 Gateway 事件，可继续观察执行证据。" : "WebSocket 已打开，等待桌面端业务事件。"
+            icon = "antenna.radiowaves.left.and.right.circle.fill"
+            tone = .info
+        } else if canAttemptLive {
+            healthState = "ready"
+            title = "Live Gateway 可尝试"
+            guidance = "preflight 通过；发送后才会建立 live 连接。"
+            icon = "bolt.circle.fill"
+            tone = .success
+        } else if connectionState == .idle || connectionState == .simulated {
+            healthState = "idle"
+            title = "Live Gateway 待准备"
+            guidance = "尚未准备或当前使用模拟事件流。"
+            icon = "antenna.radiowaves.left.and.right"
+            tone = .neutral
+        } else {
+            healthState = "pending"
+            title = "Live Gateway 等待中"
+            guidance = compactStatus
+            icon = "hourglass.circle.fill"
+            tone = .info
+        }
+
+        var checklist: [String] = [
+            canAttemptLive ? "可 live" : "live 未就绪",
+            hasGatewayAck ? "已收到 Gateway ack" : "等待 Gateway ack",
+            hasFallback ? "已 fallback" : "无 fallback"
+        ]
+        if transportAttemptCount > 0 {
+            checklist.append("attempt \(transportAttemptCount)")
+        }
+        if reconnectCount > 0 {
+            checklist.append("reconnect \(reconnectCount)")
+        }
+        if let lastPingSucceeded {
+            checklist.append(lastPingSucceeded ? "ping ok" : "ping failed")
+        }
+
+        return ClawMissionRunLiveGatewayHealthStrip(
+            title: title,
+            status: compactStatus,
+            guidance: guidance,
+            icon: icon,
+            tone: tone,
+            healthState: healthState,
+            connectionStateTitle: connectionState.title,
+            canAttemptLive: canAttemptLive,
+            hasGatewayAck: hasGatewayAck,
+            hasFallback: hasFallback,
+            hasError: hasError,
+            isCompleted: isCompleted,
+            eventCount: eventCount,
+            transportAttemptCount: transportAttemptCount,
+            reconnectCount: reconnectCount,
+            lastPingSucceeded: lastPingSucceeded,
+            checklist: checklist,
+            isReviewable: true
+        )
     }
 }
 

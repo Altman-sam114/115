@@ -120,6 +120,10 @@ final class ClawStore: ObservableObject {
         "\(gatewayDispatchMode.title) / \(gatewayConnectionState.title)"
     }
 
+    var missionRunLiveGatewayHealthStrip: ClawMissionRunLiveGatewayHealthStrip {
+        gatewayLiveHealthSummary.asMissionRunHealthStrip()
+    }
+
     var gatewayLiveHealthSummary: ClawGatewayLiveHealthSummary {
         let latestSession = clawGatewaySessions.first
         let sessionEvents: [ClawGatewayEvent]

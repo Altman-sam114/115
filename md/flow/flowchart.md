@@ -16,7 +16,7 @@ flowchart TD
   A --> E["ClawMobileEnvelope<br/>schema、task、gateway profile、审批摘要"]
   E --> M{"发送模式<br/>simulatedEventStream 或 liveGateway"}
   M --> SIM["模拟事件流<br/>ClawGatewayEventStream.simulatedEvents"]
-  M --> LIVE["WebSocket Live Gateway<br/>URLSessionClawGatewayTransport"]
+  M --> LIVE["WebSocket Live Gateway / Health Strip<br/>URLSessionClawGatewayTransport"]
   LIVE --> LREQ["ClawGatewayLiveRequest<br/>preflight、脱敏 endpoint、transport、token 指纹"]
   LREQ --> RETRY["bounded retry + ping observe<br/>attempt、reconnect、ping、transport error"]
   RETRY --> G["Tools/claw-gateway-server.mjs<br/>校验 token、schema、allowlist、workspace"]

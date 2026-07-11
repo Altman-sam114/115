@@ -3550,6 +3550,12 @@ final class ClawTests: XCTestCase {
         XCTAssertTrue(store.gatewayLiveHealthSummary.hasFallback)
         XCTAssertFalse(store.gatewayLiveHealthSummary.canAttemptLive)
         XCTAssertFalse(store.gatewayLiveHealthSummary.detailLine.contains("Authorization"))
+        let strip = store.missionRunLiveGatewayHealthStrip
+        XCTAssertEqual(strip.healthState, "fallback")
+        XCTAssertTrue(strip.hasFallback)
+        XCTAssertFalse(strip.canAttemptLive)
+        XCTAssertFalse(strip.guidance.contains("Authorization"))
+        XCTAssertFalse(strip.status.contains("Authorization"))
     }
 
     func testLiveGatewayHealthSummarySanitizesEndpoint() throws {
@@ -3605,6 +3611,10 @@ final class ClawTests: XCTestCase {
 
         XCTAssertEqual(store.gatewayConnectionState, .streaming)
         XCTAssertTrue(store.gatewayLiveHealthSummary.hasGatewayAck)
+        let liveStrip = store.missionRunLiveGatewayHealthStrip
+        XCTAssertTrue(["streaming", "completed", "ready", "pending", "fallback", "error"].contains(liveStrip.healthState))
+        XCTAssertGreaterThanOrEqual(liveStrip.eventCount, 0)
+
         XCTAssertEqual(store.gatewayLiveHealthSummary.latestEventKind, .gatewayConnected)
     }
 
