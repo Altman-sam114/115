@@ -22,6 +22,42 @@
 
 ## 历史记录
 
+### v0.54 / Mission Run Policy Diagnostics Board 策略诊断看板
+
+日期：2026-07-12
+
+核心变更：
+
+- 新增 presentation-layer `ClawMissionRunPolicyDiagnosticsBoard`，固定汇总 Desktop App、Shell、文件变更、提取来源和浏览器五类策略诊断。
+- 看板只从既有 Delivery/Shell/File/Extraction/Browser review 的 diagnostic、retry reason 与 requires* 派生，不读取 payload，不执行 Gateway 动作。
+- compact Mission Run 与 iPad Dock 在 Readiness Board 后展示；row 只改变本地聚焦。
+- XCTest / LogicSmoke 覆盖 idle、有证据和聚焦路径。
+- 同步 README、flow/flowchart、测试说明和 Agent A 提示词。
+
+关键文件：
+
+- `Claw/Core/ClawModels.swift`
+- `Claw/Views/ContentView.swift`
+- `ClawTests/ClawTests.swift`
+- `Tools/LogicSmoke.swift`
+- `README.md`
+- `md/flow/flow.md`
+- `md/flow/flowchart.md`
+- `md/test/test.md`
+- `md/prompt/v0（核心智能能力）/v0.54（MissionRunPolicyDiagnosticsBoard）.md`
+- `update_log.md`
+
+验证结果：
+
+- 本地只运行非编译静态检查；build/smoke 等待云端 workflow。
+- GitHub Actions 结果包待本轮 push 后由 Agent C 下载复判。
+
+遗留事项：
+
+- 看板不是自动安全裁决、自动审批或 Gateway readiness 授权。
+- 完整 Accessibility bridge、Playwright/browser-use、真实多轮 agent loop、live Gateway 保活/配对和完整 artifact 内容复核体验仍是后续遗留。
+
+
 ### v0.53 / Extraction Source Completeness Diagnostics 提取来源完整性诊断
 
 日期：2026-07-12

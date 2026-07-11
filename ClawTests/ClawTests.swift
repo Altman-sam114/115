@@ -660,6 +660,10 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(idlePayloadLedger.metadataPendingCount, 0)
         XCTAssertNil(idlePayloadLedger.primaryReviewKind)
         let idleMacReadiness = idleStore.missionRunSummary.macAgentReadinessBoard
+        let idlePolicyBoard = idleStore.missionRunSummary.macAgentPolicyDiagnosticsBoard
+        XCTAssertEqual(idlePolicyBoard.items.count, 5)
+        XCTAssertFalse(idlePolicyBoard.isReviewable)
+        XCTAssertEqual(idlePolicyBoard.blockedCount, 0)
         XCTAssertFalse(idleMacReadiness.isReviewable)
         XCTAssertEqual(idleMacReadiness.items.map(\.id), ["connection", "capability", "observation", "loop", "human-gate"])
         XCTAssertEqual(idleMacReadiness.readyCount, 0)
@@ -864,6 +868,17 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(focusedPayloadLedger.focusedReviewTitle, "最终提交安全")
         XCTAssertTrue(focusedPayloadLedger.items.contains { $0.reviewKind == "delivery-safety" && $0.isFocused })
         let macReadiness = summary.macAgentReadinessBoard
+        let policyBoard = summary.macAgentPolicyDiagnosticsBoard
+        XCTAssertEqual(policyBoard.items.count, 5)
+        XCTAssertTrue(policyBoard.isReviewable)
+        XCTAssertTrue(policyBoard.items.contains { $0.id == "desktop" })
+        XCTAssertTrue(policyBoard.items.contains { $0.id == "shell" })
+        XCTAssertTrue(policyBoard.items.contains { $0.id == "file" })
+        XCTAssertTrue(policyBoard.items.contains { $0.id == "extraction" })
+        XCTAssertTrue(policyBoard.items.contains { $0.id == "browser" })
+        let focusedPolicyBoard = summary.macAgentPolicyDiagnosticsBoard(focusedOn: "shell-safety")
+        XCTAssertEqual(focusedPolicyBoard.focusedReviewKind, "shell-safety")
+        XCTAssertTrue(focusedPolicyBoard.items.contains { $0.id == "shell" && $0.isFocused })
         XCTAssertTrue(macReadiness.isReviewable)
         XCTAssertEqual(macReadiness.items.map(\.id), ["connection", "capability", "observation", "loop", "human-gate"])
         XCTAssertGreaterThan(macReadiness.readyCount, 0)

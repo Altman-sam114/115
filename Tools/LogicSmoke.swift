@@ -165,6 +165,10 @@ enum LogicSmoke {
         expect(idlePayloadLedger.metadataPendingCount == 0, "idle payload ledger should not count metadata gaps")
         expect(idlePayloadLedger.primaryReviewKind == nil, "idle payload ledger should not invent primary focus")
         let idleMacReadiness = missionStore.missionRunSummary.macAgentReadinessBoard
+        let idlePolicyBoard = missionStore.missionRunSummary.macAgentPolicyDiagnosticsBoard
+        expect(idlePolicyBoard.items.count == 5, "idle policy board should keep fixed items")
+        expect(idlePolicyBoard.isReviewable == false, "idle policy board should not invent reviewable diagnostics")
+        expect(idlePolicyBoard.blockedCount == 0, "idle policy board should not invent blocks")
         expect(idleMacReadiness.isReviewable == false, "idle mac readiness should not be reviewable")
         expect(idleMacReadiness.items.map(\.id) == ["connection", "capability", "observation", "loop", "human-gate"], "idle mac readiness should expose stable rows")
         expect(idleMacReadiness.readyCount == 0, "idle mac readiness should not count ready rows")
@@ -452,6 +456,13 @@ enum LogicSmoke {
             "focused payload ledger should mark delivery row"
         )
         let macReadiness = missionSummary.macAgentReadinessBoard
+        let policyBoard = missionSummary.macAgentPolicyDiagnosticsBoard
+        expect(policyBoard.items.count == 5, "policy diagnostics board should have 5 fixed items")
+        expect(policyBoard.isReviewable, "active mission should make policy diagnostics reviewable")
+        expect(policyBoard.items.contains { $0.id == "shell" }, "policy board should include shell item")
+        expect(policyBoard.items.contains { $0.id == "desktop" }, "policy board should include desktop item")
+        let focusedPolicyBoard = missionSummary.macAgentPolicyDiagnosticsBoard(focusedOn: "delivery-safety")
+        expect(focusedPolicyBoard.focusedReviewKind == "delivery-safety" || focusedPolicyBoard.items.contains { $0.isFocused }, "policy board focus should track delivery-safety")
         expect(macReadiness.isReviewable, "mac readiness should be reviewable once Gateway evidence exists")
         expect(macReadiness.items.map(\.id) == ["connection", "capability", "observation", "loop", "human-gate"], "mac readiness should expose stable rows")
         expect(macReadiness.readyCount > 0, "mac readiness should count ready rows")

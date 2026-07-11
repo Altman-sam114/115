@@ -1497,6 +1497,46 @@ struct ClawMissionRunMacAgentReadinessBoard: Equatable, Codable, Sendable {
     var items: [ClawMissionRunMacAgentReadinessItem]
 }
 
+struct ClawMissionRunPolicyDiagnosticsItem: Identifiable, Equatable, Codable, Sendable {
+    var id: String
+    var title: String
+    var status: String
+    var guidance: String
+    var icon: String
+    var tone: ClawMissionRunOperatorLaneTone
+    var reviewKind: String?
+    var reviewTitle: String?
+    var diagnostic: String?
+    var retryableReason: String?
+    var canFocusReview: Bool
+    var isFocused: Bool
+    var isReady: Bool
+    var isBlocked: Bool
+    var hasMetadataGap: Bool
+    var requiresHumanAction: Bool
+}
+
+struct ClawMissionRunPolicyDiagnosticsBoard: Equatable, Codable, Sendable {
+    var title: String
+    var status: String
+    var guidance: String
+    var icon: String
+    var readyCount: Int
+    var blockedCount: Int
+    var metadataPendingCount: Int
+    var humanActionCount: Int
+    var focusedItemID: String?
+    var focusedReviewKind: String?
+    var focusedReviewTitle: String?
+    var primaryReviewKind: String?
+    var primaryReviewTitle: String?
+    var canFocusPrimaryReview: Bool
+    var requiresHumanAction: Bool
+    var hasMetadataGap: Bool
+    var isReviewable: Bool
+    var items: [ClawMissionRunPolicyDiagnosticsItem]
+}
+
 struct ClawMissionRunActionPreflightItem: Identifiable, Equatable, Codable, Sendable {
     var id: String
     var rank: Int
@@ -6119,6 +6159,241 @@ extension ClawMissionRunSummary {
             isBlocked: isBlocked,
             isRetryable: isRetryable,
             isReviewable: isReviewable
+        )
+    }
+
+    var macAgentPolicyDiagnosticsBoard: ClawMissionRunPolicyDiagnosticsBoard {
+        macAgentPolicyDiagnosticsBoard(focusedOn: nil)
+    }
+
+    func macAgentPolicyDiagnosticsBoard(focusedOn reviewKind: String?) -> ClawMissionRunPolicyDiagnosticsBoard {
+        let focusedKind = activeReviewFocus(from: reviewKind)
+        let items = policyDiagnosticsItems(focusedOn: focusedKind)
+        let focusedItem = items.first { $0.reviewKind != nil && $0.reviewKind == focusedKind }
+        let primaryItem = focusedItem ??
+            items.first(where: \.isBlocked) ??
+            items.first(where: \.requiresHumanAction) ??
+            items.first(where: \.hasMetadataGap) ??
+            items.first(where: { $0.isReady == false }) ??
+            items.first
+        let readyCount = items.filter(\.isReady).count
+        let blockedCount = items.filter(\.isBlocked).count
+        let metadataPendingCount = items.filter(\.hasMetadataGap).count
+        let humanActionCount = items.filter(\.requiresHumanAction).count
+        let isReviewable = items.contains { $0.reviewKind != nil } ||
+            gatewayDeliverySafetyReview != nil ||
+            gatewayShellCommandSafetyReview != nil ||
+            gatewayFileChangeSafetyReview != nil ||
+            gatewayExtractionCompletenessReview != nil ||
+            gatewayBrowserControlReview != nil
+        let hasMetadataGap = metadataPendingCount > 0
+        let requiresHumanAction = humanActionCount > 0
+
+        let title: String
+        let status: String
+        let guidance: String
+        let icon: String
+        if isReviewable == false {
+            title = "策略诊断待生成"
+            status = "尚无策略证据"
+            guidance = "发送任务后会汇总 Desktop、Shell、文件、提取和浏览器策略诊断。"
+            icon = "shield.lefthalf.filled"
+        } else if let focusedItem {
+            title = "聚焦策略诊断"
+            status = focusedItem.title
+            guidance = "\(focusedItem.title)：\(focusedItem.guidance)"
+            icon = focusedItem.icon
+        } else if blockedCount > 0 {
+            title = "策略诊断阻断"
+            status = "\(blockedCount) 项阻断 · \(humanActionCount) 项需人工"
+            guidance = primaryItem.map { "先看 \($0.title)：\($0.guidance)" } ?? "先处理策略阻断项。"
+            icon = "exclamationmark.shield.fill"
+        } else if requiresHumanAction {
+            title = "策略诊断待确认"
+            status = "\(humanActionCount) 项需人工 · \(readyCount)/\(items.count) 就绪"
+            guidance = primaryItem.map { "先确认 \($0.title)：\($0.guidance)" } ?? "先处理策略确认项。"
+            icon = "checkmark.shield.fill"
+        } else if hasMetadataGap {
+            title = "策略 metadata 待同步"
+            status = "\(metadataPendingCount) 项待同步 · \(readyCount)/\(items.count) 就绪"
+            guidance = primaryItem.map { "等待 \($0.title) metadata 后再判断策略。" } ?? "等待策略 metadata 后再判断。"
+            icon = "doc.badge.clock"
+        } else {
+            title = "策略诊断看板"
+            status = "\(readyCount)/\(items.count) 项就绪"
+            guidance = primaryItem.map { "可从 \($0.title) 开始抽查。" } ?? "可继续抽查策略诊断。"
+            icon = "shield.lefthalf.filled"
+        }
+
+        return ClawMissionRunPolicyDiagnosticsBoard(
+            title: title,
+            status: status,
+            guidance: guidance,
+            icon: icon,
+            readyCount: readyCount,
+            blockedCount: blockedCount,
+            metadataPendingCount: metadataPendingCount,
+            humanActionCount: humanActionCount,
+            focusedItemID: focusedItem?.id,
+            focusedReviewKind: focusedItem?.reviewKind,
+            focusedReviewTitle: focusedItem?.reviewTitle,
+            primaryReviewKind: primaryItem?.reviewKind,
+            primaryReviewTitle: primaryItem?.reviewTitle,
+            canFocusPrimaryReview: primaryItem?.canFocusReview ?? false,
+            requiresHumanAction: requiresHumanAction,
+            hasMetadataGap: hasMetadataGap,
+            isReviewable: isReviewable,
+            items: items
+        )
+    }
+
+    private func policyDiagnosticsItems(focusedOn focusedKind: String?) -> [ClawMissionRunPolicyDiagnosticsItem] {
+        [
+            policyDiagnosticsItem(
+                id: "desktop",
+                title: "桌面 App 策略",
+                reviewKind: "delivery-safety",
+                icon: "desktopcomputer",
+                focusedOn: focusedKind,
+                diagnostic: gatewayDeliverySafetyReview?.desktopPolicyDiagnostic,
+                retryableReason: gatewayDeliverySafetyReview?.desktopRetryableReason,
+                hasReview: gatewayDeliverySafetyReview != nil,
+                hasMetadata: gatewayDeliverySafetyReview?.hasMetadata == true,
+                requiresReview: gatewayDeliverySafetyReview?.requiresDesktopPolicyReview == true,
+                missingGuidance: "等待 Delivery Safety metadata 后确认桌面 App/key 策略。",
+                readyGuidance: "桌面策略诊断已同步，可抽查 dry-run、阻断或最终提交闸门。"
+            ),
+            policyDiagnosticsItem(
+                id: "shell",
+                title: "Shell 策略",
+                reviewKind: "shell-safety",
+                icon: "terminal.fill",
+                focusedOn: focusedKind,
+                diagnostic: gatewayShellCommandSafetyReview?.shellPolicyDiagnostic,
+                retryableReason: gatewayShellCommandSafetyReview?.shellRetryableReason,
+                hasReview: gatewayShellCommandSafetyReview != nil,
+                hasMetadata: gatewayShellCommandSafetyReview?.hasMetadata == true,
+                requiresReview: gatewayShellCommandSafetyReview?.requiresShellPolicyReview == true,
+                missingGuidance: "等待 Shell Safety metadata 后确认 allowlist 与执行状态。",
+                readyGuidance: "Shell 策略诊断已同步，可抽查 dry-run、allowlist 或执行结果。"
+            ),
+            policyDiagnosticsItem(
+                id: "file",
+                title: "文件变更策略",
+                reviewKind: "file-change-safety",
+                icon: "folder.badge.gearshape.fill",
+                focusedOn: focusedKind,
+                diagnostic: gatewayFileChangeSafetyReview?.filePolicyDiagnostic,
+                retryableReason: gatewayFileChangeSafetyReview?.fileRetryableReason,
+                hasReview: gatewayFileChangeSafetyReview != nil,
+                hasMetadata: gatewayFileChangeSafetyReview?.hasMetadata == true,
+                requiresReview: gatewayFileChangeSafetyReview?.requiresFilePolicyReview == true,
+                missingGuidance: "等待 File Change metadata 后确认 workspace 范围与写入结果。",
+                readyGuidance: "文件策略诊断已同步，可抽查 path escape 或写入结果。"
+            ),
+            policyDiagnosticsItem(
+                id: "extraction",
+                title: "提取来源策略",
+                reviewKind: "extraction-completeness",
+                icon: "tablecells.fill",
+                focusedOn: focusedKind,
+                diagnostic: gatewayExtractionCompletenessReview?.extractionPolicyDiagnostic,
+                retryableReason: gatewayExtractionCompletenessReview?.extractionRetryableReason,
+                hasReview: gatewayExtractionCompletenessReview != nil,
+                hasMetadata: gatewayExtractionCompletenessReview?.hasMetadata == true,
+                requiresReview: gatewayExtractionCompletenessReview?.requiresExtractionPolicyReview == true,
+                missingGuidance: "等待提取完整性 metadata 后确认来源覆盖。",
+                readyGuidance: "提取策略诊断已同步，可抽查 dry-run、empty、partial 或 complete。"
+            ),
+            policyDiagnosticsItem(
+                id: "browser",
+                title: "浏览器策略",
+                reviewKind: "browser-control",
+                icon: "safari.fill",
+                focusedOn: focusedKind,
+                diagnostic: gatewayBrowserControlReview?.policyDiagnostic,
+                retryableReason: gatewayBrowserControlReview?.retryableReason,
+                hasReview: gatewayBrowserControlReview != nil,
+                hasMetadata: gatewayBrowserControlReview?.hasMetadata == true,
+                requiresReview: gatewayBrowserControlReview?.requiresPolicyReview == true,
+                missingGuidance: "等待 Browser Control metadata 后确认 app/host 策略。",
+                readyGuidance: "浏览器策略诊断已同步，可抽查 dry-run、host/app 阻断或打开结果。"
+            )
+        ]
+    }
+
+    private func policyDiagnosticsItem(
+        id: String,
+        title: String,
+        reviewKind: String,
+        icon: String,
+        focusedOn focusedKind: String?,
+        diagnostic: String?,
+        retryableReason: String?,
+        hasReview: Bool,
+        hasMetadata: Bool,
+        requiresReview: Bool,
+        missingGuidance: String,
+        readyGuidance: String
+    ) -> ClawMissionRunPolicyDiagnosticsItem {
+        let reviewTitle = Self.title(forDetailReviewKind: reviewKind)
+        if hasReview == false {
+            return ClawMissionRunPolicyDiagnosticsItem(
+                id: id,
+                title: title,
+                status: "策略证据待同步",
+                guidance: missingGuidance,
+                icon: icon,
+                tone: .neutral,
+                reviewKind: nil,
+                reviewTitle: nil,
+                diagnostic: nil,
+                retryableReason: nil,
+                canFocusReview: false,
+                isFocused: false,
+                isReady: false,
+                isBlocked: false,
+                hasMetadataGap: false,
+                requiresHumanAction: false
+            )
+        }
+        let hasMetadataGap = hasMetadata == false || diagnostic == nil
+        let retry = retryableReason.flatMap { $0 == "none" ? nil : $0 }
+        let isBlocked = requiresReview && (hasMetadataGap == false)
+        let status: String
+        if hasMetadataGap {
+            status = "metadata 待同步"
+        } else if let diagnostic {
+            status = retry.map { "\(diagnostic) · retry \($0)" } ?? diagnostic
+        } else {
+            status = "诊断待复核"
+        }
+        let guidance: String
+        if hasMetadataGap {
+            guidance = missingGuidance
+        } else if isBlocked {
+            guidance = "策略诊断提示需人工确认；先聚焦对应复核项。"
+        } else {
+            guidance = readyGuidance
+        }
+        let canFocus = focusUsesDetailReview(reviewKind)
+        return ClawMissionRunPolicyDiagnosticsItem(
+            id: id,
+            title: title,
+            status: status,
+            guidance: guidance,
+            icon: icon,
+            tone: hasMetadataGap ? .info : (isBlocked ? .warning : .success),
+            reviewKind: reviewKind,
+            reviewTitle: reviewTitle,
+            diagnostic: diagnostic,
+            retryableReason: retryableReason,
+            canFocusReview: canFocus,
+            isFocused: focusedKind == reviewKind,
+            isReady: hasMetadata && requiresReview == false,
+            isBlocked: isBlocked,
+            hasMetadataGap: hasMetadataGap,
+            requiresHumanAction: isBlocked || hasMetadataGap
         )
     }
 

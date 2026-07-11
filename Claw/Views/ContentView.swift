@@ -640,6 +640,7 @@ struct ClawMissionRunPanel: View {
         let operatorStrip = summary.operatorStrip(focusedOn: activeFocusedReviewKind)
         let loopContinuation = summary.loopContinuationSummary(focusedOn: activeFocusedReviewKind)
         let macAgentReadiness = summary.macAgentReadinessBoard(focusedOn: activeFocusedReviewKind)
+        let macAgentPolicyDiagnostics = summary.macAgentPolicyDiagnosticsBoard(focusedOn: activeFocusedReviewKind)
         let actionPreflightMatrix = summary.macGatewayActionPreflightMatrix(focusedOn: activeFocusedReviewKind)
         let evidenceCoverageMap = summary.macAgentEvidenceCoverageMap(focusedOn: activeFocusedReviewKind)
         let nextStepDeck = summary.macAgentNextStepDeck(focusedOn: activeFocusedReviewKind)
@@ -717,6 +718,11 @@ struct ClawMissionRunPanel: View {
 
             ClawMissionMacAgentReadinessBoardView(
                 board: macAgentReadiness,
+                onFocusReviewKind: focusReviewKind
+            )
+
+            ClawMissionMacAgentPolicyDiagnosticsBoardView(
+                board: macAgentPolicyDiagnostics,
                 onFocusReviewKind: focusReviewKind
             )
 
@@ -904,6 +910,7 @@ struct ClawMissionReviewDetailDockView: View {
         let controlSnapshot = summary.controlSnapshot(focusedOn: activeFocusedReviewKind)
         let evidenceTrail = summary.evidenceTrailSummary(focusedOn: activeFocusedReviewKind)
         let macAgentReadiness = summary.macAgentReadinessBoard(focusedOn: activeFocusedReviewKind)
+        let macAgentPolicyDiagnostics = summary.macAgentPolicyDiagnosticsBoard(focusedOn: activeFocusedReviewKind)
         let actionPreflightMatrix = summary.macGatewayActionPreflightMatrix(focusedOn: activeFocusedReviewKind)
         let evidenceCoverageMap = summary.macAgentEvidenceCoverageMap(focusedOn: activeFocusedReviewKind)
         let nextStepDeck = summary.macAgentNextStepDeck(focusedOn: activeFocusedReviewKind)
@@ -963,6 +970,11 @@ struct ClawMissionReviewDetailDockView: View {
             if dock.isReviewable {
                 ClawMissionMacAgentReadinessBoardView(
                     board: macAgentReadiness,
+                    onFocusReviewKind: focusReviewKind
+                )
+
+                ClawMissionMacAgentPolicyDiagnosticsBoardView(
+                    board: macAgentPolicyDiagnostics,
                     onFocusReviewKind: focusReviewKind
                 )
 
@@ -2552,6 +2564,155 @@ struct ClawMissionMacAgentReadinessItemRow: View {
         }
     }
 }
+
+struct ClawMissionMacAgentPolicyDiagnosticsBoardView: View {
+    let board: ClawMissionRunPolicyDiagnosticsBoard
+    let onFocusReviewKind: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Label(board.title, systemImage: board.icon)
+                    .font(.subheadline.bold())
+                    .foregroundStyle(tint)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Spacer(minLength: 0)
+
+                if let focusedReviewTitle = board.focusedReviewTitle {
+                    PhoneAgentTag(text: focusedReviewTitle, icon: "scope", tint: tint)
+                }
+            }
+
+            Text(board.status)
+                .font(.footnote.bold())
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(board.guidance)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 8) {
+                Label("\(board.readyCount) 就绪", systemImage: "checkmark.circle.fill")
+                Label("\(board.blockedCount) 阻断", systemImage: "nosign")
+                Label("\(board.humanActionCount) 人工", systemImage: "person.crop.circle.badge.checkmark")
+            }
+            .font(.caption.bold())
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+            if board.items.isEmpty == false {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(board.items) { item in
+                        ClawMissionMacAgentPolicyDiagnosticsItemRow(
+                            item: item,
+                            onFocusReviewKind: onFocusReviewKind
+                        )
+                    }
+                }
+            }
+        }
+        .padding(10)
+        .background(tint.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(tint.opacity(0.16), lineWidth: 1)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(accessibilitySummary)
+    }
+
+    private var accessibilitySummary: String {
+        "策略诊断看板，\(board.status)，\(board.readyCount) 项就绪，\(board.humanActionCount) 项需要人工"
+    }
+
+    private var tint: Color {
+        if board.isReviewable == false {
+            return .secondary
+        }
+        if board.blockedCount > 0 {
+            return .red
+        }
+        if board.requiresHumanAction {
+            return .orange
+        }
+        if board.hasMetadataGap {
+            return .blue
+        }
+        return .purple
+    }
+}
+
+struct ClawMissionMacAgentPolicyDiagnosticsItemRow: View {
+    let item: ClawMissionRunPolicyDiagnosticsItem
+    let onFocusReviewKind: (String) -> Void
+
+    var body: some View {
+        Group {
+            if item.canFocusReview, let reviewKind = item.reviewKind {
+                Button {
+                    onFocusReviewKind(reviewKind)
+                } label: {
+                    rowContent
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("聚焦对应策略复核项，不执行 Gateway 动作、不审批、不继续")
+            } else {
+                rowContent
+            }
+        }
+    }
+
+    private var rowContent: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: item.icon)
+                .foregroundStyle(rowTint)
+                .frame(width: 16)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(item.title)
+                        .font(.caption.bold())
+                        .foregroundStyle(.primary)
+                    if item.isFocused {
+                        PhoneAgentTag(text: "聚焦", icon: "scope", tint: rowTint)
+                    }
+                    if let diagnostic = item.diagnostic {
+                        PhoneAgentTag(text: diagnostic, icon: "shield.lefthalf.filled", tint: rowTint)
+                    }
+                }
+                Text(item.status)
+                    .font(.caption2.bold())
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(item.guidance)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var rowTint: Color {
+        switch item.tone {
+        case .success:
+            return .green
+        case .warning:
+            return .orange
+        case .danger:
+            return .red
+        case .info:
+            return .blue
+        case .neutral:
+            return .secondary
+        }
+    }
+}
+
 
 struct ClawMissionMacGatewayActionPreflightMatrixView: View {
     let matrix: ClawMissionRunActionPreflightMatrix
