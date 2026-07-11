@@ -551,6 +551,12 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(review.mode, "shell-policy-blocked")
         XCTAssertEqual(review.actionKind, "runShellCommand")
         XCTAssertEqual(review.shellPolicy, "dry-run")
+        XCTAssertEqual(review.shellPolicyDiagnostic, "dry-run")
+        XCTAssertEqual(review.shellRetryableReason, "enable-shell")
+        XCTAssertEqual(review.policyChecked, true)
+        XCTAssertEqual(review.binaryAllowlistChecked, true)
+        XCTAssertEqual(review.structuredCommandChecked, true)
+        XCTAssertTrue(review.requiresShellPolicyReview)
         XCTAssertEqual(review.structuredCommandPresent, true)
         XCTAssertEqual(review.commandParsed, true)
         XCTAssertEqual(review.allowlistConfigured, false)
@@ -569,6 +575,7 @@ final class ClawTests: XCTestCase {
         XCTAssertTrue(review.safetyFlags.contains("structured-arguments-only"))
         XCTAssertTrue(review.safetyFlags.contains("shell-allowlist-enforced"))
         XCTAssertTrue(review.safetyFlags.contains("command-omitted"))
+        XCTAssertTrue(review.compactStatus.contains("diagnostic dry-run"))
         XCTAssertTrue(review.compactStatus.contains("policy dry-run"))
 
         let shellResult = try XCTUnwrap(store.clawGatewaySessions.first?.results.first { $0.actionKind == .runShellCommand })
@@ -2849,6 +2856,11 @@ final class ClawTests: XCTestCase {
                 "mode": "shell-executed Authorization: Bearer raw-token",
                 "actionKind": "runShellCommand token=raw-token",
                 "shellPolicy": "allowlist-enabled /private/tmp/workspace",
+                "shellPolicyDiagnostic": "execution-attempted file:///private/tmp/shell",
+                "shellRetryableReason": "none Authorization: Bearer raw-token",
+                "policyChecked": "true",
+                "binaryAllowlistChecked": "true",
+                "structuredCommandChecked": "true",
                 "structuredCommandPresent": "true",
                 "commandParsed": "true",
                 "allowlistConfigured": "true",
@@ -2880,6 +2892,8 @@ final class ClawTests: XCTestCase {
             review.mode ?? "",
             review.actionKind ?? "",
             review.shellPolicy ?? "",
+            review.shellPolicyDiagnostic ?? "",
+            review.shellRetryableReason ?? "",
             review.resultStatus ?? "",
             review.safetyFlags.joined(separator: " ")
         ].joined(separator: " ")
@@ -2888,13 +2902,19 @@ final class ClawTests: XCTestCase {
         XCTAssertNil(review.mode)
         XCTAssertNil(review.actionKind)
         XCTAssertNil(review.shellPolicy)
+        XCTAssertNil(review.shellPolicyDiagnostic)
+        XCTAssertNil(review.shellRetryableReason)
         XCTAssertNil(review.resultStatus)
+        XCTAssertEqual(review.policyChecked, true)
+        XCTAssertEqual(review.binaryAllowlistChecked, true)
+        XCTAssertEqual(review.structuredCommandChecked, true)
         XCTAssertEqual(review.executed, true)
         XCTAssertEqual(review.exitCodeZero, true)
         XCTAssertEqual(review.commandOmitted, true)
         XCTAssertEqual(review.stdoutOmitted, true)
         XCTAssertEqual(review.stderrOmitted, true)
         XCTAssertEqual(review.cwdOmitted, true)
+        XCTAssertTrue(review.requiresShellPolicyReview)
         XCTAssertTrue(review.safetyFlags.contains("command-omitted"))
         XCTAssertTrue(review.safetyFlags.contains("stdout-omitted"))
         XCTAssertFalse(visibleText.contains("Authorization"))

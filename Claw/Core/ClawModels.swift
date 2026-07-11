@@ -2254,6 +2254,11 @@ struct ClawGatewayArtifactMetadataReviewSummary: Equatable, Codable, Sendable {
             "exitcodepresent": "exitCodePresent",
             "exitcodezero": "exitCodeZero",
             "shellpolicy": "shellPolicy",
+            "shellpolicydiagnostic": "shellPolicyDiagnostic",
+            "shellretryablereason": "shellRetryableReason",
+            "policychecked": "policyChecked",
+            "binaryallowlistchecked": "binaryAllowlistChecked",
+            "structuredcommandchecked": "structuredCommandChecked",
             "shellreview": "shellReview",
             "stderrpresent": "stderrPresent",
             "stderromitted": "stderrOmitted",
@@ -2908,6 +2913,11 @@ struct ClawGatewayShellCommandSafetyReviewSummary: Equatable, Codable, Sendable 
     var mode: String?
     var actionKind: String?
     var shellPolicy: String?
+    var shellPolicyDiagnostic: String?
+    var shellRetryableReason: String?
+    var policyChecked: Bool?
+    var binaryAllowlistChecked: Bool?
+    var structuredCommandChecked: Bool?
     var structuredCommandPresent: Bool?
     var commandParsed: Bool?
     var allowlistConfigured: Bool?
@@ -2931,6 +2941,7 @@ struct ClawGatewayShellCommandSafetyReviewSummary: Equatable, Codable, Sendable 
         guard hasMetadata else {
             return "已收到 Shell 输出 artifact，metadata 待同步。"
         }
+        let diagnostic = shellPolicyDiagnostic.map { "diagnostic \($0)" } ?? "diagnostic 待复核"
         let policy = shellPolicy.map { "policy \($0)" } ?? "policy 待复核"
         let execution: String
         if executed == true {
@@ -2941,7 +2952,26 @@ struct ClawGatewayShellCommandSafetyReviewSummary: Equatable, Codable, Sendable 
             execution = "execution 待复核"
         }
         let result = resultStatus ?? "result 待复核"
-        return "\(policy) · \(execution) · \(result)"
+        return "\(diagnostic) · \(policy) · \(execution) · \(result)"
+    }
+
+    var requiresShellPolicyReview: Bool {
+        guard hasMetadata else {
+            return true
+        }
+        if shellPolicyDiagnostic == nil || shellRetryableReason == nil || policyChecked == nil || binaryAllowlistChecked == nil || structuredCommandChecked == nil {
+            return true
+        }
+        if ["missing-structured-command", "command-parse-failed", "dry-run", "allowlist-blocked", "execution-failed"].contains(shellPolicyDiagnostic ?? "") {
+            return true
+        }
+        if resultStatus == "failed" || timedOut == true {
+            return true
+        }
+        if shellRetryableReason != nil && shellRetryableReason != "none" {
+            return true
+        }
+        return false
     }
 
     static func latest(from session: ClawGatewaySession?) -> ClawGatewayShellCommandSafetyReviewSummary? {
@@ -2965,6 +2995,11 @@ struct ClawGatewayShellCommandSafetyReviewSummary: Equatable, Codable, Sendable 
             mode: allowedMode(metadata["mode"]),
             actionKind: allowedActionKind(metadata["actionKind"]),
             shellPolicy: allowedShellPolicy(metadata["shellPolicy"]),
+            shellPolicyDiagnostic: allowedShellPolicyDiagnostic(metadata["shellPolicyDiagnostic"]),
+            shellRetryableReason: allowedShellRetryableReason(metadata["shellRetryableReason"]),
+            policyChecked: ClawArtifactMetadataParser.boolValue(metadata["policyChecked"]),
+            binaryAllowlistChecked: ClawArtifactMetadataParser.boolValue(metadata["binaryAllowlistChecked"]),
+            structuredCommandChecked: ClawArtifactMetadataParser.boolValue(metadata["structuredCommandChecked"]),
             structuredCommandPresent: ClawArtifactMetadataParser.boolValue(metadata["structuredCommandPresent"]),
             commandParsed: ClawArtifactMetadataParser.boolValue(metadata["commandParsed"]),
             allowlistConfigured: ClawArtifactMetadataParser.boolValue(metadata["allowlistConfigured"]),
@@ -3011,6 +3046,39 @@ struct ClawGatewayShellCommandSafetyReviewSummary: Equatable, Codable, Sendable 
             return nil
         }
         let allowed = ["dry-run", "allowlist-required", "allowlist-enabled"]
+        return allowed.contains(clean) ? clean : nil
+    }
+
+    private static func allowedShellPolicyDiagnostic(_ value: String?) -> String? {
+        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
+            return nil
+        }
+        let allowed = [
+            "not-requested",
+            "missing-structured-command",
+            "command-parse-failed",
+            "dry-run",
+            "allowlist-blocked",
+            "execution-attempted",
+            "execution-failed"
+        ]
+        return allowed.contains(clean) ? clean : nil
+    }
+
+    private static func allowedShellRetryableReason(_ value: String?) -> String? {
+        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
+            return nil
+        }
+        let allowed = [
+            "none",
+            "provide-structured-command",
+            "fix-command-parse",
+            "enable-shell",
+            "configure-shell-allowlist",
+            "allow-shell-binary",
+            "automation-failed",
+            "review-execution"
+        ]
         return allowed.contains(clean) ? clean : nil
     }
 

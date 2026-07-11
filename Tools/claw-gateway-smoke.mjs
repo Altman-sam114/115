@@ -160,6 +160,11 @@ assertShellCommandSafetyMetadata(shellPolicyArtifact?.metadata, {
   stdoutPresent: false,
   stderrPresent: false,
   resultStatus: "failed",
+  shellPolicyDiagnostic: "dry-run",
+  shellRetryableReason: "enable-shell",
+  policyChecked: true,
+  binaryAllowlistChecked: true,
+  structuredCommandChecked: true,
   safetyFlags: ["metadata-only", "structured-arguments-only", "tool-arguments-omitted", "command-omitted", "stdout-omitted", "stderr-omitted", "cwd-omitted", "shell-allowlist-enforced", "dry-run-only", "no-command-executed", "artifact-payload-not-read"],
 }, "websocket shell policy");
 
@@ -953,6 +958,11 @@ function assertBrowserControlReviewMetadata(metadata, expected, label) {
   expect(metadata.executed === String(expected.executed), `${label} executed metadata mismatch`);
   expect(metadata.timedOut === String(expected.timedOut), `${label} timeout metadata mismatch`);
   expect(metadata.resultStatus === expected.resultStatus, `${label} result status metadata mismatch`);
+  expect(metadata.shellPolicyDiagnostic === expected.shellPolicyDiagnostic, `${label} shell policy diagnostic mismatch`);
+  expect(metadata.shellRetryableReason === expected.shellRetryableReason, `${label} shell retry reason mismatch`);
+  expect(metadata.policyChecked === String(expected.policyChecked), `${label} policy checked mismatch`);
+  expect(metadata.binaryAllowlistChecked === String(expected.binaryAllowlistChecked), `${label} binary allowlist checked mismatch`);
+  expect(metadata.structuredCommandChecked === String(expected.structuredCommandChecked), `${label} structured command checked mismatch`);
   for (const flag of expected.safetyFlags) {
     expect(metadata.safetyFlags.includes(flag), `${label} missing safety flag ${flag}`);
   }
@@ -1078,6 +1088,7 @@ function assertShellCommandSafetyMetadata(metadata, expected, label) {
     "actionKind",
     "allowlistConfigured",
     "allowlistMatched",
+    "binaryAllowlistChecked",
     "commandOmitted",
     "commandParsed",
     "cwdOmitted",
@@ -1086,14 +1097,18 @@ function assertShellCommandSafetyMetadata(metadata, expected, label) {
     "exitCodePresent",
     "exitCodeZero",
     "mode",
+    "policyChecked",
     "resultStatus",
     "safetyFlags",
     "shellPolicy",
+    "shellPolicyDiagnostic",
+    "shellRetryableReason",
     "shellReview",
     "stderrOmitted",
     "stderrPresent",
     "stdoutOmitted",
     "stdoutPresent",
+    "structuredCommandChecked",
     "structuredCommandPresent",
     "timedOut",
   ].sort();

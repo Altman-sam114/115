@@ -22,6 +22,49 @@
 
 ## 历史记录
 
+### v0.51 / Shell Command Policy Diagnostics Shell 命令策略诊断
+
+日期：2026-07-12
+
+核心变更：
+
+- Gateway `runShellCommand` commandOutput metadata 增加固定 `shellPolicyDiagnostic`、`shellRetryableReason`、`policyChecked`、`binaryAllowlistChecked` 和 `structuredCommandChecked`。
+- Shell 策略诊断枚举覆盖 not-requested、missing-structured-command、command-parse-failed、dry-run、allowlist-blocked、execution-attempted 和 execution-failed；retry reason 覆盖 none、provide-structured-command、fix-command-parse、enable-shell、configure-shell-allowlist、allow-shell-binary、automation-failed 和 review-execution。
+- `ClawGatewayShellCommandSafetyReviewSummary` 解析并 allowlist 新字段，`compactStatus` 纳入 diagnostic，`requiresShellPolicyReview` 用 metadata 缺失、阻断、失败和 retry reason 派生人工复核需求。
+- Shell Safety review row 展示 policy diagnostic、retry reason 和 policy/binary/structured checked chips；复核优先队列改为提示“确认 Shell 策略、allowlist 和执行状态”。
+- Simulator、Gateway direct/WebSocket smoke、XCTest 和 Swift logic smoke 覆盖固定键、dry-run、missing structured command、allowlist 真执行、敏感字段丢弃和 metadata 缺失回退。
+- 同步 README、协议、flow/flowchart、测试说明和 Agent A 提示词；本轮不读取 Gateway `file://` payload，不展示 raw command、stdout/stderr、cwd、token/header 或 `toolArguments`。
+- 本轮不新增 schema/event/action/artifact kind，不扩大 Gateway Shell 权限，不实现自然语言 Shell 或自动执行。
+
+关键文件：
+
+- `Tools/claw-gateway-server.mjs`
+- `Tools/claw-gateway-direct-smoke.mjs`
+- `Tools/claw-gateway-smoke.mjs`
+- `Claw/Core/ClawModels.swift`
+- `Claw/Services/ClawStore.swift`
+- `Claw/Views/ContentView.swift`
+- `ClawTests/ClawTests.swift`
+- `Tools/LogicSmoke.swift`
+- `README.md`
+- `Docs/claw-mobile-gateway-protocol.md`
+- `md/flow/flow.md`
+- `md/flow/flowchart.md`
+- `md/test/test.md`
+- `md/prompt/v0（核心智能能力）/v0.51（ShellCommandPolicyDiagnostics）.md`
+- `update_log.md`
+
+验证结果：
+
+- 本地只运行非编译静态检查；Swift logic smoke、iOS build、XCTest 编译、Gateway smoke 和 `node --check` 均等待云端 workflow 覆盖。
+- GitHub Actions 结果包待本轮提交并 push 后由 Agent C 下载复判。
+
+遗留事项：
+
+- 当前 Shell Command Policy Diagnostics 是 metadata-only 复核，不是自然语言 Shell、自动 allowlist 放行或完整 command payload viewer。
+- 完整 macOS Accessibility bridge、Playwright/browser-use 兼容控制器、真实多轮 agent loop、live Gateway 后台保活/真实心跳协议/配对和完整 artifact 内容复核体验仍是后续遗留。
+
+
 ### v0.50 / Desktop App Policy Diagnostics 桌面 App 策略诊断
 
 日期：2026-07-07

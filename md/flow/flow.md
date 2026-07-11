@@ -26,7 +26,7 @@ Claw 的当前主链路是：用户在 iPhone 输入电脑任务，App 生成可
   -> ClawGatewayLiveHealthSummary 从 request、连接状态、session、事件、attempt/reconnect/ping 派生连接健康摘要
   -> ClawGatewayArtifactMetadataReviewSummary 从 artifact event metadata 派生通用 metadata 复核摘要
   -> ClawGatewayFileChangeSafetyReviewSummary 从 manageFiles artifact metadata 派生文件变更安全复核摘要
-  -> ClawGatewayShellCommandSafetyReviewSummary 从 runShellCommand artifact metadata 派生 Shell 命令安全复核摘要
+  -> ClawGatewayShellCommandSafetyReviewSummary 从 runShellCommand artifact metadata 派生 Shell 命令安全和策略诊断复核摘要
   -> ClawGatewayExtractionCompletenessReviewSummary 从 extractData artifact metadata 派生提取完整性复核摘要
   -> ClawGatewayBrowserControlReviewSummary 从 controlBrowser artifact metadata 派生浏览器控制计划和策略诊断复核摘要
   -> ClawGatewayDeliverySafetyReviewSummary 从 messageDraft/operateDesktopApp artifact metadata 派生草稿/最终提交安全和桌面 App 策略诊断复核摘要
@@ -326,7 +326,7 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 - `agentTrace` metadata、degradedSignals 和 handoffStatus 只能用于手机端复核展示，不能成为执行计划来源，不能放入浏览器正文、命令输出、截图内容、草稿正文、联系人或 token；手机端展示前必须统一脱敏 raw token、Authorization/header、`toolArguments`、`file://` 和完整 workspace path；handoffStatus 只能使用固定枚举，不能从自然语言或 payload 解析，degradedSignals 只能使用固定 source 枚举，不能从 payload 文本解析。
 - `extractData` 完整性 metadata 只能用于手机端复核展示，不能成为执行计划来源，不能放入 row 内容、URL/path、命令输出、网页正文、草稿正文、联系人、token 或 `toolArguments`；手机端展示前必须统一脱敏敏感值。
 - File Change Safety metadata 只能用于手机端复核展示，不能成为执行计划来源，不能放入 raw path、workspace/sessionWorkspace、文件名/目录名、文件内容、diff hunk、patch、stdout/stderr、token、Authorization/header、cookie、secret 或 `toolArguments`；metadata 缺失时必须显示“metadata 待同步”，不能假定写入安全。
-- Shell Command Safety metadata 只能用于手机端复核展示，不能成为执行计划来源，不能放入 raw command、binary/args、cwd、workspace/session path、stdout/stderr 内容、token、Authorization/header、cookie、secret、自然语言 instruction 或 `toolArguments`；metadata 缺失时必须显示“metadata 待同步”，不能假定命令安全、已阻断或已执行。
+- Shell Command Safety metadata 只能用于手机端复核展示，不能成为执行计划来源，不能放入 raw command、binary/args、cwd、workspace/session path、stdout/stderr 内容、token、Authorization/header、cookie、secret、自然语言 instruction 或 `toolArguments`；v0.51 起固定展示 `shellPolicyDiagnostic`/`shellRetryableReason` 与 policy/binary/structured checked 状态，metadata 缺失时必须显示“metadata 待同步”，不能假定命令安全、已阻断或已执行。
 - Browser Control metadata 只能用于手机端复核展示，不能成为执行计划来源，不能放入 raw URL、search query、HTML/page text、form fields、candidate labels、browser app name、host、allowlist 值、stdout/stderr、token、Authorization/header 或 `toolArguments`；policy diagnostic 和 retryable reason 只能是固定枚举；metadata 缺失时必须显示“metadata 待同步”，不能假定安全或已执行。
 - Accessibility signal quality metadata 只能用于手机端复核展示，不能成为执行计划来源，不能放入前台 App 名、窗口标题、控件 label/description、raw text、选择器、坐标、完整 tree、token、Authorization/header、workspace path 或 `toolArguments`；signal/evidence/coverage 只能是固定枚举，当前 `actionExecutionSupported` 必须保持 `false`。
 - Delivery Safety metadata 只能用于手机端复核展示，不能成为执行计划来源，不能放入草稿正文、paste text、target app、allowlist 值、按键原文、URL/path、联系人、token、Authorization/header 或 `toolArguments`；desktop policy diagnostic 和 retryable reason 只能是固定枚举，metadata 缺失时必须显示“metadata 待同步”，不能假定安全、已执行或已提交。

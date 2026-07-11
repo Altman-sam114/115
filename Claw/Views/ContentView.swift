@@ -5038,6 +5038,12 @@ struct ClawGatewayShellCommandSafetyReviewRow: View {
             return [("metadata 待同步", "hourglass", .secondary)]
         }
         var items: [(String, String, Color)] = []
+        if let diagnostic = review.shellPolicyDiagnostic {
+            items.append((diagnostic, shellPolicyIcon(for: diagnostic), shellPolicyTint(for: diagnostic)))
+        }
+        if let retry = review.shellRetryableReason, retry != "none" {
+            items.append(("retry \(retry)", "arrow.triangle.2.circlepath", .orange))
+        }
         if let mode = review.mode {
             items.append((mode, "terminal.fill", statusTint))
         }
@@ -5054,6 +5060,60 @@ struct ClawGatewayShellCommandSafetyReviewRow: View {
             items.append(("policy 待复核", "hourglass", .secondary))
         }
         return items
+    }
+
+    private var shellPolicyCheckChips: [(text: String, icon: String, tint: Color)] {
+        guard review.hasMetadata else {
+            return [("策略检查待同步", "hourglass", .secondary)]
+        }
+        var items: [(String, String, Color)] = []
+        if let policyChecked = review.policyChecked {
+            items.append((policyChecked ? "policy checked" : "policy skipped", policyChecked ? "checkmark.shield.fill" : "shield.slash.fill", policyChecked ? .blue : .secondary))
+        }
+        if let binaryChecked = review.binaryAllowlistChecked {
+            items.append((binaryChecked ? "binary allowlist checked" : "binary allowlist skipped", binaryChecked ? "lock.shield.fill" : "lock.open.fill", binaryChecked ? .blue : .secondary))
+        }
+        if let structuredChecked = review.structuredCommandChecked {
+            items.append((structuredChecked ? "structured checked" : "structured skipped", structuredChecked ? "curlybraces" : "lock.fill", structuredChecked ? .blue : .secondary))
+        }
+        if items.isEmpty {
+            items.append(("策略检查待复核", "hourglass", .secondary))
+        }
+        return items
+    }
+
+    private func shellPolicyIcon(for diagnostic: String) -> String {
+        switch diagnostic {
+        case "not-requested":
+            return "minus.circle.fill"
+        case "missing-structured-command":
+            return "curlybraces.square"
+        case "command-parse-failed":
+            return "xmark.octagon.fill"
+        case "dry-run":
+            return "hand.raised.fill"
+        case "allowlist-blocked":
+            return "lock.trianglebadge.exclamationmark.fill"
+        case "execution-attempted":
+            return "play.circle.fill"
+        case "execution-failed":
+            return "exclamationmark.triangle.fill"
+        default:
+            return "shield.lefthalf.filled"
+        }
+    }
+
+    private func shellPolicyTint(for diagnostic: String) -> Color {
+        switch diagnostic {
+        case "not-requested":
+            return .secondary
+        case "execution-attempted":
+            return .blue
+        case "dry-run", "missing-structured-command", "command-parse-failed", "allowlist-blocked", "execution-failed":
+            return .orange
+        default:
+            return .secondary
+        }
     }
 
     private var executionChips: [(text: String, icon: String, tint: Color)] {
@@ -5177,7 +5237,16 @@ struct ClawGatewayShellCommandSafetyReviewRow: View {
                 }
             }
 
+
             ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(Array(shellPolicyCheckChips.enumerated()), id: \.offset) { _, chip in
+                        PhoneAgentTag(text: chip.text, icon: chip.icon, tint: chip.tint)
+                    }
+                }
+            }
+
+ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     ForEach(Array(executionChips.enumerated()), id: \.offset) { _, chip in
                         PhoneAgentTag(text: chip.text, icon: chip.icon, tint: chip.tint)

@@ -876,17 +876,17 @@ final class ClawStore: ObservableObject {
         }
 
         if let review = gatewayShellCommandSafetyReview {
-            let needsReview = review.hasMetadata == false || review.resultStatus == "failed" || review.executed == true || review.executionAttempted == true
+            let needsReview = review.requiresShellPolicyReview || review.executed == true || review.executionAttempted == true
             add(
                 id: "shell-safety",
                 rank: needsReview ? 34 : 84,
                 severity: review.hasMetadata == false ? .high : (needsReview ? .high : .info),
                 title: "Shell 命令安全",
                 status: review.compactStatus,
-                reason: review.hasMetadata ? "只展示结构化命令安全状态。" : "Shell metadata 待同步。",
+                reason: review.hasMetadata ? "只展示 Shell 策略诊断和安全状态。" : "Shell metadata 待同步。",
                 icon: "terminal.fill",
                 reviewKind: "shell-safety",
-                actionHint: needsReview ? "确认 policy、allowlist 和执行状态" : "抽查 Shell 复核",
+                actionHint: needsReview ? "确认 Shell 策略、allowlist 和执行状态" : "抽查 Shell 复核",
                 isActionable: needsReview,
                 hasMetadata: review.hasMetadata
             )
@@ -2841,6 +2841,11 @@ enum ClawGatewaySimulator {
             "stderrOmitted": "true",
             "cwdOmitted": "true",
             "resultStatus": "failed",
+            "shellPolicyDiagnostic": "dry-run",
+            "shellRetryableReason": "enable-shell",
+            "policyChecked": "true",
+            "binaryAllowlistChecked": "true",
+            "structuredCommandChecked": "true",
             "safetyFlags": "metadata-only,structured-arguments-only,tool-arguments-omitted,command-omitted,stdout-omitted,stderr-omitted,cwd-omitted,shell-allowlist-enforced,dry-run-only,no-command-executed,artifact-payload-not-read"
         ]
     }

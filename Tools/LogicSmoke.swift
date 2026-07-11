@@ -1739,6 +1739,12 @@ enum LogicSmoke {
             expect(shellReview.mode == "shell-policy-blocked", "shell safety review should expose policy blocked mode")
             expect(shellReview.actionKind == "runShellCommand", "shell safety review should expose action kind")
             expect(shellReview.shellPolicy == "dry-run", "shell safety review should expose dry-run policy")
+            expect(shellReview.shellPolicyDiagnostic == "dry-run", "shell safety review should expose policy diagnostic")
+            expect(shellReview.shellRetryableReason == "enable-shell", "shell safety review should expose retryable reason")
+            expect(shellReview.policyChecked == true, "shell safety review should expose policy checked")
+            expect(shellReview.binaryAllowlistChecked == true, "shell safety review should expose binary allowlist checked")
+            expect(shellReview.structuredCommandChecked == true, "shell safety review should expose structured command checked")
+            expect(shellReview.requiresShellPolicyReview, "shell safety review should require policy review")
             expect(shellReview.structuredCommandPresent == true, "shell safety review should expose structured command presence")
             expect(shellReview.commandParsed == true, "shell safety review should expose parse success")
             expect(shellReview.allowlistMatched == false, "shell safety review should expose allowlist block")
@@ -2550,6 +2556,8 @@ enum LogicSmoke {
                 sensitiveShellReview.mode ?? "",
                 sensitiveShellReview.actionKind ?? "",
                 sensitiveShellReview.shellPolicy ?? "",
+                sensitiveShellReview.shellPolicyDiagnostic ?? "",
+                sensitiveShellReview.shellRetryableReason ?? "",
                 sensitiveShellReview.resultStatus ?? "",
                 sensitiveShellReview.safetyFlags.joined(separator: " ")
             ].joined(separator: " ")
@@ -2557,7 +2565,13 @@ enum LogicSmoke {
             expect(sensitiveShellReview.mode == nil, "shell safety review should reject unsafe mode")
             expect(sensitiveShellReview.actionKind == nil, "shell safety review should reject unsafe action kind")
             expect(sensitiveShellReview.shellPolicy == nil, "shell safety review should reject unsafe policy")
+            expect(sensitiveShellReview.shellPolicyDiagnostic == nil, "shell safety review should reject unsafe diagnostic")
+            expect(sensitiveShellReview.shellRetryableReason == nil, "shell safety review should reject unsafe retry reason")
             expect(sensitiveShellReview.resultStatus == nil, "shell safety review should reject unsafe result status")
+            expect(sensitiveShellReview.policyChecked == true, "shell safety review should keep policy checked boolean")
+            expect(sensitiveShellReview.binaryAllowlistChecked == true, "shell safety review should keep binary allowlist boolean")
+            expect(sensitiveShellReview.structuredCommandChecked == true, "shell safety review should keep structured checked boolean")
+            expect(sensitiveShellReview.requiresShellPolicyReview, "shell safety review should require review when diagnostic rejected")
             expect(sensitiveShellReview.executed == true, "shell safety review should keep execution boolean")
             expect(sensitiveShellReview.exitCodeZero == true, "shell safety review should keep exit code boolean")
             expect(sensitiveShellReview.commandOmitted == true, "shell safety review should keep command omission")

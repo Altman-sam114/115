@@ -2019,6 +2019,73 @@ function shellPolicyState(config) {
   return config.shellAllowlist?.size > 0 ? "allowlist-enabled" : "allowlist-required";
 }
 
+function shellPolicyDiagnostics(config, details = {}) {
+  const policyChecked = true;
+  if (details.mode === "missing-structured-command") {
+    return {
+      diagnostic: "missing-structured-command",
+      retryableReason: "provide-structured-command",
+      policyChecked,
+      binaryAllowlistChecked: false,
+      structuredCommandChecked: true,
+    };
+  }
+  if (details.mode === "command-parse-failed" || details.parseFailed) {
+    return {
+      diagnostic: "command-parse-failed",
+      retryableReason: "fix-command-parse",
+      policyChecked,
+      binaryAllowlistChecked: false,
+      structuredCommandChecked: true,
+    };
+  }
+  if (details.mode === "shell-policy-blocked") {
+    if (!config.allowShell || details.dryRunOnly || details.shellPolicy === "dry-run") {
+      return {
+        diagnostic: "dry-run",
+        retryableReason: "enable-shell",
+        policyChecked,
+        binaryAllowlistChecked: true,
+        structuredCommandChecked: true,
+      };
+    }
+    const allowlistConfigured = Boolean(config.shellAllowlist?.size > 0) || details.allowlistConfigured === true;
+    return {
+      diagnostic: "allowlist-blocked",
+      retryableReason: allowlistConfigured ? "allow-shell-binary" : "configure-shell-allowlist",
+      policyChecked,
+      binaryAllowlistChecked: true,
+      structuredCommandChecked: true,
+    };
+  }
+  if (details.mode === "shell-executed" || details.executed) {
+    const failed = details.resultStatus === "failed" || details.timedOut || details.exitCodeZero === false;
+    if (failed) {
+      return {
+        diagnostic: "execution-failed",
+        retryableReason: details.timedOut ? "review-execution" : "automation-failed",
+        policyChecked,
+        binaryAllowlistChecked: true,
+        structuredCommandChecked: true,
+      };
+    }
+    return {
+      diagnostic: "execution-attempted",
+      retryableReason: "none",
+      policyChecked,
+      binaryAllowlistChecked: true,
+      structuredCommandChecked: true,
+    };
+  }
+  return {
+    diagnostic: "not-requested",
+    retryableReason: "none",
+    policyChecked: false,
+    binaryAllowlistChecked: false,
+    structuredCommandChecked: Boolean(details.structuredCommandPresent),
+  };
+}
+
 function shellCommandSafetyMetadata(action, config, details = {}) {
   const safetyFlags = [
     "metadata-only",
@@ -2045,6 +2112,7 @@ function shellCommandSafetyMetadata(action, config, details = {}) {
   if (details.dryRunOnly) {
     safetyFlags.push("dry-run-only");
   }
+  const shellPolicy = shellPolicyDiagnostics(config, details);
   return compactMetadata({
     shellReview: "commandSafety",
     mode: details.mode,
@@ -2066,6 +2134,11 @@ function shellCommandSafetyMetadata(action, config, details = {}) {
     stderrOmitted: true,
     cwdOmitted: true,
     resultStatus: details.resultStatus,
+    shellPolicyDiagnostic: shellPolicy.diagnostic,
+    shellRetryableReason: shellPolicy.retryableReason,
+    policyChecked: shellPolicy.policyChecked,
+    binaryAllowlistChecked: shellPolicy.binaryAllowlistChecked,
+    structuredCommandChecked: shellPolicy.structuredCommandChecked,
     safetyFlags,
   });
 }
