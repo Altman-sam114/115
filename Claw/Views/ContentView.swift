@@ -638,7 +638,7 @@ struct ClawMissionRunPanel: View {
         let nextReviewAction = summary.nextReviewAction(focusedOn: activeFocusedReviewKind)
         let liveGatewayHealthStrip = store.missionRunLiveGatewayHealthStrip
         let controlSnapshot = summary.controlSnapshot(focusedOn: activeFocusedReviewKind, liveHealth: liveGatewayHealthStrip)
-        let operatorStrip = summary.operatorStrip(focusedOn: activeFocusedReviewKind)
+        let operatorStrip = summary.operatorStrip(focusedOn: activeFocusedReviewKind, liveHealth: liveGatewayHealthStrip, policyBoard: macAgentPolicyDiagnostics)
         let loopContinuation = summary.loopContinuationSummary(focusedOn: activeFocusedReviewKind)
         let macAgentReadiness = summary.macAgentReadinessBoard(focusedOn: activeFocusedReviewKind)
         let macAgentPolicyDiagnostics = summary.macAgentPolicyDiagnosticsBoard(focusedOn: activeFocusedReviewKind)

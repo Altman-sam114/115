@@ -7375,16 +7375,21 @@ extension ClawMissionRunSummary {
     }
 
     var operatorStrip: ClawMissionRunOperatorStrip {
-        operatorStrip(focusedOn: nil)
+        operatorStrip(focusedOn: nil, liveHealth: nil, policyBoard: nil)
     }
 
-    func operatorStrip(focusedOn reviewKind: String?) -> ClawMissionRunOperatorStrip {
+    func operatorStrip(
+        focusedOn reviewKind: String? = nil,
+        liveHealth: ClawMissionRunLiveGatewayHealthStrip? = nil,
+        policyBoard: ClawMissionRunPolicyDiagnosticsBoard? = nil
+    ) -> ClawMissionRunOperatorStrip {
         let focusedKind = reviewKind.flatMap { kind in
             availableDetailReviewKinds.contains(kind) || reviewPriorityQueue.contains { $0.reviewKind == kind } ? kind : nil
         }
         let evidence = artifactEvidenceIndex(focusedOn: focusedKind)
         let readiness = reviewReadinessSummary(focusedOn: focusedKind)
         let next = nextReviewAction(focusedOn: focusedKind)
+        let policy = policyBoard ?? macAgentPolicyDiagnosticsBoard(focusedOn: focusedKind)
         let gatewayTone: ClawMissionRunOperatorLaneTone
         if blockedCount > 0 || failedCount > 0 {
             gatewayTone = .danger
@@ -7430,6 +7435,44 @@ extension ClawMissionRunSummary {
         }
 
         let nextReviewKind = next.reviewKind
+        let liveTone: ClawMissionRunOperatorLaneTone
+        if let liveHealth {
+            switch liveHealth.tone {
+            case .danger: liveTone = .danger
+            case .warning: liveTone = .warning
+            case .success: liveTone = .success
+            case .info: liveTone = .info
+            case .neutral: liveTone = .neutral
+            }
+        } else {
+            liveTone = .neutral
+        }
+        let liveStatus = liveHealth?.status ?? "尚未准备 Live Gateway"
+        let liveGuidance = liveHealth?.guidance ?? "发送或配置 live 后显示连接健康。"
+        let liveIcon = liveHealth?.icon ?? "antenna.radiowaves.left.and.right"
+
+        let policyTone: ClawMissionRunOperatorLaneTone
+        if policy.blockedCount > 0 {
+            policyTone = .danger
+        } else if policy.requiresHumanAction {
+            policyTone = .warning
+        } else if policy.hasMetadataGap {
+            policyTone = .info
+        } else if policy.isReviewable {
+            policyTone = .success
+        } else {
+            policyTone = .neutral
+        }
+        let policyStatus: String
+        if policy.isReviewable == false {
+            policyStatus = "策略待同步"
+        } else {
+            policyStatus = "\(policy.readyCount)/\(policy.items.count) 就绪 · \(policy.blockedCount) 阻断"
+        }
+        let policyGuidance = policy.primaryReviewTitle.map { "先看 \($0)" } ?? policy.guidance
+        let policyReviewKind = policy.primaryReviewKind
+        let policyCanFocus = policy.canFocusPrimaryReview && (policyReviewKind.map(focusUsesDetailReview) ?? false)
+
         let lanes = [
             ClawMissionRunOperatorLane(
                 id: "gateway",
@@ -7441,6 +7484,28 @@ extension ClawMissionRunSummary {
                 reviewKind: nil,
                 canFocusReview: false,
                 isFocused: false
+            ),
+            ClawMissionRunOperatorLane(
+                id: "live",
+                title: "Live",
+                status: liveStatus,
+                guidance: liveGuidance,
+                icon: liveIcon,
+                tone: liveTone,
+                reviewKind: nil,
+                canFocusReview: false,
+                isFocused: false
+            ),
+            ClawMissionRunOperatorLane(
+                id: "policy",
+                title: "策略",
+                status: policyStatus,
+                guidance: policyGuidance,
+                icon: policy.icon,
+                tone: policyTone,
+                reviewKind: policyReviewKind,
+                canFocusReview: policyCanFocus,
+                isFocused: focusedKind != nil && focusedKind == policyReviewKind
             ),
             ClawMissionRunOperatorLane(
                 id: "evidence",

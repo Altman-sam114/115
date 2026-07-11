@@ -22,6 +22,42 @@
 
 ## 历史记录
 
+### v0.57 / Operator Strip Live/Policy Lanes 操作条连接与策略格
+
+日期：2026-07-12
+
+核心变更：
+
+- Operator Strip 固定 lanes 扩展为 gateway、live、policy、evidence、review、next。
+- Live 格复用 `ClawMissionRunLiveGatewayHealthStrip`；Policy 格复用 `ClawMissionRunPolicyDiagnosticsBoard`。
+- `operatorStrip(focusedOn:liveHealth:policyBoard:)` 支持可选注入，Mission Run 传入现有 strip/board。
+- XCTest / LogicSmoke 更新 idle lane id 期望。
+- 同步 README、flow、test、protocol 和 Agent A 提示词。
+
+关键文件：
+
+- `Claw/Core/ClawModels.swift`
+- `Claw/Views/ContentView.swift`
+- `ClawTests/ClawTests.swift`
+- `Tools/LogicSmoke.swift`
+- `README.md`
+- `Docs/claw-mobile-gateway-protocol.md`
+- `md/flow/flow.md`
+- `md/test/test.md`
+- `md/prompt/v0（核心智能能力）/v0.57（OperatorStripLivePolicyLanes）.md`
+- `update_log.md`
+
+验证结果：
+
+- 本地只运行非编译静态检查；build/smoke 等待云端 workflow。
+- GitHub Actions 结果包待本轮 push 后由 Agent C 下载复判。
+
+遗留事项：
+
+- lanes 仍是 presentation-layer 摘要，不是自动连接、自动审批或安全裁决。
+- 完整 Accessibility bridge、Playwright/browser-use、真实多轮 agent loop 和完整 artifact payload 复核体验仍是后续遗留。
+
+
 ### v0.56 / Control Snapshot Live Health Signal 控制态势连接健康信号
 
 日期：2026-07-12

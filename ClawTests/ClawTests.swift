@@ -621,7 +621,9 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(idleEvidence.coveredReviewCount, 0)
         XCTAssertFalse(idleEvidence.focusedHasEvidence)
         let idleOperatorStrip = idleStore.missionRunSummary.operatorStrip
-        XCTAssertEqual(idleOperatorStrip.lanes.map(\.id), ["gateway", "evidence", "review", "next"])
+        XCTAssertEqual(idleOperatorStrip.lanes.map(\.id), ["gateway", "live", "policy", "evidence", "review", "next"])
+        XCTAssertTrue(idleOperatorStrip.lanes.contains { $0.id == "live" })
+        XCTAssertTrue(idleOperatorStrip.lanes.contains { $0.id == "policy" })
         XCTAssertNil(idleOperatorStrip.focusedReviewKind)
         XCTAssertTrue(idleOperatorStrip.lanes.allSatisfy { $0.canFocusReview == false })
         XCTAssertTrue(idleOperatorStrip.lanes.contains { $0.id == "evidence" && $0.status == "0/0 类覆盖" })
@@ -998,7 +1000,7 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(focusedControlSnapshot.focusedReviewTitle, "最终提交安全")
         XCTAssertEqual(focusedControlSnapshot.primaryReviewKind, "delivery-safety")
         let operatorStrip = summary.operatorStrip
-        XCTAssertEqual(operatorStrip.lanes.map(\.id), ["gateway", "evidence", "review", "next"])
+        XCTAssertEqual(operatorStrip.lanes.map(\.id), ["gateway", "live", "policy", "evidence", "review", "next"])
         XCTAssertEqual(operatorStrip.title, "Mission Operator")
         XCTAssertTrue(operatorStrip.lanes.contains { $0.id == "gateway" && $0.status.contains(summary.phaseTitle) })
         XCTAssertTrue(operatorStrip.lanes.contains { $0.id == "evidence" && $0.status == "\(evidenceIndex.coveredReviewCount)/\(evidenceIndex.items.count) 类覆盖" })

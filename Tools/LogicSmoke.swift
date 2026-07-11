@@ -123,7 +123,9 @@ enum LogicSmoke {
         expect(idleEvidence.coveredReviewCount == 0, "idle evidence index should not invent coverage")
         expect(idleEvidence.focusedHasEvidence == false, "idle evidence index should not mark focused evidence")
         let idleOperatorStrip = missionStore.missionRunSummary.operatorStrip
-        expect(idleOperatorStrip.lanes.map(\.id) == ["gateway", "evidence", "review", "next"], "idle operator strip should expose stable lanes")
+        expect(idleOperatorStrip.lanes.map(\.id) == ["gateway", "live", "policy", "evidence", "review", "next"], "idle operator strip should expose stable lanes")
+        expect(idleOperatorStrip.lanes.contains { $0.id == "live" }, "idle operator strip should include live lane")
+        expect(idleOperatorStrip.lanes.contains { $0.id == "policy" }, "idle operator strip should include policy lane")
         expect(idleOperatorStrip.focusedReviewKind == nil, "idle operator strip should not invent focus")
         expect(idleOperatorStrip.lanes.allSatisfy { $0.canFocusReview == false }, "idle operator strip should not expose focus buttons")
         expect(
@@ -665,7 +667,7 @@ enum LogicSmoke {
         expect(focusedControlSnapshot.focusedReviewTitle == "最终提交安全", "focused control snapshot should expose delivery title")
         expect(focusedControlSnapshot.primaryReviewKind == "delivery-safety", "focused control snapshot should keep delivery primary")
         let operatorStrip = missionSummary.operatorStrip
-        expect(operatorStrip.lanes.map(\.id) == ["gateway", "evidence", "review", "next"], "operator strip should expose stable lanes")
+        expect(operatorStrip.lanes.map(\.id) == ["gateway", "live", "policy", "evidence", "review", "next"], "operator strip should expose stable lanes")
         expect(operatorStrip.title == "Mission Operator", "operator strip should expose stable title")
         expect(
             operatorStrip.lanes.contains { $0.id == "gateway" && $0.status.contains(missionSummary.phaseTitle) },
@@ -2666,6 +2668,8 @@ enum LogicSmoke {
         expect(fallbackStrip.hasFallback, "mission health strip should expose fallback")
         expect(fallbackStrip.guidance.contains("Authorization") == false, "mission health strip should not expose headers")
         let fallbackControl = store.missionRunSummary.controlSnapshot(focusedOn: nil, liveHealth: fallbackStrip)
+        let fallbackOperator = store.missionRunSummary.operatorStrip(liveHealth: fallbackStrip)
+        expect(fallbackOperator.lanes.contains { $0.id == "live" }, "operator strip should expose live lane with health")
         expect(fallbackControl.hasLiveFallback, "control snapshot should expose live fallback signal")
         expect(fallbackControl.liveHealthState == "fallback", "control snapshot should expose live health state")
         expect((fallbackControl.liveHealthStatus ?? "").contains("Authorization") == false, "control snapshot live status should redact headers")
