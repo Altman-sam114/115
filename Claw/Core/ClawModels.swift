@@ -2749,7 +2749,9 @@ struct ClawGatewayDeliverySafetyReviewSummary: Equatable, Codable, Sendable {
     }
 
     private static func allowedDesktopRetryableReason(_ value: String?) -> String? {
-        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
+        // Preserve fixed enum "none"; ClawArtifactMetadataParser.cleanValue drops it.
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard trimmed.isEmpty == false else {
             return nil
         }
         let allowed = [
@@ -2762,7 +2764,7 @@ struct ClawGatewayDeliverySafetyReviewSummary: Equatable, Codable, Sendable {
             "automation-failed",
             "user-final-submit"
         ]
-        return allowed.contains(clean) ? clean : nil
+        return allowed.contains(trimmed) ? trimmed : nil
     }
 
     private static func allowedSafetyFlags(_ value: String?) -> [String] {
@@ -2929,7 +2931,9 @@ struct ClawGatewayFileChangeSafetyReviewSummary: Equatable, Codable, Sendable {
     }
 
     private static func allowedFileRetryableReason(_ value: String?) -> String? {
-        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
+        // Preserve fixed enum "none"; ClawArtifactMetadataParser.cleanValue drops it.
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard trimmed.isEmpty == false else {
             return nil
         }
         let allowed = [
@@ -2939,7 +2943,7 @@ struct ClawGatewayFileChangeSafetyReviewSummary: Equatable, Codable, Sendable {
             "retry-write",
             "review-write-failure"
         ]
-        return allowed.contains(clean) ? clean : nil
+        return allowed.contains(trimmed) ? trimmed : nil
     }
 
     private static func allowedResultStatus(_ value: String?) -> String? {
@@ -3128,7 +3132,9 @@ struct ClawGatewayShellCommandSafetyReviewSummary: Equatable, Codable, Sendable 
     }
 
     private static func allowedShellRetryableReason(_ value: String?) -> String? {
-        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
+        // Preserve fixed enum "none"; ClawArtifactMetadataParser.cleanValue drops it.
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard trimmed.isEmpty == false else {
             return nil
         }
         let allowed = [
@@ -3141,7 +3147,7 @@ struct ClawGatewayShellCommandSafetyReviewSummary: Equatable, Codable, Sendable 
             "automation-failed",
             "review-execution"
         ]
-        return allowed.contains(clean) ? clean : nil
+        return allowed.contains(trimmed) ? trimmed : nil
     }
 
     private static func allowedResultStatus(_ value: String?) -> String? {
