@@ -5366,6 +5366,62 @@ struct ClawGatewayExtractionCompletenessReviewRow: View {
         }
     }
 
+    private var policyChips: [(text: String, icon: String, tint: Color)] {
+        guard review.hasMetadata else {
+            return [("metadata 待同步", "hourglass", .secondary)]
+        }
+        var items: [(String, String, Color)] = []
+        if let diagnostic = review.extractionPolicyDiagnostic {
+            items.append((diagnostic, extractionPolicyIcon(for: diagnostic), extractionPolicyTint(for: diagnostic)))
+        }
+        if let retry = review.extractionRetryableReason, retry != "none" {
+            items.append(("retry \(retry)", "arrow.triangle.2.circlepath", .orange))
+        }
+        if let policyChecked = review.policyChecked {
+            items.append((policyChecked ? "policy checked" : "policy skipped", policyChecked ? "checkmark.shield.fill" : "shield.slash.fill", policyChecked ? .blue : .secondary))
+        }
+        if let sourceChecked = review.sourceCoverageChecked {
+            items.append((sourceChecked ? "source coverage checked" : "source coverage skipped", sourceChecked ? "square.stack.3d.up.fill" : "square.stack.3d.up.slash", sourceChecked ? .blue : .secondary))
+        }
+        if let completenessChecked = review.completenessChecked {
+            items.append((completenessChecked ? "completeness checked" : "completeness skipped", completenessChecked ? "checklist.checked" : "checklist", completenessChecked ? .blue : .secondary))
+        }
+        if items.isEmpty {
+            items.append(("策略检查待复核", "hourglass", .secondary))
+        }
+        return items
+    }
+
+    private func extractionPolicyIcon(for diagnostic: String) -> String {
+        switch diagnostic {
+        case "not-requested":
+            return "minus.circle.fill"
+        case "dry-run":
+            return "hand.raised.fill"
+        case "empty":
+            return "tray"
+        case "partial":
+            return "exclamationmark.triangle.fill"
+        case "complete":
+            return "checkmark.seal.fill"
+        default:
+            return "shield.lefthalf.filled"
+        }
+    }
+
+    private func extractionPolicyTint(for diagnostic: String) -> Color {
+        switch diagnostic {
+        case "complete":
+            return .green
+        case "partial", "dry-run":
+            return .orange
+        case "empty":
+            return .red
+        default:
+            return .secondary
+        }
+    }
+
     private var sourceChips: [(text: String, icon: String, tint: Color)] {
         guard review.hasMetadata else {
             return [("sources 待同步", "hourglass", .secondary)]
@@ -5446,7 +5502,16 @@ struct ClawGatewayExtractionCompletenessReviewRow: View {
                 }
             }
 
+
             ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(Array(policyChips.enumerated()), id: \.offset) { _, chip in
+                        PhoneAgentTag(text: chip.text, icon: chip.icon, tint: chip.tint)
+                    }
+                }
+            }
+
+ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     ForEach(Array(sourceChips.enumerated()), id: \.offset) { _, chip in
                         PhoneAgentTag(text: chip.text, icon: chip.icon, tint: chip.tint)

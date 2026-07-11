@@ -1624,6 +1624,12 @@ enum LogicSmoke {
         if let extractionReview = missionSummary.gatewayExtractionCompletenessReview {
             expect(extractionReview.extractionCount == 1, "mission summary should count extraction artifacts")
             expect(extractionReview.hasMetadata, "extraction review should include metadata")
+            expect(extractionReview.extractionPolicyDiagnostic == "complete", "extraction review should expose policy diagnostic")
+            expect(extractionReview.extractionRetryableReason == "none", "extraction review should expose retry reason")
+            expect(extractionReview.policyChecked == true, "extraction review should expose policy checked")
+            expect(extractionReview.sourceCoverageChecked == true, "extraction review should expose source coverage checked")
+            expect(extractionReview.completenessChecked == true, "extraction review should expose completeness checked")
+            expect(extractionReview.requiresExtractionPolicyReview == false, "complete extraction should not require policy review")
             expect(extractionReview.mode == "artifact-grounded-extraction", "extraction review should expose extraction mode")
             expect(extractionReview.validateCompleteness == true, "extraction review should expose completeness validation")
             expect(extractionReview.rowCount == 4, "extraction review should expose row count")
@@ -2296,6 +2302,11 @@ enum LogicSmoke {
                 "validateCompleteness": "true",
                 "rowCount": "2",
                 "completenessStatus": "complete file:///private/tmp/secret.json",
+                "extractionPolicyDiagnostic": "complete file:///private/tmp/secret.json",
+                "extractionRetryableReason": "none Authorization: Bearer raw-token",
+                "policyChecked": "true",
+                "sourceCoverageChecked": "true",
+                "completenessChecked": "true",
                 "browserTraceCount": "1",
                 "fileDiffCount": "1",
                 "commandOutputCount": "1",

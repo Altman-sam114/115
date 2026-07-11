@@ -927,17 +927,17 @@ final class ClawStore: ObservableObject {
         }
 
         if let review = gatewayExtractionCompletenessReview {
-            let incomplete = review.hasMetadata == false || review.completenessStatus != "complete"
+            let incomplete = review.requiresExtractionPolicyReview
             add(
                 id: "extraction-completeness",
                 rank: incomplete ? 52 : 90,
                 severity: review.hasMetadata == false ? .medium : (incomplete ? .medium : .low),
                 title: "提取完整性",
                 status: review.compactStatus,
-                reason: review.hasMetadata ? "结构化结果有来源和完整性状态。" : "提取 metadata 待同步。",
+                reason: review.hasMetadata ? "只展示提取来源完整性诊断。" : "提取 metadata 待同步。",
                 icon: "tablecells.fill",
                 reviewKind: "extraction-completeness",
-                actionHint: incomplete ? "确认来源 artifact 和行数" : "抽查提取摘要",
+                actionHint: incomplete ? "确认提取策略、来源覆盖和完整性" : "抽查提取摘要",
                 isActionable: incomplete,
                 hasMetadata: review.hasMetadata
             )
@@ -2762,6 +2762,11 @@ enum ClawGatewaySimulator {
             "accessibilityTreeCount": "1",
             "messageDraftCount": "0",
             "sourceArtifactKinds": "browserTrace,fileDiff,commandOutput,screenObservation,accessibilityTree",
+            "extractionPolicyDiagnostic": "complete",
+            "extractionRetryableReason": "none",
+            "policyChecked": "true",
+            "sourceCoverageChecked": "true",
+            "completenessChecked": "true",
             "safetyFlags": "metadata-only,row-content-omitted,source-values-omitted,tool-arguments-omitted,artifact-payload-not-read"
         ]
     }

@@ -2500,6 +2500,55 @@ async function extractDataAction(action, index, config) {
   };
 }
 
+function extractionPolicyDiagnostics({ mode, completenessStatus, sourceArtifactKinds }) {
+  const policyChecked = true;
+  const sourceCoverageChecked = true;
+  const completenessChecked = true;
+  if (mode === "dry-run-extraction") {
+    return {
+      diagnostic: "dry-run",
+      retryableReason: "provide-source-artifacts",
+      policyChecked,
+      sourceCoverageChecked,
+      completenessChecked,
+    };
+  }
+  if (completenessStatus === "empty") {
+    return {
+      diagnostic: "empty",
+      retryableReason: "review-empty-extraction",
+      policyChecked,
+      sourceCoverageChecked,
+      completenessChecked,
+    };
+  }
+  if (completenessStatus === "partial") {
+    return {
+      diagnostic: "partial",
+      retryableReason: "review-partial-extraction",
+      policyChecked,
+      sourceCoverageChecked,
+      completenessChecked,
+    };
+  }
+  if (completenessStatus === "complete") {
+    return {
+      diagnostic: "complete",
+      retryableReason: "none",
+      policyChecked,
+      sourceCoverageChecked,
+      completenessChecked,
+    };
+  }
+  return {
+    diagnostic: "not-requested",
+    retryableReason: "none",
+    policyChecked: false,
+    sourceCoverageChecked: false,
+    completenessChecked: false,
+  };
+}
+
 function extractionCompletenessMetadata(extracted) {
   const sourceArtifacts = extracted.sourceArtifacts || {};
   const sourceArtifactKinds = [
@@ -2518,6 +2567,11 @@ function extractionCompletenessMetadata(extracted) {
     : extracted.mode === "artifact-grounded-extraction" && sourceArtifactKinds.length > 0
       ? "complete"
       : "partial";
+  const extractionPolicy = extractionPolicyDiagnostics({
+    mode: extracted.mode,
+    completenessStatus,
+    sourceArtifactKinds,
+  });
   return compactMetadata({
     extractionReview: "artifactGrounded",
     mode: extracted.mode,
@@ -2531,6 +2585,11 @@ function extractionCompletenessMetadata(extracted) {
     accessibilityTreeCount: sourceArtifacts.accessibilityTreeCount,
     messageDraftCount: sourceArtifacts.messageDraftCount,
     sourceArtifactKinds,
+    extractionPolicyDiagnostic: extractionPolicy.diagnostic,
+    extractionRetryableReason: extractionPolicy.retryableReason,
+    policyChecked: extractionPolicy.policyChecked,
+    sourceCoverageChecked: extractionPolicy.sourceCoverageChecked,
+    completenessChecked: extractionPolicy.completenessChecked,
     safetyFlags: [
       "metadata-only",
       "row-content-omitted",

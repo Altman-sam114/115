@@ -402,6 +402,12 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(review.validateCompleteness, true)
         XCTAssertEqual(review.rowCount, 4)
         XCTAssertEqual(review.completenessStatus, "complete")
+        XCTAssertEqual(review.extractionPolicyDiagnostic, "complete")
+        XCTAssertEqual(review.extractionRetryableReason, "none")
+        XCTAssertEqual(review.policyChecked, true)
+        XCTAssertEqual(review.sourceCoverageChecked, true)
+        XCTAssertEqual(review.completenessChecked, true)
+        XCTAssertFalse(review.requiresExtractionPolicyReview)
         XCTAssertEqual(review.browserTraceCount, 1)
         XCTAssertEqual(review.fileDiffCount, 1)
         XCTAssertEqual(review.commandOutputCount, 1)
@@ -410,6 +416,7 @@ final class ClawTests: XCTestCase {
         XCTAssertTrue(review.sourceArtifactKinds.contains("browserTrace"))
         XCTAssertTrue(review.sourceArtifactKinds.contains("fileDiff"))
         XCTAssertTrue(review.safetyFlags.contains("row-content-omitted"))
+        XCTAssertTrue(review.compactStatus.contains("diagnostic complete"))
         XCTAssertTrue(review.compactStatus.contains("complete"))
         XCTAssertTrue(review.compactStatus.contains("rows 4"))
     }
@@ -2521,6 +2528,11 @@ final class ClawTests: XCTestCase {
                 "validateCompleteness": "true",
                 "rowCount": "8",
                 "completenessStatus": "complete file:///private/tmp/secret.json",
+                "extractionPolicyDiagnostic": "complete file:///private/tmp/secret.json",
+                "extractionRetryableReason": "none Authorization: Bearer raw-token",
+                "policyChecked": "true",
+                "sourceCoverageChecked": "true",
+                "completenessChecked": "true",
                 "browserTraceCount": "2",
                 "fileDiffCount": "1",
                 "commandOutputCount": "1",
@@ -2538,6 +2550,8 @@ final class ClawTests: XCTestCase {
             review.compactStatus,
             review.mode ?? "",
             review.completenessStatus ?? "",
+            review.extractionPolicyDiagnostic ?? "",
+            review.extractionRetryableReason ?? "",
             review.sourceArtifactKinds.joined(separator: " "),
             review.safetyFlags.joined(separator: " ")
         ].joined(separator: " ")
@@ -2551,6 +2565,12 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(review.commandOutputCount, 1)
         XCTAssertNil(review.mode)
         XCTAssertNil(review.completenessStatus)
+        XCTAssertNil(review.extractionPolicyDiagnostic)
+        XCTAssertNil(review.extractionRetryableReason)
+        XCTAssertEqual(review.policyChecked, true)
+        XCTAssertEqual(review.sourceCoverageChecked, true)
+        XCTAssertEqual(review.completenessChecked, true)
+        XCTAssertTrue(review.requiresExtractionPolicyReview)
         XCTAssertTrue(review.sourceArtifactKinds.contains("browserTrace"))
         XCTAssertFalse(review.sourceArtifactKinds.contains("toolArguments"))
         XCTAssertFalse(review.safetyFlags.contains { $0.contains("headers") })

@@ -2190,6 +2190,10 @@ struct ClawGatewayArtifactMetadataReviewSummary: Equatable, Codable, Sendable {
             "candidatecontrolcount": "candidateControlCount",
             "commandoutputcount": "commandOutputCount",
             "completenessstatus": "completenessStatus",
+            "extractionpolicydiagnostic": "extractionPolicyDiagnostic",
+            "extractionretryablereason": "extractionRetryableReason",
+            "sourcecoveragechecked": "sourceCoverageChecked",
+            "completenesschecked": "completenessChecked",
             "decision": "decision",
             "desktopcontrolstate": "desktopControlState",
             "desktoppolicydiagnostic": "desktopPolicyDiagnostic",
@@ -2294,6 +2298,11 @@ struct ClawGatewayExtractionCompletenessReviewSummary: Equatable, Codable, Senda
     var validateCompleteness: Bool?
     var rowCount: Int?
     var completenessStatus: String?
+    var extractionPolicyDiagnostic: String?
+    var extractionRetryableReason: String?
+    var policyChecked: Bool?
+    var sourceCoverageChecked: Bool?
+    var completenessChecked: Bool?
     var browserTraceCount: Int?
     var fileDiffCount: Int?
     var commandOutputCount: Int?
@@ -2308,10 +2317,30 @@ struct ClawGatewayExtractionCompletenessReviewSummary: Equatable, Codable, Senda
         guard hasMetadata else {
             return "已收到结构化提取结果，metadata 待同步。"
         }
+        let diagnostic = extractionPolicyDiagnostic.map { "diagnostic \($0)" } ?? "diagnostic 待复核"
         let status = completenessStatus ?? "完整性待复核"
         let rows = rowCount.map { "rows \($0)" } ?? "rows 待复核"
         let sources = sourceArtifactKinds.isEmpty ? "sources 待复核" : "sources \(sourceArtifactKinds.count)"
-        return "\(status) · \(rows) · \(sources)"
+        return "\(diagnostic) · \(status) · \(rows) · \(sources)"
+    }
+
+    var requiresExtractionPolicyReview: Bool {
+        guard hasMetadata else {
+            return true
+        }
+        if extractionPolicyDiagnostic == nil || extractionRetryableReason == nil || policyChecked == nil || sourceCoverageChecked == nil || completenessChecked == nil {
+            return true
+        }
+        if ["dry-run", "empty", "partial"].contains(extractionPolicyDiagnostic ?? "") {
+            return true
+        }
+        if completenessStatus != "complete" {
+            return true
+        }
+        if extractionRetryableReason != nil && extractionRetryableReason != "none" {
+            return true
+        }
+        return false
     }
 
     static func latest(from session: ClawGatewaySession?) -> ClawGatewayExtractionCompletenessReviewSummary? {
@@ -2335,6 +2364,11 @@ struct ClawGatewayExtractionCompletenessReviewSummary: Equatable, Codable, Senda
             validateCompleteness: ClawArtifactMetadataParser.boolValue(metadata["validateCompleteness"]),
             rowCount: ClawArtifactMetadataParser.intValue(metadata["rowCount"]),
             completenessStatus: allowedCompletenessStatus(metadata["completenessStatus"]),
+            extractionPolicyDiagnostic: allowedExtractionPolicyDiagnostic(metadata["extractionPolicyDiagnostic"]),
+            extractionRetryableReason: allowedExtractionRetryableReason(metadata["extractionRetryableReason"]),
+            policyChecked: ClawArtifactMetadataParser.boolValue(metadata["policyChecked"]),
+            sourceCoverageChecked: ClawArtifactMetadataParser.boolValue(metadata["sourceCoverageChecked"]),
+            completenessChecked: ClawArtifactMetadataParser.boolValue(metadata["completenessChecked"]),
             browserTraceCount: ClawArtifactMetadataParser.intValue(metadata["browserTraceCount"]),
             fileDiffCount: ClawArtifactMetadataParser.intValue(metadata["fileDiffCount"]),
             commandOutputCount: ClawArtifactMetadataParser.intValue(metadata["commandOutputCount"]),
@@ -2370,6 +2404,35 @@ struct ClawGatewayExtractionCompletenessReviewSummary: Equatable, Codable, Senda
         }
         let allowed = ["complete", "partial", "empty"]
         return allowed.contains(clean) ? clean : nil
+    }
+
+    private static func allowedExtractionPolicyDiagnostic(_ value: String?) -> String? {
+        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
+            return nil
+        }
+        let allowed = [
+            "not-requested",
+            "dry-run",
+            "empty",
+            "partial",
+            "complete"
+        ]
+        return allowed.contains(clean) ? clean : nil
+    }
+
+    private static func allowedExtractionRetryableReason(_ value: String?) -> String? {
+        // Preserve fixed enum "none"; ClawArtifactMetadataParser.cleanValue drops it.
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard trimmed.isEmpty == false else {
+            return nil
+        }
+        let allowed = [
+            "none",
+            "provide-source-artifacts",
+            "review-empty-extraction",
+            "review-partial-extraction"
+        ]
+        return allowed.contains(trimmed) ? trimmed : nil
     }
 
     private static func allowedSourceArtifactKinds(_ value: String?) -> [String] {

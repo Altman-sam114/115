@@ -884,15 +884,20 @@ function assertExtractionCompletenessMetadata(metadata, extraction, label) {
     "accessibilityTreeCount",
     "browserTraceCount",
     "commandOutputCount",
+    "completenessChecked",
     "completenessStatus",
+    "extractionPolicyDiagnostic",
+    "extractionRetryableReason",
     "extractionReview",
     "fileDiffCount",
     "messageDraftCount",
     "mode",
+    "policyChecked",
     "rowCount",
     "safetyFlags",
     "screenObservationCount",
     "sourceArtifactKinds",
+    "sourceCoverageChecked",
     "validateCompleteness",
   ];
   expect(
@@ -904,6 +909,11 @@ function assertExtractionCompletenessMetadata(metadata, extraction, label) {
   expect(metadata.validateCompleteness === String(extraction.validateCompleteness), `${label} completeness validation metadata mismatch`);
   expect(Number(metadata.rowCount) === extraction.rows.length, `${label} row count metadata mismatch`);
   expect(metadata.completenessStatus === "complete", `${label} completeness status mismatch`);
+  expect(metadata.extractionPolicyDiagnostic === "complete", `${label} extraction policy diagnostic mismatch`);
+  expect(metadata.extractionRetryableReason === "none", `${label} extraction retry reason mismatch`);
+  expect(metadata.policyChecked === "true", `${label} policy checked mismatch`);
+  expect(metadata.sourceCoverageChecked === "true", `${label} source coverage checked mismatch`);
+  expect(metadata.completenessChecked === "true", `${label} completeness checked mismatch`);
   expect(Number(metadata.browserTraceCount) === extraction.sourceArtifacts.browserTraceCount, `${label} browser trace count metadata mismatch`);
   expect(Number(metadata.fileDiffCount) === extraction.sourceArtifacts.fileDiffCount, `${label} file diff count metadata mismatch`);
   expect(Number(metadata.commandOutputCount) === extraction.sourceArtifacts.commandOutputCount, `${label} command output count metadata mismatch`);
