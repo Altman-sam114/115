@@ -3473,7 +3473,8 @@ struct ClawAgentTraceReviewSummary: Equatable, Codable, Sendable {
     }
 
     static func allowedNextActionKind(_ value: String?) -> String? {
-        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
+        let clean = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard clean.isEmpty == false else {
             return nil
         }
         let allowed: Set<String> = [

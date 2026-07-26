@@ -2250,6 +2250,8 @@ enum LogicSmoke {
             ]
         )
         if let readyLoopReview = ClawAgentTraceReviewSummary.latest(from: [readyLoopTrace]) {
+            expect(readyLoopReview.stopReason == nil, "generic metadata parser should continue treating none stop reason as absent")
+            expect(ClawAgentTraceReviewSummary.allowedNextActionKind("None") == nil, "next action kind parsing should remain case sensitive")
             let readyLoopSummary = ClawMissionRunSummary(
                 command: "ready loop",
                 phaseTitle: "复核中",
@@ -2363,7 +2365,7 @@ enum LogicSmoke {
                 failures.append("contradictory next action policy review should be derived")
             }
             var blockedMetadata = readyLoopTrace.metadata ?? [:]
-            blockedMetadata["selectedNextActionKind"] = "none"
+            blockedMetadata["selectedNextActionKind"] = " \nnone\t "
             blockedMetadata["selectedNextActionRequiresApproval"] = "false"
             blockedMetadata["nextActionPolicyDiagnostic"] = "policy-blocked"
             blockedMetadata["requestedNextActionCount"] = "2"
@@ -2380,6 +2382,7 @@ enum LogicSmoke {
                 metadata: blockedMetadata
             )
             if let blockedReview = ClawAgentTraceReviewSummary.latest(from: [blockedTrace]) {
+                expect(blockedReview.selectedNextActionKind == "none", "blocked policy should preserve the none stop action")
                 expect(blockedReview.requiresNextActionPolicyReview == false, "valid blocked policy evidence should be accepted")
                 var blockedSummary = readyLoopSummary
                 blockedSummary.agentTraceReview = blockedReview
@@ -2439,6 +2442,7 @@ enum LogicSmoke {
                 sensitiveAgentTraceReview.handoffSummary ?? ""
             ].joined(separator: " ")
             expect(sensitiveAgentTraceReview.degradedSignals == ["accessibilityTree"], "agent trace review should keep only safe degraded signals")
+            expect(sensitiveAgentTraceReview.selectedNextActionKind == nil, "agent trace review should reject polluted selected action kinds")
             expect(sensitiveAgentTraceReview.nextActionPolicy == nil, "agent trace review should reject unsafe policy metadata")
             expect(sensitiveAgentTraceReview.nextActionPolicyDiagnostic == nil, "agent trace review should reject unsafe policy diagnostic")
             expect(sensitiveAgentTraceReview.requestedNextActionCount == nil, "agent trace review should reject out-of-range requested count")

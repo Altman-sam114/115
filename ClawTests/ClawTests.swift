@@ -2192,6 +2192,8 @@ final class ClawTests: XCTestCase {
             ]
         )
         let review = try XCTUnwrap(ClawAgentTraceReviewSummary.latest(from: [artifact]))
+        XCTAssertNil(review.stopReason)
+        XCTAssertNil(ClawAgentTraceReviewSummary.allowedNextActionKind("None"))
         let summary = ClawMissionRunSummary(
             command: "ready loop",
             phaseTitle: "复核中",
@@ -2306,7 +2308,7 @@ final class ClawTests: XCTestCase {
         XCTAssertFalse(contradictorySummary.loopContinuationSummary.canContinueLoop)
 
         var blockedMetadata = artifact.metadata ?? [:]
-        blockedMetadata["selectedNextActionKind"] = "none"
+        blockedMetadata["selectedNextActionKind"] = " \nnone\t "
         blockedMetadata["selectedNextActionRequiresApproval"] = "false"
         blockedMetadata["nextActionPolicyDiagnostic"] = "policy-blocked"
         blockedMetadata["requestedNextActionCount"] = "2"
@@ -2323,6 +2325,7 @@ final class ClawTests: XCTestCase {
             metadata: blockedMetadata
         )
         let blockedReview = try XCTUnwrap(ClawAgentTraceReviewSummary.latest(from: [blockedArtifact]))
+        XCTAssertEqual(blockedReview.selectedNextActionKind, "none")
         XCTAssertFalse(blockedReview.requiresNextActionPolicyReview)
         var blockedSummary = summary
         blockedSummary.agentTraceReview = blockedReview
@@ -3276,6 +3279,7 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(review.readinessScore, 64)
         XCTAssertEqual(review.readinessCanContinue, true)
         XCTAssertEqual(review.selectedNextActionRequiresApproval, true)
+        XCTAssertNil(review.selectedNextActionKind)
         XCTAssertEqual(review.degradedSignals, ["accessibilityTree"])
         XCTAssertNil(review.nextActionPolicy)
         XCTAssertNil(review.nextActionPolicyDiagnostic)
