@@ -1767,7 +1767,7 @@ enum LogicSmoke {
             expect(shellReview.shellPolicyDiagnostic == "dry-run", "shell safety review should expose policy diagnostic")
             expect(shellReview.shellRetryableReason == "enable-shell", "shell safety review should expose retryable reason")
             expect(shellReview.policyChecked == true, "shell safety review should expose policy checked")
-            expect(shellReview.binaryAllowlistChecked == true, "shell safety review should expose binary allowlist checked")
+            expect(shellReview.binaryAllowlistChecked == false, "shell safety review should show binary allowlist was skipped in dry-run")
             expect(shellReview.structuredCommandChecked == true, "shell safety review should expose structured command checked")
             expect(shellReview.requiresShellPolicyReview, "shell safety review should require policy review")
             expect(shellReview.structuredCommandPresent == true, "shell safety review should expose structured command presence")

@@ -33,7 +33,7 @@ flowchart TD
   ART --> AXMETA["accessibilityTree metadata<br/>signal quality、evidence tier、控件覆盖、省略标志、observe-only"]
   ART --> AMETA["artifact metadata review<br/>覆盖率、脱敏数、安全键值、safety flags"]
   ART --> FCMETA["file change safety metadata<br/>workspace policy、写入状态、变更计数、省略标志"]
-  ART --> SHMETA["shell command safety metadata<br/>结构化命令、policy、allowlist、执行状态、省略标志"]
+  ART --> SHMETA["shell command safety metadata<br/>结构化命令、policy、真实 allowlist 检查证据、执行状态、省略标志"]
   ART --> EXMETA["extractData metadata<br/>完整性状态、row count、来源计数、安全标志"]
   ART --> DLMETA["delivery safety metadata<br/>最终提交闸门、桌面策略诊断、用户确认、省略状态、按键计数"]
   ART --> META["agentTrace artifact metadata<br/>证据分、满足/降级/缺失信号、下一步、风险、停止原因、handoff 状态、统一脱敏"]

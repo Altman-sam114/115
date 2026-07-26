@@ -59,7 +59,7 @@ assertShellCommandSafetyMetadata(shellPolicyArtifact?.metadata, {
   shellPolicyDiagnostic: "dry-run",
   shellRetryableReason: "enable-shell",
   policyChecked: true,
-  binaryAllowlistChecked: true,
+  binaryAllowlistChecked: false,
   structuredCommandChecked: true,
   safetyFlags: ["metadata-only", "structured-arguments-only", "tool-arguments-omitted", "command-omitted", "stdout-omitted", "stderr-omitted", "cwd-omitted", "shell-allowlist-enforced", "dry-run-only", "no-command-executed", "artifact-payload-not-read"],
 }, "direct shell policy");

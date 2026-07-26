@@ -2090,7 +2090,7 @@ function shellPolicyDiagnostics(config, details = {}) {
         diagnostic: "dry-run",
         retryableReason: "enable-shell",
         policyChecked,
-        binaryAllowlistChecked: true,
+        binaryAllowlistChecked: false,
         structuredCommandChecked: true,
       };
     }

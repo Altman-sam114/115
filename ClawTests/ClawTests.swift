@@ -568,7 +568,7 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(review.shellPolicyDiagnostic, "dry-run")
         XCTAssertEqual(review.shellRetryableReason, "enable-shell")
         XCTAssertEqual(review.policyChecked, true)
-        XCTAssertEqual(review.binaryAllowlistChecked, true)
+        XCTAssertEqual(review.binaryAllowlistChecked, false)
         XCTAssertEqual(review.structuredCommandChecked, true)
         XCTAssertTrue(review.requiresShellPolicyReview)
         XCTAssertEqual(review.structuredCommandPresent, true)

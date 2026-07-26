@@ -138,6 +138,7 @@ node Tools/claw-gateway-smoke.mjs
 
 ## 完成情况
 
+- 2026-07-26：新增 v0.58 Shell Allowlist Evidence Accuracy。修正 Shell disabled/dry-run 在真正查询 binary allowlist 前短路，却输出 `binaryAllowlistChecked=true` 的误报；Gateway、simulator、direct/WebSocket smoke、XCTest 和 LogicSmoke 统一改为 `false`，allowlist-enabled 执行路径继续为 `true`。本轮不改变 Shell 权限、allowlist 匹配、schema/action/event/artifact，不读取或展示 raw command、stdout/stderr、cwd、token/header 或 `toolArguments`。
 - 2026-07-12：新增 v0.57 Operator Strip Live/Policy Lanes 操作条连接与策略格。Operator Strip 从 4 格扩展为 6 格，新增 Live 与 Policy，复用 Health Strip 与 Policy Diagnostics Board；不执行连接/审批动作。本轮不新增 schema/event/action/artifact kind。
 - 2026-07-12：新增 v0.56 Control Snapshot Live Health Signal 控制态势连接健康信号。Control Snapshot 从既有 Live Gateway Health Strip 派生 live/fallback/error/ping 信号 chips，不改 transport，不执行连接动作。本轮不新增 schema/event/action/artifact kind。
 - 2026-07-12：新增 v0.55 Mission Run Live Gateway Health Strip 连接健康条。手机端把既有 Live Gateway health summary 压缩为 Mission Run presentation-layer 健康条，展示 preflight/live/fallback/ping/reconnect 状态；compact Mission Run 与 iPad Dock 复用，不执行连接动作，不写入 envelope，不展示 token 原文或 Authorization header。本轮不新增 schema/event/action/artifact kind，不实现真实心跳协议或配对。

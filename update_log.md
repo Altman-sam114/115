@@ -22,6 +22,42 @@
 
 ## 历史记录
 
+### v0.58 / Shell Allowlist Evidence Accuracy Shell 白名单证据准确性
+
+日期：2026-07-26
+
+核心变更：
+
+- 修正 Shell disabled/dry-run 在 binary allowlist 查询前短路，却输出 `binaryAllowlistChecked=true` 的误报；现固定输出 `false`。
+- Shell enabled 且实际进入 allowlist 判断、以及 allowlist-enabled 执行路径继续输出 `true`。
+- Gateway、simulator、direct/WebSocket smoke、XCTest 和 LogicSmoke 对齐该证据语义。
+- 同步 README、协议、flow、test 和 Agent A 提示词；不改变 Shell 权限、allowlist 匹配、schema/action/event/artifact，也不读取 payload。
+
+关键文件：
+
+- `Tools/claw-gateway-server.mjs`
+- `Claw/Services/ClawStore.swift`
+- `Tools/claw-gateway-direct-smoke.mjs`
+- `Tools/claw-gateway-smoke.mjs`
+- `ClawTests/ClawTests.swift`
+- `Tools/LogicSmoke.swift`
+- `README.md`
+- `Docs/claw-mobile-gateway-protocol.md`
+- `md/flow/flow.md`
+- `md/test/test.md`
+- `md/prompt/v0（核心智能能力）/v0.58（ShellAllowlistEvidenceAccuracy）.md`
+- `update_log.md`
+
+验证结果：
+
+- 本地只运行非编译静态检查；build/smoke 等待云端 workflow。
+- GitHub Actions 结果包待本轮 push 后由 Agent C 下载复判。
+
+遗留事项：
+
+- Shell policy diagnostics 仍是 metadata-only 复核，不是自动授权、自动审批或任意命令执行能力。
+- 完整 Accessibility bridge、Playwright/browser-use、真实多轮 agent loop 和完整 artifact payload 复核体验仍是后续遗留。
+
 ### v0.57 / Operator Strip Live/Policy Lanes 操作条连接与策略格
 
 日期：2026-07-12
