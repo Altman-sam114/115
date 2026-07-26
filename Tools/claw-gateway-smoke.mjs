@@ -646,8 +646,8 @@ expect(Boolean(redirectFailureArtifact), "websocket cross-host redirect failure 
 assertBrowserControlReviewMetadata(redirectFailureArtifact.metadata, {
   mode: "browser-network-failed",
   browserControlPolicy: "not-requested",
-  browserControlRequested: false,
-  openInBrowser: false,
+  browserControlRequested: true,
+  openInBrowser: true,
   targetURLPresent: false,
   searchQueryPresent: false,
   localHTMLInput: false,

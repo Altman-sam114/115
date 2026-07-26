@@ -1479,7 +1479,7 @@ function assertBrowserNetworkAction(events, action, expected, label) {
     browserControlRequested: false,
     openInBrowser: false,
     openAttempted: false,
-    targetURLPresent: false,
+    targetURLPresent: expected.eventKind === "actionCompleted",
     searchQueryPresent: false,
     localHTMLInput: false,
     networkFetchAttempted: true,
