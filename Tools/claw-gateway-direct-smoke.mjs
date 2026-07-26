@@ -753,7 +753,108 @@ assertAccessibilityTreeArtifact(accessibilityPolicyArtifact, accessibilityPolicy
   label: "enabled accessibility tree",
 });
 
-console.log(`Claw Gateway direct smoke passed (${dryRunEvents.length + emptyExtractionEvents.length + pathEscapeEvents.length + writeFailureEvents.length + replayEvents.length + allowlistEvents.length + pathBypassEvents.length + relativePathEvents.length + topLevelShellCommandEvents.length + topLevelCommandLineEvents.length + conflictingShellSourceEvents.length + missingShellEvents.length + desktopPolicyEvents.length + browserPolicyEvents.length + browserRedirectEvents.length + accessibilityPolicyEvents.length} events)`);
+const blockedAgentLoopEnvelope = makeAgentLoopPolicyEnvelope(token, ["runAgentLoop"]);
+const blockedAgentLoopEvents = await runEmitEvents({
+  CLAW_GATEWAY_TOKEN: token,
+  CLAW_WORKSPACE: `${workspace}-agent-loop-policy-blocked`,
+}, blockedAgentLoopEnvelope);
+expect(blockedAgentLoopEvents.some((event) => event.kind === "actionCompleted" && event.actionKind === "runAgentLoop"), "blocked agent loop should complete safely");
+expect(blockedAgentLoopEvents.some((event) => event.kind === "sessionCompleted"), "blocked agent loop session did not complete");
+const blockedAgentLoopTrace = (await readArtifacts(blockedAgentLoopEvents, "agentTrace"))[0];
+const blockedAgentLoopArtifact = findArtifact(blockedAgentLoopEvents, "agentTrace");
+expect(Boolean(blockedAgentLoopTrace), "missing blocked agent loop trace");
+expect(blockedAgentLoopTrace.nextActions?.length === 1 && blockedAgentLoopTrace.nextActions[0].kind === "none", "empty intersection should only propose none");
+expect(blockedAgentLoopTrace.selectedNextAction?.kind === "none", "empty intersection should select none");
+expect(blockedAgentLoopTrace.iterations?.every((iteration) => iteration.proposedAction === "none"), "empty intersection iterations should only propose none");
+expect(blockedAgentLoopTrace.safetyGates?.length === 0, "empty intersection should not create safety gates");
+expect(blockedAgentLoopTrace.stopReason === "policy-blocked", "empty intersection should stop as policy-blocked");
+expect(blockedAgentLoopTrace.finalState === "blocked-by-next-action-policy", "empty intersection final state should be policy blocked");
+assertAgentTraceMetadata(blockedAgentLoopArtifact?.metadata, blockedAgentLoopTrace, "blocked agent loop");
+assertAgentRecommendationSubset(blockedAgentLoopTrace, blockedAgentLoopArtifact?.metadata, blockedAgentLoopEnvelope, "blocked agent loop");
+expect(blockedAgentLoopArtifact?.metadata?.nextActionPolicy === "envelope-intersection", "blocked agent loop policy metadata mismatch");
+expect(blockedAgentLoopArtifact?.metadata?.nextActionPolicyDiagnostic === "policy-blocked", "blocked agent loop diagnostic mismatch");
+expect(blockedAgentLoopArtifact?.metadata?.requestedNextActionCount === "2", "blocked agent loop requested count mismatch");
+expect(blockedAgentLoopArtifact?.metadata?.effectiveNextActionCount === "0", "blocked agent loop effective count mismatch");
+expect(blockedAgentLoopArtifact?.metadata?.blockedNextActionCount === "2", "blocked agent loop blocked count mismatch");
+expect(blockedAgentLoopArtifact?.metadata?.selectedNextActionAllowedByEnvelope === "true", "none should be an envelope-safe stop selection");
+assertAgentPolicyOutputRedacted(blockedAgentLoopEvents, blockedAgentLoopArtifact?.metadata, blockedAgentLoopTrace, ["manageFiles", "composeMessage"], "blocked agent loop");
+
+const partialAgentLoopEnvelope = makeAgentLoopPolicyEnvelope(token, ["runAgentLoop", "composeMessage"]);
+const partialAgentLoopEvents = await runEmitEvents({
+  CLAW_GATEWAY_TOKEN: token,
+  CLAW_WORKSPACE: `${workspace}-agent-loop-policy-partial`,
+}, partialAgentLoopEnvelope);
+expect(partialAgentLoopEvents.some((event) => event.kind === "actionCompleted" && event.actionKind === "runAgentLoop"), "partial agent loop should complete");
+expect(partialAgentLoopEvents.some((event) => event.kind === "sessionCompleted"), "partial agent loop session did not complete");
+const partialAgentLoopTrace = (await readArtifacts(partialAgentLoopEvents, "agentTrace"))[0];
+const partialAgentLoopArtifact = findArtifact(partialAgentLoopEvents, "agentTrace");
+expect(Boolean(partialAgentLoopTrace), "missing partial agent loop trace");
+expect(partialAgentLoopTrace.nextActions?.length === 1 && partialAgentLoopTrace.nextActions[0].kind === "composeMessage", "partial intersection should only propose composeMessage");
+expect(partialAgentLoopTrace.selectedNextAction?.kind === "composeMessage", "partial intersection should select composeMessage");
+expect(partialAgentLoopTrace.iterations?.every((iteration) => iteration.proposedAction === "composeMessage"), "partial intersection iterations should only propose composeMessage");
+assertAgentTraceMetadata(partialAgentLoopArtifact?.metadata, partialAgentLoopTrace, "partial agent loop");
+assertAgentRecommendationSubset(partialAgentLoopTrace, partialAgentLoopArtifact?.metadata, partialAgentLoopEnvelope, "partial agent loop");
+expect(partialAgentLoopArtifact?.metadata?.nextActionPolicy === "envelope-intersection", "partial agent loop policy metadata mismatch");
+expect(partialAgentLoopArtifact?.metadata?.nextActionPolicyDiagnostic === "allowed", "partial agent loop diagnostic mismatch");
+expect(partialAgentLoopArtifact?.metadata?.requestedNextActionCount === "2", "partial agent loop requested count mismatch");
+expect(partialAgentLoopArtifact?.metadata?.effectiveNextActionCount === "1", "partial agent loop effective count mismatch");
+expect(partialAgentLoopArtifact?.metadata?.blockedNextActionCount === "1", "partial agent loop blocked count mismatch");
+expect(partialAgentLoopArtifact?.metadata?.selectedNextActionAllowedByEnvelope === "true", "partial selected action should be envelope allowed");
+assertAgentPolicyOutputRedacted(partialAgentLoopEvents, partialAgentLoopArtifact?.metadata, partialAgentLoopTrace, ["manageFiles"], "partial agent loop");
+
+const requestedSubsetEnvelope = makeAgentLoopPolicyEnvelope(
+  token,
+  ["runAgentLoop", "manageFiles", "composeMessage"],
+  "composeMessage",
+);
+const requestedSubsetEvents = await runEmitEvents({
+  CLAW_GATEWAY_TOKEN: token,
+  CLAW_WORKSPACE: `${workspace}-agent-loop-requested-subset`,
+}, requestedSubsetEnvelope);
+const requestedSubsetTrace = (await readArtifacts(requestedSubsetEvents, "agentTrace"))[0];
+const requestedSubsetArtifact = findArtifact(requestedSubsetEvents, "agentTrace");
+expect(requestedSubsetTrace.nextActions?.length === 1 && requestedSubsetTrace.nextActions[0].kind === "composeMessage", "requested subset should not inherit extra envelope actions");
+assertAgentTraceMetadata(requestedSubsetArtifact?.metadata, requestedSubsetTrace, "requested subset agent loop");
+assertAgentRecommendationSubset(requestedSubsetTrace, requestedSubsetArtifact?.metadata, requestedSubsetEnvelope, "requested subset agent loop");
+expect(requestedSubsetTrace.requestedNextActionCount === 1, "requested subset count mismatch");
+expect(requestedSubsetTrace.effectiveNextActionCount === 1, "requested subset effective count mismatch");
+
+const unsupportedAgentLoopEnvelope = makeAgentLoopPolicyEnvelope(
+  token,
+  ["runAgentLoop", "runShellCommand"],
+  "runShellCommand",
+);
+const unsupportedAgentLoopEvents = await runEmitEvents({
+  CLAW_GATEWAY_TOKEN: token,
+  CLAW_WORKSPACE: `${workspace}-agent-loop-unsupported-kind`,
+}, unsupportedAgentLoopEnvelope);
+const unsupportedAgentLoopTrace = (await readArtifacts(unsupportedAgentLoopEvents, "agentTrace"))[0];
+const unsupportedAgentLoopArtifact = findArtifact(unsupportedAgentLoopEvents, "agentTrace");
+expect(unsupportedAgentLoopTrace.nextActions?.length === 1 && unsupportedAgentLoopTrace.nextActions[0].kind === "none", "unsupported recommendation kind should fail closed");
+expect(unsupportedAgentLoopTrace.nextActionPolicyDiagnostic === "policy-blocked", "unsupported recommendation should be policy blocked");
+assertAgentTraceMetadata(unsupportedAgentLoopArtifact?.metadata, unsupportedAgentLoopTrace, "unsupported kind agent loop");
+assertAgentRecommendationSubset(unsupportedAgentLoopTrace, unsupportedAgentLoopArtifact?.metadata, unsupportedAgentLoopEnvelope, "unsupported kind agent loop");
+expect(!JSON.stringify(unsupportedAgentLoopArtifact?.metadata || {}).includes("runShellCommand"), "unsupported kind metadata leaked blocked recommendation");
+
+const emptyRequestAgentLoopEnvelope = makeAgentLoopPolicyEnvelope(
+  token,
+  ["runAgentLoop", "composeMessage"],
+  "",
+);
+const emptyRequestAgentLoopEvents = await runEmitEvents({
+  CLAW_GATEWAY_TOKEN: token,
+  CLAW_WORKSPACE: `${workspace}-agent-loop-empty-request`,
+}, emptyRequestAgentLoopEnvelope);
+const emptyRequestAgentLoopTrace = (await readArtifacts(emptyRequestAgentLoopEvents, "agentTrace"))[0];
+const emptyRequestAgentLoopArtifact = findArtifact(emptyRequestAgentLoopEvents, "agentTrace");
+expect(emptyRequestAgentLoopTrace.nextActions?.length === 1 && emptyRequestAgentLoopTrace.nextActions[0].kind === "none", "explicit empty request should only propose none");
+expect(emptyRequestAgentLoopTrace.requestedNextActionCount === 0, "explicit empty request count mismatch");
+expect(emptyRequestAgentLoopTrace.nextActionPolicyDiagnostic === "policy-blocked", "explicit empty request should fail closed");
+expect(emptyRequestAgentLoopTrace.handoffStatus === "blocked", "explicit empty request should require blocked handoff");
+assertAgentTraceMetadata(emptyRequestAgentLoopArtifact?.metadata, emptyRequestAgentLoopTrace, "empty request agent loop");
+assertAgentRecommendationSubset(emptyRequestAgentLoopTrace, emptyRequestAgentLoopArtifact?.metadata, emptyRequestAgentLoopEnvelope, "empty request agent loop");
+
+console.log(`Claw Gateway direct smoke passed (${dryRunEvents.length + emptyExtractionEvents.length + pathEscapeEvents.length + writeFailureEvents.length + replayEvents.length + allowlistEvents.length + pathBypassEvents.length + relativePathEvents.length + topLevelShellCommandEvents.length + topLevelCommandLineEvents.length + conflictingShellSourceEvents.length + missingShellEvents.length + desktopPolicyEvents.length + browserPolicyEvents.length + browserRedirectEvents.length + accessibilityPolicyEvents.length + blockedAgentLoopEvents.length + partialAgentLoopEvents.length + requestedSubsetEvents.length + unsupportedAgentLoopEvents.length + emptyRequestAgentLoopEvents.length} events)`);
 
 async function runEmitEvents(env, input = envelope) {
   const inputPath = `/private/tmp/claw-gateway-direct-smoke-${crypto.randomUUID()}.json`;
@@ -1256,34 +1357,56 @@ function accessibilityControlCoverage(tree) {
 function assertAgentTraceMetadata(metadata, trace, label) {
   expect(metadata && typeof metadata === "object", `${label} missing agentTrace metadata`);
   const allowedKeys = [
+    "blockedNextActionCount",
     "degradedSignals",
+    "effectiveNextActionCount",
     "handoffStatus",
     "handoffSummary",
     "missingSignals",
+    "nextActionPolicy",
+    "nextActionPolicyDiagnostic",
     "readinessCanContinue",
     "readinessScore",
+    "requestedNextActionCount",
     "riskTags",
     "satisfiedSignals",
+    "selectedNextActionAllowedByEnvelope",
     "selectedNextActionKind",
     "selectedNextActionRequiresApproval",
     "stopReason",
   ];
-  const expectedKeys = trace.readiness.degradedSignals?.length > 0
-    ? allowedKeys
-    : allowedKeys.filter((key) => key !== "degradedSignals");
+  const expectedKeys = allowedKeys.filter((key) => {
+    if (key === "degradedSignals") {
+      return trace.readiness.degradedSignals?.length > 0;
+    }
+    if (key === "satisfiedSignals") {
+      return trace.readiness.satisfiedSignals?.length > 0;
+    }
+    return true;
+  });
   expect(
     Object.keys(metadata).sort().join(",") === expectedKeys.join(","),
     `${label} agentTrace metadata includes unexpected keys`,
   );
   expect(metadata.readinessScore === String(trace.readiness.score), `${label} readiness score metadata mismatch`);
   expect(metadata.readinessCanContinue === String(trace.readiness.canContinue), `${label} readiness continuation metadata mismatch`);
-  expect(metadata.satisfiedSignals === trace.readiness.satisfiedSignals.join(","), `${label} satisfied signals metadata mismatch`);
+  if (trace.readiness.satisfiedSignals?.length > 0) {
+    expect(metadata.satisfiedSignals === trace.readiness.satisfiedSignals.join(","), `${label} satisfied signals metadata mismatch`);
+  } else {
+    expect(metadata.satisfiedSignals === undefined, `${label} unexpected satisfied signals metadata`);
+  }
   if (trace.readiness.degradedSignals?.length > 0) {
     expect(metadata.degradedSignals === trace.readiness.degradedSignals.join(","), `${label} degraded signals metadata mismatch`);
   } else {
     expect(metadata.degradedSignals === undefined, `${label} unexpected degraded signals metadata`);
   }
   expect(metadata.missingSignals === trace.readiness.missingSignals.join(","), `${label} missing signals metadata mismatch`);
+  expect(metadata.nextActionPolicy === trace.nextActionPolicy, `${label} next action policy metadata mismatch`);
+  expect(metadata.nextActionPolicyDiagnostic === trace.nextActionPolicyDiagnostic, `${label} next action diagnostic metadata mismatch`);
+  expect(metadata.requestedNextActionCount === String(trace.requestedNextActionCount), `${label} requested action count metadata mismatch`);
+  expect(metadata.effectiveNextActionCount === String(trace.effectiveNextActionCount), `${label} effective action count metadata mismatch`);
+  expect(metadata.blockedNextActionCount === String(trace.blockedNextActionCount), `${label} blocked action count metadata mismatch`);
+  expect(metadata.selectedNextActionAllowedByEnvelope === String(trace.selectedNextActionAllowedByEnvelope), `${label} selected action allowlist metadata mismatch`);
   expect(metadata.selectedNextActionKind === trace.selectedNextAction.kind, `${label} selected action metadata mismatch`);
   expect(metadata.selectedNextActionRequiresApproval === String(trace.selectedNextAction.requiresApproval), `${label} selected approval metadata mismatch`);
   expect(metadata.riskTags === trace.riskTags.join(","), `${label} risk tags metadata mismatch`);
@@ -1294,6 +1417,50 @@ function assertAgentTraceMetadata(metadata, trace, label) {
     `${label} handoff status metadata invalid`,
   );
   expect(metadata.handoffSummary === trace.handoffSummary, `${label} handoff summary metadata mismatch`);
+}
+
+function assertAgentRecommendationSubset(trace, metadata, policyEnvelope, label) {
+  const envelopeAllowed = new Set(policyEnvelope.gateway.allowedActionKinds);
+  const requested = new Set(String(
+    policyEnvelope.task.actions.find((action) => action.kind === "runAgentLoop")?.toolArguments?.allowedNextActions || "",
+  ).split(",").map((kind) => kind.trim()).filter(Boolean));
+  const supported = new Set(["observeScreen", "controlBrowser", "manageFiles", "extractData", "operateDesktopApp", "composeMessage"]);
+  const assertAllowed = (kind, source) => {
+    expect(
+      kind === "none" || (requested.has(kind) && envelopeAllowed.has(kind) && supported.has(kind)),
+      `${label} ${source} escaped recommendation intersection: ${kind}`,
+    );
+  };
+  for (const action of trace.nextActions || []) {
+    assertAllowed(action.kind, "nextActions");
+  }
+  assertAllowed(trace.selectedNextAction?.kind, "selectedNextAction");
+  for (const iteration of trace.iterations || []) {
+    assertAllowed(iteration.proposedAction, "iterations");
+  }
+  for (const gate of trace.safetyGates || []) {
+    assertAllowed(gate.actionKind, "safetyGates");
+  }
+  for (const kind of trace.allowedNextActions || []) {
+    assertAllowed(kind, "allowedNextActions");
+  }
+  assertAllowed(metadata?.selectedNextActionKind, "metadata selectedNextActionKind");
+  expect(metadata?.selectedNextActionAllowedByEnvelope === "true", `${label} selected action lacks envelope policy evidence`);
+  expect(trace.requestedNextActionCount === trace.effectiveNextActionCount + trace.blockedNextActionCount, `${label} next action counts are inconsistent`);
+}
+
+function assertAgentPolicyOutputRedacted(events, metadata, trace, forbiddenActionKinds, label) {
+  const serializedEvents = JSON.stringify(events);
+  const serializedMetadata = JSON.stringify(metadata || {});
+  const serializedTrace = JSON.stringify(trace || {});
+  expect(!serializedEvents.includes("manageFiles,composeMessage"), `${label} events leaked complete requested action list`);
+  expect(!serializedMetadata.includes("allowedNextActions"), `${label} metadata leaked next action list key`);
+  expect(!serializedTrace.includes("manageFiles,composeMessage"), `${label} trace leaked complete requested action list`);
+  for (const actionKind of forbiddenActionKinds) {
+    expect(!serializedEvents.includes(actionKind), `${label} events leaked blocked action ${actionKind}`);
+    expect(!serializedMetadata.includes(actionKind), `${label} metadata leaked blocked action ${actionKind}`);
+    expect(!serializedTrace.includes(actionKind), `${label} trace leaked blocked action ${actionKind}`);
+  }
 }
 
 function assertExtractionCompletenessMetadata(metadata, extraction, label) {
@@ -1917,6 +2084,56 @@ function makeBrowserRedirectEnvelope(rawToken, fixture) {
       createdAt: isoNow(),
     },
     approvalSummary: "browser redirect policy smoke",
+    auditRequired: true,
+  };
+}
+
+function makeAgentLoopPolicyEnvelope(rawToken, allowedActionKinds, requestedNextActions = "manageFiles,composeMessage") {
+  return {
+    schemaVersion: "claw.computer.control.v1",
+    sourceApp: "Claw Controller",
+    gateway: {
+      endpoint: "ws://127.0.0.1:18789",
+      deviceName: "smoke",
+      securityMode: "mutualApproval",
+      tokenFingerprint: tokenFingerprint(rawToken),
+      allowedActionKinds,
+      requiresApprovalForSensitiveData: true,
+      auditEnabled: true,
+    },
+    task: {
+      id: crypto.randomUUID(),
+      command: "verify agent loop envelope policy intersection",
+      summary: "agent loop envelope policy smoke",
+      sourceDevice: "smoke",
+      destinationGateway: "ws://127.0.0.1:18789",
+      actions: [
+        {
+          id: crypto.randomUUID(),
+          kind: "runAgentLoop",
+          title: "Verify next action policy",
+          target: "Desktop Agent Loop",
+          instruction: "Select the next safe action under the structured envelope policy",
+          approval: "gatewayApproval",
+          sourceSurface: "clawGateway",
+          handlesSensitiveData: false,
+          inputPreview: "policy smoke",
+          toolArguments: {
+            objective: "verify structured next action policy evidence",
+            loopMode: "observe-plan-act-verify",
+            maxIterations: "1",
+            inputSources: "browserTrace,fileDiff,commandOutput",
+            allowedNextActions: requestedNextActions,
+            stopBeforeDestructiveAction: "true",
+            writeTrace: "true",
+          },
+        },
+      ],
+      status: "sent",
+      riskScore: 36,
+      createdAt: isoNow(),
+    },
+    approvalSummary: "agent loop envelope policy smoke",
     auditRequired: true,
   };
 }

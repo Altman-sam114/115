@@ -384,7 +384,12 @@ async function buildGatewayEvents(envelope, config, sessionID = crypto.randomUUI
       summary: `Gateway accepted task from ${envelope.sourceApp}; workspace=${sessionWorkspace}`,
     }),
   ];
-  const sessionConfig = { ...config, sessionWorkspace, sessionContext };
+  const sessionConfig = {
+    ...config,
+    sessionWorkspace,
+    sessionContext,
+    allowedActionKinds: [...new Set(envelope.gateway?.allowedActionKinds || [])],
+  };
   const capabilitySnapshot = gatewayCapabilitySnapshot(envelope, config, sessionID, sessionWorkspace);
   const capabilitySnapshotArtifact = await writeArtifact(
     "auditLog",
@@ -470,6 +475,7 @@ async function makeTaskReplayGuardEvents(envelope, config, record) {
     ...config,
     sessionWorkspace,
     sessionContext: makeSessionContext(),
+    allowedActionKinds: [...new Set(envelope.gateway?.allowedActionKinds || [])],
   };
   let sequence = 0;
   const events = [
@@ -3307,7 +3313,30 @@ async function agentLoopAction(action, index, config) {
   const args = action.toolArguments || {};
   const maxIterations = clampInteger(Number(args.maxIterations || 3), 1, 8);
   const inputSources = parseCSV(args.inputSources || "screenObservation,accessibilityTree,browserTrace,fileDiff,commandOutput,messageDraft");
-  const allowedNextActions = parseCSV(args.allowedNextActions || "observeScreen,controlBrowser,manageFiles,extractData,operateDesktopApp,composeMessage");
+  const defaultNextActions = "observeScreen,controlBrowser,manageFiles,extractData,operateDesktopApp,composeMessage";
+  const requestedNextActions = [...new Set(parseCSV(
+    Object.prototype.hasOwnProperty.call(args, "allowedNextActions")
+      ? args.allowedNextActions
+      : defaultNextActions,
+  ))];
+  const supportedNextActionKinds = new Set([
+    "observeScreen",
+    "controlBrowser",
+    "manageFiles",
+    "extractData",
+    "operateDesktopApp",
+    "composeMessage",
+  ]);
+  const envelopeAllowedActionKinds = new Set(config.allowedActionKinds || []);
+  const allowedNextActions = requestedNextActions.filter(
+    (kind) => supportedNextActionKinds.has(kind) && envelopeAllowedActionKinds.has(kind),
+  );
+  const requestedNextActionCount = requestedNextActions.length;
+  const effectiveNextActionCount = allowedNextActions.length;
+  const blockedNextActionCount = requestedNextActionCount - effectiveNextActionCount;
+  const nextActionPolicy = "envelope-intersection";
+  const nextActionPolicyBlocked = effectiveNextActionCount === 0;
+  const nextActionPolicyDiagnostic = nextActionPolicyBlocked ? "policy-blocked" : "allowed";
   const approvalRequiredFor = parseCSV(args.approvalRequiredFor || "runShellCommand,operateDesktopAppFinalSubmit,externalNetwork,destructiveFileChange");
   const stopBeforeDestructiveAction = args.stopBeforeDestructiveAction !== "false";
   const contextSummary = summarizeArtifactContext(config.sessionContext);
@@ -3324,6 +3353,7 @@ async function agentLoopAction(action, index, config) {
     safetyGates,
     approvalRequiredFor,
     stopBeforeDestructiveAction,
+    nextActionPolicyBlocked,
   });
   const stopReason = makeAgentStopReason({
     readiness,
@@ -3333,6 +3363,8 @@ async function agentLoopAction(action, index, config) {
   });
   const handoffStatus = makeAgentHandoffStatus({ readiness, selectedNextAction, riskTags, stopReason });
   const handoffSummary = makeAgentHandoffSummary(readiness, selectedNextAction, stopReason);
+  const selectedNextActionAllowedByEnvelope = selectedNextAction.kind === "none" ||
+    envelopeAllowedActionKinds.has(selectedNextAction.kind);
   const iterations = [];
 
   for (let iteration = 1; iteration <= maxIterations; iteration += 1) {
@@ -3356,6 +3388,12 @@ async function agentLoopAction(action, index, config) {
     maxIterations,
     inputSources,
     allowedNextActions,
+    requestedNextActionCount,
+    effectiveNextActionCount,
+    blockedNextActionCount,
+    nextActionPolicy,
+    nextActionPolicyDiagnostic,
+    selectedNextActionAllowedByEnvelope,
     approvalRequiredFor,
     stopBeforeDestructiveAction,
     sourceArtifacts: contextSummary,
@@ -3371,7 +3409,9 @@ async function agentLoopAction(action, index, config) {
     handoffStatus,
     handoffSummary,
     iterations,
-    finalState: proposedActions.some((item) => item.requiresApproval)
+    finalState: nextActionPolicyBlocked
+      ? "blocked-by-next-action-policy"
+      : proposedActions.some((item) => item.requiresApproval)
       ? "ready-for-user-or-gateway-approval"
       : "ready-for-next-safe-action",
   };
@@ -3407,6 +3447,12 @@ function agentTraceMetadata(trace) {
     stopReason: trace.stopReason,
     handoffStatus: trace.handoffStatus,
     handoffSummary: trace.handoffSummary,
+    requestedNextActionCount: trace.requestedNextActionCount,
+    effectiveNextActionCount: trace.effectiveNextActionCount,
+    blockedNextActionCount: trace.blockedNextActionCount,
+    nextActionPolicy: trace.nextActionPolicy,
+    nextActionPolicyDiagnostic: trace.nextActionPolicyDiagnostic,
+    selectedNextActionAllowedByEnvelope: trace.selectedNextActionAllowedByEnvelope,
   });
 }
 
@@ -3456,7 +3502,7 @@ function clampInteger(value, min, max) {
 
 function proposeAgentNextActions(summary, allowlist) {
   const proposals = [];
-  const allow = (kind) => allowlist.length === 0 || allowlist.includes(kind);
+  const allow = (kind) => allowlist.includes(kind);
   if (summary.screenObservationCount === 0 && allow("observeScreen")) {
     proposals.push({
       kind: "observeScreen",
@@ -3619,8 +3665,12 @@ function makeAgentRiskTags({
   safetyGates,
   approvalRequiredFor,
   stopBeforeDestructiveAction,
+  nextActionPolicyBlocked,
 }) {
   const tags = new Set();
+  if (nextActionPolicyBlocked) {
+    tags.add("next-action-policy-blocked");
+  }
   if (!readiness.canContinue) {
     tags.add("insufficient-evidence");
   }
@@ -3667,6 +3717,9 @@ function makeAgentStopReason({
   riskTags,
   stopBeforeDestructiveAction,
 }) {
+  if (riskTags.includes("next-action-policy-blocked")) {
+    return "policy-blocked";
+  }
   if (!readiness.canContinue) {
     return "insufficient-evidence";
   }
@@ -3689,6 +3742,9 @@ function makeAgentStopReason({
 }
 
 function makeAgentHandoffStatus({ readiness, selectedNextAction, riskTags, stopReason }) {
+  if (stopReason === "policy-blocked" || riskTags.includes("next-action-policy-blocked")) {
+    return "blocked";
+  }
   if (!readiness.canContinue) {
     return "needs-evidence";
   }

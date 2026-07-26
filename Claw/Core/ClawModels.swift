@@ -3375,11 +3375,39 @@ struct ClawAgentTraceReviewSummary: Equatable, Codable, Sendable {
     var missingSignals: [String]
     var selectedNextActionKind: String?
     var selectedNextActionRequiresApproval: Bool?
+    var nextActionPolicy: String?
+    var nextActionPolicyDiagnostic: String?
+    var requestedNextActionCount: Int?
+    var effectiveNextActionCount: Int?
+    var blockedNextActionCount: Int?
+    var selectedNextActionAllowedByEnvelope: Bool?
     var riskTags: [String]
     var stopReason: String?
     var handoffStatus: String?
     var handoffSummary: String?
     var isRedacted: Bool
+
+    var requiresNextActionPolicyReview: Bool {
+        guard nextActionPolicy == "envelope-intersection",
+              let nextActionPolicyDiagnostic,
+              ["allowed", "policy-blocked"].contains(nextActionPolicyDiagnostic),
+              let requestedNextActionCount,
+              let effectiveNextActionCount,
+              let blockedNextActionCount,
+              requestedNextActionCount == effectiveNextActionCount + blockedNextActionCount,
+              let selectedNextActionKind,
+              selectedNextActionAllowedByEnvelope == true else {
+            return true
+        }
+        if nextActionPolicyDiagnostic == "policy-blocked" {
+            return effectiveNextActionCount != 0 ||
+                selectedNextActionKind != "none" ||
+                stopReason != "policy-blocked" ||
+                handoffStatus != "blocked" ||
+                riskTags.contains("next-action-policy-blocked") == false
+        }
+        return effectiveNextActionCount == 0
+    }
 
     var compactStatus: String {
         guard hasMetadata else {
@@ -3388,7 +3416,8 @@ struct ClawAgentTraceReviewSummary: Equatable, Codable, Sendable {
         let score = readinessScore.map { "证据 \($0)/100" } ?? "证据待复核"
         let action = selectedNextActionKind ?? "下一步待定"
         let handoff = handoffStatus.map { "交接 \($0)" } ?? (stopReason ?? "handoff 待同步")
-        return "\(score) · \(action) · \(handoff)"
+        let policy = requiresNextActionPolicyReview ? "策略待复核" : "envelope intersection"
+        return "\(score) · \(action) · \(handoff) · \(policy)"
     }
 
     static func latest(from session: ClawGatewaySession?) -> ClawAgentTraceReviewSummary? {
@@ -3413,8 +3442,14 @@ struct ClawAgentTraceReviewSummary: Equatable, Codable, Sendable {
             satisfiedSignals: Self.allowedAgentSignalList(metadata["satisfiedSignals"]),
             degradedSignals: Self.allowedAgentSignalList(metadata["degradedSignals"]),
             missingSignals: Self.allowedAgentSignalList(metadata["missingSignals"]),
-            selectedNextActionKind: ClawArtifactMetadataDisplaySanitizer.safeValue(metadata["selectedNextActionKind"]),
+            selectedNextActionKind: Self.allowedNextActionKind(metadata["selectedNextActionKind"]),
             selectedNextActionRequiresApproval: ClawArtifactMetadataParser.boolValue(metadata["selectedNextActionRequiresApproval"]),
+            nextActionPolicy: Self.allowedNextActionPolicy(metadata["nextActionPolicy"]),
+            nextActionPolicyDiagnostic: Self.allowedNextActionPolicyDiagnostic(metadata["nextActionPolicyDiagnostic"]),
+            requestedNextActionCount: Self.allowedNextActionCount(metadata["requestedNextActionCount"]),
+            effectiveNextActionCount: Self.allowedNextActionCount(metadata["effectiveNextActionCount"]),
+            blockedNextActionCount: Self.allowedNextActionCount(metadata["blockedNextActionCount"]),
+            selectedNextActionAllowedByEnvelope: ClawArtifactMetadataParser.boolValue(metadata["selectedNextActionAllowedByEnvelope"]),
             riskTags: ClawArtifactMetadataDisplaySanitizer.safeList(metadata["riskTags"]),
             stopReason: ClawArtifactMetadataDisplaySanitizer.safeValue(metadata["stopReason"]),
             handoffStatus: Self.allowedHandoffStatus(metadata["handoffStatus"]),
@@ -3438,6 +3473,43 @@ struct ClawAgentTraceReviewSummary: Equatable, Codable, Sendable {
         return allowed.contains(clean) ? clean : nil
     }
 
+    static func allowedNextActionKind(_ value: String?) -> String? {
+        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
+            return nil
+        }
+        let allowed: Set<String> = [
+            "none",
+            "observeScreen",
+            "controlBrowser",
+            "manageFiles",
+            "extractData",
+            "operateDesktopApp",
+            "composeMessage"
+        ]
+        return allowed.contains(clean) ? clean : nil
+    }
+
+    static func allowedNextActionPolicy(_ value: String?) -> String? {
+        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
+            return nil
+        }
+        return clean == "envelope-intersection" ? clean : nil
+    }
+
+    static func allowedNextActionPolicyDiagnostic(_ value: String?) -> String? {
+        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
+            return nil
+        }
+        return ["allowed", "policy-blocked"].contains(clean) ? clean : nil
+    }
+
+    static func allowedNextActionCount(_ value: String?) -> Int? {
+        guard let count = ClawArtifactMetadataParser.intValue(value), (0...16).contains(count) else {
+            return nil
+        }
+        return count
+    }
+
     static func allowedAgentSignalList(_ value: String?) -> [String] {
         let allowed = [
             "screenObservation",
@@ -3452,7 +3524,7 @@ struct ClawAgentTraceReviewSummary: Equatable, Codable, Sendable {
     }
 
     var needsHandoffReview: Bool {
-        guard hasMetadata else {
+        guard hasMetadata, requiresNextActionPolicyReview == false else {
             return true
         }
         switch handoffStatus {
@@ -6989,7 +7061,7 @@ extension ClawMissionRunSummary {
             )
         }
 
-        let hasMetadataGap = review.hasMetadata == false
+        let hasMetadataGap = review.hasMetadata == false || review.requiresNextActionPolicyReview
         let selectedRequiresApproval = review.selectedNextActionRequiresApproval == true
         let hasEvidenceGap = review.missingSignals.isEmpty == false || review.degradedSignals.isEmpty == false
         let handoff = review.handoffStatus

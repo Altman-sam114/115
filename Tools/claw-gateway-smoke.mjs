@@ -691,7 +691,114 @@ for (const forbidden of [
   expect(!redirectFailurePayload.includes(forbidden), `websocket redirect failure artifact leaked ${forbidden}`);
 }
 
-console.log(`Claw Gateway smoke passed (${events.length + firstReplayEvents.length + replayGuardEvents.length + shellIdentityEvents.length + shellProvenanceEvents.length + browserRedirectEvents.length} events)`);
+const agentLoopPolicyPort = port + 5;
+const agentLoopPolicyServer = spawn(
+  process.execPath,
+  ["Tools/claw-gateway-server.mjs", "--once"],
+  {
+    env: {
+      ...process.env,
+      ...gatewayPolicyDefaults(),
+      CLAW_GATEWAY_HOST: host,
+      CLAW_GATEWAY_PORT: String(agentLoopPolicyPort),
+      CLAW_GATEWAY_TOKEN: token,
+      CLAW_WORKSPACE: ".build/claw-gateway-websocket-agent-loop-policy",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  },
+);
+let agentLoopPolicyServerOutput = "";
+agentLoopPolicyServer.stdout.on("data", (chunk) => {
+  agentLoopPolicyServerOutput += chunk.toString("utf8");
+});
+agentLoopPolicyServer.stderr.on("data", (chunk) => {
+  agentLoopPolicyServerOutput += chunk.toString("utf8");
+});
+const agentLoopPolicyEnvelope = makeEnvelope(token, agentLoopPolicyPort);
+agentLoopPolicyEnvelope.gateway.allowedActionKinds = ["runAgentLoop"];
+agentLoopPolicyEnvelope.task.command = "verify websocket agent loop envelope allowlist intersection";
+agentLoopPolicyEnvelope.task.summary = "websocket agent loop allowlist intersection smoke";
+const agentLoopPolicyAction = {
+  ...agentLoopPolicyEnvelope.task.actions.find((action) => action.kind === "runAgentLoop"),
+  id: crypto.randomUUID(),
+  title: "Block agent loop actions outside the envelope allowlist",
+  instruction: "Stop when requested next actions are not allowed by the envelope",
+  toolArguments: {
+    maxIterations: "1",
+    allowedNextActions: "operateDesktopApp,composeMessage",
+    stopBeforeDestructiveAction: "true",
+    writeTrace: "true",
+  },
+};
+agentLoopPolicyEnvelope.task.actions = [agentLoopPolicyAction];
+let agentLoopPolicyEvents = [];
+try {
+  await waitFor(
+    () => agentLoopPolicyServerOutput.includes("Claw Gateway listening"),
+    3000,
+    () => agentLoopPolicyServerOutput,
+  );
+  agentLoopPolicyEvents = await connectAndCollectEvents({
+    host,
+    port: agentLoopPolicyPort,
+    token,
+    envelope: agentLoopPolicyEnvelope,
+  });
+} finally {
+  agentLoopPolicyServer.kill();
+}
+expect(
+  agentLoopPolicyEvents.some((event) =>
+    event.kind === "actionCompleted" &&
+    event.actionID === agentLoopPolicyAction.id &&
+    event.actionKind === "runAgentLoop"
+  ),
+  "websocket agent loop policy action should complete with a blocked handoff",
+);
+expect(agentLoopPolicyEvents.some((event) => event.kind === "sessionCompleted"), "websocket agent loop policy session should complete");
+const agentLoopPolicyArtifact = agentLoopPolicyEvents
+  .find((event) =>
+    event.kind === "artifactStored" &&
+    event.actionID === agentLoopPolicyAction.id &&
+    event.artifacts?.some((artifact) => artifact.kind === "agentTrace")
+  )
+  ?.artifacts?.find((artifact) => artifact.kind === "agentTrace");
+expect(Boolean(agentLoopPolicyArtifact), "websocket agent loop policy missing action-bound agentTrace artifact");
+const agentLoopPolicyTrace = JSON.parse(await fs.readFile(new URL(agentLoopPolicyArtifact.reference), "utf8"));
+assertAgentTraceMetadata(agentLoopPolicyArtifact.metadata, agentLoopPolicyTrace, "websocket agent loop envelope intersection");
+expect(
+  agentLoopPolicyTrace.nextActions?.length === 1 && agentLoopPolicyTrace.nextActions[0]?.kind === "none",
+  "websocket agent loop empty intersection should only propose none",
+);
+expect(agentLoopPolicyTrace.selectedNextAction?.kind === "none", "websocket agent loop empty intersection should select none");
+expect(
+  agentLoopPolicyTrace.iterations?.length === 1 && agentLoopPolicyTrace.iterations.every((iteration) => iteration.proposedAction === "none"),
+  "websocket agent loop empty intersection iterations should only propose none",
+);
+expect(agentLoopPolicyTrace.safetyGates?.length === 0, "websocket agent loop empty intersection should have no safety gates");
+expect(agentLoopPolicyTrace.stopReason === "policy-blocked", "websocket agent loop empty intersection stop reason mismatch");
+expect(agentLoopPolicyTrace.handoffStatus === "blocked", "websocket agent loop empty intersection handoff should be blocked");
+expect(agentLoopPolicyArtifact.metadata?.nextActionPolicy === "envelope-intersection", "websocket agent loop policy metadata mismatch");
+expect(agentLoopPolicyArtifact.metadata?.nextActionPolicyDiagnostic === "policy-blocked", "websocket agent loop policy diagnostic mismatch");
+expect(agentLoopPolicyArtifact.metadata?.requestedNextActionCount === "2", "websocket agent loop requested action count mismatch");
+expect(agentLoopPolicyArtifact.metadata?.effectiveNextActionCount === "0", "websocket agent loop effective action count mismatch");
+expect(agentLoopPolicyArtifact.metadata?.blockedNextActionCount === "2", "websocket agent loop blocked action count mismatch");
+expect(agentLoopPolicyArtifact.metadata?.selectedNextActionAllowedByEnvelope === "true", "websocket agent loop none selection should be allowed by envelope policy");
+const requestedAgentLoopActions = "operateDesktopApp,composeMessage";
+const serializedAgentLoopPolicyEvents = JSON.stringify(agentLoopPolicyEvents);
+const serializedAgentLoopPolicyMetadata = JSON.stringify(agentLoopPolicyArtifact.metadata);
+const serializedAgentLoopPolicyTrace = JSON.stringify(agentLoopPolicyTrace);
+expect(!serializedAgentLoopPolicyEvents.includes(requestedAgentLoopActions), "websocket agent loop events leaked the requested action list");
+expect(!serializedAgentLoopPolicyMetadata.includes(requestedAgentLoopActions), "websocket agent loop metadata leaked the requested action list");
+expect(!serializedAgentLoopPolicyTrace.includes(requestedAgentLoopActions), "websocket agent loop trace leaked the requested action list");
+for (const blockedAction of ["operateDesktopApp", "composeMessage"]) {
+  const serializedAction = JSON.stringify(blockedAction);
+  expect(!serializedAgentLoopPolicyEvents.includes(serializedAction), `websocket agent loop events leaked ${blockedAction}`);
+  expect(!serializedAgentLoopPolicyMetadata.includes(serializedAction), `websocket agent loop metadata leaked ${blockedAction}`);
+  expect(!serializedAgentLoopPolicyTrace.includes(serializedAction), `websocket agent loop trace leaked ${blockedAction}`);
+}
+
+console.log(`Claw Gateway smoke passed (${events.length + firstReplayEvents.length + replayGuardEvents.length + shellIdentityEvents.length + shellProvenanceEvents.length + browserRedirectEvents.length + agentLoopPolicyEvents.length} events)`);
 
 function makeEnvelope(rawToken, endpointPort = port) {
   const taskID = crypto.randomUUID();
@@ -1187,28 +1294,44 @@ function accessibilityControlCoverage(tree) {
 function assertAgentTraceMetadata(metadata, trace, label) {
   expect(metadata && typeof metadata === "object", `${label} missing agentTrace metadata`);
   const allowedKeys = [
+    "blockedNextActionCount",
     "degradedSignals",
+    "effectiveNextActionCount",
     "handoffStatus",
     "handoffSummary",
     "missingSignals",
+    "nextActionPolicy",
+    "nextActionPolicyDiagnostic",
     "readinessCanContinue",
     "readinessScore",
+    "requestedNextActionCount",
     "riskTags",
     "satisfiedSignals",
+    "selectedNextActionAllowedByEnvelope",
     "selectedNextActionKind",
     "selectedNextActionRequiresApproval",
     "stopReason",
   ];
-  const expectedKeys = trace.readiness.degradedSignals?.length > 0
-    ? allowedKeys
-    : allowedKeys.filter((key) => key !== "degradedSignals");
+  const expectedKeys = allowedKeys.filter((key) => {
+    if (key === "satisfiedSignals") {
+      return trace.readiness.satisfiedSignals?.length > 0;
+    }
+    if (key === "degradedSignals") {
+      return trace.readiness.degradedSignals?.length > 0;
+    }
+    return true;
+  });
   expect(
     Object.keys(metadata).sort().join(",") === expectedKeys.join(","),
     `${label} agentTrace metadata includes unexpected keys`,
   );
   expect(metadata.readinessScore === String(trace.readiness.score), `${label} readiness score metadata mismatch`);
   expect(metadata.readinessCanContinue === String(trace.readiness.canContinue), `${label} readiness continuation metadata mismatch`);
-  expect(metadata.satisfiedSignals === trace.readiness.satisfiedSignals.join(","), `${label} satisfied signals metadata mismatch`);
+  if (trace.readiness.satisfiedSignals?.length > 0) {
+    expect(metadata.satisfiedSignals === trace.readiness.satisfiedSignals.join(","), `${label} satisfied signals metadata mismatch`);
+  } else {
+    expect(metadata.satisfiedSignals === undefined, `${label} unexpected satisfied signals metadata`);
+  }
   if (trace.readiness.degradedSignals?.length > 0) {
     expect(metadata.degradedSignals === trace.readiness.degradedSignals.join(","), `${label} degraded signals metadata mismatch`);
   } else {
@@ -1217,6 +1340,15 @@ function assertAgentTraceMetadata(metadata, trace, label) {
   expect(metadata.missingSignals === trace.readiness.missingSignals.join(","), `${label} missing signals metadata mismatch`);
   expect(metadata.selectedNextActionKind === trace.selectedNextAction.kind, `${label} selected action metadata mismatch`);
   expect(metadata.selectedNextActionRequiresApproval === String(trace.selectedNextAction.requiresApproval), `${label} selected approval metadata mismatch`);
+  expect(metadata.nextActionPolicy === trace.nextActionPolicy, `${label} next action policy metadata mismatch`);
+  expect(metadata.nextActionPolicyDiagnostic === trace.nextActionPolicyDiagnostic, `${label} next action policy diagnostic metadata mismatch`);
+  expect(Number(metadata.requestedNextActionCount) === trace.requestedNextActionCount, `${label} requested next action count metadata mismatch`);
+  expect(Number(metadata.effectiveNextActionCount) === trace.effectiveNextActionCount, `${label} effective next action count metadata mismatch`);
+  expect(Number(metadata.blockedNextActionCount) === trace.blockedNextActionCount, `${label} blocked next action count metadata mismatch`);
+  expect(
+    metadata.selectedNextActionAllowedByEnvelope === String(trace.selectedNextActionAllowedByEnvelope),
+    `${label} selected action envelope policy metadata mismatch`,
+  );
   expect(metadata.riskTags === trace.riskTags.join(","), `${label} risk tags metadata mismatch`);
   expect(metadata.stopReason === trace.stopReason, `${label} stop reason metadata mismatch`);
   expect(metadata.handoffStatus === trace.handoffStatus, `${label} handoff status metadata mismatch`);

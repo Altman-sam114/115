@@ -223,6 +223,7 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 - 路径逃逸到 workspace 外。
 - 未经 app/key/host allowlist 控制浏览器或桌面 App。
 - 用 `agentTrace` 的下一步建议绕过结构化 `toolArguments`、allowlist 或最终提交审批。
+- 把 `agentTrace` 的策略 metadata 当成执行授权，或让推荐动作逃逸 `allowedNextActions ∩ envelope.allowedActionKinds ∩ fixed-supported` 交集。
 - 把 replay guard 描述成跨进程、跨重启或分布式 exactly-once，或在 replay path 调用 action handler。
 
 ### 4.6 GitHub Actions CI Results
@@ -275,7 +276,7 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 - `ClawGatewayCapabilityReviewSummary`：手机端从 `gateway-capability-snapshot.json` `auditLog` metadata 派生的能力复核摘要，只展示短 token 指纹、allowlist、capability state、`accessibilityTreeState` 和 safety flags，不读取 Gateway `file://` 内容，UI 可见字符串统一走 metadata 脱敏路径。
 - `ClawGatewayAccessibilityReviewSummary`：手机端从 `accessibilityTree` artifact metadata 派生的观察复核摘要，只展示 mode、policy、signal quality、evidence tier、control coverage、节点数、候选控件数、platform、redaction、省略标志、`actionExecutionSupported=false` 和 safety flags，不读取 Gateway `file://` 内容，不展示前台 App 名、窗口标题、控件 label/description、raw text 或密码字段值，UI 可见字符串统一走 metadata 脱敏路径。
 - `ClawGatewayTaskReplayGuardReviewSummary`：手机端从 `task-replay-guard.json` `auditLog` metadata 派生的 Replay Guard 复核摘要，只展示重复次数、跳过动作数、短 digest、首次状态和 safety flags，不读取 Gateway `file://` 内容，不声称跨进程 exactly-once，UI 可见字符串统一走 metadata 脱敏路径。
-- `ClawAgentTraceReviewSummary`：手机端从最近 `agentTrace` artifact metadata 派生的复核摘要和固定 handoff 状态，只展示安全字符串摘要和枚举状态；v0.31 的 `degradedSignals` 仍是固定 source 枚举 metadata，不读取 Gateway `file://` 内容，UI 可见字符串统一走 metadata 脱敏路径。
+- `ClawAgentTraceReviewSummary`：手机端从最近 `agentTrace` artifact metadata 派生的复核摘要和固定 handoff 状态，只展示安全字符串摘要和枚举状态；v0.31 的 `degradedSignals` 仍是固定 source 枚举 metadata；v0.62 只解析固定交集策略、诊断、有限计数和 selected 授权布尔，未知、越界或矛盾状态 fail closed，不读取 Gateway `file://` 内容，UI 可见字符串统一走 metadata 脱敏路径。
 - `ClawMissionRunReviewPriorityItem`：手机端 presentation layer 队列项，只从既有 Mission Run summary、review summary 和 session/action 状态派生，用固定 severity/rank/review kind 排序首屏复核重点，并作为聚焦详情的安全输入；不读取 Gateway `file://` payload，不展示 raw URL/path/command/stdout/stderr/diff/token/header 或 `toolArguments`。
 - `ClawMissionRunReviewReadinessSummary`：手机端 presentation layer 复核态势摘要，只从完整复核优先队列、可用 detail review kind 和聚焦状态派生，展示总优先项、可行动项、高优先项、metadata 缺口、最高优先项和聚焦状态；不读取 Gateway `file://` payload，不展示 raw URL/path/command/stdout/stderr/diff/token/header 或 `toolArguments`，不是自动执行 readiness。
 - `ClawMissionRunNextReviewAction`：手机端 presentation layer 下一步人工复核行动，只从当前有效聚焦项、完整复核优先队列和可用 detail review kind 派生，提示用户下一步聚焦哪类复核或等待 Gateway 证据；不读取 Gateway `file://` payload，不展示 raw URL/path/command/stdout/stderr/diff/token/header 或 `toolArguments`，不是自动执行计划。
@@ -324,6 +325,7 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 - 新协议字段必须同步测试和文档。
 - Gateway capability snapshot 只能作为审计复核 artifact，不能新增权限，不能成为执行计划来源，payload 和 metadata 不能包含 raw token、Authorization header、自然语言 instruction、`toolArguments`、网页正文、命令输出、截图内容、草稿正文、联系人或完整 workspace path。
 - `agentTrace` metadata、degradedSignals 和 handoffStatus 只能用于手机端复核展示，不能成为执行计划来源，不能放入浏览器正文、命令输出、截图内容、草稿正文、联系人或 token；手机端展示前必须统一脱敏 raw token、Authorization/header、`toolArguments`、`file://` 和完整 workspace path；handoffStatus 只能使用固定枚举，不能从自然语言或 payload 解析，degradedSignals 只能使用固定 source 枚举，不能从 payload 文本解析。
+- `runAgentLoop` 推荐集合必须按结构化 request、envelope action allowlist 和 Gateway 固定支持推荐种类取交集。空交集只生成 `none` 并 blocked handoff；metadata 只记录固定 policy/diagnostic、有限计数和 selected 授权布尔，不记录完整列表。推荐是 artifact 审计证据，真实执行仍须重新通过 `actionPolicy`、审批、workspace 和 handler allowlist。
 - `extractData` 完整性 metadata 只能用于手机端复核展示，不能成为执行计划来源，不能放入 row 内容、URL/path、命令输出、网页正文、草稿正文、联系人、token 或 `toolArguments`；手机端展示前必须统一脱敏敏感值。
 - File Change Safety metadata 只能用于手机端复核展示，不能成为执行计划来源，不能放入 raw path、workspace/sessionWorkspace、文件名/目录名、文件内容、diff hunk、patch、stdout/stderr、token、Authorization/header、cookie、secret 或 `toolArguments`；metadata 缺失时必须显示“metadata 待同步”，不能假定写入安全。
 - Shell Command Safety metadata 只能用于手机端复核展示，不能成为执行计划来源，不能放入 raw command、binary/args、cwd、workspace/session path、stdout/stderr 内容、token、Authorization/header、cookie、secret、自然语言 instruction 或 `toolArguments`；v0.51 起固定展示 `shellPolicyDiagnostic`/`shellRetryableReason` 与 policy/binary/structured checked 状态，v0.58 起 dry-run 在 binary allowlist 查询前短路时必须是 `binaryAllowlistChecked=false`，不能把未检查误报为已检查；v0.59 起含路径分隔符的 executable token 即使 basename 命中也必须阻断，且不能把原始路径写入事件；v0.60 起顶层 Shell alias 或来源冲突必须显示 `invalid-structured-command-source`，保持 parse/allowlist/execution 未开始并省略 alias 值；metadata 缺失时必须显示“metadata 待同步”，不能假定命令安全、已阻断或已执行。

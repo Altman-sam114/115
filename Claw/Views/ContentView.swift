@@ -6622,6 +6622,15 @@ struct ClawAgentTraceReviewRow: View {
             let icon = review.selectedNextActionRequiresApproval == true ? "checkmark.seal.fill" : "arrow.forward.circle.fill"
             items.append((action, icon, review.selectedNextActionRequiresApproval == true ? .orange : .blue))
         }
+        if let policy = review.nextActionPolicy {
+            items.append((policy, "checkmark.shield.fill", review.requiresNextActionPolicyReview ? .orange : .green))
+        }
+        if let effective = review.effectiveNextActionCount, let blocked = review.blockedNextActionCount {
+            items.append(("有效 \(effective) · 阻断 \(blocked)", blocked > 0 ? "shield.slash.fill" : "shield.checkered", blocked > 0 ? .orange : .green))
+        }
+        if review.requiresNextActionPolicyReview {
+            items.append(("推荐策略待复核", "exclamationmark.triangle.fill", .orange))
+        }
         if let handoff = review.handoffStatus {
             items.append((handoff, handoffIcon(for: handoff), handoffTint(for: handoff)))
         }

@@ -2197,6 +2197,13 @@ enum LogicSmoke {
             expect(agentTraceReview.missingSignals.contains("messageDraft"), "agent trace review should expose missing signals")
             expect(agentTraceReview.selectedNextActionKind == "composeMessage", "agent trace review should expose selected action")
             expect(agentTraceReview.selectedNextActionRequiresApproval == true, "agent trace review should expose approval requirement")
+            expect(agentTraceReview.nextActionPolicy == "envelope-intersection", "agent trace review should expose next action policy")
+            expect(agentTraceReview.nextActionPolicyDiagnostic == "allowed", "agent trace review should expose next action policy diagnostic")
+            expect(agentTraceReview.requestedNextActionCount == 6, "agent trace review should expose requested action count")
+            expect(agentTraceReview.effectiveNextActionCount == 6, "agent trace review should expose effective action count")
+            expect(agentTraceReview.blockedNextActionCount == 0, "agent trace review should expose blocked action count")
+            expect(agentTraceReview.selectedNextActionAllowedByEnvelope == true, "agent trace review should expose envelope authorization")
+            expect(agentTraceReview.requiresNextActionPolicyReview == false, "valid next action policy should not require review")
             expect(agentTraceReview.riskTags.contains("degraded-screen-observation"), "agent trace review should expose degraded risk tags")
             expect(agentTraceReview.riskTags.contains("final-submit-gate"), "agent trace review should expose risk tags")
             expect(agentTraceReview.stopReason == "final-submit", "agent trace review should expose stop reason")
@@ -2230,6 +2237,12 @@ enum LogicSmoke {
                 "missingSignals": "",
                 "selectedNextActionKind": "extractData",
                 "selectedNextActionRequiresApproval": "false",
+                "nextActionPolicy": "envelope-intersection",
+                "nextActionPolicyDiagnostic": "allowed",
+                "requestedNextActionCount": "2",
+                "effectiveNextActionCount": "2",
+                "blockedNextActionCount": "0",
+                "selectedNextActionAllowedByEnvelope": "true",
                 "riskTags": "",
                 "stopReason": "none",
                 "handoffStatus": "ready-to-continue",
@@ -2275,6 +2288,106 @@ enum LogicSmoke {
             let readyLoopContinuation = readyLoopSummary.loopContinuationSummary
             expect(readyLoopContinuation.canContinueLoop, "ready loop continuation should be user-continuable")
             expect(readyLoopContinuation.requiresHumanAction == false, "ready loop continuation should not require approval")
+            var unsafeMetadata = readyLoopTrace.metadata ?? [:]
+            unsafeMetadata["nextActionPolicy"] = "future-policy https://example.com/private"
+            let unsafeTrace = ClawGatewayArtifact(
+                kind: .agentTrace,
+                title: "agent-loop-unsafe-policy",
+                reference: "file:///tmp/agent-loop-unsafe-policy.json",
+                isRedacted: true,
+                metadata: unsafeMetadata
+            )
+            if let unsafeReview = ClawAgentTraceReviewSummary.latest(from: [unsafeTrace]) {
+                expect(unsafeReview.nextActionPolicy == nil, "agent trace review should reject unsafe next action policy")
+                expect(unsafeReview.requiresNextActionPolicyReview, "unsafe next action policy should fail closed")
+                var unsafeSummary = readyLoopSummary
+                unsafeSummary.agentTraceReview = unsafeReview
+                expect(unsafeSummary.loopContinuationSummary.canContinueLoop == false, "unsafe next action policy should prevent continuation")
+                expect(unsafeSummary.loopContinuationSummary.requiresHumanAction, "unsafe next action policy should require human review")
+            } else {
+                failures.append("unsafe agent trace policy review should be derived")
+            }
+            var unauthorizedMetadata = readyLoopTrace.metadata ?? [:]
+            unauthorizedMetadata["selectedNextActionAllowedByEnvelope"] = "false"
+            let unauthorizedTrace = ClawGatewayArtifact(
+                kind: .agentTrace,
+                title: "agent-loop-unauthorized-selection",
+                reference: "file:///tmp/agent-loop-unauthorized-selection.json",
+                isRedacted: true,
+                metadata: unauthorizedMetadata
+            )
+            if let unauthorizedReview = ClawAgentTraceReviewSummary.latest(from: [unauthorizedTrace]) {
+                expect(unauthorizedReview.requiresNextActionPolicyReview, "unauthorized selected action should fail closed")
+                var unauthorizedSummary = readyLoopSummary
+                unauthorizedSummary.agentTraceReview = unauthorizedReview
+                expect(unauthorizedSummary.loopContinuationSummary.canContinueLoop == false, "unauthorized selected action should prevent continuation")
+                expect(unauthorizedSummary.loopContinuationSummary.requiresHumanAction, "unauthorized selected action should require human review")
+            } else {
+                failures.append("unauthorized selected action review should be derived")
+            }
+            var inconsistentMetadata = readyLoopTrace.metadata ?? [:]
+            inconsistentMetadata["requestedNextActionCount"] = "17"
+            inconsistentMetadata["effectiveNextActionCount"] = "2"
+            inconsistentMetadata["blockedNextActionCount"] = "1"
+            let inconsistentTrace = ClawGatewayArtifact(
+                kind: .agentTrace,
+                title: "agent-loop-inconsistent-counts",
+                reference: "file:///tmp/agent-loop-inconsistent-counts.json",
+                isRedacted: true,
+                metadata: inconsistentMetadata
+            )
+            if let inconsistentReview = ClawAgentTraceReviewSummary.latest(from: [inconsistentTrace]) {
+                expect(inconsistentReview.requestedNextActionCount == nil, "out-of-range next action count should be rejected")
+                expect(inconsistentReview.requiresNextActionPolicyReview, "inconsistent next action counts should fail closed")
+                var inconsistentSummary = readyLoopSummary
+                inconsistentSummary.agentTraceReview = inconsistentReview
+                expect(inconsistentSummary.loopContinuationSummary.canContinueLoop == false, "inconsistent next action counts should prevent continuation")
+            } else {
+                failures.append("inconsistent next action policy review should be derived")
+            }
+            var contradictoryMetadata = readyLoopTrace.metadata ?? [:]
+            contradictoryMetadata["nextActionPolicyDiagnostic"] = "policy-blocked"
+            let contradictoryTrace = ClawGatewayArtifact(
+                kind: .agentTrace,
+                title: "agent-loop-contradictory-policy",
+                reference: "file:///tmp/agent-loop-contradictory-policy.json",
+                isRedacted: true,
+                metadata: contradictoryMetadata
+            )
+            if let contradictoryReview = ClawAgentTraceReviewSummary.latest(from: [contradictoryTrace]) {
+                expect(contradictoryReview.requiresNextActionPolicyReview, "contradictory policy diagnostic should fail closed")
+                var contradictorySummary = readyLoopSummary
+                contradictorySummary.agentTraceReview = contradictoryReview
+                expect(contradictorySummary.loopContinuationSummary.canContinueLoop == false, "contradictory policy diagnostic should prevent continuation")
+            } else {
+                failures.append("contradictory next action policy review should be derived")
+            }
+            var blockedMetadata = readyLoopTrace.metadata ?? [:]
+            blockedMetadata["selectedNextActionKind"] = "none"
+            blockedMetadata["selectedNextActionRequiresApproval"] = "false"
+            blockedMetadata["nextActionPolicyDiagnostic"] = "policy-blocked"
+            blockedMetadata["requestedNextActionCount"] = "2"
+            blockedMetadata["effectiveNextActionCount"] = "0"
+            blockedMetadata["blockedNextActionCount"] = "2"
+            blockedMetadata["riskTags"] = "next-action-policy-blocked"
+            blockedMetadata["stopReason"] = "policy-blocked"
+            blockedMetadata["handoffStatus"] = "blocked"
+            let blockedTrace = ClawGatewayArtifact(
+                kind: .agentTrace,
+                title: "agent-loop-policy-blocked",
+                reference: "file:///tmp/agent-loop-policy-blocked.json",
+                isRedacted: true,
+                metadata: blockedMetadata
+            )
+            if let blockedReview = ClawAgentTraceReviewSummary.latest(from: [blockedTrace]) {
+                expect(blockedReview.requiresNextActionPolicyReview == false, "valid blocked policy evidence should be accepted")
+                var blockedSummary = readyLoopSummary
+                blockedSummary.agentTraceReview = blockedReview
+                expect(blockedSummary.loopContinuationSummary.canContinueLoop == false, "blocked policy should prevent continuation")
+                expect(blockedSummary.loopContinuationSummary.requiresHumanAction, "blocked policy should require human review")
+            } else {
+                failures.append("blocked next action policy review should be derived")
+            }
             let readyLoopDeck = readyLoopSummary.macAgentNextStepDeck(focusedOn: "agent-trace")
             expect(readyLoopDeck.isReviewable, "ready loop next step deck should be reviewable")
             expect(readyLoopDeck.canContinueLoop, "ready loop next step deck should surface loop candidate")
@@ -2300,6 +2413,12 @@ enum LogicSmoke {
             metadata: [
                 "readinessScore": "51",
                 "selectedNextActionKind": "composeMessage token=raw-token",
+                "nextActionPolicy": "envelope-intersection Authorization: Bearer raw-token",
+                "nextActionPolicyDiagnostic": "allowed file:///private/tmp/policy.json",
+                "requestedNextActionCount": "17",
+                "effectiveNextActionCount": "2 token=raw-token",
+                "blockedNextActionCount": "1 /Users/alice/policy.json",
+                "selectedNextActionAllowedByEnvelope": "true Authorization: Bearer raw-token",
                 "degradedSignals": "accessibilityTree,Authorization: Bearer raw-token,file:///private/tmp/accessibility.json,/Users/alice/window.json",
                 "riskTags": "headers={Authorization: Bearer raw-token},C:\\Users\\alice\\secret.txt",
                 "stopReason": "final-submit file:///private/tmp/secret.txt /home/alice/secret.txt",
@@ -2312,12 +2431,21 @@ enum LogicSmoke {
                 sensitiveAgentTraceReview.latestTitle,
                 sensitiveAgentTraceReview.compactStatus,
                 sensitiveAgentTraceReview.degradedSignals.joined(separator: " "),
+                sensitiveAgentTraceReview.nextActionPolicy ?? "",
+                sensitiveAgentTraceReview.nextActionPolicyDiagnostic ?? "",
                 sensitiveAgentTraceReview.riskTags.joined(separator: " "),
                 sensitiveAgentTraceReview.stopReason ?? "",
                 sensitiveAgentTraceReview.handoffStatus ?? "",
                 sensitiveAgentTraceReview.handoffSummary ?? ""
             ].joined(separator: " ")
             expect(sensitiveAgentTraceReview.degradedSignals == ["accessibilityTree"], "agent trace review should keep only safe degraded signals")
+            expect(sensitiveAgentTraceReview.nextActionPolicy == nil, "agent trace review should reject unsafe policy metadata")
+            expect(sensitiveAgentTraceReview.nextActionPolicyDiagnostic == nil, "agent trace review should reject unsafe policy diagnostic")
+            expect(sensitiveAgentTraceReview.requestedNextActionCount == nil, "agent trace review should reject out-of-range requested count")
+            expect(sensitiveAgentTraceReview.effectiveNextActionCount == nil, "agent trace review should reject unsafe effective count")
+            expect(sensitiveAgentTraceReview.blockedNextActionCount == nil, "agent trace review should reject unsafe blocked count")
+            expect(sensitiveAgentTraceReview.selectedNextActionAllowedByEnvelope == nil, "agent trace review should reject unsafe authorization boolean")
+            expect(sensitiveAgentTraceReview.requiresNextActionPolicyReview, "unsafe policy metadata should require review")
             expect(sensitiveAgentTraceReview.handoffStatus == nil, "agent trace review should reject unsafe handoff status")
             expect(visibleText.contains("Authorization") == false, "agent trace review should redact Authorization")
             expect(visibleText.contains("Bearer") == false, "agent trace review should redact bearer token")

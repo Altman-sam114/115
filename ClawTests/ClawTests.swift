@@ -2132,6 +2132,13 @@ final class ClawTests: XCTestCase {
         XCTAssertTrue(review.missingSignals.contains("messageDraft"))
         XCTAssertEqual(review.selectedNextActionKind, "composeMessage")
         XCTAssertEqual(review.selectedNextActionRequiresApproval, true)
+        XCTAssertEqual(review.nextActionPolicy, "envelope-intersection")
+        XCTAssertEqual(review.nextActionPolicyDiagnostic, "allowed")
+        XCTAssertEqual(review.requestedNextActionCount, 6)
+        XCTAssertEqual(review.effectiveNextActionCount, 6)
+        XCTAssertEqual(review.blockedNextActionCount, 0)
+        XCTAssertEqual(review.selectedNextActionAllowedByEnvelope, true)
+        XCTAssertFalse(review.requiresNextActionPolicyReview)
         XCTAssertTrue(review.riskTags.contains("degraded-screen-observation"))
         XCTAssertTrue(review.riskTags.contains("final-submit-gate"))
         XCTAssertEqual(review.stopReason, "final-submit")
@@ -2172,6 +2179,12 @@ final class ClawTests: XCTestCase {
                 "missingSignals": "",
                 "selectedNextActionKind": "extractData",
                 "selectedNextActionRequiresApproval": "false",
+                "nextActionPolicy": "envelope-intersection",
+                "nextActionPolicyDiagnostic": "allowed",
+                "requestedNextActionCount": "2",
+                "effectiveNextActionCount": "2",
+                "blockedNextActionCount": "0",
+                "selectedNextActionAllowedByEnvelope": "true",
                 "riskTags": "",
                 "stopReason": "none",
                 "handoffStatus": "ready-to-continue",
@@ -2225,6 +2238,96 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(continuation.missingSignalCount, 0)
         XCTAssertTrue(continuation.canContinueLoop)
         XCTAssertFalse(continuation.requiresHumanAction)
+
+        var unsafeMetadata = artifact.metadata ?? [:]
+        unsafeMetadata["nextActionPolicy"] = "future-policy https://example.com/private"
+        let unsafeArtifact = ClawGatewayArtifact(
+            kind: .agentTrace,
+            title: "agent-loop-unsafe-policy.json",
+            reference: "file:///tmp/agent-loop-unsafe-policy.json",
+            isRedacted: true,
+            metadata: unsafeMetadata
+        )
+        let unsafeReview = try XCTUnwrap(ClawAgentTraceReviewSummary.latest(from: [unsafeArtifact]))
+        XCTAssertNil(unsafeReview.nextActionPolicy)
+        XCTAssertTrue(unsafeReview.requiresNextActionPolicyReview)
+        var unsafeSummary = summary
+        unsafeSummary.agentTraceReview = unsafeReview
+        XCTAssertFalse(unsafeSummary.loopContinuationSummary.canContinueLoop)
+        XCTAssertTrue(unsafeSummary.loopContinuationSummary.requiresHumanAction)
+
+        var unauthorizedMetadata = artifact.metadata ?? [:]
+        unauthorizedMetadata["selectedNextActionAllowedByEnvelope"] = "false"
+        let unauthorizedArtifact = ClawGatewayArtifact(
+            kind: .agentTrace,
+            title: "agent-loop-unauthorized-selection.json",
+            reference: "file:///tmp/agent-loop-unauthorized-selection.json",
+            isRedacted: true,
+            metadata: unauthorizedMetadata
+        )
+        let unauthorizedReview = try XCTUnwrap(ClawAgentTraceReviewSummary.latest(from: [unauthorizedArtifact]))
+        XCTAssertTrue(unauthorizedReview.requiresNextActionPolicyReview)
+        var unauthorizedSummary = summary
+        unauthorizedSummary.agentTraceReview = unauthorizedReview
+        XCTAssertFalse(unauthorizedSummary.loopContinuationSummary.canContinueLoop)
+        XCTAssertTrue(unauthorizedSummary.loopContinuationSummary.requiresHumanAction)
+
+        var inconsistentMetadata = artifact.metadata ?? [:]
+        inconsistentMetadata["requestedNextActionCount"] = "17"
+        inconsistentMetadata["effectiveNextActionCount"] = "2"
+        inconsistentMetadata["blockedNextActionCount"] = "1"
+        let inconsistentArtifact = ClawGatewayArtifact(
+            kind: .agentTrace,
+            title: "agent-loop-inconsistent-counts.json",
+            reference: "file:///tmp/agent-loop-inconsistent-counts.json",
+            isRedacted: true,
+            metadata: inconsistentMetadata
+        )
+        let inconsistentReview = try XCTUnwrap(ClawAgentTraceReviewSummary.latest(from: [inconsistentArtifact]))
+        XCTAssertNil(inconsistentReview.requestedNextActionCount)
+        XCTAssertTrue(inconsistentReview.requiresNextActionPolicyReview)
+        var inconsistentSummary = summary
+        inconsistentSummary.agentTraceReview = inconsistentReview
+        XCTAssertFalse(inconsistentSummary.loopContinuationSummary.canContinueLoop)
+
+        var contradictoryMetadata = artifact.metadata ?? [:]
+        contradictoryMetadata["nextActionPolicyDiagnostic"] = "policy-blocked"
+        let contradictoryArtifact = ClawGatewayArtifact(
+            kind: .agentTrace,
+            title: "agent-loop-contradictory-policy.json",
+            reference: "file:///tmp/agent-loop-contradictory-policy.json",
+            isRedacted: true,
+            metadata: contradictoryMetadata
+        )
+        let contradictoryReview = try XCTUnwrap(ClawAgentTraceReviewSummary.latest(from: [contradictoryArtifact]))
+        XCTAssertTrue(contradictoryReview.requiresNextActionPolicyReview)
+        var contradictorySummary = summary
+        contradictorySummary.agentTraceReview = contradictoryReview
+        XCTAssertFalse(contradictorySummary.loopContinuationSummary.canContinueLoop)
+
+        var blockedMetadata = artifact.metadata ?? [:]
+        blockedMetadata["selectedNextActionKind"] = "none"
+        blockedMetadata["selectedNextActionRequiresApproval"] = "false"
+        blockedMetadata["nextActionPolicyDiagnostic"] = "policy-blocked"
+        blockedMetadata["requestedNextActionCount"] = "2"
+        blockedMetadata["effectiveNextActionCount"] = "0"
+        blockedMetadata["blockedNextActionCount"] = "2"
+        blockedMetadata["riskTags"] = "next-action-policy-blocked"
+        blockedMetadata["stopReason"] = "policy-blocked"
+        blockedMetadata["handoffStatus"] = "blocked"
+        let blockedArtifact = ClawGatewayArtifact(
+            kind: .agentTrace,
+            title: "agent-loop-policy-blocked.json",
+            reference: "file:///tmp/agent-loop-policy-blocked.json",
+            isRedacted: true,
+            metadata: blockedMetadata
+        )
+        let blockedReview = try XCTUnwrap(ClawAgentTraceReviewSummary.latest(from: [blockedArtifact]))
+        XCTAssertFalse(blockedReview.requiresNextActionPolicyReview)
+        var blockedSummary = summary
+        blockedSummary.agentTraceReview = blockedReview
+        XCTAssertFalse(blockedSummary.loopContinuationSummary.canContinueLoop)
+        XCTAssertTrue(blockedSummary.loopContinuationSummary.requiresHumanAction)
         XCTAssertTrue(continuation.canFocusAgentTrace)
         let deck = summary.macAgentNextStepDeck(focusedOn: "agent-trace")
         XCTAssertTrue(deck.isReviewable)
@@ -3141,6 +3244,12 @@ final class ClawTests: XCTestCase {
                 "missingSignals": "messageDraft,workspace=/private/tmp/claw-work,~/Library/Claw/state.json",
                 "selectedNextActionKind": "composeMessage token=raw-token",
                 "selectedNextActionRequiresApproval": "true",
+                "nextActionPolicy": "envelope-intersection Authorization: Bearer raw-token",
+                "nextActionPolicyDiagnostic": "allowed file:///private/tmp/policy.json",
+                "requestedNextActionCount": "17",
+                "effectiveNextActionCount": "2 token=raw-token",
+                "blockedNextActionCount": "1 /Users/alice/policy.json",
+                "selectedNextActionAllowedByEnvelope": "true Authorization: Bearer raw-token",
                 "riskTags": "final-submit-gate,headers={Authorization: Bearer raw-token},C:\\Users\\alice\\secret.txt",
                 "stopReason": "final-submit file:///private/tmp/secret.txt \\\\server\\share\\secret.txt",
                 "handoffStatus": "waiting-for-approval Authorization: Bearer raw-token file:///private/tmp/secret.txt",
@@ -3156,6 +3265,8 @@ final class ClawTests: XCTestCase {
             review.degradedSignals.joined(separator: " "),
             review.missingSignals.joined(separator: " "),
             review.selectedNextActionKind ?? "",
+            review.nextActionPolicy ?? "",
+            review.nextActionPolicyDiagnostic ?? "",
             review.riskTags.joined(separator: " "),
             review.stopReason ?? "",
             review.handoffStatus ?? "",
@@ -3166,6 +3277,13 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(review.readinessCanContinue, true)
         XCTAssertEqual(review.selectedNextActionRequiresApproval, true)
         XCTAssertEqual(review.degradedSignals, ["accessibilityTree"])
+        XCTAssertNil(review.nextActionPolicy)
+        XCTAssertNil(review.nextActionPolicyDiagnostic)
+        XCTAssertNil(review.requestedNextActionCount)
+        XCTAssertNil(review.effectiveNextActionCount)
+        XCTAssertNil(review.blockedNextActionCount)
+        XCTAssertNil(review.selectedNextActionAllowedByEnvelope)
+        XCTAssertTrue(review.requiresNextActionPolicyReview)
         XCTAssertNil(review.handoffStatus)
         XCTAssertFalse(visibleText.contains("Authorization"))
         XCTAssertFalse(visibleText.contains("Bearer"))

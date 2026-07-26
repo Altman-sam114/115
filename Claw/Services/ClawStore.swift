@@ -2405,7 +2405,7 @@ enum ClawGatewaySimulator {
         profile: ClawGatewayProfile
     ) -> ClawGatewaySession {
         let results = task.actions.enumerated().map { index, action in
-            makeResult(for: action, index: index)
+            makeResult(for: action, index: index, allowedActionKinds: profile.allowedActionKinds)
         }
         let status: ClawGatewaySessionStatus
         if task.status == .blocked || results.contains(where: { $0.status == .skipped }) {
@@ -2473,7 +2473,8 @@ enum ClawGatewaySimulator {
 
     static func makeResult(
         for action: ClawMobileAction,
-        index: Int
+        index: Int,
+        allowedActionKinds: [ClawMobileActionKind]
     ) -> ClawGatewayActionResult {
         if action.approval == .blocked {
             return ClawGatewayActionResult(
@@ -2500,7 +2501,7 @@ enum ClawGatewaySimulator {
                         .agentTrace,
                         "agent-loop-\(index + 1).json",
                         redacted: true,
-                        metadata: agentTraceMetadata()
+                        metadata: agentTraceMetadata(for: action, allowedActionKinds: allowedActionKinds)
                     )
                 ]
             )
@@ -2714,20 +2715,44 @@ enum ClawGatewaySimulator {
         )
     }
 
-    private static func agentTraceMetadata() -> [String: String] {
-        [
+    private static func agentTraceMetadata(
+        for action: ClawMobileAction,
+        allowedActionKinds: [ClawMobileActionKind]
+    ) -> [String: String] {
+        let supported: Set<String> = ["observeScreen", "controlBrowser", "manageFiles", "extractData", "operateDesktopApp", "composeMessage"]
+        let defaultNextActions = "observeScreen,controlBrowser,manageFiles,extractData,operateDesktopApp,composeMessage"
+        let requested = (action.toolArguments["allowedNextActions"] ?? defaultNextActions)
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { $0.isEmpty == false }
+            .reduce(into: [String]()) { values, value in
+                if values.contains(value) == false { values.append(value) }
+            }
+        let envelopeAllowed = Set(allowedActionKinds.map(\.rawValue))
+        let effective = requested.filter { supported.contains($0) && envelopeAllowed.contains($0) }
+        let blocked = requested.count - effective.count
+        let policyBlocked = effective.isEmpty
+        let selected = effective.contains("composeMessage") ? "composeMessage" : (effective.first ?? "none")
+        let metadata = [
             "readinessScore": "50",
             "readinessCanContinue": "true",
             "satisfiedSignals": "browserTrace,fileDiff,commandOutput",
             "degradedSignals": "screenObservation,accessibilityTree",
             "missingSignals": "messageDraft",
-            "selectedNextActionKind": "composeMessage",
-            "selectedNextActionRequiresApproval": "true",
-            "riskTags": "degraded-screen-observation,degraded-accessibility-tree,approval-required,final-submit-gate,missing-message-draft",
-            "stopReason": "final-submit",
-            "handoffStatus": "final-submit-review",
-            "handoffSummary": "Evidence score 50/100 from browserTrace, fileDiff, commandOutput; degraded screenObservation, accessibilityTree; missing messageDraft. Selected next action: composeMessage. Stop reason: final-submit."
+            "selectedNextActionKind": selected,
+            "selectedNextActionRequiresApproval": selected == "none" || selected == "extractData" ? "false" : "true",
+            "nextActionPolicy": "envelope-intersection",
+            "nextActionPolicyDiagnostic": policyBlocked ? "policy-blocked" : "allowed",
+            "requestedNextActionCount": String(requested.count),
+            "effectiveNextActionCount": String(effective.count),
+            "blockedNextActionCount": String(blocked),
+            "selectedNextActionAllowedByEnvelope": "true",
+            "riskTags": policyBlocked ? "next-action-policy-blocked,degraded-screen-observation,degraded-accessibility-tree,missing-message-draft" : "degraded-screen-observation,degraded-accessibility-tree,approval-required,final-submit-gate,missing-message-draft",
+            "stopReason": policyBlocked ? "policy-blocked" : "final-submit",
+            "handoffStatus": policyBlocked ? "blocked" : "final-submit-review",
+            "handoffSummary": "Evidence score 50/100. Selected next action: \(selected). Stop reason: \(policyBlocked ? "policy-blocked" : "final-submit")."
         ]
+        return metadata
     }
 
     private static func accessibilityTreeMetadata() -> [String: String] {
@@ -3365,7 +3390,11 @@ enum ClawGatewayEventStream {
         sequence += 1
 
         for (index, action) in task.actions.enumerated() {
-            let result = ClawGatewaySimulator.makeResult(for: action, index: index)
+            let result = ClawGatewaySimulator.makeResult(
+                for: action,
+                index: index,
+                allowedActionKinds: profile.allowedActionKinds
+            )
             events.append(
                 ClawGatewayEvent(
                     sessionID: sessionID,

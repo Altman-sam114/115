@@ -93,7 +93,11 @@ enum ClawGatewayEventFixture {
             )
             sequence += 1
 
-            let artifacts = artifacts(for: action, index: index)
+            let artifacts = artifacts(
+                for: action,
+                index: index,
+                allowedActionKinds: envelope.gateway.allowedActionKinds
+            )
             if artifacts.isEmpty == false {
                 events.append(
                     ClawGatewayEvent(
@@ -177,12 +181,13 @@ enum ClawGatewayEventFixture {
 
     private static func artifacts(
         for action: ClawMobileAction,
-        index: Int
+        index: Int,
+        allowedActionKinds: [ClawMobileActionKind]
     ) -> [ClawGatewayArtifact] {
         let suffix = index + 1
         switch action.kind {
         case .runAgentLoop:
-            return [artifact(.agentTrace, "fixture-agent-loop-\(suffix).json", redacted: true)]
+            return [artifact(.agentTrace, "fixture-agent-loop-\(suffix).json", redacted: true, metadata: agentTraceMetadata(for: action, allowedActionKinds: allowedActionKinds))]
         case .observeScreen:
             return [
                 artifact(.screenshot, "fixture-screen-\(suffix).png", redacted: true),
@@ -204,6 +209,45 @@ enum ClawGatewayEventFixture {
         case .analyzeLocalContext, .requestPermission, .extractData, .readContacts, .createReminder, .scheduleNotification, .openExternalURL, .runShortcut, .speechCapture, .backgroundRefresh, .desktopHandoff, .auditLog, .blockedUnsupported:
             return [artifact(.auditLog, "fixture-audit-\(suffix).json", redacted: action.handlesSensitiveData)]
         }
+    }
+
+    private static func agentTraceMetadata(
+        for action: ClawMobileAction,
+        allowedActionKinds: [ClawMobileActionKind]
+    ) -> [String: String] {
+        let supported: Set<String> = ["observeScreen", "controlBrowser", "manageFiles", "extractData", "operateDesktopApp", "composeMessage"]
+        let defaultNextActions = "observeScreen,controlBrowser,manageFiles,extractData,operateDesktopApp,composeMessage"
+        let requested = (action.toolArguments["allowedNextActions"] ?? defaultNextActions)
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { $0.isEmpty == false }
+            .reduce(into: [String]()) { values, value in
+                if values.contains(value) == false { values.append(value) }
+            }
+        let envelopeAllowed = Set(allowedActionKinds.map(\.rawValue))
+        let effective = requested.filter { supported.contains($0) && envelopeAllowed.contains($0) }
+        let blocked = requested.count - effective.count
+        let policyBlocked = effective.isEmpty
+        let selected = effective.contains("composeMessage") ? "composeMessage" : (effective.first ?? "none")
+        return [
+            "readinessScore": "50",
+            "readinessCanContinue": "true",
+            "satisfiedSignals": "browserTrace,fileDiff,commandOutput",
+            "degradedSignals": "screenObservation,accessibilityTree",
+            "missingSignals": "messageDraft",
+            "selectedNextActionKind": selected,
+            "selectedNextActionRequiresApproval": selected == "none" || selected == "extractData" ? "false" : "true",
+            "nextActionPolicy": "envelope-intersection",
+            "nextActionPolicyDiagnostic": policyBlocked ? "policy-blocked" : "allowed",
+            "requestedNextActionCount": String(requested.count),
+            "effectiveNextActionCount": String(effective.count),
+            "blockedNextActionCount": String(blocked),
+            "selectedNextActionAllowedByEnvelope": "true",
+            "riskTags": policyBlocked ? "next-action-policy-blocked,degraded-screen-observation,degraded-accessibility-tree,missing-message-draft" : "degraded-screen-observation,degraded-accessibility-tree,approval-required,final-submit-gate,missing-message-draft",
+            "stopReason": policyBlocked ? "policy-blocked" : "final-submit",
+            "handoffStatus": policyBlocked ? "blocked" : "final-submit-review",
+            "handoffSummary": "Evidence score 50/100. Selected next action: \(selected)."
+        ]
     }
 
     private static func artifact(

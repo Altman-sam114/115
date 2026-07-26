@@ -187,6 +187,7 @@ v0.13 起，桌面 Gateway 原型增加进程内 task replay guard，作为 v0.1
   - v0.61 为 Browser Control 的可重试 fetch timeout、HTTP 5xx 或 network error 增加固定 `retryableReason=retry-network-fetch`；host/protocol/credentials/Location/limit 策略阻断保持不可自动重试。
   - `extractData` 会消费同一 session 内的 browser trace、file diff、command output、screen observation 和 accessibility tree artifact，生成 `artifact-grounded-extraction` 结构化结果，并在 artifact event metadata 上附 metadata-only 的完整性复核摘要；metadata 只含计数、状态、source kind 和 safety flags，不含 row 内容、URL/path、命令输出或 `toolArguments`。
   - `runAgentLoop` 会消费同一 session 内的 artifact context，写出 `agentTrace` artifact。v0.6 保留旧字段 `sourceArtifacts`、`evidenceRows`、`observations`、`nextActions`、`safetyGates`，并新增 `readiness`、`decisionChecklist`、`selectedNextAction`、`riskTags`、`stopReason`、`handoffSummary`，用于说明证据分数、满足/缺失信号、当前推荐下一步、风险标签和停在审批/最终提交前的原因。v0.7 会把这些安全摘要压缩成 artifact event 上的可选字符串 `metadata`，供手机端复核；旧事件缺少 metadata 仍合法。v0.31 起，`decisionChecklist[].status` 可为 `satisfied`、`degraded` 或 `missing`，`readiness.degradedSignals` 记录 dry-run、window metadata、network blocked、failed、unavailable 或 not-requested 等降级证据；这些降级证据不计入 readiness score。这些字段不进入 `ClawMobileEnvelope` schema，也不能作为可执行指令。
+  - v0.62 起，`runAgentLoop` 的有效推荐集合严格为 `toolArguments.allowedNextActions ∩ gateway.allowedActionKinds ∩ Gateway 固定支持推荐种类`，去重并保持请求顺序。固定集合仅包含 `observeScreen`、`controlBrowser`、`manageFiles`、`extractData`、`operateDesktopApp` 和 `composeMessage`。空交集只能生成 `none`，不得产生越权 `nextActions`、iteration proposal 或 safety gate，并以 `policy-blocked`、blocked handoff 和 `blocked-by-next-action-policy` 停止。推荐是 advisory artifact；后续真实 action 仍必须作为结构化 action 重新通过 `actionPolicy`、审批、workspace 和 handler allowlist。
   - `observeScreen` 默认 dry-run；设置 `CLAW_ALLOW_SCREEN_CAPTURE=1` 后可在 macOS 上生成真实截图 artifact，设置 `CLAW_ALLOW_WINDOW_METADATA=1` 后可读取前台窗口元数据，设置 `CLAW_ALLOW_ACCESSIBILITY_OBSERVE=1` 后可在授权 macOS Gateway 上通过固定只读 System Events 脚本采集前台 App/窗口和有限候选控件摘要。该摘要只写既有 `accessibilityTree` artifact，并在 artifact event metadata 上附 signal quality、evidence tier、control coverage、省略标志和 `actionExecutionSupported=false`；metadata 不写前台 App 名、窗口标题、控件 label/description、raw text 或密码字段值，不执行点击、输入或任意选择器。无权限或非 macOS 时写入可审计 permission-missing/platform-unavailable 信号。
   - `operateDesktopApp` 默认停在审批闸门；设置 `CLAW_ALLOW_DESKTOP_CONTROL=1`、`CLAW_DESKTOP_APP_ALLOWLIST` 和 `CLAW_DESKTOP_KEY_ALLOWLIST` 后，可在 macOS 上聚焦允许的 App、粘贴结构化草稿、执行允许的非提交快捷键，并在最终提交前回到用户确认。该 handler 会在相关 artifact event metadata 上附 Delivery Safety 和桌面策略诊断摘要，只写固定策略诊断、重试原因、是否尝试自动化、是否检查 app/key 策略、最终提交闸门、用户确认、正文/paste 省略和按键计数，不写草稿正文、paste text、按键原文、target app、allowlist 值或 `toolArguments`。
   - `composeMessage`/`composeEmail` 写既有 `messageDraft` artifact 并等待用户确认；v0.20 起会附 Delivery Safety metadata，说明草稿正文已从 metadata 中省略且最终发送需要用户确认，不新增真实发送能力。
@@ -262,6 +263,12 @@ live gateway 与模拟器共用 `ClawGatewayEvent`，手机端只依赖事件 re
         "missingSignals": "messageDraft",
         "selectedNextActionKind": "composeMessage",
         "selectedNextActionRequiresApproval": "true",
+        "nextActionPolicy": "envelope-intersection",
+        "nextActionPolicyDiagnostic": "allowed",
+        "requestedNextActionCount": "6",
+        "effectiveNextActionCount": "6",
+        "blockedNextActionCount": "0",
+        "selectedNextActionAllowedByEnvelope": "true",
         "riskTags": "degraded-screen-observation,degraded-accessibility-tree,approval-required,final-submit-gate,missing-message-draft",
         "stopReason": "final-submit",
         "handoffStatus": "final-submit-review",
@@ -284,6 +291,12 @@ live gateway 与模拟器共用 `ClawGatewayEvent`，手机端只依赖事件 re
 - `missingSignals`
 - `selectedNextActionKind`
 - `selectedNextActionRequiresApproval`
+- `nextActionPolicy`
+- `nextActionPolicyDiagnostic`
+- `requestedNextActionCount`
+- `effectiveNextActionCount`
+- `blockedNextActionCount`
+- `selectedNextActionAllowedByEnvelope`
 - `riskTags`
 - `stopReason`
 - `handoffStatus`
@@ -292,6 +305,8 @@ live gateway 与模拟器共用 `ClawGatewayEvent`，手机端只依赖事件 re
 v0.30 起，`agentTrace` metadata 建议包含固定枚举 `handoffStatus`，用于把证据缺口、审批等待、最终提交复核、阻断、可继续或完成状态压缩成一个安全字符串。建议值包括 `needs-evidence`、`waiting-for-approval`、`final-submit-review`、`blocked`、`ready-to-continue` 和 `complete`。该状态只由 `readinessCanContinue`、`selectedNextActionRequiresApproval`、`riskTags` 和 `stopReason` 等结构化字段派生，不从自然语言 `handoffSummary` 或 artifact payload 解析；手机端展示时仍只用于人工复核，不是自动执行授权或 Gateway readiness。
 
 v0.31 起，`agentTrace` metadata 建议包含 `degradedSignals`，只使用固定 source 枚举列表，例如 `screenObservation,accessibilityTree`。`runAgentLoop` 会把真实或可操作证据计入 `satisfiedSignals`，把 dry-run、window metadata、network blocked、failed、unavailable 或 not-requested 等 artifact 计入 `degradedSignals`，完全没有 artifact 时计入 `missingSignals`。降级证据可用于人工复核和风险提示，但不增加 readiness score，也不能作为自动执行授权。
+
+v0.62 起，`nextActionPolicy` 固定为 `envelope-intersection`，diagnostic 只允许 `allowed` 或 `policy-blocked`；三个计数必须是有限非负整数且满足 requested = effective + blocked，selected action 只能使用固定推荐枚举并带 envelope 授权布尔。metadata 不包含 requested/effective/envelope 完整列表。手机/iPad 对缺失、未知、越界或矛盾证据进入人工复核，不能据此继续 Loop；这些字段是审计证据，不是 Gateway `actionPolicy` 的替代品。
 
 metadata 只能包含安全摘要，不能放入浏览器正文、命令输出、截图内容、消息草稿、联系人、token、完整 URL/path、row 内容、`toolArguments` 或其他敏感 payload。旧 Gateway 事件不带 metadata 时，手机端必须正常 decode，并按对应复核摘要降级显示 metadata 待同步。
 
@@ -330,6 +345,7 @@ metadata 只能包含安全摘要，不能放入浏览器正文、命令输出�
 - `gateway-capability-snapshot.json` payload 和 metadata 只能记录安全策略摘要、capability 状态和短 token 指纹，不能写入 raw token、Authorization header、自然语言 instruction、`toolArguments`、网页正文、命令输出、截图内容、草稿正文、联系人或完整 workspace path，也不能作为执行计划来源。
 - `agentTrace` 的 readiness/checklist/risk/stop/handoff 只解释已有证据和下一步建议，不能把自然语言直接交给 Shell、AppleScript、浏览器或桌面 App，也不能绕过 action allowlist、workspace 限制或最终提交审批。
 - `agentTrace` metadata 只能用于手机端复核展示，不能成为执行计划来源；手机端不得读取桌面 Gateway `file://` artifact 内容来补全无权限信息。
+- `agentTrace` 推荐必须受 request、envelope 和固定支持种类三方交集约束；空交集只能安全停止。策略 metadata 只能公开固定枚举、有限计数和布尔证据，不能公开完整 allowlist，也不能授权或直接触发后续 action。
 - File Change Safety metadata 只能用于手机端复核展示，不能成为执行计划来源；`filePolicyDiagnostic` 和 `fileRetryableReason` 只能使用固定枚举；metadata 和手机端 UI 不得包含 raw path、workspace/sessionWorkspace、文件名/目录名、文件内容、diff hunk、patch、stdout/stderr、token、Authorization/header、cookie、secret 或 `toolArguments`。metadata 缺失时必须降级为“metadata 待同步”，路径阻断或写入失败只能通过固定状态、计数和 omission flags 展示。
 - Shell Command Safety metadata 只能用于手机端复核展示，不能成为执行计划来源；metadata 和手机端 UI 不得包含 raw command、binary/args、cwd、workspace/session path、stdout/stderr 内容、token、Authorization/header、cookie、secret、自然语言 instruction 或 `toolArguments`。`shellPolicyDiagnostic` 和 `shellRetryableReason` 只能使用固定枚举，metadata 缺失时必须降级为“metadata 待同步”，policy 阻断或真实执行只能通过固定状态、布尔值、presence 和 omission flags 展示。
 - Desktop App policy diagnostics metadata 只能用于手机端复核展示，不能成为执行计划来源；metadata 和手机端 UI 不得包含 target app、app allowlist、key sequence、paste text、草稿正文、osascript stdout/stderr、token、Authorization/header、cookie、secret、workspace path 或 `toolArguments`。`desktopPolicyDiagnostic` 和 `desktopRetryableReason` 只能使用固定枚举，metadata 缺失时必须降级为“metadata 待同步”，不能假定已经安全、已执行或已提交。

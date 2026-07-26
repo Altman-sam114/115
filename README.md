@@ -136,12 +136,15 @@ node Tools/claw-gateway-smoke.mjs
 
 v0.61 起，Gateway URL 抓取使用手动重定向：每一跳在请求前精确检查 HTTP(S)、URL credentials 和 `CLAW_BROWSER_HOST_ALLOWLIST`，支持相对 `Location`，最多跟随 5 跳并共享 12 秒总超时。策略失败只失败当前 action，写入脱敏 Browser artifact；direct/WebSocket smoke 用本地 HTTP fixture 证明跨 host 目标零访问。该保证只覆盖 Gateway fetch，不代表 AppleScript 打开后的桌面浏览器导航受控。
 
+v0.62 起，`runAgentLoop` 的推荐动作严格取 `toolArguments.allowedNextActions`、envelope `gateway.allowedActionKinds` 与 Gateway 固定支持推荐种类的交集。空交集只生成 `none`，并以 `policy-blocked`、blocked handoff 和 `blocked-by-next-action-policy` 停止，不产生审批 gate 或越权 iteration。`agentTrace` metadata 只公开固定策略名、请求/有效/阻断计数和 selected action 授权布尔，不公开完整 allowlist；手机/iPad 对未知或矛盾证据 fail closed。推荐仍是人工复核信息，任何真实 action 都必须重新通过 Gateway `actionPolicy`、审批、workspace 和各 handler allowlist。
+
 ## 运行
 
 打开 `Claw.xcodeproj`，选择 `Claw` scheme，在 iPhone 模拟器或真机运行。默认协作验证不在本机跑命令行编译或 smoke；命令行 build、Swift logic smoke、Gateway smoke 和 `node --check` 统一由 GitHub Actions workflow 执行并通过 Agent C 下载 artifact 复判。
 
 ## 完成情况
 
+- 2026-07-26：新增 v0.62 Agent Loop Envelope Allowlist Intersection。Gateway 推荐动作取 request、envelope 与固定支持种类的交集，空交集只返回 `none` 并 blocked handoff；双 smoke 覆盖全阻断和部分交集，手机/iPad 对未知、未授权或矛盾策略 metadata fail closed。推荐 metadata 不构成执行授权，真实动作仍经过 `actionPolicy`。
 - 2026-07-26：新增 v0.61 Browser Redirect Host Allowlist。Gateway URL 抓取改为逐跳手动重定向检查，阻断跨 host、非法协议、credentials、非法 Location 和超限跳转；Browser Control metadata 与手机/iPad 复核新增固定 network/redirect 诊断，双 smoke 断言跨 host 目标零访问和 action-bound 失败。
 - 2026-07-26：新增 v0.60 Shell Structured Argument Provenance。Gateway 只接受 `toolArguments.shellCommand`；顶层 `shellCommand` / `commandLine`，以及与合法嵌套命令并存的冲突来源，统一在 parse/allowlist/执行前 fail closed。手机/iPad/mac 复核新增固定 `invalid-structured-command-source` 诊断；direct/WebSocket smoke 用伪造 allowlisted executable 与 marker 证明无执行副作用，并检查事件和阻断 artifact 不泄露 alias 命令。
 - 2026-07-26：新增 v0.59 Shell Executable Identity Allowlist。`CLAW_SHELL_ALLOWLIST` 只授权裸 executable token；包含 `/` 或 `\\` 的同名路径即使 basename 命中也会在 `runProcess` 前阻断。direct/WebSocket smoke 用同名可执行文件和副作用标记证明路径未执行，并断言事件不回显原路径；正常 `pwd` allowlist 真执行保持不变。
