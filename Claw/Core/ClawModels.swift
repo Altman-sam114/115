@@ -3403,8 +3403,7 @@ struct ClawAgentTraceReviewSummary: Equatable, Codable, Sendable {
             return effectiveNextActionCount != 0 ||
                 selectedNextActionKind != "none" ||
                 stopReason != "policy-blocked" ||
-                handoffStatus != "blocked" ||
-                riskTags.contains("next-action-policy-blocked") == false
+                handoffStatus != "blocked"
         }
         return effectiveNextActionCount == 0
     }
