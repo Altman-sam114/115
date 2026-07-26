@@ -76,7 +76,9 @@ flowchart TD
 ```mermaid
 flowchart TD
   ENV["ClawMobileEnvelope<br/>来自 iOS 控制台"] --> VAL["validateEnvelope<br/>校验 schema、token 指纹、task actions"]
-  VAL --> REPLAY{"taskReplayGuard<br/>同一 Gateway 进程内是否重复 task.id"}
+  VAL --> KNOWN{"schema action kind known?"}
+  KNOWN -->|否| UERR["unsupported_action_kind / non-retryable<br/>无任务 session、action identity 或 artifact，不回显原值"]
+  KNOWN -->|是| REPLAY{"taskReplayGuard<br/>同一 Gateway 进程内是否重复 task.id"}
   REPLAY -->|"重复"| RG["task-replay-guard.json<br/>auditLog 脱敏摘要"]
   RG --> RGS["actionSkipped<br/>跳过所有 action handler"]
   RG --> SOUT
@@ -84,7 +86,11 @@ flowchart TD
   REPLAY -->|"首次"| SNAP["session-start auditLog<br/>gateway-capability-snapshot.json<br/>workspace、platform、token 指纹、allowlist、capability 状态、安全 metadata"]
   REPLAY -->|"首次"| POL["actionPolicy<br/>检查 approval 和 allowedActionKinds"]
   POL -->|不允许| SKIP["actionSkipped<br/>写 auditLog 说明原因"]
-  POL -->|允许| KIND{"action.kind"}
+  POL -->|允许| HANDLER{"fixed handler supported?"}
+  HANDLER -->|否| UAUD["action-bound redacted auditLog<br/>metadata-only、无业务副作用"]
+  UAUD --> UFAIL["actionFailed / failed<br/>non-retryable"]
+  UFAIL --> NEXT["继续后续合法 action<br/>最终 sessionCompleted"]
+  HANDLER -->|是| KIND{"action.kind"}
   KIND --> OBS["observeScreen<br/>dry-run、macOS 截图、窗口元数据或受控 Accessibility 摘要与信号质量 metadata"]
   KIND --> BRO["controlBrowser<br/>HTML/URL trace、Gateway fetch 重定向逐跳 allowlist、浏览器打开/搜索计划和 policy diagnostics metadata 复核"]
   KIND --> FILE["manageFiles<br/>workspace 内结构化写文件、路径逃逸阻断、File Change Safety metadata"]

@@ -20,6 +20,9 @@ Claw 的当前主链路是：用户在 iPhone 输入电脑任务，App 生成可
   -> URLSessionClawGatewayTransport 有界重连 + ping 可观测性
   -> Gateway process-local task replay guard 防止同一 task.id 重复执行 handler
   -> Gateway session-start capability snapshot auditLog + 安全 metadata
+  -> schema action kind gate：未知 kind 固定拒绝，不生成任务 session、action-bound event 或 artifact；WebSocket 仅返回无 action identity 的 envelope error event
+  -> approval/envelope allowlist policy -> fixed handler support gate
+  -> schema-known unsupported action -> action-bound redacted auditLog + actionFailed/non-retryable，不进入业务 handler
   -> ClawGatewayEvent
   -> ClawGatewayEventStream.apply
   -> ClawGatewaySession.results/sessionArtifacts/auditTrail
@@ -92,10 +95,11 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 7. 桌面 Gateway 原型 `Tools/claw-gateway-server.mjs` 校验 schema、token、动作白名单和策略。
 8. Gateway 先查进程内 task replay guard：同一 `task.id` 已被接受过时，只写 `task-replay-guard.json` `auditLog`、逐个 action 返回 `actionSkipped` 并结束 session，不调用 action handler。
 9. 正常路径在 `gatewayConnected` 后写入 session 级 `gateway-capability-snapshot.json` `auditLog` artifact，记录 workspace、platform、短 token 指纹、envelope allowlist、策略 allowlist 和 capability 状态，并在 artifact event metadata 上附安全字符串摘要。
-10. Gateway action handler 写 artifact 并返回状态：成功、失败、等待审批、跳过。
-11. 手机端 reducer 用事件更新 session；无 action 绑定的 `artifactStored` 进入 `sessionArtifacts` 和 auditTrail，action-bound artifact 保持 result 合并逻辑。
-12. UI 显示结果、artifact、审批点、retry 状态、Live Gateway 连接健康摘要、Approval Fast Lane 审批快车道、Mac Agent Control Snapshot 控制态势快照、Mission Run Operator Strip、Loop 继续态势、Mac Agent Readiness Board 就绪看板、Mac Gateway Action Preflight Matrix 动作预检矩阵、Mac Agent Evidence Coverage Map 证据覆盖图、Mac Agent Next Step Deck 下一步候选卡组、Mac Agent Run Timeline 执行时间线、Mac Agent Continuation Gate 继续闸门、Mac Agent Review Radar 复核雷达、Mac Agent Handoff Brief 人工交接简报、Focus Context 聚焦上下文、Review Detail Dock、Review Trail 复核路径、Approval Queue 审批队列、Payload Safety Ledger 载荷安全账本、Artifact 证据索引、复核态势摘要、下一步人工复核行动、按风险/可行动性排序的复核优先队列、当前聚焦的队列项详情、Artifact metadata 复核摘要、文件变更安全复核摘要、提取完整性复核摘要、浏览器控制计划复核摘要、草稿/最终提交安全复核摘要、Gateway 能力复核摘要、Accessibility 复核摘要、Replay Guard 复核摘要和 AgentTrace handoff 复核摘要。
-13. `ClawAutonomousLoopState` 记录计划、审批、发送、观察、重试等自动循环状态。
+10. action 通过 approval/envelope policy 后必须再命中固定 Node handler 支持集合；不支持时只写 action-bound、redacted、metadata-only `auditLog`，返回 `actionFailed`/`failed`/non-retryable，不调用业务 handler、不写业务 artifact，也不尝试业务副作用。
+11. unsupported action 失败后继续处理 envelope 中的后续合法 action；固定 handler 写对应 artifact 并返回成功、失败或等待审批，session 最终仍可完成。
+12. 手机端 reducer 用事件更新 session；无 action 绑定的 `artifactStored` 进入 `sessionArtifacts` 和 auditTrail，action-bound artifact 保持 result 合并逻辑。
+13. UI 显示结果、artifact、审批点、retry 状态、Live Gateway 连接健康摘要、Approval Fast Lane 审批快车道、Mac Agent Control Snapshot 控制态势快照、Mission Run Operator Strip、Loop 继续态势、Mac Agent Readiness Board 就绪看板、Mac Gateway Action Preflight Matrix 动作预检矩阵、Mac Agent Evidence Coverage Map 证据覆盖图、Mac Agent Next Step Deck 下一步候选卡组、Mac Agent Run Timeline 执行时间线、Mac Agent Continuation Gate 继续闸门、Mac Agent Review Radar 复核雷达、Mac Agent Handoff Brief 人工交接简报、Focus Context 聚焦上下文、Review Detail Dock、Review Trail 复核路径、Approval Queue 审批队列、Payload Safety Ledger 载荷安全账本、Artifact 证据索引、复核态势摘要、下一步人工复核行动、按风险/可行动性排序的复核优先队列、当前聚焦的队列项详情、Artifact metadata 复核摘要、文件变更安全复核摘要、提取完整性复核摘要、浏览器控制计划复核摘要、草稿/最终提交安全复核摘要、Gateway 能力复核摘要、Accessibility 复核摘要、Replay Guard 复核摘要和 AgentTrace handoff 复核摘要。
+14. `ClawAutonomousLoopState` 记录计划、审批、发送、观察、重试等自动循环状态。
 
 ## 4. 核心模块
 

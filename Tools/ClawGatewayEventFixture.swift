@@ -2,6 +2,18 @@ import Foundation
 
 @main
 enum ClawGatewayEventFixture {
+    private static let gatewayHandlerSupportedKinds: Set<String> = [
+        "runAgentLoop",
+        "observeScreen",
+        "controlBrowser",
+        "manageFiles",
+        "runShellCommand",
+        "extractData",
+        "operateDesktopApp",
+        "composeMessage",
+        "composeEmail"
+    ]
+
     static func main() throws {
         if CommandLine.arguments.contains("--help") {
             print("""
@@ -11,6 +23,11 @@ enum ClawGatewayEventFixture {
             newline-delimited ClawGatewayEvent JSON. This is a desktop Gateway contract
             fixture, not a real computer-control runtime.
             """)
+            return
+        }
+        if CommandLine.arguments.contains("--self-test") {
+            try runSelfTest()
+            print("Claw Gateway event fixture self-test passed")
             return
         }
 
@@ -48,6 +65,86 @@ enum ClawGatewayEventFixture {
             throw FixtureError.missingInput
         }
         return data
+    }
+
+    private static func runSelfTest() throws {
+        let unsupportedAction = ClawMobileAction(
+            kind: .openExternalURL,
+            title: "Unsupported fixture action",
+            target: "omitted",
+            instruction: "omitted",
+            approval: .gatewayApproval,
+            sourceSurface: .clawGateway,
+            handlesSensitiveData: true,
+            inputPreview: "omitted"
+        )
+        let skippedAction = ClawMobileAction(
+            kind: .observeScreen,
+            title: "Policy-skipped fixture action",
+            target: "omitted",
+            instruction: "omitted",
+            approval: .automatic,
+            sourceSurface: .clawGateway,
+            handlesSensitiveData: true,
+            inputPreview: "omitted"
+        )
+        let envelope = ClawMobileEnvelope(
+            schemaVersion: "claw.computer.control.v1",
+            sourceApp: "Claw Controller",
+            task: ClawMobileTask(
+                command: "fixture self-test",
+                summary: "fixture self-test",
+                sourceDevice: "CI",
+                destinationGateway: "fixture",
+                actions: [unsupportedAction, skippedAction],
+                status: .sent,
+                riskScore: 10
+            ),
+            gateway: ClawGatewayProfile(
+                endpoint: "fixture://gateway",
+                deviceName: "fixture",
+                securityMode: .mutualApproval,
+                tokenFingerprint: "unset",
+                allowedActionKinds: [.openExternalURL],
+                requiresApprovalForSensitiveData: true,
+                auditEnabled: true
+            ),
+            approvalSummary: "fixture",
+            auditRequired: true
+        )
+        let events = makeEvents(for: envelope, sessionID: UUID())
+        let failed = events.first {
+            $0.actionID == unsupportedAction.id &&
+            $0.kind == .actionFailed &&
+            $0.resultStatus == .failed &&
+            $0.isRetryable == false
+        }
+        let audit = events
+            .filter { $0.actionID == unsupportedAction.id && $0.kind == .artifactStored }
+            .flatMap(\.artifacts)
+            .first { artifact in
+                artifact.kind == .auditLog &&
+                artifact.isRedacted &&
+                artifact.metadata?["handlerSupported"] == "false"
+            }
+        let skipped = events.first {
+            $0.actionID == skippedAction.id &&
+            $0.kind == .actionSkipped &&
+            $0.resultStatus == .skipped
+        }
+        let skippedArtifacts = events
+            .filter { $0.actionID == skippedAction.id && $0.kind == .artifactStored }
+            .flatMap(\.artifacts)
+        guard
+            failed != nil,
+            audit != nil,
+            skipped != nil,
+            skippedArtifacts.count == 1,
+            skippedArtifacts.first?.kind == .auditLog,
+            skippedArtifacts.first?.isRedacted == true
+        else {
+            throw FixtureError.selfTestFailed
+        }
     }
 
     private static func makeEvents(
@@ -93,10 +190,15 @@ enum ClawGatewayEventFixture {
             )
             sequence += 1
 
+            let status = resultStatus(
+                for: action,
+                allowedActionKinds: envelope.gateway.allowedActionKinds
+            )
             let artifacts = artifacts(
                 for: action,
                 index: index,
-                allowedActionKinds: envelope.gateway.allowedActionKinds
+                allowedActionKinds: envelope.gateway.allowedActionKinds,
+                status: status
             )
             if artifacts.isEmpty == false {
                 events.append(
@@ -116,7 +218,6 @@ enum ClawGatewayEventFixture {
                 sequence += 1
             }
 
-            let status = resultStatus(for: action)
             events.append(
                 ClawGatewayEvent(
                     sessionID: sessionID,
@@ -147,9 +248,16 @@ enum ClawGatewayEventFixture {
         return events
     }
 
-    private static func resultStatus(for action: ClawMobileAction) -> ClawGatewayActionResultStatus {
-        if action.approval == .blocked {
+    private static func resultStatus(
+        for action: ClawMobileAction,
+        allowedActionKinds: [ClawMobileActionKind]
+    ) -> ClawGatewayActionResultStatus {
+        if action.approval == .blocked || allowedActionKinds.contains(action.kind) == false {
             return .skipped
+        }
+
+        guard gatewayHandlerSupportedKinds.contains(action.kind.rawValue) else {
+            return .failed
         }
 
         switch action.kind {
@@ -157,10 +265,10 @@ enum ClawGatewayEventFixture {
             return .failed
         case .operateDesktopApp, .composeMessage, .composeEmail:
             return .waitingForApproval
-        case .blockedUnsupported:
-            return .skipped
-        case .analyzeLocalContext, .requestPermission, .runAgentLoop, .observeScreen, .controlBrowser, .manageFiles, .extractData, .readContacts, .createReminder, .scheduleNotification, .openExternalURL, .runShortcut, .speechCapture, .backgroundRefresh, .desktopHandoff, .auditLog:
+        case .runAgentLoop, .observeScreen, .controlBrowser, .manageFiles, .extractData:
             return .succeeded
+        case .analyzeLocalContext, .requestPermission, .readContacts, .createReminder, .scheduleNotification, .openExternalURL, .runShortcut, .speechCapture, .backgroundRefresh, .desktopHandoff, .auditLog, .blockedUnsupported:
+            return .failed
         }
     }
 
@@ -182,9 +290,31 @@ enum ClawGatewayEventFixture {
     private static func artifacts(
         for action: ClawMobileAction,
         index: Int,
-        allowedActionKinds: [ClawMobileActionKind]
+        allowedActionKinds: [ClawMobileActionKind],
+        status: ClawGatewayActionResultStatus
     ) -> [ClawGatewayArtifact] {
         let suffix = index + 1
+        if status == .skipped {
+            return [
+                artifact(
+                    .auditLog,
+                    "fixture-policy-skip-\(suffix).json",
+                    redacted: true,
+                    metadata: policySkippedMetadata(for: action)
+                )
+            ]
+        }
+        if status == .failed && gatewayHandlerSupportedKinds.contains(action.kind.rawValue) == false {
+            return [
+                artifact(
+                    .auditLog,
+                    "fixture-unsupported-action-\(suffix).json",
+                    redacted: true,
+                    metadata: unsupportedActionMetadata(for: action)
+                )
+            ]
+        }
+
         switch action.kind {
         case .runAgentLoop:
             return [artifact(.agentTrace, "fixture-agent-loop-\(suffix).json", redacted: true, metadata: agentTraceMetadata(for: action, allowedActionKinds: allowedActionKinds))]
@@ -209,6 +339,42 @@ enum ClawGatewayEventFixture {
         case .analyzeLocalContext, .requestPermission, .extractData, .readContacts, .createReminder, .scheduleNotification, .openExternalURL, .runShortcut, .speechCapture, .backgroundRefresh, .desktopHandoff, .auditLog, .blockedUnsupported:
             return [artifact(.auditLog, "fixture-audit-\(suffix).json", redacted: action.handlesSensitiveData)]
         }
+    }
+
+    private static func unsupportedActionMetadata(
+        for action: ClawMobileAction
+    ) -> [String: String] {
+        [
+            "mode": "gateway-unsupported-action",
+            "actionID": action.id.uuidString,
+            "actionKind": action.kind.rawValue,
+            "policyDiagnostic": "unsupported-action-handler",
+            "schemaActionKnown": "true",
+            "envelopeAllowed": "true",
+            "handlerSupported": "false",
+            "handlerExecution": "blocked",
+            "handlerExecutionAttempted": "false",
+            "businessSideEffectsAttempted": "false",
+            "resultStatus": "failed",
+            "retryable": "false",
+            "safetyFlags": "metadata-only,action-bound,handler-not-invoked,business-artifacts-not-written,tool-arguments-omitted,instruction-omitted,input-preview-omitted,target-omitted"
+        ]
+    }
+
+    private static func policySkippedMetadata(
+        for action: ClawMobileAction
+    ) -> [String: String] {
+        [
+            "mode": "gateway-policy-skip",
+            "actionID": action.id.uuidString,
+            "actionKind": action.kind.rawValue,
+            "policyDiagnostic": "approval-or-envelope-blocked",
+            "handlerExecutionAttempted": "false",
+            "businessSideEffectsAttempted": "false",
+            "resultStatus": "skipped",
+            "retryable": "false",
+            "safetyFlags": "metadata-only,action-bound,handler-not-invoked,business-artifacts-not-written,tool-arguments-omitted"
+        ]
     }
 
     private static func agentTraceMetadata(
@@ -355,6 +521,9 @@ enum ClawGatewayEventFixture {
         case .succeeded:
             return "fixture completed \(action.title)"
         case .failed:
+            if gatewayHandlerSupportedKinds.contains(action.kind.rawValue) == false {
+                return "fixture blocked unsupported action handler"
+            }
             return "fixture paused \(action.title); command policy needs a narrower allowlist"
         case .waitingForApproval:
             return "fixture reached confirmation point for \(action.title)"
@@ -370,6 +539,7 @@ enum FixtureError: Error, CustomStringConvertible {
     case missingInput
     case unsupportedSchema(String)
     case encodingFailed
+    case selfTestFailed
 
     var description: String {
         switch self {
@@ -379,6 +549,8 @@ enum FixtureError: Error, CustomStringConvertible {
             return "unsupported schema: \(schema)"
         case .encodingFailed:
             return "failed to encode event line"
+        case .selfTestFailed:
+            return "fixture unsupported-action contract failed"
         }
     }
 }

@@ -6,11 +6,13 @@
 
 v0.63 起，Mission Run 先锁定当前最新 task，再只接受 `taskID` 匹配的 Gateway session、live request 和 events；新任务尚未发送时不会继承旧任务的结果、artifact、复核摘要或连接健康。iPhone compact 与 iPad/mac 多栏工作台共享的复核聚焦同时绑定当前 task/session scope，task 转 session 或切换 Mission 后旧聚焦会失效并恢复全量详情，提示用户重新选择，且不会显示 scope UUID。
 
+v0.64 起，桌面 Gateway 在 approval/envelope allowlist 之后再执行固定 handler gate。固定支持集合仅包含 `runAgentLoop`、`observeScreen`、`controlBrowser`、`manageFiles`、`runShellCommand`、`extractData`、`operateDesktopApp`、`composeMessage` 和 `composeEmail`；schema 已知但没有 Node handler 的 action 即使被 envelope 允许，也只能产生不可重试的 `actionFailed` 和 action-bound、redacted、metadata-only `auditLog`，不得进入 generic success、业务 handler、业务 artifact 或外部副作用。schema 未知的 action kind 会在任务 session、action-bound event 或 artifact 前以固定、不可重试的 `unsupported_action_kind` 拒绝；WebSocket 只返回无 action identity 的 envelope error event，避免向 Swift 闭合枚举回传不可解码值。Swift Gateway fixture 使用同一合同；完整 direct/WebSocket smoke、fixture self-test 和 Xcode build 只在 GitHub Actions 云端执行并由 Agent C 下载结果包复判。
+
 后续 Codex/Agent 接力开发必须先读 `AGENTS.md`。项目已建立“人工目标 -> Agent A 设计提示词 -> Agent B 在 main 上实现并推送 -> GitHub Actions 云端验证 -> Agent C 下载结果包复判 -> 人工复核 -> 下一轮”的迭代工作流，并准备支持未来由 Agent X 主控多轮调度 A/B/C。核心记忆和规范分布在 `AGENTS.md`、`update_log.md`、`md/test/test.md`、`md/flow/flow.md`、`md/flow/flowchart.md` 和 `md/prompt/`。
 
 ## 协作与云端验证
 
-当前协作制度固定以 `main` 作为上传、提交、推送和云端验证分支。Agent B 默认只做必要的非编译静态检查后提交并 push 到 `origin/main`；从 2026-07-07 起，默认禁止本地编译、本地 build、本地 xcodebuild、本地 Swift logic smoke、本地 Gateway smoke 和本地 `node --check`。`.github/workflows/ci-results.yml` 负责运行 Claw build、Swift logic smoke、Gateway smoke 和静态检查，并上传未加密 `ci-results` 结果包。Agent C 必须用 GitHub CLI 下载结果包，核对 manifest、JUnit/摘要、主日志和关键结果文件后再验收。
+当前协作制度固定以 `main` 作为上传、提交、推送和云端验证分支。Agent B 默认只做必要的非编译静态检查后提交并 push 到 `origin/main`；从 2026-07-07 起，默认禁止本地编译、本地 build、本地 xcodebuild、本地 Swift logic smoke、本地 Gateway smoke 和本地 `node --check`。`.github/workflows/ci-results.yml` 负责运行 Claw build、Swift logic smoke、Swift Gateway fixture 编译入口、Gateway smoke 和静态检查，并上传未加密 `ci-results` 结果包。Agent C 必须用 GitHub CLI 下载结果包，核对 manifest、JUnit/摘要、主日志和关键结果文件后再验收。
 
 角色召唤约定：`agenta`/`a:`/`A:` 召唤 Agent A，`agentb`/`b:`/`B:` 召唤 Agent B，`agentc`/`c:`/`C:` 召唤 Agent C，`agentx`/`x:`/`X:` 召唤 Agent X。Agent X 用于围绕总目标主控多轮迭代，不直接替代 A/B/C，而是调度 A -> B -> C 并根据 Agent C artifact 验收结论决定继续、退回、暂停或完成。没有角色前缀时按普通 Codex 任务处理。
 
@@ -31,7 +33,7 @@ v0.63 起，Mission Run 先锁定当前最新 task，再只接受 `taskID` 匹�
 - `Docs/claw-mobile-gateway-protocol.md`：当前 Claw computer-control envelope、动作 schema、审批和任务状态协议草案。
 - `Tools/claw-gateway-server.mjs`：本地桌面 Gateway 原型，通过 WebSocket 接收 envelope 并推送事件。
 - `Tools/claw-gateway-smoke.mjs`：启动一次性 Gateway 并验证 WebSocket 事件闭环。
-- `Tools/ClawGatewayEventFixture.swift`：读取 envelope 并输出 `ClawGatewayEvent` JSON Lines 的协议 fixture。
+- `Tools/ClawGatewayEventFixture.swift`：读取 envelope 并输出 `ClawGatewayEvent` JSON Lines 的协议 fixture；无固定 Node handler 的已知 action fail closed，不模拟成功。
 - `ClawTests/ClawTests.swift`：核心数据和业务流测试。
 
 ## 方向

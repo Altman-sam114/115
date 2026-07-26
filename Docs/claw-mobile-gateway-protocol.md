@@ -186,6 +186,9 @@ v0.13 起，桌面 Gateway 原型增加进程内 task replay guard，作为 v0.1
   - 监听 WebSocket。
   - 校验 bearer token、schema 和 envelope token 指纹。
   - 校验 action 是否在 `allowedActionKinds` 内。
+  - approval/envelope policy 通过后再检查固定 handler 支持集合；当前仅 `runAgentLoop`、`observeScreen`、`controlBrowser`、`manageFiles`、`runShellCommand`、`extractData`、`operateDesktopApp`、`composeMessage`、`composeEmail` 可进入 Node handler。schema 已知但无 handler 的 action 固定返回 `failed`/`actionFailed`、`isRetryable=false`，不会进入 generic success。
+  - unsupported action 只写 action-bound、redacted、metadata-only `auditLog`，用固定 diagnostic 记录 handler 未调用和业务副作用未尝试；payload/metadata 不记录 instruction、inputPreview、target、`toolArguments`、URL、path、command、正文、联系人、token、header 或 cookie。该 action 失败后继续处理后续合法 action，最终仍可产生 `sessionCompleted`。
+  - 不属于 `ClawMobileActionKind` schema 集合的未知 kind 在 replay、任务 session workspace、action-bound event 和 artifact 生成前以固定、不可重试的 `unsupported_action_kind` 拒绝；错误响应不回显未知 kind。WebSocket 只返回无 action identity 的 envelope error event，不产生带未知 `actionKind` 的事件。
   - 对同一进程内重复提交的 `task.id` 启用 replay guard：重复任务只写 `task-replay-guard.json` `auditLog`，逐个 action 返回 `actionSkipped`，不重新执行 handler 或写业务 artifact。
   - 在 session 开始后写入 `gateway-capability-snapshot.json` `auditLog` artifact，并附安全 metadata，审计 workspace、platform、token 短指纹、allowlist 和 real/dry-run/disabled/unavailable 状态，包括 `accessibilityTreeState`。
   - 把 artifact 写入 workspace，并回传 `file://` 引用。
@@ -203,11 +206,13 @@ v0.13 起，桌面 Gateway 原型增加进程内 task replay guard，作为 v0.1
   - 启动一次性 Gateway 验证正常路径。
   - 额外启动同一进程内可接收两次连接的 Gateway 验证 replay guard。
   - 验证 `gatewayConnected`、browser/file/shell/extract/action draft result、artifact 文件落盘、browser trace 到结构化提取链路、Browser Control metadata、Accessibility signal quality metadata、File Change Safety metadata、Shell Command Safety metadata、提取完整性 metadata、Delivery Safety metadata、Desktop App policy diagnostics、路径逃逸阻断、写入失败审计、重复 envelope 的 `task-replay-guard.json` / `actionSkipped` 和 `sessionCompleted`。
+  - 云端覆盖 envelope 明确允许但固定 handler 不支持的已知 action：必须 action-bound `actionFailed`、不可重试、只写脱敏 audit、无业务 artifact/副作用/敏感 marker 泄漏，并确认后续合法 action 与 `sessionCompleted` 仍到达。
 - `Tools/claw-gateway-direct-smoke.mjs`
   - 不监听端口，使用 `--emit-events` 直接验证同一套 Gateway handler。
   - 覆盖 workspace artifact、workspace 文件真实写入、File Change Safety metadata、路径逃逸阻断、写入失败审计、workspace symlink 阻断、browser trace 到结构化提取链路、Browser Control metadata、Accessibility signal quality metadata、Shell Command Safety metadata、提取完整性 metadata、Delivery Safety metadata、Desktop App policy diagnostics、Shell dry-run 阻断、allowlist Shell 真执行、缺少结构化 Shell 命令阻断、浏览器打开/搜索计划与 allowlist 阻断、同一 `--emit-events` 进程内重复 envelope 的 replay guard，以及桌面 App 控制的审批闸门和 allowlist 阻断。
+  - 云端对 known-enum + envelope-allowed + handler-unsupported 场景断言 failed/non-retryable、action 绑定、脱敏 audit、业务 artifact 禁止集合、副作用哨兵、敏感 marker 不泄漏和后续合法 action 继续执行；未知 kind 对称断言固定 envelope error、无 actionStarted/sessionCompleted 且不回显原值。
 - `Tools/ClawGatewayEventFixture.swift`
-  - 从 envelope 生成 JSON Lines 事件，用于协议 fixture 和桌面端实现对照。
+  - 从 envelope 生成 JSON Lines 事件，用于协议 fixture 和桌面端实现对照；固定 handler 集合与 Node Gateway 对齐，无 handler 的已知 action 生成 `actionFailed`、不可重试和 action-bound redacted audit，不再生成 generic succeeded。
 
 启动本地 Gateway：
 

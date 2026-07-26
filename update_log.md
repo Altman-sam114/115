@@ -22,6 +22,43 @@
 
 ## 历史记录
 
+### v0.64 / Gateway Unsupported Action Fail Closed 未支持动作固定阻断
+
+日期：2026-07-26
+
+核心变更：
+
+- Gateway 在 approval/envelope allowlist 后增加固定 handler 支持 gate；schema 已知但无 Node handler 的 action 不再进入 generic success。
+- schema 未知 action kind 在任何 session/event/artifact 前固定拒绝且不回显原值，避免 Swift 闭合 enum 解码失败。
+- unsupported action 固定产生 action-bound `actionFailed`/`failed`、不可重试和 redacted metadata-only `auditLog`，不调用业务 handler、不写业务 artifact、不尝试业务副作用；当前 action 失败后继续后续合法 action。
+- Swift Gateway fixture 与固定 9 类 Node handler 合同对齐，无 handler 的已知 action 不再报告 succeeded。
+- direct/WebSocket 云端 smoke 要求覆盖状态绑定、脱敏 audit、业务 artifact 禁止集合、副作用与敏感 marker 哨兵、后续合法 action 和 session completion。
+- CI 新增 Swift Gateway fixture 编译与 `--self-test`，并纳入 manifest、JUnit 和最终 fail gate。
+
+关键文件：
+
+- `Tools/claw-gateway-server.mjs`
+- `Tools/claw-gateway-direct-smoke.mjs`
+- `Tools/claw-gateway-smoke.mjs`
+- `Tools/ClawGatewayEventFixture.swift`
+- `.github/workflows/ci-results.yml`
+- `README.md`
+- `Docs/claw-mobile-gateway-protocol.md`
+- `md/flow/flow.md`
+- `md/flow/flowchart.md`
+- `md/test/test.md`
+- `md/prompt/v0（核心智能能力）/v0.64（GatewayUnsupportedActionFailClosed）.md`
+
+验证结果：
+
+- 本地仅允许 `git diff --check` 和静态复核；未运行编译、Swift/Gateway smoke、XCTest、`xcodebuild` 或 `node --check`。
+- GitHub Actions 完整验证和 Agent C 最新 run artifact 复判待 v0.64 汇总提交并 push 后执行，不提前标记通过。
+
+遗留事项：
+
+- 固定支持集合与 dispatch 必须持续保持一致；未来新增 handler 时需同步 Gateway、fixture、direct/WebSocket smoke 和文档。
+- unsupported audit 是运行审计，不提供密码学执行证明；手机端仍不得把 `sessionCompleted` 解释为每个 action 均成功。
+
 ### v0.63 / Mission Run Session Affinity And Scoped Focus 会话归属与聚焦作用域
 
 日期：2026-07-26

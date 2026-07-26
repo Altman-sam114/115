@@ -10,6 +10,40 @@ import { spawn } from "node:child_process";
 const DEFAULT_PORT = 18789;
 const SCHEMA_VERSION = "claw.computer.control.v1";
 const TASK_REPLAY_CACHE_LIMIT = 128;
+const SCHEMA_ACTION_KINDS = new Set([
+  "analyzeLocalContext",
+  "requestPermission",
+  "runAgentLoop",
+  "observeScreen",
+  "controlBrowser",
+  "operateDesktopApp",
+  "manageFiles",
+  "runShellCommand",
+  "extractData",
+  "readContacts",
+  "composeMessage",
+  "composeEmail",
+  "createReminder",
+  "scheduleNotification",
+  "openExternalURL",
+  "runShortcut",
+  "speechCapture",
+  "backgroundRefresh",
+  "desktopHandoff",
+  "auditLog",
+  "blockedUnsupported",
+]);
+const FIXED_ACTION_HANDLERS = Object.freeze({
+  runAgentLoop: agentLoopAction,
+  observeScreen: observeScreenAction,
+  controlBrowser: controlBrowserAction,
+  manageFiles: manageFilesAction,
+  runShellCommand: runShellAction,
+  extractData: extractDataAction,
+  operateDesktopApp: desktopAppAction,
+  composeMessage: messageDraftAction,
+  composeEmail: messageDraftAction,
+});
 
 class GatewayError extends Error {
   constructor(status, code) {
@@ -411,6 +445,8 @@ async function buildGatewayEvents(envelope, config, sessionID = crypto.randomUUI
   );
 
   for (const [index, action] of task.actions.entries()) {
+    const policy = actionPolicy(action, envelope.gateway);
+    const unsupportedByHandler = policy.allowed && fixedActionHandler(action.kind) === null;
     events.push(
       event({
         sessionID,
@@ -419,7 +455,9 @@ async function buildGatewayEvents(envelope, config, sessionID = crypto.randomUUI
         kind: "actionStarted",
         action,
         resultStatus: "running",
-        summary: `Starting ${action.kind} on ${action.target}`,
+        summary: unsupportedByHandler
+          ? "Starting policy-approved action with no fixed Gateway handler"
+          : `Starting ${action.kind} on ${action.target}`,
       }),
     );
 
@@ -691,6 +729,11 @@ function validateEnvelope(envelope, config) {
   }
   if (typeof envelope.task.id !== "string" || envelope.task.id.trim().length === 0) {
     throw new GatewayError(400, "invalid_task_id");
+  }
+  if (envelope.task.actions.some((action) =>
+    typeof action?.kind !== "string" || !SCHEMA_ACTION_KINDS.has(action.kind)
+  )) {
+    throw new GatewayError(400, "unsupported_action_kind");
   }
   if (config.token) {
     const expected = tokenFingerprint(config.token);
@@ -1023,27 +1066,19 @@ async function runAction(action, index, gateway, config) {
     };
   }
 
-  switch (action.kind) {
-    case "runAgentLoop":
-      return agentLoopAction(action, index, config);
-    case "observeScreen":
-      return observeScreenAction(action, index, config);
-    case "controlBrowser":
-      return controlBrowserAction(action, index, config);
-    case "manageFiles":
-      return manageFilesAction(action, index, config);
-    case "runShellCommand":
-      return runShellAction(action, index, config);
-    case "extractData":
-      return extractDataAction(action, index, config);
-    case "operateDesktopApp":
-      return desktopAppAction(action, index, config);
-    case "composeMessage":
-    case "composeEmail":
-      return messageDraftAction(action, index, config);
-    default:
-      return genericAuditAction(action, index, config);
+  const handler = fixedActionHandler(action.kind);
+  if (!handler) {
+    return unsupportedActionResult(action, index, config);
   }
+  return handler(action, index, config);
+}
+
+function fixedActionHandler(actionKind) {
+  if (!Object.hasOwn(FIXED_ACTION_HANDLERS, actionKind)) {
+    return null;
+  }
+  const handler = FIXED_ACTION_HANDLERS[actionKind];
+  return typeof handler === "function" ? handler : null;
 }
 
 function actionPolicy(action, gateway) {
@@ -3853,27 +3888,74 @@ async function messageDraftAction(action, index, config) {
   };
 }
 
-async function genericAuditAction(action, index, config) {
+async function unsupportedActionResult(action, index, config) {
+  const schemaActionKnown = SCHEMA_ACTION_KINDS.has(action.kind);
+  const safeActionKind = schemaActionKnown ? action.kind : "unknown";
+  const diagnostic = "unsupported-action-handler";
+  const safetyFlags = [
+    "metadata-only",
+    "action-bound",
+    "handler-not-invoked",
+    "business-artifacts-not-written",
+    "tool-arguments-omitted",
+    "instruction-omitted",
+    "input-preview-omitted",
+    "target-omitted",
+  ];
+  const audit = {
+    mode: "gateway-unsupported-action",
+    action: {
+      id: action.id,
+      kind: safeActionKind,
+    },
+    policy: {
+      diagnostic,
+      schemaActionKnown,
+      envelopeAllowed: true,
+      handlerSupported: false,
+      handlerExecution: "blocked",
+      handlerExecutionAttempted: false,
+    },
+    result: {
+      status: "failed",
+      retryable: false,
+      businessSideEffectsAttempted: false,
+    },
+    safety: {
+      instruction: "omitted",
+      inputPreview: "omitted",
+      target: "omitted",
+      toolArguments: "omitted",
+      businessArtifacts: "not-written",
+    },
+  };
   const artifacts = [
     await writeArtifact(
       "auditLog",
-      `audit-${index + 1}.json`,
-      {
-        actionID: action.id,
-        actionKind: action.kind,
-        title: action.title,
-        target: action.target,
-        instruction: action.instruction,
-        inputPreview: action.inputPreview,
-        toolArguments: action.toolArguments || {},
-      },
-      Boolean(action.handlesSensitiveData),
+      `unsupported-action-${index + 1}.json`,
+      audit,
+      true,
       config,
+      compactMetadata({
+        mode: audit.mode,
+        actionID: action.id,
+        actionKind: safeActionKind,
+        policyDiagnostic: diagnostic,
+        schemaActionKnown,
+        envelopeAllowed: true,
+        handlerSupported: false,
+        handlerExecution: "blocked",
+        handlerExecutionAttempted: false,
+        businessSideEffectsAttempted: false,
+        resultStatus: "failed",
+        retryable: false,
+        safetyFlags,
+      }),
     ),
   ];
   return {
-    status: "succeeded",
-    summary: `${action.title} recorded by Gateway audit handler`,
+    status: "failed",
+    summary: "Gateway blocked an action because no fixed handler is available",
     artifacts,
     isRetryable: false,
   };
@@ -4428,7 +4510,7 @@ function errorEvent(error) {
     kind: "actionFailed",
     summary: `gateway error: ${code}`,
     artifacts: [],
-    isRetryable: true,
+    isRetryable: code !== "unsupported_action_kind",
     retryCount: 0,
     createdAt: isoNow(),
   };

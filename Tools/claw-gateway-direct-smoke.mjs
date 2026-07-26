@@ -854,7 +854,57 @@ expect(emptyRequestAgentLoopTrace.handoffStatus === "blocked", "explicit empty r
 assertAgentTraceMetadata(emptyRequestAgentLoopArtifact?.metadata, emptyRequestAgentLoopTrace, "empty request agent loop");
 assertAgentRecommendationSubset(emptyRequestAgentLoopTrace, emptyRequestAgentLoopArtifact?.metadata, emptyRequestAgentLoopEnvelope, "empty request agent loop");
 
-console.log(`Claw Gateway direct smoke passed (${dryRunEvents.length + emptyExtractionEvents.length + pathEscapeEvents.length + writeFailureEvents.length + replayEvents.length + allowlistEvents.length + pathBypassEvents.length + relativePathEvents.length + topLevelShellCommandEvents.length + topLevelCommandLineEvents.length + conflictingShellSourceEvents.length + missingShellEvents.length + desktopPolicyEvents.length + browserPolicyEvents.length + browserRedirectEvents.length + accessibilityPolicyEvents.length + blockedAgentLoopEvents.length + partialAgentLoopEvents.length + requestedSubsetEvents.length + unsupportedAgentLoopEvents.length + emptyRequestAgentLoopEvents.length} events)`);
+const unsupportedMarker = `unsupported-handler-${crypto.randomUUID()}`;
+const unsupportedSideEffectPath = path.resolve(`${workspace}-unsupported-side-effect-${unsupportedMarker}`);
+let unsupportedTargetHits = 0;
+const unsupportedTargetServer = createServer((_request, response) => {
+  unsupportedTargetHits += 1;
+  response.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+  response.end("unexpected unsupported handler request");
+});
+const unsupportedTargetPort = await listenHTTPServer(unsupportedTargetServer, "127.0.0.1");
+const unsupportedHandlerEnvelope = makeUnsupportedHandlerEnvelope(
+  token,
+  unsupportedMarker,
+  unsupportedSideEffectPath,
+  unsupportedTargetPort,
+);
+let unsupportedHandlerEvents = [];
+let unknownActionFailure;
+try {
+  unsupportedHandlerEvents = await runEmitEvents({
+    CLAW_GATEWAY_TOKEN: token,
+    CLAW_WORKSPACE: `${workspace}-unsupported-handler`,
+    CLAW_ALLOW_BROWSER_NETWORK: "1",
+    CLAW_BROWSER_HOST_ALLOWLIST: "127.0.0.1",
+  }, unsupportedHandlerEnvelope);
+  const unknownActionEnvelope = JSON.parse(JSON.stringify(unsupportedHandlerEnvelope));
+  unknownActionEnvelope.task.id = crypto.randomUUID();
+  unknownActionEnvelope.task.actions[0].kind = `futureAction-${unsupportedMarker}`;
+  unknownActionEnvelope.gateway.allowedActionKinds = [unknownActionEnvelope.task.actions[0].kind];
+  unknownActionFailure = await runEmitEventsExpectFailure({
+    CLAW_GATEWAY_TOKEN: token,
+    CLAW_WORKSPACE: `${workspace}-unknown-action`,
+  }, unknownActionEnvelope);
+} finally {
+  await closeHTTPServer(unsupportedTargetServer);
+}
+expect(unsupportedTargetHits === 0, "unsupported handler contacted the network target");
+await fs.access(unsupportedSideEffectPath).then(
+  () => expect(false, "unsupported handler produced a file side effect"),
+  (error) => expect(error?.code === "ENOENT", "unsupported handler side effect marker check failed unexpectedly"),
+);
+await assertUnsupportedHandlerFailure(
+  unsupportedHandlerEvents,
+  unsupportedHandlerEnvelope,
+  [unsupportedMarker, unsupportedSideEffectPath, `http://127.0.0.1:${unsupportedTargetPort}/${unsupportedMarker}`],
+  "direct unsupported handler",
+);
+expect(unknownActionFailure?.stdout.trim() === "", "unknown action should not emit Gateway events");
+expect(unknownActionFailure?.stderr.includes("unsupported_action_kind"), "unknown action should return a fixed envelope error");
+expect(!unknownActionFailure?.stderr.includes(unsupportedMarker), "unknown action error should not expose the raw kind");
+
+console.log(`Claw Gateway direct smoke passed (${dryRunEvents.length + emptyExtractionEvents.length + pathEscapeEvents.length + writeFailureEvents.length + replayEvents.length + allowlistEvents.length + pathBypassEvents.length + relativePathEvents.length + topLevelShellCommandEvents.length + topLevelCommandLineEvents.length + conflictingShellSourceEvents.length + missingShellEvents.length + desktopPolicyEvents.length + browserPolicyEvents.length + browserRedirectEvents.length + accessibilityPolicyEvents.length + blockedAgentLoopEvents.length + partialAgentLoopEvents.length + requestedSubsetEvents.length + unsupportedAgentLoopEvents.length + emptyRequestAgentLoopEvents.length + unsupportedHandlerEvents.length} events)`);
 
 async function runEmitEvents(env, input = envelope) {
   const inputPath = `/private/tmp/claw-gateway-direct-smoke-${crypto.randomUUID()}.json`;
@@ -921,6 +971,7 @@ async function runEmitEventsExpectFailure(env, input = envelope) {
     stderr += chunk.toString("utf8");
   });
   const exitCode = await new Promise((resolve) => child.on("close", resolve));
+  await fs.unlink(inputPath).catch(() => {});
   expect(exitCode !== 0, "direct smoke expected Gateway failure");
   return { stdout, stderr };
 }
@@ -1091,6 +1142,95 @@ function findArtifactByTitle(events, kind, titlePrefix) {
   return events
     .flatMap((event) => event.artifacts || [])
     .find((artifact) => artifact.kind === kind && artifact.title?.startsWith(titlePrefix));
+}
+
+async function assertUnsupportedHandlerFailure(events, input, forbiddenValues, label) {
+  const [unsupportedAction, followUpAction] = input.task.actions;
+  expect(input.gateway.allowedActionKinds.includes(unsupportedAction.kind), `${label} action should be envelope allowed`);
+  const finalEvents = events.filter((event) =>
+    event.actionID === unsupportedAction.id &&
+    ["actionCompleted", "actionFailed", "actionSkipped", "approvalRequested"].includes(event.kind)
+  );
+  expect(finalEvents.length === 1, `${label} should have exactly one final action event`);
+  expect(finalEvents[0].kind === "actionFailed", `${label} should fail`);
+  expect(finalEvents[0].actionKind === unsupportedAction.kind, `${label} failure kind mismatch`);
+  expect(finalEvents[0].resultStatus === "failed", `${label} result status mismatch`);
+  expect(finalEvents[0].isRetryable === false, `${label} should not be retryable`);
+  expect(!events.some((event) => event.actionID === unsupportedAction.id && event.kind === "actionCompleted"), `${label} unexpectedly completed`);
+  expect(!events.some((event) => event.actionID === unsupportedAction.id && event.kind === "actionSkipped"), `${label} should not use policy skip`);
+  expect(!events.some((event) => event.actionID === unsupportedAction.id && event.kind === "approvalRequested"), `${label} should not request approval`);
+  expect(
+    events.filter((event) => event.actionID === unsupportedAction.id).map((event) => event.kind).join(",") ===
+      "actionStarted,artifactStored,actionFailed",
+    `${label} action event order mismatch`,
+  );
+
+  const artifactEvents = events.filter((event) => event.kind === "artifactStored" && event.actionID === unsupportedAction.id);
+  expect(artifactEvents.length === 1, `${label} should emit one action-bound artifact event`);
+  const artifacts = artifactEvents.flatMap((event) => event.artifacts || []);
+  expect(artifacts.length === 1, `${label} should write only one audit artifact`);
+  const auditArtifact = artifacts[0];
+  expect(auditArtifact.kind === "auditLog", `${label} should only write an auditLog`);
+  expect(auditArtifact.title?.startsWith("unsupported-action-"), `${label} audit title mismatch`);
+  expect(auditArtifact.isRedacted === true, `${label} audit should be redacted`);
+  const businessKinds = new Set(["accessibilityTree", "agentTrace", "browserTrace", "commandOutput", "extractedData", "fileDiff", "messageDraft", "screenshot"]);
+  expect(!artifacts.some((artifact) => businessKinds.has(artifact.kind)), `${label} wrote a business artifact`);
+
+  const audit = JSON.parse(await fs.readFile(new URL(auditArtifact.reference), "utf8"));
+  assertUnsupportedHandlerAudit(auditArtifact.metadata, audit, unsupportedAction, label);
+  const actionEvents = events.filter((event) => event.actionID === unsupportedAction.id);
+  const serialized = JSON.stringify({ actionEvents, metadata: auditArtifact.metadata, audit });
+  for (const forbidden of forbiddenValues) {
+    expect(!serialized.includes(forbidden), `${label} leaked ${forbidden}`);
+  }
+
+  expect(
+    events.some((event) =>
+      event.kind === "actionCompleted" &&
+      event.actionID === followUpAction.id &&
+      event.actionKind === followUpAction.kind &&
+      event.resultStatus === "succeeded"
+    ),
+    `${label} should continue to the following supported action`,
+  );
+  expect(events.some((event) => event.kind === "sessionCompleted"), `${label} session should complete`);
+  expect(events.every((event, index) => index === 0 || event.sequence > events[index - 1].sequence), `${label} sequence should be strictly increasing`);
+}
+
+function assertUnsupportedHandlerAudit(metadata, audit, action, label) {
+  expect(metadata && typeof metadata === "object", `${label} missing audit metadata`);
+  expect(audit?.mode === "gateway-unsupported-action", `${label} payload mode mismatch`);
+  expect(audit?.action?.id === action.id, `${label} payload action id mismatch`);
+  expect(audit?.action?.kind === action.kind, `${label} payload action kind mismatch`);
+  expect(audit?.policy?.diagnostic === "unsupported-action-handler", `${label} payload diagnostic mismatch`);
+  expect(audit?.policy?.schemaActionKnown === true, `${label} payload should confirm schema action`);
+  expect(audit?.policy?.envelopeAllowed === true, `${label} payload should confirm envelope allowlist`);
+  expect(audit?.policy?.handlerSupported === false, `${label} payload should reject handler support`);
+  expect(audit?.policy?.handlerExecution === "blocked", `${label} payload should block handler execution`);
+  expect(audit?.policy?.handlerExecutionAttempted === false, `${label} payload should record no handler attempt`);
+  expect(audit?.result?.businessSideEffectsAttempted === false, `${label} payload should record no business side effects`);
+  expect(audit?.result?.status === "failed", `${label} payload result status mismatch`);
+  expect(audit?.result?.retryable === false, `${label} payload retryable mismatch`);
+  expect(audit?.safety?.instruction === "omitted", `${label} payload should omit instruction`);
+  expect(audit?.safety?.inputPreview === "omitted", `${label} payload should omit input preview`);
+  expect(audit?.safety?.target === "omitted", `${label} payload should omit target`);
+  expect(audit?.safety?.toolArguments === "omitted", `${label} payload should omit tool arguments`);
+  expect(audit?.safety?.businessArtifacts === "not-written", `${label} payload should record no business artifacts`);
+  expect(metadata.mode === "gateway-unsupported-action", `${label} metadata mode mismatch`);
+  expect(metadata.actionID === action.id, `${label} metadata action id mismatch`);
+  expect(metadata.actionKind === action.kind, `${label} metadata action kind mismatch`);
+  expect(metadata.policyDiagnostic === "unsupported-action-handler", `${label} metadata diagnostic mismatch`);
+  expect(metadata.schemaActionKnown === "true", `${label} metadata should confirm schema action`);
+  expect(metadata.envelopeAllowed === "true", `${label} metadata should confirm envelope allowlist`);
+  expect(metadata.handlerSupported === "false", `${label} metadata should reject handler support`);
+  expect(metadata.handlerExecution === "blocked", `${label} metadata should block handler execution`);
+  expect(metadata.handlerExecutionAttempted === "false", `${label} metadata should record no handler attempt`);
+  expect(metadata.businessSideEffectsAttempted === "false", `${label} metadata should record no business side effects`);
+  expect(metadata.resultStatus === "failed", `${label} metadata result status mismatch`);
+  expect(metadata.retryable === "false", `${label} metadata retryable mismatch`);
+  for (const flag of ["metadata-only", "action-bound", "handler-not-invoked", "business-artifacts-not-written", "tool-arguments-omitted", "instruction-omitted", "input-preview-omitted", "target-omitted"]) {
+    expect(metadata.safetyFlags?.includes(flag), `${label} missing ${flag} safety flag`);
+  }
 }
 
 async function assertTaskReplayGuard(events, expectedActionCount, label) {
@@ -2086,6 +2226,53 @@ function makeBrowserRedirectEnvelope(rawToken, fixture) {
     approvalSummary: "browser redirect policy smoke",
     auditRequired: true,
   };
+}
+
+function makeUnsupportedHandlerEnvelope(rawToken, marker, sideEffectPath, targetPort) {
+  const input = makeEnvelope(rawToken);
+  const followUpAction = input.task.actions.find((action) => action.kind === "observeScreen");
+  input.gateway.allowedActionKinds = ["openExternalURL", "observeScreen"];
+  input.task.command = "verify unsupported Gateway handlers fail closed";
+  input.task.summary = "unsupported handler regression";
+  input.task.actions = [
+    {
+      id: crypto.randomUUID(),
+      kind: "openExternalURL",
+      title: "Reject unsupported handler",
+      target: `sensitive-target-${marker}`,
+      instruction: `Do not execute unsupported input ${marker}`,
+      approval: "gatewayApproval",
+      sourceSurface: "clawGateway",
+      handlesSensitiveData: true,
+      inputPreview: `sensitive-preview-${marker}`,
+      toolArguments: {
+        url: `http://127.0.0.1:${targetPort}/${marker}`,
+        writePath: sideEffectPath,
+        writeText: marker,
+        executable: "touch",
+        args: JSON.stringify([sideEffectPath]),
+        appName: `sensitive-app-${marker}`,
+        pasteText: `sensitive-paste-${marker}`,
+        draftText: `sensitive-draft-${marker}`,
+        keySequence: `sensitive-key-${marker}`,
+      },
+    },
+    {
+      ...followUpAction,
+      id: crypto.randomUUID(),
+      title: "Continue after unsupported handler",
+      instruction: "Collect dry-run evidence after the isolated failure",
+      inputPreview: "supported continuation",
+      toolArguments: {
+        observationGoal: "verify unsupported handler session continuity",
+        includeScreenshot: "false",
+        includeWindowTitles: "false",
+        includeAccessibilityTree: "false",
+        redaction: "required",
+      },
+    },
+  ];
+  return input;
 }
 
 function makeAgentLoopPolicyEnvelope(rawToken, allowedActionKinds, requestedNextActions = "manageFiles,composeMessage") {
