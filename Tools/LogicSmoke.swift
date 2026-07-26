@@ -854,8 +854,8 @@ enum LogicSmoke {
             "approval queue should include delivery safety confirmation"
         )
         expect(
-            approvalQueue.items.contains { $0.reviewKind == "agent-trace" && $0.isActionable && $0.hasMetadata },
-            "approval queue should include agent trace handoff confirmation"
+            approvalQueue.items.contains { $0.reviewKind == "agent-trace" && $0.isActionable } == false,
+            "approval queue should not require approval for an approval-free selected action"
         )
         expect(
             approvalQueue.items.contains { $0.reviewKind == "approval" && $0.isActionable == false },

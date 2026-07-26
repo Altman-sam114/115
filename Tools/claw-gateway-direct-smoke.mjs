@@ -827,7 +827,7 @@ const noActionAgentLoopEnvelope = makeAgentLoopPolicyEnvelope(
   "observeScreen",
 );
 noActionAgentLoopEnvelope.task.actions[0].toolArguments.approvalRequiredFor = "none";
-const observationAction = dryRunEnvelope.task.actions.find((action) => action.kind === "observeScreen");
+const observationAction = envelope.task.actions.find((action) => action.kind === "observeScreen");
 expect(Boolean(observationAction), "no-action decision fixture requires an observeScreen action");
 noActionAgentLoopEnvelope.task.actions.unshift({ ...observationAction, id: crypto.randomUUID() });
 const noActionAgentLoopEvents = await runEmitEvents({
@@ -842,7 +842,7 @@ expect(noActionAgentLoopTrace.selectedActionDecision?.reason === "no-action-need
 expect(noActionAgentLoopTrace.stopReason === "complete" && noActionAgentLoopTrace.handoffStatus === "complete", "no-action decision should complete instead of reporting missing evidence");
 assertAgentTraceMetadata(noActionAgentLoopArtifact?.metadata, noActionAgentLoopTrace, "no action agent loop");
 
-const approvalOverrideEnvelope = JSON.parse(JSON.stringify(dryRunEnvelope));
+const approvalOverrideEnvelope = JSON.parse(JSON.stringify(envelope));
 approvalOverrideEnvelope.task.id = crypto.randomUUID();
 for (const action of approvalOverrideEnvelope.task.actions) {
   action.id = crypto.randomUUID();
