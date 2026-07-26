@@ -98,6 +98,8 @@ CLAW_GATEWAY_TOKEN=super-secret-token \
 node Tools/claw-gateway-server.mjs
 ```
 
+`CLAW_SHELL_ALLOWLIST` 只接受 `pwd`、`ls` 这类裸 executable 名；结构化命令的首个 token 若包含 `/` 或 `\\`，即使 basename 命中也会在执行前阻断。
+
 带 workspace 和 Shell 策略启动：
 
 ```sh
@@ -130,7 +132,7 @@ node Tools/claw-gateway-direct-smoke.mjs
 node Tools/claw-gateway-smoke.mjs
 ```
 
-`direct-smoke` 不监听端口，用 `--emit-events` 直接验证同一套 Gateway handler、workspace artifact、browser trace 到结构化提取链路、Browser Control metadata、Accessibility signal quality metadata、File Change Safety metadata、Shell Command Safety metadata、提取完整性 metadata、Delivery Safety metadata、workspace 文件真实写入、路径逃逸阻断、写入失败审计、workspace symlink 阻断、Shell dry-run 阻断、allowlist Shell 真执行、缺少结构化 Shell 命令阻断、浏览器打开/搜索计划与 allowlist 阻断、`agentTrace` 证据充分性/降级证据/缺口/下一步选择/审批停止原因/handoff 状态、artifact metadata 与 trace JSON 关键字段一致性、同一进程内重复 envelope 的 replay guard，以及桌面 App 控制的审批闸门和 allowlist 阻断；Swift logic smoke 还覆盖 Mission Run Approval Fast Lane 审批快车道、Control Snapshot 控制态势快照、Operator Strip、Loop 继续态势、Mac Agent Readiness Board 就绪看板、Mac Gateway Action Preflight Matrix 动作预检矩阵、Mac Agent Evidence Coverage Map 证据覆盖图、Mac Agent Next Step Deck 下一步候选卡组、Mac Agent Run Timeline 执行时间线、Mac Agent Continuation Gate 继续闸门、Mac Agent Review Radar 复核雷达、Mac Agent Handoff Brief 人工交接简报、Focus Context 聚焦上下文、Review Detail Dock、Review Trail 复核路径、Approval Queue 审批队列、Payload Safety Ledger 载荷安全账本、AgentTrace handoff 状态、Artifact 证据索引、复核优先队列的排序、聚焦过滤、复核态势摘要、下一步复核行动、Accessibility signal quality 解析和脱敏断言；`claw-gateway-smoke` 会实际启动 WebSocket server，并覆盖同类 `agentTrace` 证据策略、degraded signal metadata、handoff status metadata 断言、Browser Control metadata、Accessibility signal quality metadata、File Change Safety metadata、Shell Command Safety metadata、提取完整性 metadata、Delivery Safety metadata、路径逃逸阻断、写入失败审计和同一 Gateway 进程内两次 WebSocket 连接的 replay guard。
+`direct-smoke` 不监听端口，用 `--emit-events` 直接验证同一套 Gateway handler、workspace artifact、browser trace 到结构化提取链路、Browser Control metadata、Accessibility signal quality metadata、File Change Safety metadata、Shell Command Safety metadata、提取完整性 metadata、Delivery Safety metadata、workspace 文件真实写入、路径逃逸阻断、写入失败审计、workspace symlink 阻断、Shell dry-run 阻断、allowlist Shell 真执行、同名 executable 路径阻断、缺少结构化 Shell 命令阻断、浏览器打开/搜索计划与 allowlist 阻断、`agentTrace` 证据充分性/降级证据/缺口/下一步选择/审批停止原因/handoff 状态、artifact metadata 与 trace JSON 关键字段一致性、同一进程内重复 envelope 的 replay guard，以及桌面 App 控制的审批闸门和 allowlist 阻断；Swift logic smoke 还覆盖 Mission Run Approval Fast Lane 审批快车道、Control Snapshot 控制态势快照、Operator Strip、Loop 继续态势、Mac Agent Readiness Board 就绪看板、Mac Gateway Action Preflight Matrix 动作预检矩阵、Mac Agent Evidence Coverage Map 证据覆盖图、Mac Agent Next Step Deck 下一步候选卡组、Mac Agent Run Timeline 执行时间线、Mac Agent Continuation Gate 继续闸门、Mac Agent Review Radar 复核雷达、Mac Agent Handoff Brief 人工交接简报、Focus Context 聚焦上下文、Review Detail Dock、Review Trail 复核路径、Approval Queue 审批队列、Payload Safety Ledger 载荷安全账本、AgentTrace handoff 状态、Artifact 证据索引、复核优先队列的排序、聚焦过滤、复核态势摘要、下一步复核行动、Accessibility signal quality 解析和脱敏断言；`claw-gateway-smoke` 会实际启动 WebSocket server，并覆盖同类 `agentTrace` 证据策略、degraded signal metadata、handoff status metadata 断言、Browser Control metadata、Accessibility signal quality metadata、File Change Safety metadata、Shell Command Safety metadata、同名 executable 路径阻断、提取完整性 metadata、Delivery Safety metadata、路径逃逸阻断、写入失败审计和同一 Gateway 进程内两次 WebSocket 连接的 replay guard。
 
 ## 运行
 
@@ -138,6 +140,7 @@ node Tools/claw-gateway-smoke.mjs
 
 ## 完成情况
 
+- 2026-07-26：新增 v0.59 Shell Executable Identity Allowlist。`CLAW_SHELL_ALLOWLIST` 只授权裸 executable token；包含 `/` 或 `\\` 的同名路径即使 basename 命中也会在 `runProcess` 前阻断。direct/WebSocket smoke 用同名可执行文件和副作用标记证明路径未执行，并断言事件不回显原路径；正常 `pwd` allowlist 真执行保持不变。
 - 2026-07-26：新增 v0.58 Shell Allowlist Evidence Accuracy。修正 Shell disabled/dry-run 在真正查询 binary allowlist 前短路，却输出 `binaryAllowlistChecked=true` 的误报；Gateway、simulator、direct/WebSocket smoke、XCTest 和 LogicSmoke 统一改为 `false`，allowlist-enabled 执行路径继续为 `true`。本轮不改变 Shell 权限、allowlist 匹配、schema/action/event/artifact，不读取或展示 raw command、stdout/stderr、cwd、token/header 或 `toolArguments`。
 - 2026-07-12：新增 v0.57 Operator Strip Live/Policy Lanes 操作条连接与策略格。Operator Strip 从 4 格扩展为 6 格，新增 Live 与 Policy，复用 Health Strip 与 Policy Diagnostics Board；不执行连接/审批动作。本轮不新增 schema/event/action/artifact kind。
 - 2026-07-12：新增 v0.56 Control Snapshot Live Health Signal 控制态势连接健康信号。Control Snapshot 从既有 Live Gateway Health Strip 派生 live/fallback/error/ping 信号 chips，不改 transport，不执行连接动作。本轮不新增 schema/event/action/artifact kind。

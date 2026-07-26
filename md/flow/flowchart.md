@@ -86,7 +86,7 @@ flowchart TD
   KIND --> OBS["observeScreen<br/>dry-run、macOS 截图、窗口元数据或受控 Accessibility 摘要与信号质量 metadata"]
   KIND --> BRO["controlBrowser<br/>HTML/URL trace、浏览器打开/搜索计划和 policy diagnostics metadata 复核"]
   KIND --> FILE["manageFiles<br/>workspace 内结构化写文件、路径逃逸阻断、File Change Safety metadata"]
-  KIND --> SH["runShellCommand<br/>结构化命令 dry-run 或 allowlist 执行、Shell Command Safety metadata"]
+  KIND --> SH["runShellCommand<br/>结构化命令 dry-run 或裸 executable allowlist 执行、路径形式阻断、Shell Command Safety metadata"]
   KIND --> EXT["extractData<br/>消费已有 artifact 生成结构化数据和完整性 metadata"]
   KIND --> APP["operateDesktopApp<br/>app/key allowlist、最终提交前停止、delivery policy diagnostics metadata"]
   KIND --> AG["runAgentLoop<br/>基于 session artifacts 生成证据质量、readiness、checklist、下一步、风险、停止原因和 handoff 状态"]

@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import net from "node:net";
+import path from "node:path";
 
 const port = Number(process.env.CLAW_GATEWAY_SMOKE_PORT || 18879);
 const token = "smoke-token";
@@ -342,7 +343,100 @@ expect(firstReplayEvents.some((event) => event.kind === "actionStarted"), "webso
 expect(replayGuardEvents[0]?.sessionID !== firstReplayEvents[0]?.sessionID, "websocket replay guard should use a replay session");
 await assertTaskReplayGuard(replayGuardEvents, replayEnvelope, token, "websocket replay guard");
 
-console.log(`Claw Gateway smoke passed (${events.length + firstReplayEvents.length + replayGuardEvents.length} events)`);
+const shellIdentityPort = port + 2;
+const shellIdentityRoot = path.resolve(`.build/claw-gateway-websocket-shell-identity-${crypto.randomUUID()}`);
+const shellIdentityExecutable = path.join(shellIdentityRoot, "pwd");
+const shellIdentityMarker = path.join(shellIdentityRoot, "executed");
+await fs.mkdir(shellIdentityRoot, { recursive: true });
+await fs.writeFile(shellIdentityExecutable, `#!/bin/sh\nprintf executed > ${JSON.stringify(shellIdentityMarker)}\n`, "utf8");
+await fs.chmod(shellIdentityExecutable, 0o755);
+const shellIdentityServer = spawn(
+  process.execPath,
+  ["Tools/claw-gateway-server.mjs", "--once"],
+  {
+    env: {
+      ...process.env,
+      ...gatewayPolicyDefaults(),
+      CLAW_GATEWAY_HOST: host,
+      CLAW_GATEWAY_PORT: String(shellIdentityPort),
+      CLAW_GATEWAY_TOKEN: token,
+      CLAW_WORKSPACE: ".build/claw-gateway-websocket-shell-identity",
+      CLAW_ALLOW_SHELL: "1",
+      CLAW_SHELL_ALLOWLIST: "pwd",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  },
+);
+let shellIdentityServerOutput = "";
+shellIdentityServer.stdout.on("data", (chunk) => {
+  shellIdentityServerOutput += chunk.toString("utf8");
+});
+shellIdentityServer.stderr.on("data", (chunk) => {
+  shellIdentityServerOutput += chunk.toString("utf8");
+});
+await waitFor(
+  () => shellIdentityServerOutput.includes("Claw Gateway listening"),
+  3000,
+  () => shellIdentityServerOutput,
+);
+const shellIdentityEnvelope = makeEnvelope(token, shellIdentityPort);
+shellIdentityEnvelope.gateway.allowedActionKinds = ["runShellCommand"];
+shellIdentityEnvelope.task.command = "verify websocket shell executable identity";
+shellIdentityEnvelope.task.summary = "websocket shell executable identity smoke";
+shellIdentityEnvelope.task.actions = shellIdentityEnvelope.task.actions
+  .filter((action) => action.kind === "runShellCommand")
+  .map((action) => ({
+    ...action,
+    title: "Reject same-name executable path",
+    toolArguments: {
+      ...action.toolArguments,
+      shellCommand: shellIdentityExecutable,
+    },
+  }));
+let shellIdentityEvents = [];
+try {
+  shellIdentityEvents = await connectAndCollectEvents({
+    host,
+    port: shellIdentityPort,
+    token,
+    envelope: shellIdentityEnvelope,
+  });
+} finally {
+  shellIdentityServer.kill();
+}
+expect(shellIdentityEvents.some((event) => event.kind === "actionFailed" && event.actionKind === "runShellCommand"), "websocket same-name shell path should be blocked");
+expect(!shellIdentityEvents.some((event) => event.kind === "actionCompleted" && event.actionKind === "runShellCommand"), "websocket same-name shell path unexpectedly completed");
+expect(!JSON.stringify(shellIdentityEvents).includes(shellIdentityExecutable), "same-name shell path leaked into websocket events");
+const shellIdentityArtifact = findArtifactByTitle(shellIdentityEvents, "commandOutput", "shell-policy-");
+assertShellCommandSafetyMetadata(shellIdentityArtifact?.metadata, {
+  mode: "shell-policy-blocked",
+  actionKind: "runShellCommand",
+  shellPolicy: "allowlist-required",
+  structuredCommandPresent: true,
+  commandParsed: true,
+  allowlistConfigured: true,
+  allowlistMatched: false,
+  executionAttempted: false,
+  executed: false,
+  timedOut: false,
+  exitCodePresent: false,
+  exitCodeZero: false,
+  stdoutPresent: false,
+  stderrPresent: false,
+  resultStatus: "failed",
+  shellPolicyDiagnostic: "allowlist-blocked",
+  shellRetryableReason: "allow-shell-binary",
+  policyChecked: true,
+  binaryAllowlistChecked: true,
+  structuredCommandChecked: true,
+  safetyFlags: ["metadata-only", "structured-arguments-only", "tool-arguments-omitted", "command-omitted", "stdout-omitted", "stderr-omitted", "cwd-omitted", "shell-allowlist-enforced", "no-command-executed", "artifact-payload-not-read"],
+}, "websocket shell executable identity");
+await fs.access(shellIdentityMarker).then(
+  () => expect(false, "websocket same-name shell path produced an execution side effect"),
+  (error) => expect(error?.code === "ENOENT", "websocket same-name shell path marker check failed unexpectedly"),
+);
+
+console.log(`Claw Gateway smoke passed (${events.length + firstReplayEvents.length + replayGuardEvents.length + shellIdentityEvents.length} events)`);
 
 function makeEnvelope(rawToken, endpointPort = port) {
   const taskID = crypto.randomUUID();

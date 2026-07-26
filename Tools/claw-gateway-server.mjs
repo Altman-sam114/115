@@ -2378,8 +2378,9 @@ async function runShellAction(action, index, config) {
     };
   }
 
-  const binary = path.basename(parsed.command);
-  if (!config.allowShell || !config.shellAllowlist.has(binary)) {
+  const binary = parsed.command;
+  const executableIdentityAllowed = isBareShellExecutable(binary);
+  if (!config.allowShell || !executableIdentityAllowed || !config.shellAllowlist.has(binary)) {
     const artifacts = [
       await writeArtifact(
         "commandOutput",
@@ -2409,7 +2410,7 @@ async function runShellAction(action, index, config) {
     ];
     return {
       status: "failed",
-      summary: `${action.title} paused: command '${binary}' is not enabled by Gateway policy`,
+      summary: `${action.title} paused: executable identity is not enabled by Gateway policy`,
       artifacts,
       isRetryable: true,
     };
@@ -3869,6 +3870,10 @@ function structuredShellCommand(action) {
     : typeof action.commandLine === "string"
       ? action.commandLine.trim()
       : "";
+}
+
+function isBareShellExecutable(command) {
+  return typeof command === "string" && command.length > 0 && !command.includes("/") && !command.includes("\\");
 }
 
 function parseCommandLine(commandLine) {

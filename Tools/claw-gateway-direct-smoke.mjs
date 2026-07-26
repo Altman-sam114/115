@@ -2,6 +2,7 @@
 import { spawn } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
+import path from "node:path";
 
 const token = "smoke-token";
 const workspace = ".build/claw-gateway-direct-smoke";
@@ -422,6 +423,61 @@ assertShellCommandSafetyMetadata(allowlistShellArtifact?.metadata, {
   safetyFlags: ["metadata-only", "structured-arguments-only", "tool-arguments-omitted", "command-omitted", "stdout-omitted", "stderr-omitted", "cwd-omitted", "shell-allowlist-enforced", "artifact-payload-not-read"],
 }, "direct shell allowlist");
 
+const bypassRoot = path.resolve(`${workspace}-allowlist-bypass-${crypto.randomUUID()}`);
+const bypassExecutable = path.join(bypassRoot, "pwd");
+const bypassMarker = path.join(bypassRoot, "executed");
+await fs.mkdir(bypassRoot, { recursive: true });
+await fs.writeFile(bypassExecutable, `#!/bin/sh\nprintf executed > ${JSON.stringify(bypassMarker)}\n`, "utf8");
+await fs.chmod(bypassExecutable, 0o755);
+const pathBypassEvents = await runEmitEvents({
+  CLAW_GATEWAY_TOKEN: token,
+  CLAW_WORKSPACE: `${workspace}-allowlist-path-blocked`,
+  CLAW_ALLOW_SHELL: "1",
+  CLAW_SHELL_ALLOWLIST: "pwd",
+}, makeShellEnvelope(token, bypassExecutable));
+expect(pathBypassEvents.some((event) => event.kind === "actionFailed" && event.actionKind === "runShellCommand"), "same-name shell path should be blocked");
+expect(!pathBypassEvents.some((event) => event.kind === "actionCompleted" && event.actionKind === "runShellCommand"), "same-name shell path unexpectedly completed");
+expect(!pathBypassEvents.some((event) => event.artifacts?.some((artifact) => artifact.title?.startsWith("shell-output-"))), "same-name shell path produced execution output");
+expect(!JSON.stringify(pathBypassEvents).includes(bypassExecutable), "same-name shell path leaked into direct events");
+const pathBypassArtifact = findArtifactByTitle(pathBypassEvents, "commandOutput", "shell-policy-");
+assertShellCommandSafetyMetadata(pathBypassArtifact?.metadata, {
+  mode: "shell-policy-blocked",
+  actionKind: "runShellCommand",
+  shellPolicy: "allowlist-required",
+  structuredCommandPresent: true,
+  commandParsed: true,
+  allowlistConfigured: true,
+  allowlistMatched: false,
+  executionAttempted: false,
+  executed: false,
+  timedOut: false,
+  exitCodePresent: false,
+  exitCodeZero: false,
+  stdoutPresent: false,
+  stderrPresent: false,
+  resultStatus: "failed",
+  shellPolicyDiagnostic: "allowlist-blocked",
+  shellRetryableReason: "allow-shell-binary",
+  policyChecked: true,
+  binaryAllowlistChecked: true,
+  structuredCommandChecked: true,
+  safetyFlags: ["metadata-only", "structured-arguments-only", "tool-arguments-omitted", "command-omitted", "stdout-omitted", "stderr-omitted", "cwd-omitted", "shell-allowlist-enforced", "no-command-executed", "artifact-payload-not-read"],
+}, "direct shell executable identity");
+await fs.access(bypassMarker).then(
+  () => expect(false, "same-name shell path produced an execution side effect"),
+  (error) => expect(error?.code === "ENOENT", "same-name shell path marker check failed unexpectedly"),
+);
+const relativePathEvents = await runEmitEvents({
+  CLAW_GATEWAY_TOKEN: token,
+  CLAW_WORKSPACE: `${workspace}-allowlist-relative-path-blocked`,
+  CLAW_ALLOW_SHELL: "1",
+  CLAW_SHELL_ALLOWLIST: "pwd",
+}, makeShellEnvelope(token, "./pwd"));
+expect(relativePathEvents.some((event) => event.kind === "actionFailed" && event.actionKind === "runShellCommand"), "relative shell path should be blocked");
+expect(!relativePathEvents.some((event) => event.kind === "actionCompleted" && event.actionKind === "runShellCommand"), "relative shell path unexpectedly completed");
+expect(!relativePathEvents.some((event) => event.artifacts?.some((artifact) => artifact.title?.startsWith("shell-output-"))), "relative shell path reached execution output");
+expect(!JSON.stringify(relativePathEvents).includes("./pwd"), "relative shell path leaked into direct events");
+
 const missingShellEvents = await runEmitEvents({
   CLAW_GATEWAY_TOKEN: token,
   CLAW_WORKSPACE: `${workspace}-missing-shell`,
@@ -554,7 +610,7 @@ assertAccessibilityTreeArtifact(accessibilityPolicyArtifact, accessibilityPolicy
   label: "enabled accessibility tree",
 });
 
-console.log(`Claw Gateway direct smoke passed (${dryRunEvents.length + emptyExtractionEvents.length + pathEscapeEvents.length + writeFailureEvents.length + replayEvents.length + allowlistEvents.length + missingShellEvents.length + desktopPolicyEvents.length + browserPolicyEvents.length + accessibilityPolicyEvents.length} events)`);
+console.log(`Claw Gateway direct smoke passed (${dryRunEvents.length + emptyExtractionEvents.length + pathEscapeEvents.length + writeFailureEvents.length + replayEvents.length + allowlistEvents.length + pathBypassEvents.length + relativePathEvents.length + missingShellEvents.length + desktopPolicyEvents.length + browserPolicyEvents.length + accessibilityPolicyEvents.length} events)`);
 
 async function runEmitEvents(env, input = envelope) {
   const inputPath = `/private/tmp/claw-gateway-direct-smoke-${crypto.randomUUID()}.json`;
@@ -1700,6 +1756,16 @@ function makeMissingShellEnvelope(rawToken) {
     approvalSummary: "missing shell smoke",
     auditRequired: true,
   };
+}
+
+function makeShellEnvelope(rawToken, shellCommand) {
+  const result = makeMissingShellEnvelope(rawToken);
+  result.task.command = "verify shell executable identity";
+  result.task.summary = "shell executable identity smoke";
+  result.task.actions[0].title = "Reject same-name executable path";
+  result.task.actions[0].toolArguments.shellCommand = shellCommand;
+  result.approvalSummary = "shell executable identity smoke";
+  return result;
 }
 
 function makePathEscapeEnvelope(rawToken) {

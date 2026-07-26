@@ -16,11 +16,46 @@
 - 项目方向：OpenClaw 式电脑接管智能体，iPhone 作为控制台，桌面 Claw Gateway 作为执行端。
 - 当前 schema：`claw.computer.control.v1`。
 - 当前核心闭环：用户自然语言任务 -> `PhoneAgentPlanner` -> `ClawMobileTask` -> `ClawMobileEnvelope` -> 模拟事件流或带有界重连/ping 可观测性和进程内 task replay guard 的 WebSocket Gateway -> `ClawGatewayEvent` -> session reducer -> Mission Run / Approval Fast Lane 审批快车道 / Control Snapshot 控制态势快照 / Operator Strip / Loop 继续态势 / Mac Agent Readiness Board 就绪看板 / Mac Gateway Action Preflight Matrix 动作预检矩阵 / Mac Agent Evidence Coverage Map 证据覆盖图 / Mac Agent Next Step Deck 下一步候选卡组 / Mac Agent Run Timeline 执行时间线 / Mac Agent Continuation Gate 继续闸门 / Mac Agent Review Radar 复核雷达 / Mac Agent Handoff Brief 人工交接简报 / Focus Context 聚焦上下文 / Review Detail Dock / Review Trail 复核路径 / Approval Queue 审批队列 / Payload Safety Ledger 载荷安全账本 / Artifact 证据索引 / 复核态势摘要 / 复核优先队列 / 复核聚焦详情 / Live Gateway 连接健康 / Artifact metadata 复核摘要 / 文件变更安全复核摘要 / Shell 命令安全复核摘要 / 提取完整性复核摘要 / 浏览器控制计划和策略诊断复核摘要 / 草稿最终提交安全和桌面策略诊断复核摘要 / Gateway 能力复核摘要 / Accessibility 信号质量复核摘要 / Replay Guard 复核摘要 / AgentTrace handoff 复核 UI / iPad 多栏工作台展示和审批。
-- 当前 Gateway 能力：进程内 task replay guard、session-start 能力快照 `auditLog`、屏幕观察 dry-run/截图/窗口元数据/带 signal quality metadata 的受控 Accessibility 摘要策略、浏览器 HTML/URL trace、带 metadata-only 计划复核和 policy diagnostics 的浏览器打开/搜索计划、workspace 文件写入与 metadata-only 文件变更安全复核、Shell dry-run/allowlist 执行与 metadata-only Shell 命令安全复核、带 metadata-only 完整性复核的结构化提取、带 metadata-only 草稿/最终提交安全复核和桌面策略诊断的 messageDraft/桌面 App 审批闸门、带 readiness/checklist/risk/stop/handoff status、mac 证据质量分层与安全 metadata 的 `runAgentLoop`/`agentTrace`。
+- 当前 Gateway 能力：进程内 task replay guard、session-start 能力快照 `auditLog`、屏幕观察 dry-run/截图/窗口元数据/带 signal quality metadata 的受控 Accessibility 摘要策略、浏览器 HTML/URL trace、带 metadata-only 计划复核和 policy diagnostics 的浏览器打开/搜索计划、workspace 文件写入与 metadata-only 文件变更安全复核、Shell dry-run/裸 executable allowlist 执行/同名路径阻断与 metadata-only Shell 命令安全复核、带 metadata-only 完整性复核的结构化提取、带 metadata-only 草稿/最终提交安全复核和桌面策略诊断的 messageDraft/桌面 App 审批闸门、带 readiness/checklist/risk/stop/handoff status、mac 证据质量分层与安全 metadata 的 `runAgentLoop`/`agentTrace`。
 - 当前协作闭环：默认 `main` 直推，GitHub Actions 生成未加密 `ci-results` 结果包，Agent C 下载并核对 manifest/JUnit/日志后验收。
 - 当前主要遗留：完整 macOS Accessibility bridge、Playwright/browser-use 兼容控制器、真实多轮 agent loop、live Gateway 后台保活/真实心跳协议/配对、完整 artifact 内容复核体验。
 
 ## 历史记录
+
+### v0.59 / Shell Executable Identity Allowlist Shell 可执行文件身份白名单
+
+日期：2026-07-26
+
+核心变更：
+
+- 修复 `CLAW_SHELL_ALLOWLIST` 只检查 `path.basename(parsed.command)`，却执行原始路径造成的同名 executable 绕过。
+- Shell 真执行现要求 command token 不含 `/` 或 `\\`，并以裸名称精确命中 allowlist；路径形式统一在 `runProcess` 前按 `allowlist-blocked` 阻断。
+- Shell 路径阻断事件改用固定摘要，不回显 raw executable path；metadata 保持 `allowlistMatched=false`、`executionAttempted=false` 和 `binaryAllowlistChecked=true`。
+- direct/WebSocket smoke 创建同名 `pwd` 测试 executable，并用副作用标记不存在证明没有执行；正常裸 `pwd` allowlist 真执行继续覆盖。
+- 不改变 schema/action/event/artifact kind，不扩大 Shell 权限，不读取 artifact payload。
+
+关键文件：
+
+- `Tools/claw-gateway-server.mjs`
+- `Tools/claw-gateway-direct-smoke.mjs`
+- `Tools/claw-gateway-smoke.mjs`
+- `README.md`
+- `Docs/claw-mobile-gateway-protocol.md`
+- `md/flow/flow.md`
+- `md/flow/flowchart.md`
+- `md/test/test.md`
+- `md/prompt/v0（核心智能能力）/v0.59（ShellExecutableIdentityAllowlist）.md`
+- `update_log.md`
+
+验证结果：
+
+- 本地只运行非编译静态检查；build/smoke 等待云端 workflow。
+- GitHub Actions 结果包待本轮 push 后由 Agent C 下载复判。
+
+遗留事项：
+
+- `structuredShellCommand()` 仍兼容顶层 `shellCommand` / `commandLine` 别名，与协议规定的仅 `toolArguments.shellCommand` 来源不一致，后续应单独收紧并补 provenance 回归。
+- Browser redirect host allowlist、Mission Run session affinity、完整 Accessibility bridge、真实多轮 agent loop 和 artifact payload 复核仍待后续迭代。
 
 ### v0.58 / Shell Allowlist Evidence Accuracy Shell 白名单证据准确性
 
