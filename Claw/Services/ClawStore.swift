@@ -3,6 +3,14 @@ import Foundation
 
 @MainActor
 final class ClawStore: ObservableObject {
+    private struct MissionRunResolution {
+        var task: ClawMobileTask?
+        var session: ClawGatewaySession?
+        var liveRequest: ClawGatewayLiveRequest?
+        var events: [ClawGatewayEvent]
+        var connectionState: ClawGatewayConnectionState
+    }
+
     @Published private(set) var model: LocalClawModel
     @Published private(set) var validation: ArtifactValidationResult
     @Published var selectedCategory: ClawCapabilityCategory?
@@ -31,6 +39,7 @@ final class ClawStore: ObservableObject {
     @Published private(set) var autonomousLoop: ClawAutonomousLoopState
 
     private let artifactDirectoryURL: URL
+    private var gatewayConnectionSessionID: UUID?
 
     init(
         model: LocalClawModel? = nil,
@@ -72,6 +81,7 @@ final class ClawStore: ObservableObject {
         self.gatewayConnectionState = .idle
         self.lastGatewayLiveRequest = nil
         self.gatewayEvents = []
+        self.gatewayConnectionSessionID = nil
         self.autonomousLoop = ClawAutonomousLoopState(
             phase: .idle,
             runMode: .simulatedEventStream,
@@ -125,18 +135,12 @@ final class ClawStore: ObservableObject {
     }
 
     var gatewayLiveHealthSummary: ClawGatewayLiveHealthSummary {
-        let latestSession = clawGatewaySessions.first
-        let sessionEvents: [ClawGatewayEvent]
-        if let latestSession {
-            sessionEvents = gatewayEvents.filter { $0.sessionID == latestSession.id }
-        } else {
-            sessionEvents = []
-        }
+        let resolution = missionRunResolution
         return ClawGatewayLiveHealthSummary.make(
-            request: lastGatewayLiveRequest,
-            connectionState: gatewayConnectionState,
-            events: sessionEvents,
-            latestSession: latestSession
+            request: resolution.liveRequest,
+            connectionState: resolution.connectionState,
+            events: resolution.events,
+            latestSession: resolution.session
         )
     }
 
@@ -145,8 +149,9 @@ final class ClawStore: ObservableObject {
     }
 
     var missionRunSummary: ClawMissionRunSummary {
-        let task = clawMobileTasks.first
-        let session = clawGatewaySessions.first
+        let resolution = missionRunResolution
+        let task = resolution.task
+        let session = resolution.session
         let phase = missionRunPhase(task: task, session: session)
         let primaryAction = missionRunPrimaryAction(for: phase, session: session)
         let command = missionRunCommand(task: task, session: session)
@@ -226,7 +231,63 @@ final class ClawStore: ObservableObject {
             isPrimaryActionEnabled: primaryAction.isEnabled,
             requiresUserApproval: requiresUserApproval,
             statusLine: missionRunStatusLine(phase: phase, task: task, session: session),
-            stageTrack: missionRunStageTrack(phase: phase, session: session)
+            stageTrack: missionRunStageTrack(phase: phase, session: session),
+            taskID: task?.id,
+            sessionID: session?.id,
+            sessionTaskID: session?.taskID,
+            missionScopeID: session?.id ?? task?.id
+        )
+    }
+
+    private var missionRunResolution: MissionRunResolution {
+        let latestTask = clawMobileTasks.first
+        let task = autonomousLoop.taskID.flatMap { taskID in
+            guard latestTask?.id == taskID else {
+                return nil
+            }
+            return latestTask
+        } ?? latestTask
+
+        guard let task else {
+            return MissionRunResolution(
+                task: nil,
+                session: nil,
+                liveRequest: nil,
+                events: [],
+                connectionState: .idle
+            )
+        }
+
+        let exactSession = autonomousLoop.sessionID.flatMap { sessionID in
+            clawGatewaySessions.first {
+                $0.id == sessionID && $0.taskID == task.id
+            }
+        }
+        let session = exactSession ?? clawGatewaySessions.first { $0.taskID == task.id }
+        let liveRequest = lastGatewayLiveRequest.flatMap { request in
+            guard request.taskID == task.id else {
+                return nil
+            }
+            guard let session else {
+                return request
+            }
+            return request.sessionID == session.id ? request : nil
+        }
+        let events: [ClawGatewayEvent]
+        if let session {
+            events = gatewayEvents.filter {
+                $0.sessionID == session.id && $0.taskID == task.id
+            }
+        } else {
+            events = []
+        }
+
+        return MissionRunResolution(
+            task: task,
+            session: session,
+            liveRequest: liveRequest,
+            events: events,
+            connectionState: session?.id == gatewayConnectionSessionID ? gatewayConnectionState : .idle
         )
     }
 
@@ -1325,6 +1386,7 @@ final class ClawStore: ObservableObject {
 
         switch dispatch.mode {
         case .simulatedEventStream:
+            gatewayConnectionSessionID = dispatch.sessionID
             gatewayConnectionState = .simulated
             let events = ClawGatewayEventStream.simulatedEvents(
                 task: dispatch.task,
@@ -1373,7 +1435,9 @@ final class ClawStore: ObservableObject {
         }
 
         do {
-            gatewayConnectionState = .streaming
+            if gatewayConnectionSessionID == dispatch.sessionID {
+                gatewayConnectionState = .streaming
+            }
             let stream = transport.streamEvents(
                 request: request,
                 envelopeJSON: lastClawMobileEnvelope,
@@ -1384,7 +1448,9 @@ final class ClawStore: ObservableObject {
                 ingestGatewayEvents([event])
             }
         } catch {
-            gatewayConnectionState = .failed
+            if gatewayConnectionSessionID == dispatch.sessionID {
+                gatewayConnectionState = .failed
+            }
             let safeError = ClawGatewayLiveClient.safeTransportErrorSummary(
                 error.localizedDescription,
                 request: request
@@ -1441,9 +1507,11 @@ final class ClawStore: ObservableObject {
             task: task,
             profile: clawGatewayProfile,
             envelopeJSON: envelope,
-            rawToken: gatewayToken
+            rawToken: gatewayToken,
+            sessionID: sessionID
         )
         lastGatewayLiveRequest = request
+        gatewayConnectionSessionID = sessionID
         gatewayConnectionState = request.canAttemptLive ? .awaitingGateway : .notConfigured
         let liveEvent = ClawGatewayLiveClient.liveRequestPreparedEvent(
             task: task,
@@ -1474,7 +1542,9 @@ final class ClawStore: ObservableObject {
         startingSequence: Int,
         transportErrorSummary: String? = nil
     ) {
-        gatewayConnectionState = .fallbackSimulated
+        if gatewayConnectionSessionID == sessionID {
+            gatewayConnectionState = .fallbackSimulated
+        }
         let fallbackEvent = ClawGatewayLiveClient.fallbackEvent(
             task: task,
             sessionID: sessionID,
@@ -1501,7 +1571,9 @@ final class ClawStore: ObservableObject {
         var acceptedEvents: [ClawGatewayEvent] = []
 
         for event in orderedEvents {
-            guard let sessionIndex = clawGatewaySessions.firstIndex(where: { $0.id == event.sessionID }) else {
+            guard let sessionIndex = clawGatewaySessions.firstIndex(where: {
+                $0.id == event.sessionID && $0.taskID == event.taskID
+            }) else {
                 continue
             }
             clawGatewaySessions[sessionIndex] = ClawGatewayEventStream.apply(
@@ -1523,20 +1595,23 @@ final class ClawStore: ObservableObject {
             return $0.createdAt < $1.createdAt
         }
 
-        if let latest = clawGatewaySessions.first {
-            let event = acceptedEvents.last
-            if event?.kind == .sessionCompleted {
-                gatewayConnectionState = latest.status == .blocked ? .failed : .completed
-            } else if event?.kind == .fallbackUsed {
-                gatewayConnectionState = .fallbackSimulated
-            } else if gatewayDispatchMode == .liveGateway,
-                      let event,
-                      isLiveGatewayProgressEvent(event),
-                      gatewayConnectionState != .fallbackSimulated,
-                      gatewayConnectionState != .failed {
-                gatewayConnectionState = .streaming
+        if let event = acceptedEvents.last,
+           let eventSession = clawGatewaySessions.first(where: { $0.id == event.sessionID }) {
+            if event.sessionID == gatewayConnectionSessionID {
+                if event.kind == .sessionCompleted {
+                    gatewayConnectionState = eventSession.status == .blocked ? .failed : .completed
+                } else if event.kind == .fallbackUsed {
+                    gatewayConnectionState = .fallbackSimulated
+                } else if gatewayDispatchMode == .liveGateway,
+                          isLiveGatewayProgressEvent(event),
+                          gatewayConnectionState != .fallbackSimulated,
+                          gatewayConnectionState != .failed {
+                    gatewayConnectionState = .streaming
+                }
             }
-            lastGatewayEvent = ClawGatewayEventStream.eventSummary(for: latest, latestEvent: event)
+            if event.sessionID == gatewayConnectionSessionID {
+                lastGatewayEvent = ClawGatewayEventStream.eventSummary(for: eventSession, latestEvent: event)
+            }
         }
     }
 
@@ -2986,7 +3061,8 @@ enum ClawGatewayLiveClient {
         task: ClawMobileTask,
         profile: ClawGatewayProfile,
         envelopeJSON: String,
-        rawToken: String = ""
+        rawToken: String = "",
+        sessionID: UUID? = nil
     ) -> ClawGatewayLiveRequest {
         let endpoint = profile.endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
         let isWebSocket = endpoint.hasPrefix("ws://") || endpoint.hasPrefix("wss://")
@@ -3019,6 +3095,7 @@ enum ClawGatewayLiveClient {
             headers: headers,
             bodyBytes: envelopeJSON.utf8.count,
             taskID: task.id,
+            sessionID: sessionID,
             command: task.command,
             actionCount: task.actions.count,
             canAttemptLive: canAttemptLive,

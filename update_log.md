@@ -22,6 +22,41 @@
 
 ## 历史记录
 
+### v0.63 / Mission Run Session Affinity And Scoped Focus 会话归属与聚焦作用域
+
+日期：2026-07-26
+
+核心变更：
+
+- Mission Run resolver 以最新 task 为根，只选择同 task 的 session、live request 和 events；新任务未发送时不再继承旧任务结果、artifact、复核摘要或连接健康。
+- summary 新增 task/session 归属和不可见 mission scope；发送前 scope 使用 task ID，发送后使用 session ID。
+- iPhone compact 与 iPad/mac 多栏共享聚焦升级为 scope + review kind；切换任务或 task-to-session 后旧聚焦 fail closed，恢复全量详情并显示固定失效提示，不外显 UUID。
+- XCTest 和 Swift logic smoke 覆盖连续 Mission A/B、同 scope 聚焦、跨 scope 失效、全量回退及旧敏感命令不外显。
+
+关键文件：
+
+- `Claw/Core/ClawModels.swift`
+- `Claw/Services/ClawStore.swift`
+- `Claw/Views/ContentView.swift`
+- `ClawTests/ClawTests.swift`
+- `Tools/LogicSmoke.swift`
+- `README.md`
+- `Docs/claw-mobile-gateway-protocol.md`
+- `md/flow/flow.md`
+- `md/flow/flowchart.md`
+- `md/test/test.md`
+- `md/prompt/v0（核心智能能力）/v0.63（MissionRunSessionAffinityScopedFocus）.md`
+
+验证结果：
+
+- 本地只运行非编译静态检查；build、Swift/Gateway smoke 和 Xcode 验证交给最新 `origin/main` GitHub Actions。
+- GitHub Actions 结果包待本轮 push 后由 Agent C 下载并复判 manifest、JUnit、主日志和关键结果。
+
+遗留事项：
+
+- 本轮 scope 是 presentation-layer 身份绑定，不提供密码学证明，也不实现跨设备持久聚焦。
+- 真实多轮 agent loop、持久调度和跨 session 状态机仍待后续版本。
+
 ### v0.62 / Agent Loop Envelope Allowlist Intersection 智能体下一步白名单交集
 
 日期：2026-07-26

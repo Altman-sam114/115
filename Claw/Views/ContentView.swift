@@ -455,14 +455,14 @@ struct PhoneAgentView: View {
 
 struct PhoneAgentCompactLayout: View {
     let examples: [String]
-    @State private var focusedReviewKind: String?
+    @State private var reviewFocus: ClawMissionRunReviewFocus?
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 PhoneAgentCommandPanel(examples: examples)
 
-                ClawMissionRunPanel(focusedReviewKind: $focusedReviewKind)
+                ClawMissionRunPanel(reviewFocus: $reviewFocus)
 
                 PhoneAgentPlanPanel()
 
@@ -481,7 +481,7 @@ struct PhoneAgentCompactLayout: View {
 
 struct PhoneAgentWorkbenchLayout: View {
     let examples: [String]
-    @State private var focusedReviewKind: String?
+    @State private var reviewFocus: ClawMissionRunReviewFocus?
 
     var body: some View {
         GeometryReader { proxy in
@@ -491,7 +491,7 @@ struct PhoneAgentWorkbenchLayout: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
                         PhoneAgentCommandPanel(examples: examples)
-                        ClawMissionRunPanel(focusedReviewKind: $focusedReviewKind)
+                        ClawMissionRunPanel(reviewFocus: $reviewFocus)
                     }
                     .padding(.vertical, 16)
                     .padding(.leading, 16)
@@ -503,7 +503,7 @@ struct PhoneAgentWorkbenchLayout: View {
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
-                        PhoneAgentReviewColumn(focusedReviewKind: $focusedReviewKind)
+                        PhoneAgentReviewColumn(reviewFocus: $reviewFocus)
                     }
                     .padding(.vertical, 16)
                     .padding(.trailing, 16)
@@ -515,12 +515,12 @@ struct PhoneAgentWorkbenchLayout: View {
 }
 
 struct PhoneAgentReviewColumn: View {
-    @Binding var focusedReviewKind: String?
+    @Binding var reviewFocus: ClawMissionRunReviewFocus?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             PhoneAgentReviewSection(title: "Mission 复核详情", icon: "sidebar.right") {
-                ClawMissionReviewDetailDockView(focusedReviewKind: $focusedReviewKind)
+                ClawMissionReviewDetailDockView(reviewFocus: $reviewFocus)
             }
             PhoneAgentReviewSection(title: "计划复核", icon: "checklist") {
                 PhoneAgentPlanPanel()
@@ -628,11 +628,11 @@ struct PhoneAgentCommandPanel: View {
 
 struct ClawMissionRunPanel: View {
     @EnvironmentObject private var store: ClawStore
-    @Binding var focusedReviewKind: String?
+    @Binding var reviewFocus: ClawMissionRunReviewFocus?
 
     var body: some View {
         let summary = store.missionRunSummary
-        let activeFocusedReviewKind = summary.activeReviewFocus(from: focusedReviewKind)
+        let activeFocusedReviewKind = summary.activeReviewFocus(from: reviewFocus)
         let artifactEvidenceIndex = summary.artifactEvidenceIndex(focusedOn: activeFocusedReviewKind)
         let reviewReadinessSummary = summary.reviewReadinessSummary(focusedOn: activeFocusedReviewKind)
         let nextReviewAction = summary.nextReviewAction(focusedOn: activeFocusedReviewKind)
@@ -649,7 +649,7 @@ struct ClawMissionRunPanel: View {
         let continuationGate = summary.macAgentContinuationGate(focusedOn: activeFocusedReviewKind)
         let reviewRadar = summary.macAgentReviewRadar(focusedOn: activeFocusedReviewKind)
         let handoffBrief = summary.macAgentHandoffBrief(focusedOn: activeFocusedReviewKind)
-        let focusContext = summary.focusContextSummary(focusedOn: focusedReviewKind)
+        let focusContext = summary.focusContextSummary(focusedOn: reviewFocus)
         let evidenceTrail = summary.evidenceTrailSummary(focusedOn: activeFocusedReviewKind)
         let approvalQueue = summary.approvalQueueSummary(focusedOn: activeFocusedReviewKind)
         let approvalFastLane = summary.approvalFastLane(focusedOn: activeFocusedReviewKind)
@@ -857,11 +857,14 @@ struct ClawMissionRunPanel: View {
     }
 
     private func focusReviewKind(_ reviewKind: String) {
-        focusedReviewKind = reviewKind
+        guard let scopeID = store.missionRunSummary.missionScopeID else {
+            return
+        }
+        reviewFocus = ClawMissionRunReviewFocus(scopeID: scopeID, reviewKind: reviewKind)
     }
 
     private func clearFocusedReviewKind() {
-        focusedReviewKind = nil
+        reviewFocus = nil
     }
 
     private func phaseTint(for summary: ClawMissionRunSummary) -> Color {
@@ -903,13 +906,13 @@ struct ClawMissionRunPanel: View {
 
 struct ClawMissionReviewDetailDockView: View {
     @EnvironmentObject private var store: ClawStore
-    @Binding var focusedReviewKind: String?
+    @Binding var reviewFocus: ClawMissionRunReviewFocus?
 
     var body: some View {
         let summary = store.missionRunSummary
-        let activeFocusedReviewKind = summary.activeReviewFocus(from: focusedReviewKind)
-        let dock = summary.reviewDetailDockSummary(focusedOn: focusedReviewKind)
-        let focusContext = summary.focusContextSummary(focusedOn: focusedReviewKind)
+        let activeFocusedReviewKind = summary.activeReviewFocus(from: reviewFocus)
+        let dock = summary.reviewDetailDockSummary(focusedOn: reviewFocus)
+        let focusContext = summary.focusContextSummary(focusedOn: reviewFocus)
         let liveGatewayHealthStrip = store.missionRunLiveGatewayHealthStrip
         let controlSnapshot = summary.controlSnapshot(focusedOn: activeFocusedReviewKind, liveHealth: liveGatewayHealthStrip)
         let evidenceTrail = summary.evidenceTrailSummary(focusedOn: activeFocusedReviewKind)
@@ -1065,11 +1068,14 @@ struct ClawMissionReviewDetailDockView: View {
     }
 
     private func focusReviewKind(_ reviewKind: String) {
-        focusedReviewKind = reviewKind
+        guard let scopeID = store.missionRunSummary.missionScopeID else {
+            return
+        }
+        reviewFocus = ClawMissionRunReviewFocus(scopeID: scopeID, reviewKind: reviewKind)
     }
 
     private func clearFocusedReviewKind() {
-        focusedReviewKind = nil
+        reviewFocus = nil
     }
 
     private func accessibilitySummary(for dock: ClawMissionRunReviewDetailDockSummary) -> String {

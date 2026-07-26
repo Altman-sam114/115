@@ -101,6 +101,132 @@ enum LogicSmoke {
         expect(store.clawGatewaySessions[0].artifactCount > 0, "gateway session should include artifacts")
         expect(store.gatewayEvents.contains { $0.kind == .sessionCompleted }, "gateway event stream should complete")
 
+        let affinityStore = ClawStore(autoScanLocalArtifacts: false)
+        affinityStore.phoneAgentCommand = "打开浏览器搜索 Mission A，整理结果并发到 Slack Authorization: Bearer old-secret file:///private/tmp/old.json"
+        affinityStore.startAutonomousComputerTakeover()
+        affinityStore.approveAndContinueAutonomousLoop()
+        let scopedMissionA = affinityStore.missionRunSummary
+        if let missionAScope = scopedMissionA.missionScopeID {
+            expect(scopedMissionA.taskID == scopedMissionA.sessionTaskID, "mission session should match its task")
+            expect(scopedMissionA.sessionID != nil, "sent mission should expose a local session identity")
+            expect(scopedMissionA.artifactCount > 0, "sent mission should expose its own artifacts")
+            let missionAFocus = ClawMissionRunReviewFocus(scopeID: missionAScope, reviewKind: "delivery-safety")
+            expect(scopedMissionA.activeReviewFocus(from: missionAFocus) == "delivery-safety", "same-scope review focus should remain active")
+
+            affinityStore.phoneAgentCommand = "打开浏览器搜索 Mission B，整理新结果并发到 Slack"
+            affinityStore.startAutonomousComputerTakeover()
+            let scopedMissionBPreSend = affinityStore.missionRunSummary
+            expect(scopedMissionBPreSend.taskID != scopedMissionA.taskID, "new mission should select the latest task")
+            expect(scopedMissionBPreSend.sessionID == nil, "unsent mission should not inherit an old session")
+            expect(scopedMissionBPreSend.sessionTaskID == nil, "unsent mission should not inherit an old session task")
+            expect(scopedMissionBPreSend.missionScopeID == scopedMissionBPreSend.taskID, "unsent mission scope should use the task identity")
+            expect(scopedMissionBPreSend.succeededCount == 0, "unsent mission should not inherit succeeded results")
+            expect(scopedMissionBPreSend.failedCount == 0, "unsent mission should not inherit failed results")
+            expect(scopedMissionBPreSend.retryableCount == 0, "unsent mission should not inherit retryable results")
+            expect(scopedMissionBPreSend.artifactCount == 0, "unsent mission should not inherit artifacts")
+            expect(scopedMissionBPreSend.artifactKinds.isEmpty, "unsent mission should not inherit artifact kinds")
+            expect(scopedMissionBPreSend.artifactMetadataReview == nil, "unsent mission should not inherit metadata review")
+            expect(scopedMissionBPreSend.gatewayDeliverySafetyReview == nil, "unsent mission should not inherit delivery review")
+            expect(scopedMissionBPreSend.agentTraceReview == nil, "unsent mission should not inherit agent trace review")
+            expect(scopedMissionBPreSend.activeReviewFocus(from: missionAFocus) == nil, "old mission focus should fail closed")
+            expect(scopedMissionBPreSend.hasStaleReviewFocus(from: missionAFocus), "old mission focus should be stale")
+            let staleDock = scopedMissionBPreSend.reviewDetailDockSummary(focusedOn: missionAFocus)
+            expect(staleDock.hasStaleFocus, "new mission dock should mark old focus stale")
+            expect(staleDock.showsFocusedDetailOnly == false, "stale focus should restore full detail")
+            expect(staleDock.guidance.contains("旧聚焦已失效"), "stale dock should explain the scope change")
+            let staleContext = scopedMissionBPreSend.focusContextSummary(focusedOn: missionAFocus)
+            expect(staleContext.canClearFocus, "stale focus context should be clearable")
+            expect(staleContext.guidance.contains("Mission 已更新"), "stale focus context should explain the mission update")
+            let scopedMissionBVisible = [
+                scopedMissionBPreSend.command,
+                scopedMissionBPreSend.phaseTitle,
+                scopedMissionBPreSend.statusLine,
+                staleDock.title,
+                staleDock.status,
+                staleDock.guidance,
+                staleContext.title,
+                staleContext.status,
+                staleContext.guidance
+            ].joined(separator: " ")
+            expect(scopedMissionBVisible.contains("old-secret") == false, "new mission should not expose old mission token text")
+            expect(scopedMissionBVisible.contains("file://") == false, "new mission should not expose old mission file references")
+            expect(scopedMissionBVisible.contains(missionAScope.uuidString) == false, "mission scope identity should not be visible")
+
+            if let preSendScope = scopedMissionBPreSend.missionScopeID {
+                let preSendFocus = ClawMissionRunReviewFocus(scopeID: preSendScope, reviewKind: "approval")
+                expect(scopedMissionBPreSend.activeReviewFocus(from: preSendFocus) == "approval", "same task-scope approval focus should remain active")
+                affinityStore.approveAndContinueAutonomousLoop()
+                let scopedMissionBSent = affinityStore.missionRunSummary
+                expect(scopedMissionBSent.taskID == scopedMissionBSent.sessionTaskID, "sent mission session should match its task")
+                expect(scopedMissionBSent.sessionID != nil, "sent mission should expose session identity")
+                expect(scopedMissionBSent.missionScopeID == scopedMissionBSent.sessionID, "sent mission scope should use session identity")
+                expect(scopedMissionBSent.missionScopeID != preSendScope, "task-to-session transition should change scope")
+                expect(scopedMissionBSent.activeReviewFocus(from: preSendFocus) == nil, "pre-send focus should not cross into a session scope")
+                expect(scopedMissionBSent.reviewDetailDockSummary(focusedOn: preSendFocus).hasStaleFocus, "sent mission should mark pre-send focus stale")
+            } else {
+                failures.append("pre-send mission scope should be available")
+            }
+        } else {
+            failures.append("sent mission scope should be available")
+        }
+
+        let lateEventStore = ClawStore(autoScanLocalArtifacts: false)
+        lateEventStore.gatewayDispatchMode = .liveGateway
+        lateEventStore.setGateway(url: "ws://127.0.0.1:18789", token: "paired-secret")
+        lateEventStore.phoneAgentCommand = "Mission A collect browser evidence"
+        lateEventStore.generatePhoneAgentPlan()
+        lateEventStore.queueClawMobileTaskFromCurrentPlan()
+        lateEventStore.approveLatestClawMobileTask()
+        lateEventStore.sendLatestClawMobileTask()
+        let missionALiveRequest = lateEventStore.lastGatewayLiveRequest
+        lateEventStore.phoneAgentCommand = "Mission B prepare a fresh report"
+        lateEventStore.generatePhoneAgentPlan()
+        lateEventStore.queueClawMobileTaskFromCurrentPlan()
+        lateEventStore.approveLatestClawMobileTask()
+        lateEventStore.sendLatestClawMobileTask()
+        let missionBLiveRequest = lateEventStore.lastGatewayLiveRequest
+        if let missionALiveRequest,
+           let missionASessionID = missionALiveRequest.sessionID,
+           let missionBLiveRequest,
+           let missionBSessionID = missionBLiveRequest.sessionID {
+            expect(missionASessionID != missionBSessionID, "consecutive live missions should use different sessions")
+            expect(lateEventStore.gatewayLiveHealthSummary.connectionState == .awaitingGateway, "latest live mission should await its own gateway")
+            let missionBEventCount = lateEventStore.gatewayLiveHealthSummary.eventCount
+            let missionBLastEvent = lateEventStore.lastGatewayEvent
+            lateEventStore.ingestGatewayEvents([
+                ClawGatewayEvent(
+                    sessionID: missionASessionID,
+                    taskID: missionALiveRequest.taskID,
+                    sequence: 97,
+                    kind: .gatewayConnected,
+                    summary: "Old Mission connected late"
+                ),
+                ClawGatewayEvent(
+                    sessionID: missionASessionID,
+                    taskID: missionALiveRequest.taskID,
+                    sequence: 98,
+                    kind: .fallbackUsed,
+                    summary: "Old Mission fallback late"
+                ),
+                ClawGatewayEvent(
+                    sessionID: missionASessionID,
+                    taskID: missionALiveRequest.taskID,
+                    sequence: 99,
+                    kind: .sessionCompleted,
+                    summary: "Old Mission completed late"
+                )
+            ])
+            let missionBHealth = lateEventStore.gatewayLiveHealthSummary
+            expect(missionBHealth.connectionState == .awaitingGateway, "late old-session completion should not change current connection state")
+            expect(missionBHealth.eventCount == missionBEventCount, "late old-session event should not enter current health summary")
+            expect(missionBHealth.latestEventSequence != 99, "late old-session event should not become current latest event")
+            expect(lateEventStore.lastGatewayEvent == missionBLastEvent, "late old-session events should not replace the current visible event summary")
+            expect(lateEventStore.missionRunSummary.sessionID == missionBSessionID, "Mission Run should remain bound to the latest session")
+            expect(lateEventStore.lastGatewayLiveRequest?.sessionID == missionBSessionID, "live request should remain bound to the latest session")
+        } else {
+            failures.append("live Mission requests should expose session identity")
+        }
+
         let missionStore = ClawStore(autoScanLocalArtifacts: false)
         expect(missionStore.missionRunSummary.primaryActionKind == .start, "mission summary should start with a launch action")
         expect(missionStore.missionRunSummary.reviewPriorityQueue.isEmpty, "idle mission summary should not invent review priorities")

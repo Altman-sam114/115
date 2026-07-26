@@ -2,6 +2,8 @@
 
 本文把 `md/flow/flow.md` 的核心逻辑画成可视化 Mermaid 图，方便人工快速复核。
 
+v0.63 的 Mission Run 展示先以当前 task 为根，只接收同 task 的 session、request 和 events。复核聚焦绑定 task/session scope；新 Mission 或 task-to-session 切换会使旧聚焦失效，iPhone 与 iPad/mac 均恢复当前 Mission 的全量详情。
+
 ## 1. Claw 核心逻辑图
 
 读图说明：从左到右看。用户任务先进入 iPhone 控制台，经过规划、任务转换和 envelope 编码后，进入模拟事件流或桌面 Gateway。Gateway 产出事件和 artifact，手机端 reducer 把它们还原成 session，最后显示给用户审批或继续下一轮。

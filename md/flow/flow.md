@@ -23,7 +23,10 @@ Claw 的当前主链路是：用户在 iPhone 输入电脑任务，App 生成可
   -> ClawGatewayEvent
   -> ClawGatewayEventStream.apply
   -> ClawGatewaySession.results/sessionArtifacts/auditTrail
-  -> ClawGatewayLiveHealthSummary 从 request、连接状态、session、事件、attempt/reconnect/ping 派生连接健康摘要
+  -> MissionRunResolution 以当前 task.id 绑定同 task session/request/events，拒绝旧任务数据回退
+  -> ClawGatewayLiveHealthSummary 从已绑定 request、连接状态、session、事件、attempt/reconnect/ping 派生连接健康摘要
+  -> ClawMissionRunSummary.missionScopeID 在发送前使用 task.id、发送后使用 session.id
+  -> ClawMissionRunReviewFocus 把 reviewKind 绑定到当前 scope；scope 变化时旧聚焦失效并恢复全量详情
   -> ClawGatewayArtifactMetadataReviewSummary 从 artifact event metadata 派生通用 metadata 复核摘要
   -> ClawGatewayFileChangeSafetyReviewSummary 从 manageFiles artifact metadata 派生文件变更安全和策略诊断复核摘要
   -> ClawGatewayShellCommandSafetyReviewSummary 从 runShellCommand artifact metadata 派生 Shell 命令安全和策略诊断复核摘要

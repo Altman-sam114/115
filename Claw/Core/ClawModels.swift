@@ -3837,6 +3837,11 @@ struct ClawGatewayTaskReplayGuardReviewSummary: Equatable, Codable, Sendable {
     }
 }
 
+struct ClawMissionRunReviewFocus: Equatable, Sendable {
+    var scopeID: UUID
+    var reviewKind: String
+}
+
 struct ClawMissionRunSummary: Equatable, Codable, Sendable {
     var command: String
     var phaseTitle: String
@@ -3871,6 +3876,10 @@ struct ClawMissionRunSummary: Equatable, Codable, Sendable {
     var requiresUserApproval: Bool
     var statusLine: String
     var stageTrack: [ClawMissionRunStage]
+    var taskID: UUID? = nil
+    var sessionID: UUID? = nil
+    var sessionTaskID: UUID? = nil
+    var missionScopeID: UUID? = nil
 }
 
 extension ClawMissionRunSummary {
@@ -3929,12 +3938,47 @@ extension ClawMissionRunSummary {
         return nil
     }
 
+    func activeReviewFocus(from requestedFocus: ClawMissionRunReviewFocus?) -> String? {
+        guard
+            let requestedFocus,
+            let missionScopeID,
+            requestedFocus.scopeID == missionScopeID
+        else {
+            return nil
+        }
+        return activeReviewFocus(from: requestedFocus.reviewKind)
+    }
+
+    func hasStaleReviewFocus(from requestedFocus: ClawMissionRunReviewFocus?) -> Bool {
+        guard let requestedFocus else {
+            return false
+        }
+        return activeReviewFocus(from: requestedFocus) == nil
+    }
+
     var reviewDetailDockSummary: ClawMissionRunReviewDetailDockSummary {
-        reviewDetailDockSummary(focusedOn: nil)
+        reviewDetailDockSummary(focusedOn: nil as String?)
     }
 
     func reviewDetailDockSummary(focusedOn requestedReviewKind: String?) -> ClawMissionRunReviewDetailDockSummary {
-        let activeReviewKind = activeReviewFocus(from: requestedReviewKind)
+        reviewDetailDockSummary(
+            requestedReviewKind: requestedReviewKind,
+            scopeIsStale: false
+        )
+    }
+
+    func reviewDetailDockSummary(focusedOn requestedFocus: ClawMissionRunReviewFocus?) -> ClawMissionRunReviewDetailDockSummary {
+        reviewDetailDockSummary(
+            requestedReviewKind: requestedFocus?.reviewKind,
+            scopeIsStale: requestedFocus != nil && requestedFocus?.scopeID != missionScopeID
+        )
+    }
+
+    private func reviewDetailDockSummary(
+        requestedReviewKind: String?,
+        scopeIsStale: Bool
+    ) -> ClawMissionRunReviewDetailDockSummary {
+        let activeReviewKind = scopeIsStale ? nil : activeReviewFocus(from: requestedReviewKind)
         let detailKinds = detailReviewKinds(focusedOn: activeReviewKind)
         let focusHasDetail = focusUsesDetailReview(activeReviewKind)
         let activePriorityItem = reviewPriorityItem(focusedOn: activeReviewKind)
@@ -3942,6 +3986,23 @@ extension ClawMissionRunSummary {
         let isReviewable = detailKinds.isEmpty == false || reviewPriorityQueue.isEmpty == false
         let hasStaleFocus = requestedReviewKind != nil && activeReviewKind == nil
         let next = nextReviewAction(focusedOn: activeReviewKind)
+
+        if scopeIsStale {
+            return ClawMissionRunReviewDetailDockSummary(
+                title: "Mission 已更新",
+                status: isReviewable ? "\(detailKinds.count) 类详细复核可查看" : "当前 Mission 尚无复核详情",
+                guidance: "Mission 已更新，旧聚焦已失效；右侧保持全量详情，请重新选择复核项。",
+                icon: "scope",
+                requestedReviewKind: requestedReviewKind,
+                activeReviewKind: nil,
+                activeReviewTitle: nil,
+                detailReviewKinds: detailKinds,
+                showsFocusedDetailOnly: false,
+                canClearFocus: true,
+                hasStaleFocus: true,
+                isReviewable: isReviewable
+            )
+        }
 
         if isReviewable == false {
             return ClawMissionRunReviewDetailDockSummary(
@@ -6909,10 +6970,48 @@ extension ClawMissionRunSummary {
     }
 
     var focusContextSummary: ClawMissionRunFocusContextSummary {
-        focusContextSummary(focusedOn: nil)
+        focusContextSummary(focusedOn: nil as String?)
     }
 
     func focusContextSummary(focusedOn reviewKind: String?) -> ClawMissionRunFocusContextSummary {
+        focusContextSummary(
+            focusedOn: reviewKind,
+            scopeIsStale: false
+        )
+    }
+
+    func focusContextSummary(focusedOn requestedFocus: ClawMissionRunReviewFocus?) -> ClawMissionRunFocusContextSummary {
+        let scopeIsStale = requestedFocus != nil && requestedFocus?.scopeID != missionScopeID
+        return focusContextSummary(
+            focusedOn: scopeIsStale ? nil : requestedFocus?.reviewKind,
+            scopeIsStale: scopeIsStale
+        )
+    }
+
+    private func focusContextSummary(
+        focusedOn reviewKind: String?,
+        scopeIsStale: Bool
+    ) -> ClawMissionRunFocusContextSummary {
+        if scopeIsStale {
+            let readiness = reviewReadinessSummary(focusedOn: nil)
+            return ClawMissionRunFocusContextSummary(
+                title: "Mission 已更新",
+                status: "旧聚焦已失效",
+                guidance: "Mission 已更新，旧聚焦已失效；当前恢复全量复核上下文，请重新选择复核项。",
+                icon: "scope",
+                focusedReviewKind: nil,
+                focusedReviewTitle: nil,
+                primaryReviewKind: nil,
+                primaryButtonTitle: nil,
+                canFocusDetailReview: false,
+                canClearFocus: true,
+                hasEvidence: false,
+                hasMetadataGap: readiness.metadataPendingCount > 0,
+                requiresHumanAction: readiness.requiresHumanAction,
+                isReviewable: readiness.isReviewable
+            )
+        }
+
         let priorityItem = reviewPriorityItem(focusedOn: reviewKind)
         let detailFocused = focusUsesDetailReview(reviewKind)
         let isKnownFocus = priorityItem != nil || detailFocused
@@ -7918,6 +8017,7 @@ struct ClawGatewayLiveRequest: Identifiable, Equatable, Codable, Sendable {
     var headers: [String: String]
     var bodyBytes: Int
     var taskID: UUID
+    var sessionID: UUID?
     var command: String
     var actionCount: Int
     var canAttemptLive: Bool
@@ -7933,6 +8033,7 @@ struct ClawGatewayLiveRequest: Identifiable, Equatable, Codable, Sendable {
         headers: [String: String],
         bodyBytes: Int,
         taskID: UUID,
+        sessionID: UUID? = nil,
         command: String,
         actionCount: Int,
         canAttemptLive: Bool,
@@ -7947,6 +8048,7 @@ struct ClawGatewayLiveRequest: Identifiable, Equatable, Codable, Sendable {
         self.headers = headers
         self.bodyBytes = bodyBytes
         self.taskID = taskID
+        self.sessionID = sessionID
         self.command = command
         self.actionCount = actionCount
         self.canAttemptLive = canAttemptLive

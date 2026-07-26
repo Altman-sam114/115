@@ -3,6 +3,135 @@ import XCTest
 
 @MainActor
 final class ClawTests: XCTestCase {
+    func testMissionRunBindsSessionAndScopedReviewFocus() throws {
+        let store = ClawStore(autoScanLocalArtifacts: false)
+        store.phoneAgentCommand = "打开浏览器搜索 Mission A，整理结果并发到 Slack Authorization: Bearer old-secret file:///private/tmp/old.json"
+        store.startAutonomousComputerTakeover()
+        store.approveAndContinueAutonomousLoop()
+
+        let missionA = store.missionRunSummary
+        let missionAScope = try XCTUnwrap(missionA.missionScopeID)
+        XCTAssertEqual(missionA.taskID, missionA.sessionTaskID)
+        XCTAssertNotNil(missionA.sessionID)
+        XCTAssertGreaterThan(missionA.artifactCount, 0)
+        let missionAFocus = ClawMissionRunReviewFocus(
+            scopeID: missionAScope,
+            reviewKind: "delivery-safety"
+        )
+        XCTAssertEqual(missionA.activeReviewFocus(from: missionAFocus), "delivery-safety")
+
+        store.phoneAgentCommand = "打开浏览器搜索 Mission B，整理新结果并发到 Slack"
+        store.startAutonomousComputerTakeover()
+
+        let missionBPreSend = store.missionRunSummary
+        XCTAssertNotEqual(missionBPreSend.taskID, missionA.taskID)
+        XCTAssertNil(missionBPreSend.sessionID)
+        XCTAssertNil(missionBPreSend.sessionTaskID)
+        XCTAssertEqual(missionBPreSend.missionScopeID, missionBPreSend.taskID)
+        XCTAssertEqual(missionBPreSend.succeededCount, 0)
+        XCTAssertEqual(missionBPreSend.failedCount, 0)
+        XCTAssertEqual(missionBPreSend.retryableCount, 0)
+        XCTAssertEqual(missionBPreSend.artifactCount, 0)
+        XCTAssertTrue(missionBPreSend.artifactKinds.isEmpty)
+        XCTAssertNil(missionBPreSend.artifactMetadataReview)
+        XCTAssertNil(missionBPreSend.gatewayDeliverySafetyReview)
+        XCTAssertNil(missionBPreSend.agentTraceReview)
+        XCTAssertNil(missionBPreSend.activeReviewFocus(from: missionAFocus))
+        XCTAssertTrue(missionBPreSend.hasStaleReviewFocus(from: missionAFocus))
+        let staleDock = missionBPreSend.reviewDetailDockSummary(focusedOn: missionAFocus)
+        XCTAssertTrue(staleDock.hasStaleFocus)
+        XCTAssertFalse(staleDock.showsFocusedDetailOnly)
+        XCTAssertTrue(staleDock.guidance.contains("旧聚焦已失效"))
+        let staleContext = missionBPreSend.focusContextSummary(focusedOn: missionAFocus)
+        XCTAssertTrue(staleContext.canClearFocus)
+        XCTAssertTrue(staleContext.guidance.contains("Mission 已更新"))
+        let missionBVisible = [
+            missionBPreSend.command,
+            missionBPreSend.phaseTitle,
+            missionBPreSend.statusLine,
+            staleDock.title,
+            staleDock.status,
+            staleDock.guidance,
+            staleContext.title,
+            staleContext.status,
+            staleContext.guidance
+        ].joined(separator: " ")
+        XCTAssertFalse(missionBVisible.contains("old-secret"))
+        XCTAssertFalse(missionBVisible.contains("file://"))
+        XCTAssertFalse(missionBVisible.contains(missionAScope.uuidString))
+
+        let preSendScope = try XCTUnwrap(missionBPreSend.missionScopeID)
+        let preSendFocus = ClawMissionRunReviewFocus(scopeID: preSendScope, reviewKind: "approval")
+        XCTAssertEqual(missionBPreSend.activeReviewFocus(from: preSendFocus), "approval")
+        store.approveAndContinueAutonomousLoop()
+
+        let missionBSent = store.missionRunSummary
+        XCTAssertEqual(missionBSent.taskID, missionBSent.sessionTaskID)
+        XCTAssertNotNil(missionBSent.sessionID)
+        XCTAssertEqual(missionBSent.missionScopeID, missionBSent.sessionID)
+        XCTAssertNotEqual(missionBSent.missionScopeID, preSendScope)
+        XCTAssertNil(missionBSent.activeReviewFocus(from: preSendFocus))
+        XCTAssertTrue(missionBSent.reviewDetailDockSummary(focusedOn: preSendFocus).hasStaleFocus)
+    }
+
+    func testMissionRunIgnoresLateConnectionEventFromPreviousSession() throws {
+        let store = ClawStore(autoScanLocalArtifacts: false)
+        store.gatewayDispatchMode = .liveGateway
+        store.setGateway(url: "ws://127.0.0.1:18789", token: "paired-secret")
+
+        store.phoneAgentCommand = "Mission A collect browser evidence"
+        store.generatePhoneAgentPlan()
+        store.queueClawMobileTaskFromCurrentPlan()
+        store.approveLatestClawMobileTask()
+        store.sendLatestClawMobileTask()
+        let missionARequest = try XCTUnwrap(store.lastGatewayLiveRequest)
+        let missionASessionID = try XCTUnwrap(missionARequest.sessionID)
+
+        store.phoneAgentCommand = "Mission B prepare a fresh report"
+        store.generatePhoneAgentPlan()
+        store.queueClawMobileTaskFromCurrentPlan()
+        store.approveLatestClawMobileTask()
+        store.sendLatestClawMobileTask()
+        let missionBRequest = try XCTUnwrap(store.lastGatewayLiveRequest)
+        let missionBSessionID = try XCTUnwrap(missionBRequest.sessionID)
+        XCTAssertNotEqual(missionASessionID, missionBSessionID)
+        XCTAssertEqual(store.gatewayLiveHealthSummary.connectionState, .awaitingGateway)
+        let missionBEventCount = store.gatewayLiveHealthSummary.eventCount
+        let missionBLastEvent = store.lastGatewayEvent
+
+        store.ingestGatewayEvents([
+            ClawGatewayEvent(
+                sessionID: missionASessionID,
+                taskID: missionARequest.taskID,
+                sequence: 97,
+                kind: .gatewayConnected,
+                summary: "Old Mission connected late"
+            ),
+            ClawGatewayEvent(
+                sessionID: missionASessionID,
+                taskID: missionARequest.taskID,
+                sequence: 98,
+                kind: .fallbackUsed,
+                summary: "Old Mission fallback late"
+            ),
+            ClawGatewayEvent(
+                sessionID: missionASessionID,
+                taskID: missionARequest.taskID,
+                sequence: 99,
+                kind: .sessionCompleted,
+                summary: "Old Mission completed late"
+            )
+        ])
+
+        let missionBHealth = store.gatewayLiveHealthSummary
+        XCTAssertEqual(missionBHealth.connectionState, .awaitingGateway)
+        XCTAssertEqual(missionBHealth.eventCount, missionBEventCount)
+        XCTAssertNotEqual(missionBHealth.latestEventSequence, 99)
+        XCTAssertEqual(store.lastGatewayEvent, missionBLastEvent)
+        XCTAssertEqual(store.missionRunSummary.sessionID, missionBSessionID)
+        XCTAssertEqual(store.lastGatewayLiveRequest?.sessionID, missionBSessionID)
+    }
+
     func testDefaultModelIsPlaceholderAndDoesNotDownload() {
         let store = ClawStore(autoScanLocalArtifacts: false)
 

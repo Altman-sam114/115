@@ -12,6 +12,14 @@
 4. App 生成 `ClawMobileEnvelope`，通过模拟事件流或 WebSocket live gateway 交给用户授权的 Claw Gateway 审批和执行。
 5. 真正的浏览器、文件、Shell、桌面 App 和屏幕观察动作发生在桌面/自托管网关，不发生在 iOS 沙盒内。
 
+## Mission Run 会话归属
+
+- Mission Run 以当前最新 `ClawMobileTask.id` 为展示根，只选择 `ClawGatewaySession.taskID` 相同的 session。
+- Live request 必须匹配当前 task；已有 session 时还必须匹配该 session。事件同时按 task ID 和 session ID 过滤。
+- 新 task 尚无 session 时，结果、artifact、metadata 复核和 Gateway 连接态按空值/idle 展示，不回退到上一任务。
+- 本地复核聚焦使用 task ID 或 session ID 作为不可见 scope。任务发送后 scope 从 task 切换为 session，旧聚焦 fail closed、恢复全量详情并要求重新选择。
+- 这些字段只用于手机/iPad presentation 归属，不进入 envelope，不扩大 Gateway 权限，也不向 UI 展示 UUID。
+
 ## Envelope
 
 当前 schema 版本：`claw.computer.control.v1`
