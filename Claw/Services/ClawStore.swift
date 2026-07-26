@@ -264,7 +264,7 @@ final class ClawStore: ObservableObject {
             }
         }
         let session = exactSession ?? clawGatewaySessions.first { $0.taskID == task.id }
-        let liveRequest = lastGatewayLiveRequest.flatMap { request in
+        let liveRequest: ClawGatewayLiveRequest? = lastGatewayLiveRequest.flatMap { request in
             guard request.taskID == task.id else {
                 return nil
             }
