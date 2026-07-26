@@ -5393,6 +5393,8 @@ struct ClawGatewayShellCommandSafetyReviewRow: View {
             return "minus.circle.fill"
         case "missing-structured-command":
             return "curlybraces.square"
+        case "invalid-structured-command-source":
+            return "exclamationmark.shield.fill"
         case "command-parse-failed":
             return "xmark.octagon.fill"
         case "dry-run":
@@ -5414,7 +5416,7 @@ struct ClawGatewayShellCommandSafetyReviewRow: View {
             return .secondary
         case "execution-attempted":
             return .blue
-        case "dry-run", "missing-structured-command", "command-parse-failed", "allowlist-blocked", "execution-failed":
+        case "dry-run", "invalid-structured-command-source", "missing-structured-command", "command-parse-failed", "allowlist-blocked", "execution-failed":
             return .orange
         default:
             return .secondary

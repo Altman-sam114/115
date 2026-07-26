@@ -2066,6 +2066,15 @@ function shellPolicyState(config) {
 
 function shellPolicyDiagnostics(config, details = {}) {
   const policyChecked = true;
+  if (details.mode === "invalid-structured-command-source" || details.invalidCommandSource) {
+    return {
+      diagnostic: "invalid-structured-command-source",
+      retryableReason: "provide-structured-command",
+      policyChecked,
+      binaryAllowlistChecked: false,
+      structuredCommandChecked: true,
+    };
+  }
   if (details.mode === "missing-structured-command") {
     return {
       diagnostic: "missing-structured-command",
@@ -2150,6 +2159,9 @@ function shellCommandSafetyMetadata(action, config, details = {}) {
   }
   if (details.parseFailed) {
     safetyFlags.push("parse-failed");
+  }
+  if (details.invalidCommandSource) {
+    safetyFlags.push("invalid-command-source-blocked");
   }
   if (details.shellAllowlistEnforced) {
     safetyFlags.push("shell-allowlist-enforced");
@@ -2316,6 +2328,38 @@ async function manageFilesAction(action, index, config) {
 }
 
 async function runShellAction(action, index, config) {
+  if (hasTopLevelShellCommandAlias(action)) {
+    const artifacts = [
+      await writeArtifact(
+        "commandOutput",
+        `shell-source-${index + 1}.log`,
+        [
+          "Shell action was not executed.",
+          "Reason: command source must be toolArguments.shellCommand.",
+          "Top-level command aliases are blocked and omitted.",
+        ].join("\n"),
+        true,
+        config,
+        shellCommandSafetyMetadata(action, config, {
+          mode: "invalid-structured-command-source",
+          structuredCommandPresent: hasStructuredShellCommand(action),
+          commandParsed: false,
+          executionAttempted: false,
+          executed: false,
+          resultStatus: "failed",
+          noCommandExecuted: true,
+          invalidCommandSource: true,
+        }),
+      ),
+    ];
+    return {
+      status: "failed",
+      summary: `${action.title} paused: command source must use structured tool arguments`,
+      artifacts,
+      isRetryable: true,
+    };
+  }
+
   const commandLine = structuredShellCommand(action);
   if (!commandLine) {
     const artifacts = [
@@ -3865,11 +3909,15 @@ function screenRows(observations) {
 function structuredShellCommand(action) {
   return typeof action.toolArguments?.shellCommand === "string"
     ? action.toolArguments.shellCommand.trim()
-    : typeof action.shellCommand === "string"
-    ? action.shellCommand.trim()
-    : typeof action.commandLine === "string"
-      ? action.commandLine.trim()
-      : "";
+    : "";
+}
+
+function hasStructuredShellCommand(action) {
+  return typeof action.toolArguments?.shellCommand === "string" && action.toolArguments.shellCommand.trim().length > 0;
+}
+
+function hasTopLevelShellCommandAlias(action) {
+  return Object.prototype.hasOwnProperty.call(action, "shellCommand") || Object.prototype.hasOwnProperty.call(action, "commandLine");
 }
 
 function isBareShellExecutable(command) {

@@ -1784,6 +1784,66 @@ enum LogicSmoke {
         } else {
             failures.append("mission summary should derive shell command safety review")
         }
+        let invalidShellSourceArtifact = ClawGatewayArtifact(
+            kind: .commandOutput,
+            title: "shell-source-1.log",
+            reference: "file:///tmp/shell-source-1.log",
+            isRedacted: true,
+            metadata: [
+                "shellReview": "commandSafety",
+                "mode": "invalid-structured-command-source",
+                "actionKind": "runShellCommand",
+                "shellPolicy": "allowlist-enabled",
+                "shellPolicyDiagnostic": "invalid-structured-command-source",
+                "shellRetryableReason": "provide-structured-command",
+                "policyChecked": "true",
+                "binaryAllowlistChecked": "false",
+                "structuredCommandChecked": "true",
+                "structuredCommandPresent": "false",
+                "commandParsed": "false",
+                "allowlistConfigured": "true",
+                "allowlistMatched": "false",
+                "executionAttempted": "false",
+                "executed": "false",
+                "timedOut": "false",
+                "exitCodePresent": "false",
+                "exitCodeZero": "false",
+                "stdoutPresent": "false",
+                "stderrPresent": "false",
+                "commandOmitted": "true",
+                "stdoutOmitted": "true",
+                "stderrOmitted": "true",
+                "cwdOmitted": "true",
+                "resultStatus": "failed",
+                "safetyFlags": "metadata-only,structured-arguments-only,tool-arguments-omitted,command-omitted,stdout-omitted,stderr-omitted,cwd-omitted,invalid-command-source-blocked,no-command-executed,artifact-payload-not-read",
+                "commandLine": "pwd provenance-secret"
+            ]
+        )
+        if let invalidShellSourceReview = ClawGatewayShellCommandSafetyReviewSummary.latest(from: [invalidShellSourceArtifact]) {
+            let visibleText = [
+                invalidShellSourceReview.latestTitle,
+                invalidShellSourceReview.compactStatus,
+                invalidShellSourceReview.mode ?? "",
+                invalidShellSourceReview.shellPolicyDiagnostic ?? "",
+                invalidShellSourceReview.shellRetryableReason ?? "",
+                invalidShellSourceReview.safetyFlags.joined(separator: " ")
+            ].joined(separator: " ")
+            expect(invalidShellSourceReview.mode == "invalid-structured-command-source", "shell source review should expose invalid source mode")
+            expect(invalidShellSourceReview.shellPolicyDiagnostic == "invalid-structured-command-source", "shell source review should expose invalid source diagnostic")
+            expect(invalidShellSourceReview.shellRetryableReason == "provide-structured-command", "shell source review should expose retry guidance")
+            expect(invalidShellSourceReview.structuredCommandPresent == false, "shell source review should expose missing valid structured command")
+            expect(invalidShellSourceReview.commandParsed == false, "shell source review should block parsing")
+            expect(invalidShellSourceReview.binaryAllowlistChecked == false, "shell source review should skip binary allowlist")
+            expect(invalidShellSourceReview.executionAttempted == false, "shell source review should block execution attempt")
+            expect(invalidShellSourceReview.executed == false, "shell source review should block execution")
+            expect(invalidShellSourceReview.requiresShellPolicyReview, "shell source review should require policy review")
+            expect(invalidShellSourceReview.safetyFlags.contains("invalid-command-source-blocked"), "shell source review should expose blocked source flag")
+            expect(visibleText.contains("provenance-secret") == false, "shell source review should redact alias command")
+            expect(visibleText.contains("commandLine") == false, "shell source review should redact alias key")
+            expect(visibleText.contains("pwd") == false, "shell source review should redact raw command")
+        } else {
+            failures.append("invalid shell command source review should be derived")
+        }
         expect(
             shellMissionSummary.reviewPriorityQueue.contains { $0.reviewKind == "shell-safety" && $0.severity == .high },
             "review priority queue should prioritize shell safety when shell policy blocks execution"

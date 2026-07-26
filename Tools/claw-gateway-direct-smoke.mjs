@@ -478,6 +478,56 @@ expect(!relativePathEvents.some((event) => event.kind === "actionCompleted" && e
 expect(!relativePathEvents.some((event) => event.artifacts?.some((artifact) => artifact.title?.startsWith("shell-output-"))), "relative shell path reached execution output");
 expect(!JSON.stringify(relativePathEvents).includes("./pwd"), "relative shell path leaked into direct events");
 
+const provenanceRoot = path.resolve(`${workspace}-provenance-${crypto.randomUUID()}`);
+const provenanceBin = path.join(provenanceRoot, "bin");
+const provenanceMarker = path.join(provenanceRoot, "executed");
+const provenanceCanary = `provenance-${crypto.randomUUID()}`;
+await fs.mkdir(provenanceBin, { recursive: true });
+await fs.writeFile(
+  path.join(provenanceBin, "pwd"),
+  `#!/bin/sh\nprintf executed > ${JSON.stringify(provenanceMarker)}\nprintf '%s' "$*"\n`,
+  "utf8",
+);
+await fs.chmod(path.join(provenanceBin, "pwd"), 0o755);
+const provenanceEnv = {
+  CLAW_GATEWAY_TOKEN: token,
+  CLAW_WORKSPACE: `${workspace}-provenance-blocked`,
+  CLAW_ALLOW_SHELL: "1",
+  CLAW_SHELL_ALLOWLIST: "pwd",
+  PATH: `${provenanceBin}:${process.env.PATH || ""}`,
+};
+const topLevelShellCommandEvents = await runEmitEvents(
+  provenanceEnv,
+  makeShellAliasEnvelope(token, "shellCommand", `pwd ${provenanceCanary}`),
+);
+await assertShellCommandSourceBlocked(topLevelShellCommandEvents, {
+  label: "direct top-level shellCommand",
+  structuredCommandPresent: false,
+  forbiddenValue: provenanceCanary,
+});
+const topLevelCommandLineEvents = await runEmitEvents(
+  provenanceEnv,
+  makeShellAliasEnvelope(token, "commandLine", `pwd ${provenanceCanary}`),
+);
+await assertShellCommandSourceBlocked(topLevelCommandLineEvents, {
+  label: "direct top-level commandLine",
+  structuredCommandPresent: false,
+  forbiddenValue: provenanceCanary,
+});
+const conflictingShellSourceEvents = await runEmitEvents(
+  provenanceEnv,
+  makeShellAliasEnvelope(token, "commandLine", `pwd ${provenanceCanary}`, "pwd"),
+);
+await assertShellCommandSourceBlocked(conflictingShellSourceEvents, {
+  label: "direct conflicting shell source",
+  structuredCommandPresent: true,
+  forbiddenValue: provenanceCanary,
+});
+await fs.access(provenanceMarker).then(
+  () => expect(false, "top-level shell alias produced an execution side effect"),
+  (error) => expect(error?.code === "ENOENT", "shell provenance marker check failed unexpectedly"),
+);
+
 const missingShellEvents = await runEmitEvents({
   CLAW_GATEWAY_TOKEN: token,
   CLAW_WORKSPACE: `${workspace}-missing-shell`,
@@ -610,7 +660,7 @@ assertAccessibilityTreeArtifact(accessibilityPolicyArtifact, accessibilityPolicy
   label: "enabled accessibility tree",
 });
 
-console.log(`Claw Gateway direct smoke passed (${dryRunEvents.length + emptyExtractionEvents.length + pathEscapeEvents.length + writeFailureEvents.length + replayEvents.length + allowlistEvents.length + pathBypassEvents.length + relativePathEvents.length + missingShellEvents.length + desktopPolicyEvents.length + browserPolicyEvents.length + accessibilityPolicyEvents.length} events)`);
+console.log(`Claw Gateway direct smoke passed (${dryRunEvents.length + emptyExtractionEvents.length + pathEscapeEvents.length + writeFailureEvents.length + replayEvents.length + allowlistEvents.length + pathBypassEvents.length + relativePathEvents.length + topLevelShellCommandEvents.length + topLevelCommandLineEvents.length + conflictingShellSourceEvents.length + missingShellEvents.length + desktopPolicyEvents.length + browserPolicyEvents.length + accessibilityPolicyEvents.length} events)`);
 
 async function runEmitEvents(env, input = envelope) {
   const inputPath = `/private/tmp/claw-gateway-direct-smoke-${crypto.randomUUID()}.json`;
@@ -1289,6 +1339,41 @@ function assertFileChangeSafetyMetadata(metadata, expected, label) {
   }
 }
 
+async function assertShellCommandSourceBlocked(events, { label, structuredCommandPresent, forbiddenValue }) {
+  expect(events.some((event) => event.kind === "actionFailed" && event.actionKind === "runShellCommand"), `${label} should fail`);
+  expect(!events.some((event) => event.kind === "actionCompleted" && event.actionKind === "runShellCommand"), `${label} unexpectedly completed`);
+  expect(!events.some((event) => event.artifacts?.some((artifact) => artifact.title?.startsWith("shell-output-"))), `${label} reached execution output`);
+  expect(!events.some((event) => event.artifacts?.some((artifact) => artifact.title?.startsWith("shell-policy-"))), `${label} reached binary policy evaluation`);
+  expect(!JSON.stringify(events).includes(forbiddenValue), `${label} leaked alias command into events`);
+  const artifact = findArtifactByTitle(events, "commandOutput", "shell-source-");
+  expect(Boolean(artifact), `${label} missing command source audit artifact`);
+  const payload = await fs.readFile(new URL(artifact.reference), "utf8");
+  expect(!payload.includes(forbiddenValue), `${label} leaked alias command into artifact payload`);
+  assertShellCommandSafetyMetadata(artifact.metadata, {
+    mode: "invalid-structured-command-source",
+    actionKind: "runShellCommand",
+    shellPolicy: "allowlist-enabled",
+    structuredCommandPresent,
+    commandParsed: false,
+    allowlistConfigured: true,
+    allowlistMatched: false,
+    executionAttempted: false,
+    executed: false,
+    timedOut: false,
+    exitCodePresent: false,
+    exitCodeZero: false,
+    stdoutPresent: false,
+    stderrPresent: false,
+    resultStatus: "failed",
+    shellPolicyDiagnostic: "invalid-structured-command-source",
+    shellRetryableReason: "provide-structured-command",
+    policyChecked: true,
+    binaryAllowlistChecked: false,
+    structuredCommandChecked: true,
+    safetyFlags: ["metadata-only", "structured-arguments-only", "tool-arguments-omitted", "command-omitted", "stdout-omitted", "stderr-omitted", "cwd-omitted", "invalid-command-source-blocked", "no-command-executed", "artifact-payload-not-read"],
+  }, label);
+}
+
 function assertShellCommandSafetyMetadata(metadata, expected, label) {
   expect(metadata && typeof metadata === "object", `${label} missing shell safety metadata`);
   const allowedKeys = [
@@ -1765,6 +1850,19 @@ function makeShellEnvelope(rawToken, shellCommand) {
   result.task.actions[0].title = "Reject same-name executable path";
   result.task.actions[0].toolArguments.shellCommand = shellCommand;
   result.approvalSummary = "shell executable identity smoke";
+  return result;
+}
+
+function makeShellAliasEnvelope(rawToken, aliasKey, aliasCommand, structuredCommand) {
+  const result = makeMissingShellEnvelope(rawToken);
+  result.task.command = "verify shell structured argument provenance";
+  result.task.summary = "shell provenance smoke";
+  result.task.actions[0].title = "Reject top-level shell command alias";
+  result.task.actions[0][aliasKey] = aliasCommand;
+  if (structuredCommand) {
+    result.task.actions[0].toolArguments.shellCommand = structuredCommand;
+  }
+  result.approvalSummary = "shell provenance smoke";
   return result;
 }
 

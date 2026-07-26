@@ -436,7 +436,110 @@ await fs.access(shellIdentityMarker).then(
   (error) => expect(error?.code === "ENOENT", "websocket same-name shell path marker check failed unexpectedly"),
 );
 
-console.log(`Claw Gateway smoke passed (${events.length + firstReplayEvents.length + replayGuardEvents.length + shellIdentityEvents.length} events)`);
+const shellProvenancePort = port + 3;
+const shellProvenanceRoot = path.resolve(`.build/claw-gateway-websocket-shell-provenance-${crypto.randomUUID()}`);
+const shellProvenanceBin = path.join(shellProvenanceRoot, "bin");
+const shellProvenanceMarker = path.join(shellProvenanceRoot, "executed");
+const shellProvenanceCanary = `provenance-${crypto.randomUUID()}`;
+await fs.mkdir(shellProvenanceBin, { recursive: true });
+await fs.writeFile(
+  path.join(shellProvenanceBin, "pwd"),
+  `#!/bin/sh\nprintf executed > ${JSON.stringify(shellProvenanceMarker)}\nprintf '%s' "$*"\n`,
+  "utf8",
+);
+await fs.chmod(path.join(shellProvenanceBin, "pwd"), 0o755);
+const shellProvenanceServer = spawn(
+  process.execPath,
+  ["Tools/claw-gateway-server.mjs", "--once"],
+  {
+    env: {
+      ...process.env,
+      ...gatewayPolicyDefaults(),
+      CLAW_GATEWAY_HOST: host,
+      CLAW_GATEWAY_PORT: String(shellProvenancePort),
+      CLAW_GATEWAY_TOKEN: token,
+      CLAW_WORKSPACE: ".build/claw-gateway-websocket-shell-provenance",
+      CLAW_ALLOW_SHELL: "1",
+      CLAW_SHELL_ALLOWLIST: "pwd",
+      PATH: `${shellProvenanceBin}:${process.env.PATH || ""}`,
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  },
+);
+let shellProvenanceServerOutput = "";
+shellProvenanceServer.stdout.on("data", (chunk) => {
+  shellProvenanceServerOutput += chunk.toString("utf8");
+});
+shellProvenanceServer.stderr.on("data", (chunk) => {
+  shellProvenanceServerOutput += chunk.toString("utf8");
+});
+await waitFor(
+  () => shellProvenanceServerOutput.includes("Claw Gateway listening"),
+  3000,
+  () => shellProvenanceServerOutput,
+);
+const shellProvenanceEnvelope = makeEnvelope(token, shellProvenancePort);
+shellProvenanceEnvelope.gateway.allowedActionKinds = ["runShellCommand"];
+shellProvenanceEnvelope.task.command = "verify websocket shell structured argument provenance";
+shellProvenanceEnvelope.task.summary = "websocket shell provenance smoke";
+shellProvenanceEnvelope.task.actions = shellProvenanceEnvelope.task.actions
+  .filter((action) => action.kind === "runShellCommand")
+  .map((action) => {
+    const { shellCommand: _, ...toolArguments } = action.toolArguments;
+    return {
+      ...action,
+      title: "Reject top-level shell command alias",
+      toolArguments,
+      commandLine: `pwd ${shellProvenanceCanary}`,
+    };
+  });
+let shellProvenanceEvents = [];
+try {
+  shellProvenanceEvents = await connectAndCollectEvents({
+    host,
+    port: shellProvenancePort,
+    token,
+    envelope: shellProvenanceEnvelope,
+  });
+} finally {
+  shellProvenanceServer.kill();
+}
+expect(shellProvenanceEvents.some((event) => event.kind === "actionFailed" && event.actionKind === "runShellCommand"), "websocket top-level shell alias should fail");
+expect(!shellProvenanceEvents.some((event) => event.kind === "actionCompleted" && event.actionKind === "runShellCommand"), "websocket top-level shell alias unexpectedly completed");
+expect(!shellProvenanceEvents.some((event) => event.artifacts?.some((artifact) => artifact.title?.startsWith("shell-output-"))), "websocket top-level shell alias reached execution output");
+expect(!JSON.stringify(shellProvenanceEvents).includes(shellProvenanceCanary), "websocket top-level shell alias leaked into events");
+const shellProvenanceArtifact = findArtifactByTitle(shellProvenanceEvents, "commandOutput", "shell-source-");
+assertShellCommandSafetyMetadata(shellProvenanceArtifact?.metadata, {
+  mode: "invalid-structured-command-source",
+  actionKind: "runShellCommand",
+  shellPolicy: "allowlist-enabled",
+  structuredCommandPresent: false,
+  commandParsed: false,
+  allowlistConfigured: true,
+  allowlistMatched: false,
+  executionAttempted: false,
+  executed: false,
+  timedOut: false,
+  exitCodePresent: false,
+  exitCodeZero: false,
+  stdoutPresent: false,
+  stderrPresent: false,
+  resultStatus: "failed",
+  shellPolicyDiagnostic: "invalid-structured-command-source",
+  shellRetryableReason: "provide-structured-command",
+  policyChecked: true,
+  binaryAllowlistChecked: false,
+  structuredCommandChecked: true,
+  safetyFlags: ["metadata-only", "structured-arguments-only", "tool-arguments-omitted", "command-omitted", "stdout-omitted", "stderr-omitted", "cwd-omitted", "invalid-command-source-blocked", "no-command-executed", "artifact-payload-not-read"],
+}, "websocket shell command provenance");
+const shellProvenancePayload = await fs.readFile(new URL(shellProvenanceArtifact.reference), "utf8");
+expect(!shellProvenancePayload.includes(shellProvenanceCanary), "websocket top-level shell alias leaked into artifact payload");
+await fs.access(shellProvenanceMarker).then(
+  () => expect(false, "websocket top-level shell alias produced an execution side effect"),
+  (error) => expect(error?.code === "ENOENT", "websocket shell provenance marker check failed unexpectedly"),
+);
+
+console.log(`Claw Gateway smoke passed (${events.length + firstReplayEvents.length + replayGuardEvents.length + shellIdentityEvents.length + shellProvenanceEvents.length} events)`);
 
 function makeEnvelope(rawToken, endpointPort = port) {
   const taskID = crypto.randomUUID();

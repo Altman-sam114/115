@@ -599,6 +599,68 @@ final class ClawTests: XCTestCase {
         XCTAssertTrue(shellReview.safetyFlags.contains("stdout-omitted"))
     }
 
+    func testShellCommandSafetyReviewParsesInvalidStructuredCommandSource() throws {
+        let artifact = ClawGatewayArtifact(
+            kind: .commandOutput,
+            title: "shell-source-1.log",
+            reference: "file:///tmp/shell-source-1.log",
+            isRedacted: true,
+            metadata: [
+                "shellReview": "commandSafety",
+                "mode": "invalid-structured-command-source",
+                "actionKind": "runShellCommand",
+                "shellPolicy": "allowlist-enabled",
+                "shellPolicyDiagnostic": "invalid-structured-command-source",
+                "shellRetryableReason": "provide-structured-command",
+                "policyChecked": "true",
+                "binaryAllowlistChecked": "false",
+                "structuredCommandChecked": "true",
+                "structuredCommandPresent": "false",
+                "commandParsed": "false",
+                "allowlistConfigured": "true",
+                "allowlistMatched": "false",
+                "executionAttempted": "false",
+                "executed": "false",
+                "timedOut": "false",
+                "exitCodePresent": "false",
+                "exitCodeZero": "false",
+                "stdoutPresent": "false",
+                "stderrPresent": "false",
+                "commandOmitted": "true",
+                "stdoutOmitted": "true",
+                "stderrOmitted": "true",
+                "cwdOmitted": "true",
+                "resultStatus": "failed",
+                "safetyFlags": "metadata-only,structured-arguments-only,tool-arguments-omitted,command-omitted,stdout-omitted,stderr-omitted,cwd-omitted,invalid-command-source-blocked,no-command-executed,artifact-payload-not-read",
+                "commandLine": "pwd provenance-secret"
+            ]
+        )
+
+        let review = try XCTUnwrap(ClawGatewayShellCommandSafetyReviewSummary.latest(from: [artifact]))
+        let visibleText = [
+            review.latestTitle,
+            review.compactStatus,
+            review.mode ?? "",
+            review.shellPolicyDiagnostic ?? "",
+            review.shellRetryableReason ?? "",
+            review.safetyFlags.joined(separator: " ")
+        ].joined(separator: " ")
+
+        XCTAssertEqual(review.mode, "invalid-structured-command-source")
+        XCTAssertEqual(review.shellPolicyDiagnostic, "invalid-structured-command-source")
+        XCTAssertEqual(review.shellRetryableReason, "provide-structured-command")
+        XCTAssertEqual(review.structuredCommandPresent, false)
+        XCTAssertEqual(review.commandParsed, false)
+        XCTAssertEqual(review.binaryAllowlistChecked, false)
+        XCTAssertEqual(review.executionAttempted, false)
+        XCTAssertEqual(review.executed, false)
+        XCTAssertTrue(review.requiresShellPolicyReview)
+        XCTAssertTrue(review.safetyFlags.contains("invalid-command-source-blocked"))
+        XCTAssertFalse(visibleText.contains("provenance-secret"))
+        XCTAssertFalse(visibleText.contains("commandLine"))
+        XCTAssertFalse(visibleText.contains("pwd"))
+    }
+
     func testMissionRunSummaryDerivesReviewPriorityQueue() throws {
         let idleStore = ClawStore(autoScanLocalArtifacts: false)
         XCTAssertTrue(idleStore.missionRunSummary.reviewPriorityQueue.isEmpty)

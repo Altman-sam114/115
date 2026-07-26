@@ -3158,7 +3158,7 @@ struct ClawGatewayShellCommandSafetyReviewSummary: Equatable, Codable, Sendable 
         if shellPolicyDiagnostic == nil || shellRetryableReason == nil || policyChecked == nil || binaryAllowlistChecked == nil || structuredCommandChecked == nil {
             return true
         }
-        if ["missing-structured-command", "command-parse-failed", "dry-run", "allowlist-blocked", "execution-failed"].contains(shellPolicyDiagnostic ?? "") {
+        if ["invalid-structured-command-source", "missing-structured-command", "command-parse-failed", "dry-run", "allowlist-blocked", "execution-failed"].contains(shellPolicyDiagnostic ?? "") {
             return true
         }
         if resultStatus == "failed" || timedOut == true {
@@ -3226,7 +3226,7 @@ struct ClawGatewayShellCommandSafetyReviewSummary: Equatable, Codable, Sendable 
         guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
             return nil
         }
-        let allowed = ["missing-structured-command", "command-parse-failed", "shell-policy-blocked", "shell-executed"]
+        let allowed = ["invalid-structured-command-source", "missing-structured-command", "command-parse-failed", "shell-policy-blocked", "shell-executed"]
         return allowed.contains(clean) ? clean : nil
     }
 
@@ -3251,6 +3251,7 @@ struct ClawGatewayShellCommandSafetyReviewSummary: Equatable, Codable, Sendable 
         }
         let allowed = [
             "not-requested",
+            "invalid-structured-command-source",
             "missing-structured-command",
             "command-parse-failed",
             "dry-run",
@@ -3294,6 +3295,7 @@ struct ClawGatewayShellCommandSafetyReviewSummary: Equatable, Codable, Sendable 
             "command-omitted",
             "cwd-omitted",
             "dry-run-only",
+            "invalid-command-source-blocked",
             "metadata-only",
             "natural-language-not-executed",
             "no-command-executed",
