@@ -6631,6 +6631,9 @@ struct ClawAgentTraceReviewRow: View {
         if let policy = review.nextActionPolicy {
             items.append((policy, "checkmark.shield.fill", review.requiresNextActionPolicyReview ? .orange : .green))
         }
+        if let reason = review.selectedActionDecisionReason {
+            items.append((reason, "list.bullet.clipboard.fill", review.requiresNextActionPolicyReview ? .orange : .green))
+        }
         if let effective = review.effectiveNextActionCount, let blocked = review.blockedNextActionCount {
             items.append(("有效 \(effective) · 阻断 \(blocked)", blocked > 0 ? "shield.slash.fill" : "shield.checkered", blocked > 0 ? .orange : .green))
         }

@@ -206,11 +206,13 @@ expect(agentTrace?.decisionChecklist?.some((item) => item.signal === "fileDiff" 
 expect(agentTrace?.decisionChecklist?.some((item) => item.signal === "commandOutput" && item.status === "satisfied"), "agent loop checklist missing command output");
 expect(agentTrace?.decisionChecklist?.some((item) => item.signal === "messageDraft" && item.status === "missing"), "agent loop checklist missing draft gap");
 expect(agentTrace?.nextActions?.some((action) => action.kind === agentTrace?.selectedNextAction?.kind), "agent loop selected action should come from nextActions");
-expect(agentTrace?.riskTags?.includes("approval-required"), "agent loop should tag approval-gated actions");
+expect(agentTrace?.selectedNextAction?.kind === "extractData", "agent loop should select the first approval-free candidate");
+expect(agentTrace?.selectedActionDecision?.reason === "safe-without-approval", "agent loop should explain the approval-free selection");
+expect(!agentTrace?.riskTags?.includes("approval-required"), "unselected approval-gated candidates should not taint selected action risk");
 expect(agentTrace?.riskTags?.includes("degraded-screen-observation"), "agent loop should tag degraded screen observation");
 expect(agentTrace?.riskTags?.includes("degraded-accessibility-tree"), "agent loop should tag degraded accessibility tree");
-expect(agentTrace?.riskTags?.includes("final-submit-gate") || agentTrace?.stopReason === "final-submit", "agent loop should stop before final delivery");
-expect(agentTrace?.handoffStatus === "final-submit-review", "agent loop should expose handoff status");
+expect(!agentTrace?.riskTags?.includes("final-submit-gate"), "unselected delivery candidates should not taint selected action risk");
+expect(agentTrace?.handoffStatus === "ready-to-continue", "approval-free selected action should be ready for explicit continuation");
 expect(typeof agentTrace?.handoffSummary === "string" && agentTrace.handoffSummary.includes(agentTrace.selectedNextAction.kind), "agent loop handoff summary should name selected action");
 const screenArtifacts = await readArtifacts(dryRunEvents, "screenshot");
 expect(screenArtifacts.some((artifact) => artifact.observationGoal === "observe smoke desktop"), "missing screen observation goal");
@@ -765,6 +767,7 @@ const blockedAgentLoopArtifact = findArtifact(blockedAgentLoopEvents, "agentTrac
 expect(Boolean(blockedAgentLoopTrace), "missing blocked agent loop trace");
 expect(blockedAgentLoopTrace.nextActions?.length === 1 && blockedAgentLoopTrace.nextActions[0].kind === "none", "empty intersection should only propose none");
 expect(blockedAgentLoopTrace.selectedNextAction?.kind === "none", "empty intersection should select none");
+expect(blockedAgentLoopTrace.selectedActionDecision?.reason === "policy-blocked", "empty intersection selected decision should be policy blocked");
 expect(blockedAgentLoopTrace.iterations?.every((iteration) => iteration.proposedAction === "none"), "empty intersection iterations should only propose none");
 expect(blockedAgentLoopTrace.safetyGates?.length === 0, "empty intersection should not create safety gates");
 expect(blockedAgentLoopTrace.stopReason === "policy-blocked", "empty intersection should stop as policy-blocked");
@@ -791,6 +794,7 @@ const partialAgentLoopArtifact = findArtifact(partialAgentLoopEvents, "agentTrac
 expect(Boolean(partialAgentLoopTrace), "missing partial agent loop trace");
 expect(partialAgentLoopTrace.nextActions?.length === 1 && partialAgentLoopTrace.nextActions[0].kind === "composeMessage", "partial intersection should only propose composeMessage");
 expect(partialAgentLoopTrace.selectedNextAction?.kind === "composeMessage", "partial intersection should select composeMessage");
+expect(partialAgentLoopTrace.selectedActionDecision?.reason === "insufficient-evidence-fallback", "partial intersection should explain the evidence fallback");
 expect(partialAgentLoopTrace.iterations?.every((iteration) => iteration.proposedAction === "composeMessage"), "partial intersection iterations should only propose composeMessage");
 assertAgentTraceMetadata(partialAgentLoopArtifact?.metadata, partialAgentLoopTrace, "partial agent loop");
 assertAgentRecommendationSubset(partialAgentLoopTrace, partialAgentLoopArtifact?.metadata, partialAgentLoopEnvelope, "partial agent loop");
@@ -801,6 +805,62 @@ expect(partialAgentLoopArtifact?.metadata?.effectiveNextActionCount === "1", "pa
 expect(partialAgentLoopArtifact?.metadata?.blockedNextActionCount === "1", "partial agent loop blocked count mismatch");
 expect(partialAgentLoopArtifact?.metadata?.selectedNextActionAllowedByEnvelope === "true", "partial selected action should be envelope allowed");
 assertAgentPolicyOutputRedacted(partialAgentLoopEvents, partialAgentLoopArtifact?.metadata, partialAgentLoopTrace, ["manageFiles"], "partial agent loop");
+
+const recoveryAgentLoopEnvelope = makeAgentLoopPolicyEnvelope(
+  token,
+  ["runAgentLoop", "observeScreen"],
+  "observeScreen",
+);
+const recoveryAgentLoopEvents = await runEmitEvents({
+  CLAW_GATEWAY_TOKEN: token,
+  CLAW_WORKSPACE: `${workspace}-agent-loop-evidence-recovery`,
+}, recoveryAgentLoopEnvelope);
+const recoveryAgentLoopTrace = (await readArtifacts(recoveryAgentLoopEvents, "agentTrace"))[0];
+const recoveryAgentLoopArtifact = findArtifact(recoveryAgentLoopEvents, "agentTrace");
+expect(recoveryAgentLoopTrace.selectedNextAction?.kind === "observeScreen", "missing evidence should select an observation candidate");
+expect(recoveryAgentLoopTrace.selectedActionDecision?.reason === "evidence-recovery", "missing evidence should use the recovery decision branch");
+assertAgentTraceMetadata(recoveryAgentLoopArtifact?.metadata, recoveryAgentLoopTrace, "evidence recovery agent loop");
+
+const noActionAgentLoopEnvelope = makeAgentLoopPolicyEnvelope(
+  token,
+  ["runAgentLoop", "observeScreen"],
+  "observeScreen",
+);
+noActionAgentLoopEnvelope.task.actions[0].toolArguments.approvalRequiredFor = "none";
+const observationAction = dryRunEnvelope.task.actions.find((action) => action.kind === "observeScreen");
+expect(Boolean(observationAction), "no-action decision fixture requires an observeScreen action");
+noActionAgentLoopEnvelope.task.actions.unshift({ ...observationAction, id: crypto.randomUUID() });
+const noActionAgentLoopEvents = await runEmitEvents({
+  CLAW_GATEWAY_TOKEN: token,
+  CLAW_WORKSPACE: `${workspace}-agent-loop-no-action`,
+}, noActionAgentLoopEnvelope);
+const noActionAgentLoopTrace = (await readArtifacts(noActionAgentLoopEvents, "agentTrace"))[0];
+const noActionAgentLoopArtifact = findArtifact(noActionAgentLoopEvents, "agentTrace");
+expect(noActionAgentLoopTrace.selectedNextAction?.kind === "none", "satisfied action context should select none when no candidate remains");
+expect(noActionAgentLoopTrace.selectedNextAction?.requiresApproval === false, "synthetic none candidate must never require approval");
+expect(noActionAgentLoopTrace.selectedActionDecision?.reason === "no-action-needed", "no candidate should use the no-action decision branch");
+expect(noActionAgentLoopTrace.stopReason === "complete" && noActionAgentLoopTrace.handoffStatus === "complete", "no-action decision should complete instead of reporting missing evidence");
+assertAgentTraceMetadata(noActionAgentLoopArtifact?.metadata, noActionAgentLoopTrace, "no action agent loop");
+
+const approvalOverrideEnvelope = JSON.parse(JSON.stringify(dryRunEnvelope));
+approvalOverrideEnvelope.task.id = crypto.randomUUID();
+for (const action of approvalOverrideEnvelope.task.actions) {
+  action.id = crypto.randomUUID();
+}
+const approvalOverrideLoopAction = approvalOverrideEnvelope.task.actions.find((action) => action.kind === "runAgentLoop");
+approvalOverrideLoopAction.toolArguments.allowedNextActions = "extractData";
+approvalOverrideLoopAction.toolArguments.approvalRequiredFor = "extractData";
+const approvalOverrideEvents = await runEmitEvents({
+  CLAW_GATEWAY_TOKEN: token,
+  CLAW_WORKSPACE: `${workspace}-agent-loop-approval-override`,
+}, approvalOverrideEnvelope);
+const approvalOverrideTrace = (await readArtifacts(approvalOverrideEvents, "agentTrace"))[0];
+const approvalOverrideArtifact = findArtifact(approvalOverrideEvents, "agentTrace");
+expect(approvalOverrideTrace.selectedNextAction?.kind === "extractData", "approval override should preserve the selected candidate");
+expect(approvalOverrideTrace.selectedNextAction?.requiresApproval === true, "approval override should update selected approval evidence");
+expect(approvalOverrideTrace.selectedActionDecision?.reason === "approval-required-fallback", "approval override should use the approval fallback branch");
+expect(approvalOverrideTrace.stopReason === "approval-required" && approvalOverrideTrace.handoffStatus === "waiting-for-approval", "approval override should stop at an approval handoff");
+assertAgentTraceMetadata(approvalOverrideArtifact?.metadata, approvalOverrideTrace, "approval override agent loop");
 
 const requestedSubsetEnvelope = makeAgentLoopPolicyEnvelope(
   token,
@@ -851,6 +911,7 @@ expect(emptyRequestAgentLoopTrace.nextActions?.length === 1 && emptyRequestAgent
 expect(emptyRequestAgentLoopTrace.requestedNextActionCount === 0, "explicit empty request count mismatch");
 expect(emptyRequestAgentLoopTrace.nextActionPolicyDiagnostic === "policy-blocked", "explicit empty request should fail closed");
 expect(emptyRequestAgentLoopTrace.handoffStatus === "blocked", "explicit empty request should require blocked handoff");
+expect(emptyRequestAgentLoopTrace.selectedActionDecision?.reason === "policy-blocked", "explicit empty request decision should be policy blocked");
 assertAgentTraceMetadata(emptyRequestAgentLoopArtifact?.metadata, emptyRequestAgentLoopTrace, "empty request agent loop");
 assertAgentRecommendationSubset(emptyRequestAgentLoopTrace, emptyRequestAgentLoopArtifact?.metadata, emptyRequestAgentLoopEnvelope, "empty request agent loop");
 
@@ -1510,6 +1571,12 @@ function assertAgentTraceMetadata(metadata, trace, label) {
     "requestedNextActionCount",
     "riskTags",
     "satisfiedSignals",
+    "selectedActionCandidateCount",
+    "selectedActionCandidateOrdinal",
+    "selectedActionDecisionConsistent",
+    "selectedActionDecisionPolicy",
+    "selectedActionDecisionReason",
+    "selectedActionFromCandidates",
     "selectedNextActionAllowedByEnvelope",
     "selectedNextActionKind",
     "selectedNextActionRequiresApproval",
@@ -1547,6 +1614,17 @@ function assertAgentTraceMetadata(metadata, trace, label) {
   expect(metadata.effectiveNextActionCount === String(trace.effectiveNextActionCount), `${label} effective action count metadata mismatch`);
   expect(metadata.blockedNextActionCount === String(trace.blockedNextActionCount), `${label} blocked action count metadata mismatch`);
   expect(metadata.selectedNextActionAllowedByEnvelope === String(trace.selectedNextActionAllowedByEnvelope), `${label} selected action allowlist metadata mismatch`);
+  expect(metadata.selectedActionDecisionPolicy === trace.selectedActionDecision.policy, `${label} selected decision policy metadata mismatch`);
+  expect(metadata.selectedActionDecisionReason === trace.selectedActionDecision.reason, `${label} selected decision reason metadata mismatch`);
+  expect(metadata.selectedActionCandidateCount === String(trace.selectedActionDecision.candidateCount), `${label} selected candidate count metadata mismatch`);
+  expect(metadata.selectedActionCandidateOrdinal === String(trace.selectedActionDecision.candidateOrdinal), `${label} selected candidate ordinal metadata mismatch`);
+  expect(metadata.selectedActionFromCandidates === String(trace.selectedActionDecision.fromCandidates), `${label} selected candidate membership metadata mismatch`);
+  expect(metadata.selectedActionDecisionConsistent === String(trace.selectedActionDecision.consistent), `${label} selected decision consistency metadata mismatch`);
+  expect(metadata.selectedActionDecisionPolicy === "evidence-first-safe-v1", `${label} selected decision policy should be fixed`);
+  expect(metadata.selectedActionFromCandidates === "true", `${label} selected action must come from candidates`);
+  expect(metadata.selectedActionDecisionConsistent === "true", `${label} selected decision must be consistent`);
+  expect(Number(metadata.selectedActionCandidateCount) >= 1, `${label} selected decision candidate count should be positive`);
+  expect(Number(metadata.selectedActionCandidateOrdinal) >= 1 && Number(metadata.selectedActionCandidateOrdinal) <= Number(metadata.selectedActionCandidateCount), `${label} selected decision ordinal should be bounded`);
   expect(metadata.selectedNextActionKind === trace.selectedNextAction.kind, `${label} selected action metadata mismatch`);
   expect(metadata.selectedNextActionRequiresApproval === String(trace.selectedNextAction.requiresApproval), `${label} selected approval metadata mismatch`);
   expect(metadata.riskTags === trace.riskTags.join(","), `${label} risk tags metadata mismatch`);
@@ -1586,6 +1664,9 @@ function assertAgentRecommendationSubset(trace, metadata, policyEnvelope, label)
   }
   assertAllowed(metadata?.selectedNextActionKind, "metadata selectedNextActionKind");
   expect(metadata?.selectedNextActionAllowedByEnvelope === "true", `${label} selected action lacks envelope policy evidence`);
+  expect(metadata?.selectedActionDecisionPolicy === "evidence-first-safe-v1", `${label} selected action decision policy mismatch`);
+  expect(metadata?.selectedActionFromCandidates === "true", `${label} selected action is not candidate-bound`);
+  expect(metadata?.selectedActionDecisionConsistent === "true", `${label} selected action decision is inconsistent`);
   expect(trace.requestedNextActionCount === trace.effectiveNextActionCount + trace.blockedNextActionCount, `${label} next action counts are inconsistent`);
 }
 

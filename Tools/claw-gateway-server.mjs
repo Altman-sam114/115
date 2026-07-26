@@ -3376,15 +3376,24 @@ async function agentLoopAction(action, index, config) {
   const stopBeforeDestructiveAction = args.stopBeforeDestructiveAction !== "false";
   const contextSummary = summarizeArtifactContext(config.sessionContext);
   const evidenceRows = buildExtractionRows(config.sessionContext, inputSources, action).slice(0, 12);
-  const proposedActions = proposeAgentNextActions(contextSummary, allowedNextActions);
+  const proposedActions = proposeAgentNextActions(contextSummary, allowedNextActions).map((proposal) => ({
+    ...proposal,
+    requiresApproval: proposal.kind !== "none" &&
+      (proposal.requiresApproval || approvalRequiredFor.includes(proposal.kind)),
+  }));
   const safetyGates = makeAgentSafetyGates(proposedActions, approvalRequiredFor);
   const decisionChecklist = makeAgentDecisionChecklist(contextSummary, inputSources);
   const readiness = makeAgentReadiness(decisionChecklist, evidenceRows);
-  const selectedNextAction = selectAgentNextAction(proposedActions, readiness);
+  const selectedActionDecision = selectAgentNextAction({
+    proposedActions,
+    readiness,
+    nextActionPolicyBlocked,
+  });
+  const selectedNextAction = selectedActionDecision.action;
   const riskTags = makeAgentRiskTags({
     readiness,
     decisionChecklist,
-    proposedActions,
+    selectedNextAction,
     safetyGates,
     approvalRequiredFor,
     stopBeforeDestructiveAction,
@@ -3439,6 +3448,7 @@ async function agentLoopAction(action, index, config) {
     readiness,
     decisionChecklist,
     selectedNextAction,
+    selectedActionDecision: selectedActionDecision.evidence,
     riskTags,
     stopReason,
     handoffStatus,
@@ -3446,7 +3456,9 @@ async function agentLoopAction(action, index, config) {
     iterations,
     finalState: nextActionPolicyBlocked
       ? "blocked-by-next-action-policy"
-      : proposedActions.some((item) => item.requiresApproval)
+      : selectedNextAction.kind === "none"
+      ? "complete"
+      : selectedNextAction.requiresApproval
       ? "ready-for-user-or-gateway-approval"
       : "ready-for-next-safe-action",
   };
@@ -3488,6 +3500,12 @@ function agentTraceMetadata(trace) {
     nextActionPolicy: trace.nextActionPolicy,
     nextActionPolicyDiagnostic: trace.nextActionPolicyDiagnostic,
     selectedNextActionAllowedByEnvelope: trace.selectedNextActionAllowedByEnvelope,
+    selectedActionDecisionPolicy: trace.selectedActionDecision?.policy,
+    selectedActionDecisionReason: trace.selectedActionDecision?.reason,
+    selectedActionCandidateCount: trace.selectedActionDecision?.candidateCount,
+    selectedActionCandidateOrdinal: trace.selectedActionDecision?.candidateOrdinal,
+    selectedActionFromCandidates: trace.selectedActionDecision?.fromCandidates,
+    selectedActionDecisionConsistent: trace.selectedActionDecision?.consistent,
   });
 }
 
@@ -3678,25 +3696,55 @@ function makeAgentReadiness(decisionChecklist, evidenceRows) {
   };
 }
 
-function selectAgentNextAction(proposedActions, readiness) {
-  if (proposedActions.length === 0) {
-    return {
+function selectAgentNextAction({ proposedActions, readiness, nextActionPolicyBlocked }) {
+  const candidates = proposedActions.length > 0
+    ? proposedActions
+    : [{
       kind: "none",
       priority: "low",
       requiresApproval: false,
       reason: "No proposed next action is available.",
-    };
+    }];
+  let selectedIndex = 0;
+  let reason = "no-action-needed";
+
+  if (nextActionPolicyBlocked) {
+    reason = "policy-blocked";
+  } else if (candidates[0]?.kind === "none") {
+    reason = "no-action-needed";
+  } else if (!readiness.canContinue) {
+    const recoveryIndex = candidates.findIndex(
+      (action) => action.kind === "observeScreen" || action.kind === "controlBrowser",
+    );
+    selectedIndex = recoveryIndex >= 0 ? recoveryIndex : 0;
+    reason = recoveryIndex >= 0 ? "evidence-recovery" : "insufficient-evidence-fallback";
+  } else {
+    const safeIndex = candidates.findIndex(
+      (action) => !action.requiresApproval && action.kind !== "none",
+    );
+    selectedIndex = safeIndex >= 0 ? safeIndex : 0;
+    reason = safeIndex >= 0 ? "safe-without-approval" : "approval-required-fallback";
   }
-  if (!readiness.canContinue) {
-    return proposedActions.find((action) => action.kind === "observeScreen" || action.kind === "controlBrowser") || proposedActions[0];
-  }
-  return proposedActions.find((action) => !action.requiresApproval && action.kind !== "none") || proposedActions[0];
+
+  const action = candidates[selectedIndex];
+  const fromCandidates = proposedActions.some((candidate) => candidate === action);
+  return {
+    action,
+    evidence: {
+      policy: "evidence-first-safe-v1",
+      reason,
+      candidateCount: proposedActions.length,
+      candidateOrdinal: selectedIndex + 1,
+      fromCandidates,
+      consistent: fromCandidates && selectedIndex < proposedActions.length,
+    },
+  };
 }
 
 function makeAgentRiskTags({
   readiness,
   decisionChecklist,
-  proposedActions,
+  selectedNextAction,
   safetyGates,
   approvalRequiredFor,
   stopBeforeDestructiveAction,
@@ -3717,31 +3765,23 @@ function makeAgentRiskTags({
       tags.add(`degraded-${kebabCase(item.signal)}`);
     }
   }
-  if (safetyGates.length > 0) {
+  if (selectedNextAction?.requiresApproval || safetyGates.some((gate) => gate.actionKind === selectedNextAction?.kind)) {
     tags.add("approval-required");
   }
-  for (const action of proposedActions) {
-    if (action.requiresApproval) {
-      tags.add("approval-required");
-    }
-    if (action.kind === "controlBrowser" && approvalRequiredFor.includes("externalNetwork")) {
-      tags.add("external-network-gate");
-    }
-    if (action.kind === "manageFiles" && stopBeforeDestructiveAction && approvalRequiredFor.includes("destructiveFileChange")) {
-      tags.add("destructive-action-gate");
-    }
-    if (action.kind === "runShellCommand") {
-      tags.add("shell-command-gate");
-    }
-    if (action.kind === "operateDesktopApp") {
-      tags.add("desktop-control-gate");
-      if (approvalRequiredFor.includes("operateDesktopAppFinalSubmit")) {
-        tags.add("final-submit-gate");
-      }
-    }
-    if (action.kind === "composeMessage" || action.kind === "composeEmail") {
+  if (selectedNextAction?.kind === "controlBrowser" && approvalRequiredFor.includes("externalNetwork")) {
+    tags.add("external-network-gate");
+  }
+  if (selectedNextAction?.kind === "manageFiles" && stopBeforeDestructiveAction && approvalRequiredFor.includes("destructiveFileChange")) {
+    tags.add("destructive-action-gate");
+  }
+  if (selectedNextAction?.kind === "operateDesktopApp") {
+    tags.add("desktop-control-gate");
+    if (approvalRequiredFor.includes("operateDesktopAppFinalSubmit")) {
       tags.add("final-submit-gate");
     }
+  }
+  if (selectedNextAction?.kind === "composeMessage" || selectedNextAction?.kind === "composeEmail") {
+    tags.add("final-submit-gate");
   }
   return [...tags];
 }
@@ -3754,6 +3794,9 @@ function makeAgentStopReason({
 }) {
   if (riskTags.includes("next-action-policy-blocked")) {
     return "policy-blocked";
+  }
+  if (selectedNextAction?.kind === "none") {
+    return "complete";
   }
   if (!readiness.canContinue) {
     return "insufficient-evidence";
@@ -3770,15 +3813,15 @@ function makeAgentStopReason({
   if (selectedNextAction?.requiresApproval || riskTags.includes("approval-required")) {
     return "approval-required";
   }
-  if (selectedNextAction?.kind === "none") {
-    return "complete";
-  }
   return "none";
 }
 
 function makeAgentHandoffStatus({ readiness, selectedNextAction, riskTags, stopReason }) {
   if (stopReason === "policy-blocked" || riskTags.includes("next-action-policy-blocked")) {
     return "blocked";
+  }
+  if (selectedNextAction?.kind === "none" || stopReason === "complete") {
+    return "complete";
   }
   if (!readiness.canContinue) {
     return "needs-evidence";
@@ -3791,9 +3834,6 @@ function makeAgentHandoffStatus({ readiness, selectedNextAction, riskTags, stopR
   }
   if (["destructive", "external"].includes(stopReason)) {
     return "blocked";
-  }
-  if (selectedNextAction?.kind === "none" || stopReason === "complete") {
-    return "complete";
   }
   return "ready-to-continue";
 }

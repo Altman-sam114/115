@@ -88,6 +88,34 @@ enum ClawGatewayEventFixture {
             handlesSensitiveData: true,
             inputPreview: "omitted"
         )
+        let approvalOverrideAction = ClawMobileAction(
+            kind: .runAgentLoop,
+            title: "Approval override fixture action",
+            target: "omitted",
+            instruction: "omitted",
+            approval: .gatewayApproval,
+            sourceSurface: .clawGateway,
+            handlesSensitiveData: false,
+            inputPreview: "omitted",
+            toolArguments: [
+                "allowedNextActions": "extractData",
+                "approvalRequiredFor": "extractData"
+            ]
+        )
+        let noActionOverrideAction = ClawMobileAction(
+            kind: .runAgentLoop,
+            title: "No-action fixture action",
+            target: "omitted",
+            instruction: "omitted",
+            approval: .gatewayApproval,
+            sourceSurface: .clawGateway,
+            handlesSensitiveData: false,
+            inputPreview: "omitted",
+            toolArguments: [
+                "allowedNextActions": "observeScreen",
+                "approvalRequiredFor": "none"
+            ]
+        )
         let envelope = ClawMobileEnvelope(
             schemaVersion: "claw.computer.control.v1",
             sourceApp: "Claw Controller",
@@ -135,13 +163,51 @@ enum ClawGatewayEventFixture {
         let skippedArtifacts = events
             .filter { $0.actionID == skippedAction.id && $0.kind == .artifactStored }
             .flatMap(\.artifacts)
+        let blockedDecision = agentTraceMetadata(
+            for: unsupportedAction,
+            allowedActionKinds: [.runAgentLoop]
+        )
+        let desktopDecision = agentTraceMetadata(
+            for: unsupportedAction,
+            allowedActionKinds: [.runAgentLoop, .operateDesktopApp]
+        )
+        let approvalOverrideDecision = agentTraceMetadata(
+            for: approvalOverrideAction,
+            allowedActionKinds: [.runAgentLoop, .extractData]
+        )
+        let noActionOverrideDecision = agentTraceMetadata(
+            for: noActionOverrideAction,
+            allowedActionKinds: [.runAgentLoop, .observeScreen]
+        )
         guard
             failed != nil,
             audit != nil,
             skipped != nil,
             skippedArtifacts.count == 1,
             skippedArtifacts.first?.kind == .auditLog,
-            skippedArtifacts.first?.isRedacted == true
+            skippedArtifacts.first?.isRedacted == true,
+            blockedDecision["selectedActionDecisionPolicy"] == "evidence-first-safe-v1",
+            blockedDecision["selectedActionDecisionReason"] == "policy-blocked",
+            blockedDecision["selectedActionCandidateCount"] == "1",
+            blockedDecision["selectedActionCandidateOrdinal"] == "1",
+            blockedDecision["selectedActionFromCandidates"] == "true",
+            blockedDecision["selectedActionDecisionConsistent"] == "true",
+            desktopDecision["selectedNextActionKind"] == "operateDesktopApp",
+            desktopDecision["selectedActionDecisionReason"] == "approval-required-fallback",
+            desktopDecision["riskTags"]?.contains("desktop-control-gate") == true,
+            desktopDecision["riskTags"]?.contains("final-submit-gate") == true,
+            desktopDecision["stopReason"] == "final-submit",
+            desktopDecision["handoffStatus"] == "final-submit-review",
+            approvalOverrideDecision["selectedNextActionKind"] == "extractData",
+            approvalOverrideDecision["selectedNextActionRequiresApproval"] == "true",
+            approvalOverrideDecision["selectedActionDecisionReason"] == "approval-required-fallback",
+            approvalOverrideDecision["stopReason"] == "approval-required",
+            approvalOverrideDecision["handoffStatus"] == "waiting-for-approval",
+            noActionOverrideDecision["selectedNextActionKind"] == "none",
+            noActionOverrideDecision["selectedNextActionRequiresApproval"] == "false",
+            noActionOverrideDecision["selectedActionDecisionReason"] == "no-action-needed",
+            noActionOverrideDecision["stopReason"] == "complete",
+            noActionOverrideDecision["handoffStatus"] == "complete"
         else {
             throw FixtureError.selfTestFailed
         }
@@ -394,7 +460,47 @@ enum ClawGatewayEventFixture {
         let effective = requested.filter { supported.contains($0) && envelopeAllowed.contains($0) }
         let blocked = requested.count - effective.count
         let policyBlocked = effective.isEmpty
-        let selected = effective.contains("composeMessage") ? "composeMessage" : (effective.first ?? "none")
+        let candidates = ["extractData", "composeMessage", "operateDesktopApp"].filter { effective.contains($0) }
+        let selected = candidates.first ?? "none"
+        let approvalRequiredFor = Set((action.toolArguments["approvalRequiredFor"] ?? "runShellCommand,operateDesktopAppFinalSubmit,externalNetwork,destructiveFileChange")
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) })
+        let selectedRequiresApproval = selected != "none" &&
+            (selected != "extractData" || approvalRequiredFor.contains(selected))
+        let selectedNeedsFinalSubmit = selected == "composeMessage" ||
+            (selected == "operateDesktopApp" && approvalRequiredFor.contains("operateDesktopAppFinalSubmit"))
+        let selectedOrdinal = selected == "none" ? 1 : ((candidates.firstIndex(of: selected) ?? 0) + 1)
+        let decisionReason = policyBlocked
+            ? "policy-blocked"
+            : (selected == "none"
+                ? "no-action-needed"
+                : (selectedRequiresApproval ? "approval-required-fallback" : "safe-without-approval"))
+        let stopReason = policyBlocked
+            ? "policy-blocked"
+            : (selected == "none"
+                ? "complete"
+                : (selectedNeedsFinalSubmit
+                    ? "final-submit"
+                    : (selectedRequiresApproval ? "approval-required" : "none")))
+        let handoffStatus = policyBlocked
+            ? "blocked"
+            : (stopReason == "complete"
+                ? "complete"
+                : (stopReason == "final-submit"
+                    ? "final-submit-review"
+                    : (selectedRequiresApproval ? "waiting-for-approval" : "ready-to-continue")))
+        var riskTags = ["degraded-screen-observation", "degraded-accessibility-tree", "missing-message-draft"]
+        if policyBlocked {
+            riskTags.insert("next-action-policy-blocked", at: 0)
+        } else if selectedRequiresApproval {
+            riskTags.append("approval-required")
+            if selected == "operateDesktopApp" {
+                riskTags.append("desktop-control-gate")
+            }
+            if selectedNeedsFinalSubmit {
+                riskTags.append("final-submit-gate")
+            }
+        }
         return [
             "readinessScore": "50",
             "readinessCanContinue": "true",
@@ -402,16 +508,22 @@ enum ClawGatewayEventFixture {
             "degradedSignals": "screenObservation,accessibilityTree",
             "missingSignals": "messageDraft",
             "selectedNextActionKind": selected,
-            "selectedNextActionRequiresApproval": selected == "none" || selected == "extractData" ? "false" : "true",
+            "selectedNextActionRequiresApproval": String(selectedRequiresApproval),
             "nextActionPolicy": "envelope-intersection",
             "nextActionPolicyDiagnostic": policyBlocked ? "policy-blocked" : "allowed",
             "requestedNextActionCount": String(requested.count),
             "effectiveNextActionCount": String(effective.count),
             "blockedNextActionCount": String(blocked),
             "selectedNextActionAllowedByEnvelope": "true",
-            "riskTags": policyBlocked ? "next-action-policy-blocked,degraded-screen-observation,degraded-accessibility-tree,missing-message-draft" : "degraded-screen-observation,degraded-accessibility-tree,approval-required,final-submit-gate,missing-message-draft",
-            "stopReason": policyBlocked ? "policy-blocked" : "final-submit",
-            "handoffStatus": policyBlocked ? "blocked" : "final-submit-review",
+            "selectedActionDecisionPolicy": "evidence-first-safe-v1",
+            "selectedActionDecisionReason": decisionReason,
+            "selectedActionCandidateCount": String(max(candidates.count, 1)),
+            "selectedActionCandidateOrdinal": String(selectedOrdinal),
+            "selectedActionFromCandidates": "true",
+            "selectedActionDecisionConsistent": "true",
+            "riskTags": riskTags.joined(separator: ","),
+            "stopReason": stopReason,
+            "handoffStatus": handoffStatus,
             "handoffSummary": "Evidence score 50/100. Selected next action: \(selected)."
         ]
     }

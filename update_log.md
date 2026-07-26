@@ -22,6 +22,45 @@
 
 ## 历史记录
 
+### v0.65 / Agent Loop Selected Action Decision Contract 智能体选中动作决策契约
+
+日期：2026-07-26
+
+核心变更：
+
+- `runAgentLoop` 为 selected action 增加 `evidence-first-safe-v1` 固定决策合同，记录固定 reason、候选数量、1-based 序位、候选成员和一致性。
+- 三方交集阻断、无需动作、证据恢复、证据不足回退、免审批优先和审批回退使用不同固定 reason；selected 风险、stop 和 handoff 不再被未选候选污染。
+- 手机/iPad 对合同字段缺失、未知、越界或 kind/approval/readiness/stop/handoff 组合矛盾 fail closed，禁止 Loop 继续并要求人工复核。
+- simulator、Swift Gateway fixture、双 smoke、XCTest、LogicSmoke 和正式协议同步新合同；metadata 不包含完整 allowlist、自然语言 reason 或 artifact payload。
+
+关键文件：
+
+- `Tools/claw-gateway-server.mjs`
+- `Claw/Core/ClawModels.swift`
+- `Claw/Services/ClawStore.swift`
+- `Claw/Views/ContentView.swift`
+- `Tools/ClawGatewayEventFixture.swift`
+- `Tools/claw-gateway-direct-smoke.mjs`
+- `Tools/claw-gateway-smoke.mjs`
+- `ClawTests/ClawTests.swift`
+- `Tools/LogicSmoke.swift`
+- `README.md`
+- `Docs/claw-mobile-gateway-protocol.md`
+- `md/flow/flow.md`
+- `md/flow/flowchart.md`
+- `md/test/test.md`
+- `md/prompt/v0（核心智能能力）/v0.65（AgentLoopSelectedActionDecisionContract）.md`
+
+验证结果：
+
+- 本地仅允许非编译静态检查；未运行编译、Swift/Gateway smoke、XCTest、`xcodebuild` 或 `node --check`。
+- GitHub Actions 完整验证和 Agent C 最新 run artifact 复判待本轮提交并 push 后执行。
+
+遗留事项：
+
+- 决策合同是 metadata-only 审计证据，不提供密码学绑定，不会自动执行推荐；真实 action 仍必须重新通过全部 Gateway gate。
+- simulator/fixture 是确定性预览，不替代真实 Gateway 的 session artifact 上下文选择；真实多轮调度和持久执行状态机仍待后续版本。
+
 ### v0.64 / Gateway Unsupported Action Fail Closed 未支持动作固定阻断
 
 日期：2026-07-26

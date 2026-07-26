@@ -199,6 +199,7 @@ v0.13 起，桌面 Gateway 原型增加进程内 task replay guard，作为 v0.1
   - `extractData` 会消费同一 session 内的 browser trace、file diff、command output、screen observation 和 accessibility tree artifact，生成 `artifact-grounded-extraction` 结构化结果，并在 artifact event metadata 上附 metadata-only 的完整性复核摘要；metadata 只含计数、状态、source kind 和 safety flags，不含 row 内容、URL/path、命令输出或 `toolArguments`。
   - `runAgentLoop` 会消费同一 session 内的 artifact context，写出 `agentTrace` artifact。v0.6 保留旧字段 `sourceArtifacts`、`evidenceRows`、`observations`、`nextActions`、`safetyGates`，并新增 `readiness`、`decisionChecklist`、`selectedNextAction`、`riskTags`、`stopReason`、`handoffSummary`，用于说明证据分数、满足/缺失信号、当前推荐下一步、风险标签和停在审批/最终提交前的原因。v0.7 会把这些安全摘要压缩成 artifact event 上的可选字符串 `metadata`，供手机端复核；旧事件缺少 metadata 仍合法。v0.31 起，`decisionChecklist[].status` 可为 `satisfied`、`degraded` 或 `missing`，`readiness.degradedSignals` 记录 dry-run、window metadata、network blocked、failed、unavailable 或 not-requested 等降级证据；这些降级证据不计入 readiness score。这些字段不进入 `ClawMobileEnvelope` schema，也不能作为可执行指令。
   - v0.62 起，`runAgentLoop` 的有效推荐集合严格为 `toolArguments.allowedNextActions ∩ gateway.allowedActionKinds ∩ Gateway 固定支持推荐种类`，去重并保持请求顺序。固定集合仅包含 `observeScreen`、`controlBrowser`、`manageFiles`、`extractData`、`operateDesktopApp` 和 `composeMessage`。空交集只能生成 `none`，不得产生越权 `nextActions`、iteration proposal 或 safety gate，并以 `policy-blocked`、blocked handoff 和 `blocked-by-next-action-policy` 停止。推荐是 advisory artifact；后续真实 action 仍必须作为结构化 action 重新通过 `actionPolicy`、审批、workspace 和 handler allowlist。
+  - v0.65 起，`selectedNextAction` 同时写入 `selectedActionDecision`。policy 固定为 `evidence-first-safe-v1`，reason 仅允许 `policy-blocked`、`no-action-needed`、`evidence-recovery`、`insufficient-evidence-fallback`、`safe-without-approval` 和 `approval-required-fallback`；candidate count、1-based ordinal、from-candidates 与 consistent 证明选择来自确定候选分支。approval、stop、handoff 和 selected 风险只描述实际选中项，不受未选候选污染。该对象和 metadata 只是审计摘要，不授权或执行动作。
   - `observeScreen` 默认 dry-run；设置 `CLAW_ALLOW_SCREEN_CAPTURE=1` 后可在 macOS 上生成真实截图 artifact，设置 `CLAW_ALLOW_WINDOW_METADATA=1` 后可读取前台窗口元数据，设置 `CLAW_ALLOW_ACCESSIBILITY_OBSERVE=1` 后可在授权 macOS Gateway 上通过固定只读 System Events 脚本采集前台 App/窗口和有限候选控件摘要。该摘要只写既有 `accessibilityTree` artifact，并在 artifact event metadata 上附 signal quality、evidence tier、control coverage、省略标志和 `actionExecutionSupported=false`；metadata 不写前台 App 名、窗口标题、控件 label/description、raw text 或密码字段值，不执行点击、输入或任意选择器。无权限或非 macOS 时写入可审计 permission-missing/platform-unavailable 信号。
   - `operateDesktopApp` 默认停在审批闸门；设置 `CLAW_ALLOW_DESKTOP_CONTROL=1`、`CLAW_DESKTOP_APP_ALLOWLIST` 和 `CLAW_DESKTOP_KEY_ALLOWLIST` 后，可在 macOS 上聚焦允许的 App、粘贴结构化草稿、执行允许的非提交快捷键，并在最终提交前回到用户确认。该 handler 会在相关 artifact event metadata 上附 Delivery Safety 和桌面策略诊断摘要，只写固定策略诊断、重试原因、是否尝试自动化、是否检查 app/key 策略、最终提交闸门、用户确认、正文/paste 省略和按键计数，不写草稿正文、paste text、按键原文、target app、allowlist 值或 `toolArguments`。
   - `composeMessage`/`composeEmail` 写既有 `messageDraft` artifact 并等待用户确认；v0.20 起会附 Delivery Safety metadata，说明草稿正文已从 metadata 中省略且最终发送需要用户确认，不新增真实发送能力。
@@ -282,6 +283,12 @@ live gateway 与模拟器共用 `ClawGatewayEvent`，手机端只依赖事件 re
         "effectiveNextActionCount": "6",
         "blockedNextActionCount": "0",
         "selectedNextActionAllowedByEnvelope": "true",
+        "selectedActionDecisionPolicy": "evidence-first-safe-v1",
+        "selectedActionDecisionReason": "safe-without-approval",
+        "selectedActionCandidateCount": "4",
+        "selectedActionCandidateOrdinal": "1",
+        "selectedActionFromCandidates": "true",
+        "selectedActionDecisionConsistent": "true",
         "riskTags": "degraded-screen-observation,degraded-accessibility-tree,approval-required,final-submit-gate,missing-message-draft",
         "stopReason": "final-submit",
         "handoffStatus": "final-submit-review",
@@ -310,6 +317,12 @@ live gateway 与模拟器共用 `ClawGatewayEvent`，手机端只依赖事件 re
 - `effectiveNextActionCount`
 - `blockedNextActionCount`
 - `selectedNextActionAllowedByEnvelope`
+- `selectedActionDecisionPolicy`
+- `selectedActionDecisionReason`
+- `selectedActionCandidateCount`
+- `selectedActionCandidateOrdinal`
+- `selectedActionFromCandidates`
+- `selectedActionDecisionConsistent`
 - `riskTags`
 - `stopReason`
 - `handoffStatus`
@@ -320,6 +333,8 @@ v0.30 起，`agentTrace` metadata 建议包含固定枚举 `handoffStatus`，用
 v0.31 起，`agentTrace` metadata 建议包含 `degradedSignals`，只使用固定 source 枚举列表，例如 `screenObservation,accessibilityTree`。`runAgentLoop` 会把真实或可操作证据计入 `satisfiedSignals`，把 dry-run、window metadata、network blocked、failed、unavailable 或 not-requested 等 artifact 计入 `degradedSignals`，完全没有 artifact 时计入 `missingSignals`。降级证据可用于人工复核和风险提示，但不增加 readiness score，也不能作为自动执行授权。
 
 v0.62 起，`nextActionPolicy` 固定为 `envelope-intersection`，diagnostic 只允许 `allowed` 或 `policy-blocked`；三个计数必须是有限非负整数且满足 requested = effective + blocked，selected action 只能使用固定推荐枚举并带 envelope 授权布尔。metadata 不包含 requested/effective/envelope 完整列表。手机/iPad 对缺失、未知、越界或矛盾证据进入人工复核，不能据此继续 Loop；这些字段是审计证据，不是 Gateway `actionPolicy` 的替代品。
+
+v0.65 起，selected-action decision metadata 必须完整满足固定 policy/reason、1...6 candidate count、1-based ordinal、`fromCandidates=true` 和 `consistent=true`。候选集合包含 Gateway 在无可执行建议时生成的合成安全停止候选 `none`，因此 `policy-blocked` 固定为 candidate count/ordinal `1/1`，并对应 effective 0 和 blocked handoff；`no-action-needed` 必须对应 `none` 和 complete。非 `none` 的 candidate count 不得大于 effective action count；合法 `ready-to-continue` 只能对应非 `none`、明确无需审批和 `safe-without-approval`。任何字段缺失、未知、越界或组合矛盾都由手机/iPad fail closed，且不得读取 artifact payload 补全。
 
 metadata 只能包含安全摘要，不能放入浏览器正文、命令输出、截图内容、消息草稿、联系人、token、完整 URL/path、row 内容、`toolArguments` 或其他敏感 payload。旧 Gateway 事件不带 metadata 时，手机端必须正常 decode，并按对应复核摘要降级显示 metadata 待同步。
 

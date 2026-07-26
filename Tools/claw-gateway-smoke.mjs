@@ -261,11 +261,13 @@ expect(agentTrace?.decisionChecklist?.some((item) => item.signal === "fileDiff" 
 expect(agentTrace?.decisionChecklist?.some((item) => item.signal === "commandOutput" && item.status === "satisfied"), "websocket agent loop checklist missing command output");
 expect(agentTrace?.decisionChecklist?.some((item) => item.signal === "messageDraft" && item.status === "missing"), "websocket agent loop checklist missing draft gap");
 expect(agentTrace?.nextActions?.some((action) => action.kind === agentTrace?.selectedNextAction?.kind), "websocket selected action should come from nextActions");
-expect(agentTrace?.riskTags?.includes("approval-required"), "websocket agent loop should tag approval-gated actions");
+expect(agentTrace?.selectedNextAction?.kind === "extractData", "websocket agent loop should select the first approval-free candidate");
+expect(agentTrace?.selectedActionDecision?.reason === "safe-without-approval", "websocket agent loop should explain the approval-free selection");
+expect(!agentTrace?.riskTags?.includes("approval-required"), "websocket unselected approval candidates should not taint selected action risk");
 expect(agentTrace?.riskTags?.includes("degraded-screen-observation"), "websocket agent loop should tag degraded screen observation");
 expect(agentTrace?.riskTags?.includes("degraded-accessibility-tree"), "websocket agent loop should tag degraded accessibility tree");
-expect(agentTrace?.riskTags?.includes("final-submit-gate") || agentTrace?.stopReason === "final-submit", "websocket agent loop should stop before final delivery");
-expect(agentTrace?.handoffStatus === "final-submit-review", "websocket agent loop should expose handoff status");
+expect(!agentTrace?.riskTags?.includes("final-submit-gate"), "websocket unselected delivery candidates should not taint selected action risk");
+expect(agentTrace?.handoffStatus === "ready-to-continue", "websocket approval-free selected action should be ready for explicit continuation");
 expect(typeof agentTrace?.handoffSummary === "string" && agentTrace.handoffSummary.includes(agentTrace.selectedNextAction.kind), "websocket agent loop handoff summary should name selected action");
 const messageDraftArtifact = findArtifactByTitle(events, "messageDraft", "message-draft-");
 assertDeliverySafetyMetadata(messageDraftArtifact?.metadata, {
@@ -771,6 +773,7 @@ expect(
   "websocket agent loop empty intersection should only propose none",
 );
 expect(agentLoopPolicyTrace.selectedNextAction?.kind === "none", "websocket agent loop empty intersection should select none");
+expect(agentLoopPolicyTrace.selectedActionDecision?.reason === "policy-blocked", "websocket agent loop selected decision should be policy blocked");
 expect(
   agentLoopPolicyTrace.iterations?.length === 1 && agentLoopPolicyTrace.iterations.every((iteration) => iteration.proposedAction === "none"),
   "websocket agent loop empty intersection iterations should only propose none",
@@ -1531,6 +1534,12 @@ function assertAgentTraceMetadata(metadata, trace, label) {
     "requestedNextActionCount",
     "riskTags",
     "satisfiedSignals",
+    "selectedActionCandidateCount",
+    "selectedActionCandidateOrdinal",
+    "selectedActionDecisionConsistent",
+    "selectedActionDecisionPolicy",
+    "selectedActionDecisionReason",
+    "selectedActionFromCandidates",
     "selectedNextActionAllowedByEnvelope",
     "selectedNextActionKind",
     "selectedNextActionRequiresApproval",
@@ -1573,6 +1582,17 @@ function assertAgentTraceMetadata(metadata, trace, label) {
     metadata.selectedNextActionAllowedByEnvelope === String(trace.selectedNextActionAllowedByEnvelope),
     `${label} selected action envelope policy metadata mismatch`,
   );
+  expect(metadata.selectedActionDecisionPolicy === trace.selectedActionDecision.policy, `${label} selected decision policy metadata mismatch`);
+  expect(metadata.selectedActionDecisionReason === trace.selectedActionDecision.reason, `${label} selected decision reason metadata mismatch`);
+  expect(Number(metadata.selectedActionCandidateCount) === trace.selectedActionDecision.candidateCount, `${label} selected candidate count metadata mismatch`);
+  expect(Number(metadata.selectedActionCandidateOrdinal) === trace.selectedActionDecision.candidateOrdinal, `${label} selected candidate ordinal metadata mismatch`);
+  expect(metadata.selectedActionFromCandidates === String(trace.selectedActionDecision.fromCandidates), `${label} selected candidate membership metadata mismatch`);
+  expect(metadata.selectedActionDecisionConsistent === String(trace.selectedActionDecision.consistent), `${label} selected decision consistency metadata mismatch`);
+  expect(metadata.selectedActionDecisionPolicy === "evidence-first-safe-v1", `${label} selected decision policy should be fixed`);
+  expect(metadata.selectedActionFromCandidates === "true", `${label} selected action must come from candidates`);
+  expect(metadata.selectedActionDecisionConsistent === "true", `${label} selected decision must be consistent`);
+  expect(Number(metadata.selectedActionCandidateCount) >= 1, `${label} selected decision candidate count should be positive`);
+  expect(Number(metadata.selectedActionCandidateOrdinal) >= 1 && Number(metadata.selectedActionCandidateOrdinal) <= Number(metadata.selectedActionCandidateCount), `${label} selected decision ordinal should be bounded`);
   expect(metadata.riskTags === trace.riskTags.join(","), `${label} risk tags metadata mismatch`);
   expect(metadata.stopReason === trace.stopReason, `${label} stop reason metadata mismatch`);
   expect(metadata.handoffStatus === trace.handoffStatus, `${label} handoff status metadata mismatch`);

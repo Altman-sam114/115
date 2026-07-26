@@ -2807,7 +2807,47 @@ enum ClawGatewaySimulator {
         let effective = requested.filter { supported.contains($0) && envelopeAllowed.contains($0) }
         let blocked = requested.count - effective.count
         let policyBlocked = effective.isEmpty
-        let selected = effective.contains("composeMessage") ? "composeMessage" : (effective.first ?? "none")
+        let candidates = ["extractData", "composeMessage", "operateDesktopApp"].filter { effective.contains($0) }
+        let selected = candidates.first ?? "none"
+        let approvalRequiredFor = Set((action.toolArguments["approvalRequiredFor"] ?? "runShellCommand,operateDesktopAppFinalSubmit,externalNetwork,destructiveFileChange")
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) })
+        let selectedRequiresApproval = selected != "none" &&
+            (selected != "extractData" || approvalRequiredFor.contains(selected))
+        let selectedNeedsFinalSubmit = selected == "composeMessage" ||
+            (selected == "operateDesktopApp" && approvalRequiredFor.contains("operateDesktopAppFinalSubmit"))
+        let selectedOrdinal = selected == "none" ? 1 : ((candidates.firstIndex(of: selected) ?? 0) + 1)
+        let decisionReason = policyBlocked
+            ? "policy-blocked"
+            : (selected == "none"
+                ? "no-action-needed"
+                : (selectedRequiresApproval ? "approval-required-fallback" : "safe-without-approval"))
+        let stopReason = policyBlocked
+            ? "policy-blocked"
+            : (selected == "none"
+                ? "complete"
+                : (selectedNeedsFinalSubmit
+                    ? "final-submit"
+                    : (selectedRequiresApproval ? "approval-required" : "none")))
+        let handoffStatus = policyBlocked
+            ? "blocked"
+            : (stopReason == "complete"
+                ? "complete"
+                : (stopReason == "final-submit"
+                    ? "final-submit-review"
+                    : (selectedRequiresApproval ? "waiting-for-approval" : "ready-to-continue")))
+        var riskTags = ["degraded-screen-observation", "degraded-accessibility-tree", "missing-message-draft"]
+        if policyBlocked {
+            riskTags.insert("next-action-policy-blocked", at: 0)
+        } else if selectedRequiresApproval {
+            riskTags.append("approval-required")
+            if selected == "operateDesktopApp" {
+                riskTags.append("desktop-control-gate")
+            }
+            if selectedNeedsFinalSubmit {
+                riskTags.append("final-submit-gate")
+            }
+        }
         let metadata = [
             "readinessScore": "50",
             "readinessCanContinue": "true",
@@ -2815,17 +2855,23 @@ enum ClawGatewaySimulator {
             "degradedSignals": "screenObservation,accessibilityTree",
             "missingSignals": "messageDraft",
             "selectedNextActionKind": selected,
-            "selectedNextActionRequiresApproval": selected == "none" || selected == "extractData" ? "false" : "true",
+            "selectedNextActionRequiresApproval": String(selectedRequiresApproval),
             "nextActionPolicy": "envelope-intersection",
             "nextActionPolicyDiagnostic": policyBlocked ? "policy-blocked" : "allowed",
             "requestedNextActionCount": String(requested.count),
             "effectiveNextActionCount": String(effective.count),
             "blockedNextActionCount": String(blocked),
             "selectedNextActionAllowedByEnvelope": "true",
-            "riskTags": policyBlocked ? "next-action-policy-blocked,degraded-screen-observation,degraded-accessibility-tree,missing-message-draft" : "degraded-screen-observation,degraded-accessibility-tree,approval-required,final-submit-gate,missing-message-draft",
-            "stopReason": policyBlocked ? "policy-blocked" : "final-submit",
-            "handoffStatus": policyBlocked ? "blocked" : "final-submit-review",
-            "handoffSummary": "Evidence score 50/100. Selected next action: \(selected). Stop reason: \(policyBlocked ? "policy-blocked" : "final-submit")."
+            "selectedActionDecisionPolicy": "evidence-first-safe-v1",
+            "selectedActionDecisionReason": decisionReason,
+            "selectedActionCandidateCount": String(max(candidates.count, 1)),
+            "selectedActionCandidateOrdinal": String(selectedOrdinal),
+            "selectedActionFromCandidates": "true",
+            "selectedActionDecisionConsistent": "true",
+            "riskTags": riskTags.joined(separator: ","),
+            "stopReason": stopReason,
+            "handoffStatus": handoffStatus,
+            "handoffSummary": "Evidence score 50/100. Selected next action: \(selected). Stop reason: \(stopReason)."
         ]
         return metadata
     }

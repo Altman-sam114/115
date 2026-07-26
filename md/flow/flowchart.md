@@ -97,7 +97,7 @@ flowchart TD
   KIND --> SH["runShellCommand<br/>仅 toolArguments 来源、顶层 alias/冲突来源阻断、裸 executable allowlist、Shell Safety metadata"]
   KIND --> EXT["extractData<br/>消费已有 artifact 生成结构化数据和完整性 metadata"]
   KIND --> APP["operateDesktopApp<br/>app/key allowlist、最终提交前停止、delivery policy diagnostics metadata"]
-  KIND --> AG["runAgentLoop<br/>request ∩ envelope ∩ fixed-supported 推荐交集<br/>空交集 none + blocked handoff"]
+  KIND --> AG["runAgentLoop<br/>request ∩ envelope ∩ fixed-supported 推荐交集<br/>evidence-first-safe-v1 选中决策合同<br/>空交集 none + blocked handoff"]
   AG --> AGPOL["推荐仅供审计复核<br/>真实 action 仍经 actionPolicy、审批和 handler allowlist"]
   KIND --> MSG["composeMessage/composeEmail<br/>生成待确认草稿、delivery metadata"]
   OBS --> CTX["sessionContext<br/>累计 screen、browser、file、shell、message、agent trace"]

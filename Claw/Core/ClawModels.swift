@@ -3381,6 +3381,12 @@ struct ClawAgentTraceReviewSummary: Equatable, Codable, Sendable {
     var effectiveNextActionCount: Int?
     var blockedNextActionCount: Int?
     var selectedNextActionAllowedByEnvelope: Bool?
+    var selectedActionDecisionPolicy: String?
+    var selectedActionDecisionReason: String?
+    var selectedActionCandidateCount: Int?
+    var selectedActionCandidateOrdinal: Int?
+    var selectedActionFromCandidates: Bool?
+    var selectedActionDecisionConsistent: Bool?
     var riskTags: [String]
     var stopReason: String?
     var handoffStatus: String?
@@ -3396,16 +3402,90 @@ struct ClawAgentTraceReviewSummary: Equatable, Codable, Sendable {
               let blockedNextActionCount,
               requestedNextActionCount == effectiveNextActionCount + blockedNextActionCount,
               let selectedNextActionKind,
-              selectedNextActionAllowedByEnvelope == true else {
+              let selectedNextActionRequiresApproval,
+              selectedNextActionAllowedByEnvelope == true,
+              selectedActionDecisionPolicy == "evidence-first-safe-v1",
+              let selectedActionDecisionReason,
+              let selectedActionCandidateCount,
+              let selectedActionCandidateOrdinal,
+              (1...6).contains(selectedActionCandidateCount),
+              (1...selectedActionCandidateCount).contains(selectedActionCandidateOrdinal),
+              selectedActionFromCandidates == true,
+              selectedActionDecisionConsistent == true else {
             return true
         }
         if nextActionPolicyDiagnostic == "policy-blocked" {
             return effectiveNextActionCount != 0 ||
                 selectedNextActionKind != "none" ||
+                selectedNextActionRequiresApproval ||
+                selectedActionDecisionReason != "policy-blocked" ||
+                selectedActionCandidateCount != 1 ||
+                selectedActionCandidateOrdinal != 1 ||
                 stopReason != "policy-blocked" ||
                 handoffStatus != "blocked"
         }
-        return effectiveNextActionCount == 0
+        guard effectiveNextActionCount > 0 else {
+            return true
+        }
+        guard selectedActionCandidateCount <= effectiveNextActionCount else {
+            return true
+        }
+        switch selectedActionDecisionReason {
+        case "no-action-needed":
+            return selectedNextActionKind != "none" ||
+                selectedNextActionRequiresApproval ||
+                selectedActionCandidateCount != 1 ||
+                selectedActionCandidateOrdinal != 1 ||
+                stopReason != "complete" ||
+                handoffStatus != "complete"
+        case "evidence-recovery":
+            return !["observeScreen", "controlBrowser"].contains(selectedNextActionKind) ||
+                readinessCanContinue != false ||
+                stopReason != "insufficient-evidence" ||
+                handoffStatus != "needs-evidence"
+        case "insufficient-evidence-fallback":
+            return selectedNextActionKind == "none" ||
+                readinessCanContinue != false ||
+                stopReason != "insufficient-evidence" ||
+                handoffStatus != "needs-evidence"
+        case "safe-without-approval":
+            let conflictingRiskTags = Set([
+                "approval-required",
+                "final-submit-gate",
+                "destructive-action-gate",
+                "external-network-gate",
+                "next-action-policy-blocked",
+                "insufficient-evidence",
+                "desktop-control-gate"
+            ])
+            return selectedNextActionKind != "extractData" ||
+                selectedNextActionRequiresApproval ||
+                readinessCanContinue != true ||
+                stopReason != nil ||
+                handoffStatus != "ready-to-continue" ||
+                riskTags.contains { conflictingRiskTags.contains($0) }
+        case "approval-required-fallback":
+            guard selectedNextActionKind != "none",
+                  selectedNextActionRequiresApproval,
+                  readinessCanContinue == true else {
+                return true
+            }
+            switch stopReason {
+            case "approval-required":
+                return handoffStatus != "waiting-for-approval"
+            case "final-submit":
+                return !["composeMessage", "operateDesktopApp"].contains(selectedNextActionKind) ||
+                    handoffStatus != "final-submit-review"
+            case "destructive":
+                return selectedNextActionKind != "manageFiles" || handoffStatus != "blocked"
+            case "external":
+                return selectedNextActionKind != "controlBrowser" || handoffStatus != "blocked"
+            default:
+                return true
+            }
+        default:
+            return true
+        }
     }
 
     var compactStatus: String {
@@ -3449,6 +3529,12 @@ struct ClawAgentTraceReviewSummary: Equatable, Codable, Sendable {
             effectiveNextActionCount: Self.allowedNextActionCount(metadata["effectiveNextActionCount"]),
             blockedNextActionCount: Self.allowedNextActionCount(metadata["blockedNextActionCount"]),
             selectedNextActionAllowedByEnvelope: ClawArtifactMetadataParser.boolValue(metadata["selectedNextActionAllowedByEnvelope"]),
+            selectedActionDecisionPolicy: Self.allowedSelectedActionDecisionPolicy(metadata["selectedActionDecisionPolicy"]),
+            selectedActionDecisionReason: Self.allowedSelectedActionDecisionReason(metadata["selectedActionDecisionReason"]),
+            selectedActionCandidateCount: Self.allowedSelectedActionCandidateIndex(metadata["selectedActionCandidateCount"]),
+            selectedActionCandidateOrdinal: Self.allowedSelectedActionCandidateIndex(metadata["selectedActionCandidateOrdinal"]),
+            selectedActionFromCandidates: ClawArtifactMetadataParser.boolValue(metadata["selectedActionFromCandidates"]),
+            selectedActionDecisionConsistent: ClawArtifactMetadataParser.boolValue(metadata["selectedActionDecisionConsistent"]),
             riskTags: ClawArtifactMetadataDisplaySanitizer.safeList(metadata["riskTags"]),
             stopReason: ClawArtifactMetadataDisplaySanitizer.safeValue(metadata["stopReason"]),
             handoffStatus: Self.allowedHandoffStatus(metadata["handoffStatus"]),
@@ -3505,6 +3591,35 @@ struct ClawAgentTraceReviewSummary: Equatable, Codable, Sendable {
 
     static func allowedNextActionCount(_ value: String?) -> Int? {
         guard let count = ClawArtifactMetadataParser.intValue(value), (0...16).contains(count) else {
+            return nil
+        }
+        return count
+    }
+
+    static func allowedSelectedActionDecisionPolicy(_ value: String?) -> String? {
+        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
+            return nil
+        }
+        return clean == "evidence-first-safe-v1" ? clean : nil
+    }
+
+    static func allowedSelectedActionDecisionReason(_ value: String?) -> String? {
+        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
+            return nil
+        }
+        let allowed = [
+            "policy-blocked",
+            "no-action-needed",
+            "evidence-recovery",
+            "insufficient-evidence-fallback",
+            "safe-without-approval",
+            "approval-required-fallback"
+        ]
+        return allowed.contains(clean) ? clean : nil
+    }
+
+    static func allowedSelectedActionCandidateIndex(_ value: String?) -> Int? {
+        guard let count = ClawArtifactMetadataParser.intValue(value), (1...6).contains(count) else {
             return nil
         }
         return count

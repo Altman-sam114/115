@@ -2259,8 +2259,8 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(review.satisfiedSignals, ["browserTrace", "fileDiff", "commandOutput"])
         XCTAssertEqual(review.degradedSignals, ["screenObservation", "accessibilityTree"])
         XCTAssertTrue(review.missingSignals.contains("messageDraft"))
-        XCTAssertEqual(review.selectedNextActionKind, "composeMessage")
-        XCTAssertEqual(review.selectedNextActionRequiresApproval, true)
+        XCTAssertEqual(review.selectedNextActionKind, "extractData")
+        XCTAssertEqual(review.selectedNextActionRequiresApproval, false)
         XCTAssertEqual(review.nextActionPolicy, "envelope-intersection")
         XCTAssertEqual(review.nextActionPolicyDiagnostic, "allowed")
         XCTAssertEqual(review.requestedNextActionCount, 6)
@@ -2269,24 +2269,24 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(review.selectedNextActionAllowedByEnvelope, true)
         XCTAssertFalse(review.requiresNextActionPolicyReview)
         XCTAssertTrue(review.riskTags.contains("degraded-screen-observation"))
-        XCTAssertTrue(review.riskTags.contains("final-submit-gate"))
-        XCTAssertEqual(review.stopReason, "final-submit")
-        XCTAssertEqual(review.handoffStatus, "final-submit-review")
-        XCTAssertTrue(review.needsHandoffReview)
+        XCTAssertFalse(review.riskTags.contains("final-submit-gate"))
+        XCTAssertNil(review.stopReason)
+        XCTAssertEqual(review.handoffStatus, "ready-to-continue")
+        XCTAssertFalse(review.needsHandoffReview)
         XCTAssertTrue(review.isRedacted)
         XCTAssertTrue(review.compactStatus.contains("50/100"))
-        XCTAssertTrue(review.compactStatus.contains("composeMessage"))
-        XCTAssertTrue(review.compactStatus.contains("final-submit-review"))
+        XCTAssertTrue(review.compactStatus.contains("extractData"))
+        XCTAssertTrue(review.compactStatus.contains("ready-to-continue"))
 
         let continuation = store.missionRunSummary.loopContinuationSummary
-        XCTAssertEqual(continuation.title, "Loop 最终提交复核")
-        XCTAssertEqual(continuation.handoffStatus, "final-submit-review")
+        XCTAssertEqual(continuation.title, "Loop 需要证据")
+        XCTAssertEqual(continuation.handoffStatus, "ready-to-continue")
         XCTAssertEqual(continuation.readinessScore, 50)
         XCTAssertEqual(continuation.satisfiedSignalCount, 3)
         XCTAssertEqual(continuation.degradedSignalCount, 2)
         XCTAssertEqual(continuation.missingSignalCount, 1)
-        XCTAssertEqual(continuation.selectedNextActionKind, "composeMessage")
-        XCTAssertTrue(continuation.selectedNextActionRequiresApproval)
+        XCTAssertEqual(continuation.selectedNextActionKind, "extractData")
+        XCTAssertFalse(continuation.selectedNextActionRequiresApproval)
         XCTAssertEqual(continuation.focusReviewKind, "agent-trace")
         XCTAssertTrue(continuation.canFocusAgentTrace)
         XCTAssertFalse(continuation.canContinueLoop)
@@ -2314,6 +2314,12 @@ final class ClawTests: XCTestCase {
                 "effectiveNextActionCount": "2",
                 "blockedNextActionCount": "0",
                 "selectedNextActionAllowedByEnvelope": "true",
+                "selectedActionDecisionPolicy": "evidence-first-safe-v1",
+                "selectedActionDecisionReason": "safe-without-approval",
+                "selectedActionCandidateCount": "2",
+                "selectedActionCandidateOrdinal": "1",
+                "selectedActionFromCandidates": "true",
+                "selectedActionDecisionConsistent": "true",
                 "riskTags": "",
                 "stopReason": "none",
                 "handoffStatus": "ready-to-continue",
@@ -2403,6 +2409,56 @@ final class ClawTests: XCTestCase {
         XCTAssertFalse(unauthorizedSummary.loopContinuationSummary.canContinueLoop)
         XCTAssertTrue(unauthorizedSummary.loopContinuationSummary.requiresHumanAction)
 
+        var missingApprovalMetadata = artifact.metadata ?? [:]
+        missingApprovalMetadata.removeValue(forKey: "selectedNextActionRequiresApproval")
+        let missingApprovalArtifact = ClawGatewayArtifact(
+            kind: .agentTrace,
+            title: "agent-loop-missing-approval.json",
+            reference: "file:///tmp/agent-loop-missing-approval.json",
+            isRedacted: true,
+            metadata: missingApprovalMetadata
+        )
+        let missingApprovalReview = try XCTUnwrap(ClawAgentTraceReviewSummary.latest(from: [missingApprovalArtifact]))
+        XCTAssertTrue(missingApprovalReview.requiresNextActionPolicyReview)
+        var missingApprovalSummary = summary
+        missingApprovalSummary.agentTraceReview = missingApprovalReview
+        XCTAssertFalse(missingApprovalSummary.loopContinuationSummary.canContinueLoop)
+        XCTAssertTrue(missingApprovalSummary.loopContinuationSummary.requiresHumanAction)
+
+        var invalidOrdinalMetadata = artifact.metadata ?? [:]
+        invalidOrdinalMetadata["selectedActionCandidateOrdinal"] = "3"
+        let invalidOrdinalArtifact = ClawGatewayArtifact(
+            kind: .agentTrace,
+            title: "agent-loop-invalid-ordinal.json",
+            reference: "file:///tmp/agent-loop-invalid-ordinal.json",
+            isRedacted: true,
+            metadata: invalidOrdinalMetadata
+        )
+        let invalidOrdinalReview = try XCTUnwrap(ClawAgentTraceReviewSummary.latest(from: [invalidOrdinalArtifact]))
+        XCTAssertTrue(invalidOrdinalReview.requiresNextActionPolicyReview)
+
+        for (key, value) in [
+            ("selectedActionFromCandidates", "false"),
+            ("selectedActionDecisionConsistent", "false"),
+            ("selectedActionDecisionReason", "future-policy https://example.com/private"),
+            ("selectedActionCandidateCount", "3"),
+            ("handoffStatus", "blocked"),
+            ("riskTags", "final-submit-gate"),
+            ("riskTags", "insufficient-evidence")
+        ] {
+            var contradictoryDecisionMetadata = artifact.metadata ?? [:]
+            contradictoryDecisionMetadata[key] = value
+            let contradictoryDecisionArtifact = ClawGatewayArtifact(
+                kind: .agentTrace,
+                title: "agent-loop-contradictory-decision.json",
+                reference: "file:///tmp/agent-loop-contradictory-decision.json",
+                isRedacted: true,
+                metadata: contradictoryDecisionMetadata
+            )
+            let contradictoryDecisionReview = try XCTUnwrap(ClawAgentTraceReviewSummary.latest(from: [contradictoryDecisionArtifact]))
+            XCTAssertTrue(contradictoryDecisionReview.requiresNextActionPolicyReview, "\(key) should fail closed")
+        }
+
         var inconsistentMetadata = artifact.metadata ?? [:]
         inconsistentMetadata["requestedNextActionCount"] = "17"
         inconsistentMetadata["effectiveNextActionCount"] = "2"
@@ -2443,6 +2499,9 @@ final class ClawTests: XCTestCase {
         blockedMetadata["requestedNextActionCount"] = "2"
         blockedMetadata["effectiveNextActionCount"] = "0"
         blockedMetadata["blockedNextActionCount"] = "2"
+        blockedMetadata["selectedActionDecisionReason"] = "policy-blocked"
+        blockedMetadata["selectedActionCandidateCount"] = "1"
+        blockedMetadata["selectedActionCandidateOrdinal"] = "1"
         blockedMetadata["riskTags"] = "next-action-policy-blocked"
         blockedMetadata["stopReason"] = "policy-blocked"
         blockedMetadata["handoffStatus"] = "blocked"
