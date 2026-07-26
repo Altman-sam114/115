@@ -65,6 +65,7 @@ ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci-results.yml"); put
 
 - 默认不运行 `node --check`、direct smoke 或 WebSocket smoke。
 - 通过代码复核和非编译静态检查确认提交范围后，push 到 `origin/main`，由云端 workflow 覆盖 `node --check`、direct smoke 和 WebSocket smoke。
+- 浏览器网络重定向测试必须使用小型本地 HTTP fixture：direct smoke 覆盖同 host 相对跳转、5 跳边界、非法 Location/协议和跨 host 阻断；direct/WebSocket 都必须以目标 hit count 为 0 证明未授权目标未被联系，并核对 action-bound 脱敏 Browser artifact。
 
 ### Swift 核心逻辑改动
 

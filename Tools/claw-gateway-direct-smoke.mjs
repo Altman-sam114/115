@@ -2,6 +2,7 @@
 import { spawn } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
+import { createServer } from "node:http";
 import path from "node:path";
 
 const token = "smoke-token";
@@ -140,11 +141,11 @@ assertBrowserControlReviewMetadata(localBrowserControlArtifact?.metadata, {
   resultStatus: "succeeded",
   safetyFlags: ["metadata-only", "tool-arguments-omitted", "url-omitted", "search-query-omitted", "page-content-omitted", "form-fields-omitted", "candidate-labels-omitted", "artifact-payload-not-read"],
 }, "direct local browser control");
-expect(browserTraces.some((trace) => trace.mode === "network-blocked" && trace.source === "https://blocked.example/"), "missing blocked URL browser trace");
-const blockedBrowserTraceArtifact = findArtifactByTitle(dryRunEvents, "browserTrace", "browser-trace-3");
+expect(browserTraces.some((trace) => trace.mode === "browser-network-failed" && trace.networkPolicyDiagnostic === "initial-host-blocked"), "missing blocked URL browser trace");
+const blockedBrowserTraceArtifact = findArtifactByTitle(dryRunEvents, "browserTrace", "browser-network-failure-3");
 assertBrowserControlReviewMetadata(blockedBrowserTraceArtifact?.metadata, {
-  mode: "browser-control-dry-run",
-  browserControlPolicy: "dry-run",
+  mode: "browser-network-failed",
+  browserControlPolicy: "not-requested",
   browserControlRequested: true,
   openInBrowser: true,
   targetURLPresent: false,
@@ -152,12 +153,20 @@ assertBrowserControlReviewMetadata(blockedBrowserTraceArtifact?.metadata, {
   localHTMLInput: false,
   networkFetchAttempted: false,
   networkBlocked: true,
+  networkPolicyDiagnostic: "initial-host-blocked",
+  redirectPolicyChecked: true,
+  redirectCount: 0,
+  redirectBlocked: false,
+  redirectLimitExceeded: false,
+  networkFetchSucceeded: false,
   appAllowlistEnforced: false,
   hostAllowlistEnforced: false,
   executed: false,
   timedOut: false,
-  resultStatus: "succeeded",
-  safetyFlags: ["metadata-only", "tool-arguments-omitted", "url-omitted", "search-query-omitted", "page-content-omitted", "form-fields-omitted", "candidate-labels-omitted", "artifact-payload-not-read", "network-allowlist-enforced"],
+  resultStatus: "failed",
+  policyDiagnostic: "not-requested",
+  retryableReason: "none",
+  safetyFlags: ["metadata-only", "tool-arguments-omitted", "url-omitted", "search-query-omitted", "page-content-omitted", "form-fields-omitted", "candidate-labels-omitted", "artifact-payload-not-read", "network-allowlist-enforced", "redirect-policy-enforced"],
 }, "direct blocked URL browser trace");
 const extractedTrace = browserTraces.find((trace) => trace.mode === "artifact-grounded-extraction" && trace.outputPath === "notes/extracted.json");
 expect(Boolean(extractedTrace), "missing artifact-grounded extraction trace");
@@ -639,6 +648,90 @@ expect(
   "browser control snapshot should be real on macOS or unavailable off macOS",
 );
 
+const browserRedirectFixture = await startBrowserRedirectFixture();
+const browserRedirectEnvelope = makeBrowserRedirectEnvelope(token, browserRedirectFixture);
+let browserRedirectEvents;
+try {
+  browserRedirectEvents = await runEmitEvents({
+    CLAW_GATEWAY_TOKEN: token,
+    CLAW_WORKSPACE: `${workspace}-browser-redirect-policy`,
+    CLAW_ALLOW_BROWSER_NETWORK: "1",
+    CLAW_BROWSER_HOST_ALLOWLIST: "127.0.0.1",
+  }, browserRedirectEnvelope);
+} finally {
+  await browserRedirectFixture.close();
+}
+
+const redirectActions = Object.fromEntries(
+  browserRedirectEnvelope.task.actions.map((action) => [action.title, action]),
+);
+assertBrowserNetworkAction(browserRedirectEvents, redirectActions["Follow relative redirect"], {
+  eventKind: "actionCompleted",
+  networkPolicyDiagnostic: "fetch-succeeded",
+  redirectCount: 1,
+  redirectBlocked: false,
+  redirectLimitExceeded: false,
+  networkFetchSucceeded: true,
+}, "direct relative redirect");
+assertBrowserNetworkAction(browserRedirectEvents, redirectActions["Follow five redirects"], {
+  eventKind: "actionCompleted",
+  networkPolicyDiagnostic: "fetch-succeeded",
+  redirectCount: 5,
+  redirectBlocked: false,
+  redirectLimitExceeded: false,
+  networkFetchSucceeded: true,
+}, "direct five redirect boundary");
+assertBrowserNetworkAction(browserRedirectEvents, redirectActions["Block cross-host redirect"], {
+  eventKind: "actionFailed",
+  networkPolicyDiagnostic: "redirect-host-blocked",
+  redirectCount: 1,
+  redirectBlocked: true,
+  redirectLimitExceeded: false,
+  networkFetchSucceeded: false,
+}, "direct cross-host redirect");
+const directRedirectFailureArtifact = browserRedirectEvents
+  .find((event) => event.kind === "artifactStored" && event.actionID === redirectActions["Block cross-host redirect"].id)
+  ?.artifacts?.find((artifact) => artifact.kind === "browserTrace");
+expect(Boolean(directRedirectFailureArtifact), "direct cross-host redirect missing failure artifact payload");
+const directRedirectFailurePayload = await fs.readFile(new URL(directRedirectFailureArtifact.reference), "utf8");
+for (const forbidden of [browserRedirectFixture.entryURL, "localhost", "Location", token, "Authorization", "Bearer"]) {
+  expect(!directRedirectFailurePayload.includes(forbidden), `direct redirect failure artifact leaked ${forbidden}`);
+}
+expect(browserRedirectFixture.blockedTargetHits === 0, "cross-host redirect contacted the blocked target");
+assertBrowserNetworkAction(browserRedirectEvents, redirectActions["Block sixth redirect"], {
+  eventKind: "actionFailed",
+  networkPolicyDiagnostic: "redirect-limit-exceeded",
+  redirectCount: 5,
+  redirectBlocked: true,
+  redirectLimitExceeded: true,
+  networkFetchSucceeded: false,
+}, "direct redirect limit");
+assertBrowserNetworkAction(browserRedirectEvents, redirectActions["Block redirect protocol"], {
+  eventKind: "actionFailed",
+  networkPolicyDiagnostic: "redirect-protocol-blocked",
+  redirectCount: 1,
+  redirectBlocked: true,
+  redirectLimitExceeded: false,
+  networkFetchSucceeded: false,
+}, "direct redirect protocol");
+assertBrowserNetworkAction(browserRedirectEvents, redirectActions["Block invalid redirect location"], {
+  eventKind: "actionFailed",
+  networkPolicyDiagnostic: "redirect-location-invalid",
+  redirectCount: 0,
+  redirectBlocked: true,
+  redirectLimitExceeded: false,
+  networkFetchSucceeded: false,
+}, "direct invalid redirect location");
+const continuationAction = redirectActions["Continue after redirect failures"];
+expect(
+  browserRedirectEvents.some((event) =>
+    event.kind === "actionCompleted" && event.actionID === continuationAction.id && event.actionKind === "controlBrowser"
+  ),
+  "redirect policy failure prevented the later browser action",
+);
+expect(browserRedirectEvents.some((event) => event.kind === "sessionCompleted"), "redirect policy session did not complete");
+await assertArtifactsExist(browserRedirectEvents);
+
 const accessibilityPolicyEvents = await runEmitEvents({
   CLAW_GATEWAY_TOKEN: token,
   CLAW_WORKSPACE: `${workspace}-accessibility-policy`,
@@ -660,7 +753,7 @@ assertAccessibilityTreeArtifact(accessibilityPolicyArtifact, accessibilityPolicy
   label: "enabled accessibility tree",
 });
 
-console.log(`Claw Gateway direct smoke passed (${dryRunEvents.length + emptyExtractionEvents.length + pathEscapeEvents.length + writeFailureEvents.length + replayEvents.length + allowlistEvents.length + pathBypassEvents.length + relativePathEvents.length + topLevelShellCommandEvents.length + topLevelCommandLineEvents.length + conflictingShellSourceEvents.length + missingShellEvents.length + desktopPolicyEvents.length + browserPolicyEvents.length + accessibilityPolicyEvents.length} events)`);
+console.log(`Claw Gateway direct smoke passed (${dryRunEvents.length + emptyExtractionEvents.length + pathEscapeEvents.length + writeFailureEvents.length + replayEvents.length + allowlistEvents.length + pathBypassEvents.length + relativePathEvents.length + topLevelShellCommandEvents.length + topLevelCommandLineEvents.length + conflictingShellSourceEvents.length + missingShellEvents.length + desktopPolicyEvents.length + browserPolicyEvents.length + browserRedirectEvents.length + accessibilityPolicyEvents.length} events)`);
 
 async function runEmitEvents(env, input = envelope) {
   const inputPath = `/private/tmp/claw-gateway-direct-smoke-${crypto.randomUUID()}.json`;
@@ -729,6 +822,107 @@ async function runEmitEventsExpectFailure(env, input = envelope) {
   const exitCode = await new Promise((resolve) => child.on("close", resolve));
   expect(exitCode !== 0, "direct smoke expected Gateway failure");
   return { stdout, stderr };
+}
+
+async function startBrowserRedirectFixture() {
+  let blockedTargetHits = 0;
+  const blockedServer = createServer((request, response) => {
+    blockedTargetHits += 1;
+    response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    response.end("<html><head><title>Blocked target</title></head><body>blocked-target</body></html>");
+  });
+  const blockedPort = await listenHTTPServer(blockedServer, "localhost");
+
+  const entryServer = createServer((request, response) => {
+    const requestURL = new URL(request.url || "/", "http://127.0.0.1");
+    if (requestURL.pathname === "/relative-start") {
+      redirectResponse(response, "/relative-final");
+      return;
+    }
+    if (requestURL.pathname === "/relative-final") {
+      htmlResponse(response, "Relative redirect", "redirect fixture content");
+      return;
+    }
+    if (requestURL.pathname === "/cross-host") {
+      redirectResponse(response, `http://localhost:${blockedPort}/blocked-target`);
+      return;
+    }
+    const successMatch = requestURL.pathname.match(/^\/limit-success\/(\d+)$/);
+    if (successMatch) {
+      const hop = Number(successMatch[1]);
+      if (hop < 5) {
+        redirectResponse(response, `/limit-success/${hop + 1}`);
+      } else {
+        htmlResponse(response, "Five redirects", "redirect fixture content");
+      }
+      return;
+    }
+    const blockedMatch = requestURL.pathname.match(/^\/limit-blocked\/(\d+)$/);
+    if (blockedMatch) {
+      const hop = Number(blockedMatch[1]);
+      redirectResponse(response, `/limit-blocked/${hop + 1}`);
+      return;
+    }
+    if (requestURL.pathname === "/invalid-protocol") {
+      redirectResponse(response, "ftp://localhost/blocked-target");
+      return;
+    }
+    if (requestURL.pathname === "/invalid-location") {
+      redirectResponse(response, "http://[::1");
+      return;
+    }
+    response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+    response.end("not found");
+  });
+  const entryPort = await listenHTTPServer(entryServer, "127.0.0.1");
+
+  return {
+    entryURL: `http://127.0.0.1:${entryPort}`,
+    get blockedTargetHits() {
+      return blockedTargetHits;
+    },
+    async close() {
+      await Promise.all([closeHTTPServer(entryServer), closeHTTPServer(blockedServer)]);
+    },
+  };
+}
+
+async function listenHTTPServer(server, host) {
+  await new Promise((resolve, reject) => {
+    const onError = (error) => {
+      server.off("listening", onListening);
+      reject(error);
+    };
+    const onListening = () => {
+      server.off("error", onError);
+      resolve();
+    };
+    server.once("error", onError);
+    server.once("listening", onListening);
+    server.listen(0, host);
+  });
+  const address = server.address();
+  expect(address && typeof address === "object", `HTTP fixture failed to bind ${host}`);
+  return address.port;
+}
+
+async function closeHTTPServer(server) {
+  if (!server.listening) {
+    return;
+  }
+  await new Promise((resolve, reject) => {
+    server.close((error) => error ? reject(error) : resolve());
+  });
+}
+
+function redirectResponse(response, location) {
+  response.writeHead(302, { Location: location });
+  response.end();
+}
+
+function htmlResponse(response, title, body) {
+  response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  response.end(`<html><head><title>${title}</title></head><body>${body}</body></html>`);
 }
 
 function groupEventsBySession(events) {
@@ -1167,9 +1361,15 @@ function assertBrowserControlReviewMetadata(metadata, expected, label) {
     "mode",
     "networkBlocked",
     "networkFetchAttempted",
+    "networkFetchSucceeded",
+    "networkPolicyDiagnostic",
     "openAttempted",
     "openInBrowser",
     "policyDiagnostic",
+    "redirectBlocked",
+    "redirectCount",
+    "redirectLimitExceeded",
+    "redirectPolicyChecked",
     "resultStatus",
     "retryableReason",
     "safetyFlags",
@@ -1200,6 +1400,32 @@ function assertBrowserControlReviewMetadata(metadata, expected, label) {
   expect(metadata.localHTMLInput === String(expected.localHTMLInput), `${label} HTML input metadata mismatch`);
   expect(metadata.networkFetchAttempted === String(expected.networkFetchAttempted), `${label} network fetch metadata mismatch`);
   expect(metadata.networkBlocked === String(expected.networkBlocked), `${label} network block metadata mismatch`);
+  const networkPolicyDiagnostics = new Set([
+    "not-requested",
+    "fetch-succeeded",
+    "initial-host-blocked",
+    "initial-protocol-blocked",
+    "initial-credentials-blocked",
+    "redirect-host-blocked",
+    "redirect-protocol-blocked",
+    "redirect-credentials-blocked",
+    "redirect-location-invalid",
+    "redirect-limit-exceeded",
+    "fetch-timeout",
+    "http-error",
+    "network-error",
+  ]);
+  expect(networkPolicyDiagnostics.has(metadata.networkPolicyDiagnostic), `${label} network policy diagnostic metadata mismatch`);
+  expect(["true", "false"].includes(metadata.redirectPolicyChecked), `${label} redirect policy checked metadata mismatch`);
+  expect(/^\d+$/.test(metadata.redirectCount), `${label} redirect count metadata mismatch`);
+  expect(["true", "false"].includes(metadata.redirectBlocked), `${label} redirect blocked metadata mismatch`);
+  expect(["true", "false"].includes(metadata.redirectLimitExceeded), `${label} redirect limit metadata mismatch`);
+  expect(["true", "false"].includes(metadata.networkFetchSucceeded), `${label} network fetch success metadata mismatch`);
+  for (const key of ["networkPolicyDiagnostic", "redirectPolicyChecked", "redirectCount", "redirectBlocked", "redirectLimitExceeded", "networkFetchSucceeded"]) {
+    if (expected[key] !== undefined) {
+      expect(metadata[key] === String(expected[key]), `${label} ${key} metadata mismatch`);
+    }
+  }
   expect(metadata.appAllowlistEnforced === String(expected.appAllowlistEnforced), `${label} app allowlist metadata mismatch`);
   expect(metadata.hostAllowlistEnforced === String(expected.hostAllowlistEnforced), `${label} host allowlist metadata mismatch`);
   expect(metadata.appPolicyChecked === String(expectedAppPolicyChecked), `${label} app policy checked metadata mismatch`);
@@ -1226,6 +1452,83 @@ function assertBrowserControlReviewMetadata(metadata, expected, label) {
     "/sessions/",
     "stdout",
     "stderr",
+  ]) {
+    expect(!serialized.includes(forbidden), `${label} metadata leaked ${forbidden}`);
+  }
+}
+
+function assertBrowserNetworkAction(events, action, expected, label) {
+  expect(Boolean(action), `${label} missing action fixture`);
+  expect(
+    events.some((event) =>
+      event.kind === expected.eventKind && event.actionID === action.id && event.actionKind === "controlBrowser"
+    ),
+    `${label} missing ${expected.eventKind}`,
+  );
+  const artifactEvent = events.find((event) =>
+    event.kind === "artifactStored" &&
+    event.actionID === action.id &&
+    event.artifacts?.some((artifact) => artifact.kind === "browserTrace")
+  );
+  expect(Boolean(artifactEvent), `${label} missing action-bound browser artifact`);
+  const artifact = artifactEvent.artifacts.find((candidate) => candidate.kind === "browserTrace");
+  const metadata = artifact.metadata;
+  assertBrowserControlReviewMetadata(metadata, {
+    mode: expected.eventKind === "actionFailed" ? "browser-network-failed" : "browser-control-not-requested",
+    browserControlPolicy: "not-requested",
+    browserControlRequested: false,
+    openInBrowser: false,
+    openAttempted: false,
+    targetURLPresent: false,
+    searchQueryPresent: false,
+    localHTMLInput: false,
+    networkFetchAttempted: true,
+    networkBlocked: expected.eventKind === "actionFailed",
+    appAllowlistEnforced: false,
+    hostAllowlistEnforced: false,
+    appPolicyChecked: false,
+    hostPolicyChecked: false,
+    executed: false,
+    timedOut: false,
+    resultStatus: expected.eventKind === "actionFailed" ? "failed" : "skipped",
+    policyDiagnostic: "not-requested",
+    retryableReason: "none",
+    networkPolicyDiagnostic: expected.networkPolicyDiagnostic,
+    redirectPolicyChecked: true,
+    redirectCount: expected.redirectCount,
+    redirectBlocked: expected.redirectBlocked,
+    redirectLimitExceeded: expected.redirectLimitExceeded,
+    networkFetchSucceeded: expected.networkFetchSucceeded,
+    safetyFlags: [
+      "redirect-policy-enforced",
+      ...(expected.redirectBlocked ? ["redirect-policy-blocked"] : []),
+      ...(expected.redirectLimitExceeded ? ["redirect-limit-exceeded"] : []),
+    ],
+  }, label);
+  const redirectFlags = new Set(String(metadata.safetyFlags).split(","));
+  expect(redirectFlags.has("redirect-policy-enforced"), `${label} missing redirect policy safety flag`);
+  expect(
+    redirectFlags.has("redirect-policy-blocked") === expected.redirectBlocked,
+    `${label} redirect blocked safety flag mismatch`,
+  );
+  expect(
+    redirectFlags.has("redirect-limit-exceeded") === expected.redirectLimitExceeded,
+    `${label} redirect limit safety flag mismatch`,
+  );
+  const serialized = JSON.stringify(metadata);
+  for (const forbidden of [
+    "127.0.0.1",
+    "localhost",
+    "Location",
+    "relative-start",
+    "cross-host",
+    "limit-success",
+    "limit-blocked",
+    "invalid-location",
+    "blocked-target",
+    "redirect fixture content",
+    "http://",
+    "ftp://",
   ]) {
     expect(!serialized.includes(forbidden), `${label} metadata leaked ${forbidden}`);
   }
@@ -1549,6 +1852,73 @@ async function readArtifacts(events, kind) {
     parsed.push(JSON.parse(await fs.readFile(new URL(artifact.reference), "utf8")));
   }
   return parsed;
+}
+
+function makeBrowserRedirectEnvelope(rawToken, fixture) {
+  const browserAction = (title, route) => ({
+    id: crypto.randomUUID(),
+    kind: "controlBrowser",
+    title,
+    target: "Desktop Browser",
+    instruction: "Verify the structured browser redirect policy",
+    approval: "gatewayApproval",
+    sourceSurface: "clawGateway",
+    handlesSensitiveData: true,
+    inputPreview: "redirect policy smoke",
+    toolArguments: {
+      url: `${fixture.entryURL}${route}`,
+      openInBrowser: "false",
+    },
+  });
+  const actions = [
+    browserAction("Follow relative redirect", "/relative-start"),
+    browserAction("Block cross-host redirect", "/cross-host"),
+    browserAction("Follow five redirects", "/limit-success/0"),
+    browserAction("Block sixth redirect", "/limit-blocked/0"),
+    browserAction("Block redirect protocol", "/invalid-protocol"),
+    browserAction("Block invalid redirect location", "/invalid-location"),
+    {
+      id: crypto.randomUUID(),
+      kind: "controlBrowser",
+      title: "Continue after redirect failures",
+      target: "Desktop Browser",
+      instruction: "Continue the session with local structured browser input",
+      approval: "gatewayApproval",
+      sourceSurface: "clawGateway",
+      handlesSensitiveData: false,
+      inputPreview: "continuation smoke",
+      toolArguments: {
+        openInBrowser: "false",
+        html: "<html><head><title>Continuation</title></head><body>session continued</body></html>",
+      },
+    },
+  ];
+  return {
+    schemaVersion: "claw.computer.control.v1",
+    sourceApp: "Claw Controller",
+    gateway: {
+      endpoint: "ws://127.0.0.1:18789",
+      deviceName: "smoke",
+      securityMode: "mutualApproval",
+      tokenFingerprint: tokenFingerprint(rawToken),
+      allowedActionKinds: ["controlBrowser"],
+      requiresApprovalForSensitiveData: true,
+      auditEnabled: true,
+    },
+    task: {
+      id: crypto.randomUUID(),
+      command: "verify browser redirect host policy",
+      summary: "browser redirect policy smoke",
+      sourceDevice: "smoke",
+      destinationGateway: "ws://127.0.0.1:18789",
+      actions,
+      status: "sent",
+      riskScore: 72,
+      createdAt: isoNow(),
+    },
+    approvalSummary: "browser redirect policy smoke",
+    auditRequired: true,
+  };
 }
 
 function makeEnvelope(rawToken) {

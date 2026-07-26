@@ -1456,6 +1456,15 @@ function accessibilitySignalMetadata(tree) {
 
 async function controlBrowserAction(action, index, config) {
   const browserInput = await resolveBrowserInput(action, config);
+  if (browserInput.status === "failed") {
+    const artifact = await browserNetworkFailureArtifact(action, index, browserInput, config);
+    return {
+      status: "failed",
+      summary: `${action.title} browser network fetch failed (${browserInput.networkPolicyDiagnostic})`,
+      artifacts: [artifact],
+      isRetryable: browserInput.isRetryable,
+    };
+  }
   const browserControl = await browserControlArtifact(action, index, browserInput, config);
   const extracted = extractHTML(browserInput.html);
   const trace = {
@@ -1494,35 +1503,46 @@ async function resolveBrowserInput(action, config) {
   const args = action.toolArguments || {};
   if (typeof args.html === "string" && args.html.trim()) {
     return {
+      status: "succeeded",
       mode: "local-html",
       source: "toolArguments.html",
       html: args.html,
+      networkPolicyDiagnostic: "not-requested",
+      redirectPolicyChecked: false,
+      redirectCount: 0,
+      redirectBlocked: false,
+      redirectLimitExceeded: false,
+      networkFetchAttempted: false,
+      networkFetchSucceeded: false,
     };
   }
   if (typeof args.url === "string" && args.url.trim()) {
-    const url = new URL(args.url);
-    if (!["http:", "https:"].includes(url.protocol)) {
-      throw new GatewayError(400, "browser_url_protocol_blocked");
+    let initialURL;
+    try {
+      initialURL = new URL(args.url);
+    } catch {
+      return browserNetworkFailureOutcome("initial-protocol-blocked");
     }
-    if (!config.allowBrowserNetwork || !config.browserHostAllowlist.has(url.hostname)) {
-      return {
-        mode: "network-blocked",
-        source: url.toString(),
-        html: [
-          "<html><head><title>Network blocked</title></head><body>",
-          `<p>Fetch blocked for ${escapeHTML(url.hostname)}. Set CLAW_ALLOW_BROWSER_NETWORK=1 and add the host to CLAW_BROWSER_HOST_ALLOWLIST.</p>`,
-          "</body></html>",
-        ].join(""),
-      };
+    const initialDiagnostic = browserFetchURLPolicyDiagnostic(initialURL, config.browserHostAllowlist, "initial");
+    if (initialDiagnostic === "initial-protocol-blocked" || initialDiagnostic === "initial-credentials-blocked") {
+      return browserNetworkFailureOutcome(initialDiagnostic);
     }
-    const response = await fetchWithTimeout(url.toString(), 12000);
+    if (!config.allowBrowserNetwork || initialDiagnostic === "initial-host-blocked") {
+      return browserNetworkFailureOutcome("initial-host-blocked");
+    }
+    const response = await fetchWithTimeout(
+      initialURL.toString(),
+      12000,
+      config.browserHostAllowlist,
+    );
     return {
-      mode: "network-fetch",
-      source: url.toString(),
-      html: response,
+      ...response,
+      mode: response.status === "succeeded" ? "network-fetch" : "network-blocked",
+      source: initialURL.toString(),
     };
   }
   return {
+    status: "succeeded",
     mode: "dry-run",
     source: "empty-browser-input",
     html: [
@@ -1530,6 +1550,65 @@ async function resolveBrowserInput(action, config) {
       `<p>${escapeHTML(action.instruction)}</p>`,
       "</body></html>",
     ].join(""),
+    networkPolicyDiagnostic: "not-requested",
+    redirectPolicyChecked: false,
+    redirectCount: 0,
+    redirectBlocked: false,
+    redirectLimitExceeded: false,
+    networkFetchAttempted: false,
+    networkFetchSucceeded: false,
+  };
+}
+
+async function browserNetworkFailureArtifact(action, index, browserInput, config) {
+  const plan = makeBrowserControlPlan(action, action.toolArguments || {}, browserInput);
+  const metadata = browserControlReviewMetadata(action, browserInput, plan, {
+    mode: "browser-network-failed",
+    browserControlPolicy: "not-requested",
+    policyDiagnostic: "not-requested",
+    retryableReason: browserInput.isRetryable ? "retry-network-fetch" : "none",
+    openAttempted: false,
+    appPolicyChecked: false,
+    hostPolicyChecked: false,
+    executed: false,
+    timedOut: browserInput.networkPolicyDiagnostic === "fetch-timeout",
+    resultStatus: "failed",
+  });
+  const payload = {
+    mode: "browser-network-failed",
+    networkPolicyDiagnostic: browserInput.networkPolicyDiagnostic,
+    redirectPolicyChecked: browserInput.redirectPolicyChecked,
+    redirectCount: browserInput.redirectCount,
+    redirectBlocked: browserInput.redirectBlocked,
+    redirectLimitExceeded: browserInput.redirectLimitExceeded,
+    networkFetchSucceeded: false,
+    note: "Browser network input failed closed before content extraction or desktop browser control.",
+  };
+  return writeArtifact(
+    "browserTrace",
+    `browser-network-failure-${index + 1}.json`,
+    payload,
+    true,
+    config,
+    metadata,
+  );
+}
+
+function browserNetworkFailureOutcome(networkPolicyDiagnostic, isRetryable = false) {
+  return {
+    status: "failed",
+    mode: "network-blocked",
+    source: "toolArguments.url",
+    html: "",
+    networkPolicyDiagnostic,
+    redirectPolicyChecked: true,
+    redirectCount: 0,
+    redirectBlocked: false,
+    redirectLimitExceeded: false,
+    networkPolicyBlocked: true,
+    networkFetchAttempted: false,
+    networkFetchSucceeded: false,
+    isRetryable,
   };
 }
 
@@ -1554,6 +1633,13 @@ function browserControlReviewMetadata(action, browserInput, plan, details = {}) 
   ];
   if (networkInputPresent) {
     safetyFlags.push("network-allowlist-enforced");
+    safetyFlags.push("redirect-policy-enforced");
+  }
+  if (browserInput?.redirectBlocked) {
+    safetyFlags.push("redirect-policy-blocked");
+  }
+  if (browserInput?.redirectLimitExceeded) {
+    safetyFlags.push("redirect-limit-exceeded");
   }
   if (appAllowlistEnforced) {
     safetyFlags.push("browser-app-allowlist-enforced");
@@ -1574,8 +1660,14 @@ function browserControlReviewMetadata(action, browserInput, plan, details = {}) 
     targetURLPresent,
     searchQueryPresent,
     localHTMLInput: browserInput?.mode === "local-html",
-    networkFetchAttempted: browserInput?.mode === "network-fetch",
-    networkBlocked: browserInput?.mode === "network-blocked" || details.mode === "browser-control-host-blocked",
+    networkPolicyDiagnostic: browserInput?.networkPolicyDiagnostic || "not-requested",
+    redirectPolicyChecked: Boolean(browserInput?.redirectPolicyChecked),
+    redirectCount: Number(browserInput?.redirectCount || 0),
+    redirectBlocked: Boolean(browserInput?.redirectBlocked),
+    redirectLimitExceeded: Boolean(browserInput?.redirectLimitExceeded),
+    networkFetchAttempted: Boolean(browserInput?.networkFetchAttempted),
+    networkFetchSucceeded: Boolean(browserInput?.networkFetchSucceeded),
+    networkBlocked: Boolean(browserInput?.networkPolicyBlocked) || details.mode === "browser-control-host-blocked",
     appAllowlistEnforced,
     hostAllowlistEnforced,
     appPolicyChecked: Boolean(details.appPolicyChecked),
@@ -1845,24 +1937,132 @@ async function runBrowserAutomation(plan, workspace) {
   return runProcess("/usr/bin/osascript", ["-e", script], workspace, 12000);
 }
 
-async function fetchWithTimeout(url, timeoutMs) {
+async function fetchWithTimeout(rawURL, timeoutMs, hostAllowlist) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const redirectStatuses = new Set([301, 302, 303, 307, 308]);
+  const maximumRedirects = 5;
+  let redirectCount = 0;
+  let networkFetchAttempted = false;
+
+  const outcome = (status, networkPolicyDiagnostic, options = {}) => ({
+    status,
+    html: options.html || "",
+    networkPolicyDiagnostic,
+    redirectPolicyChecked: true,
+    redirectCount,
+    redirectBlocked: Boolean(options.redirectBlocked),
+    redirectLimitExceeded: networkPolicyDiagnostic === "redirect-limit-exceeded",
+    networkPolicyBlocked: Boolean(options.networkPolicyBlocked),
+    networkFetchAttempted,
+    networkFetchSucceeded: status === "succeeded",
+    isRetryable: Boolean(options.isRetryable),
+  });
+
+  let currentURL;
   try {
-    const response = await fetch(url, {
-      signal: controller.signal,
-      redirect: "follow",
-      headers: {
-        "User-Agent": "ClawGatewayPrototype/0.1",
-      },
-    });
-    if (!response.ok) {
-      throw new GatewayError(502, `browser_fetch_http_${response.status}`);
+    try {
+      currentURL = new URL(rawURL);
+    } catch {
+      return outcome("failed", "initial-protocol-blocked", { networkPolicyBlocked: true });
     }
-    return await response.text();
+
+    const initialDiagnostic = browserFetchURLPolicyDiagnostic(currentURL, hostAllowlist, "initial");
+    if (initialDiagnostic) {
+      return outcome("failed", initialDiagnostic, { networkPolicyBlocked: true });
+    }
+
+    while (true) {
+      let response;
+      try {
+        networkFetchAttempted = true;
+        response = await fetch(currentURL.toString(), {
+          signal: controller.signal,
+          redirect: "manual",
+          headers: {
+            "User-Agent": "ClawGatewayPrototype/0.1",
+          },
+        });
+      } catch {
+        return controller.signal.aborted
+          ? outcome("failed", "fetch-timeout", { isRetryable: true })
+          : outcome("failed", "network-error", { isRetryable: true });
+      }
+
+      if (controller.signal.aborted) {
+        await response.body?.cancel().catch(() => {});
+        return outcome("failed", "fetch-timeout", { isRetryable: true });
+      }
+
+      if (redirectStatuses.has(response.status)) {
+        if (redirectCount >= maximumRedirects) {
+          await response.body?.cancel().catch(() => {});
+          return outcome("failed", "redirect-limit-exceeded", {
+            redirectBlocked: true,
+            networkPolicyBlocked: true,
+          });
+        }
+
+        const location = response.headers.get("location");
+        let nextURL;
+        try {
+          if (!location) {
+            throw new TypeError("missing redirect location");
+          }
+          nextURL = new URL(location, currentURL);
+        } catch {
+          await response.body?.cancel().catch(() => {});
+          return outcome("failed", "redirect-location-invalid", {
+            redirectBlocked: true,
+            networkPolicyBlocked: true,
+          });
+        }
+
+        redirectCount += 1;
+        const redirectDiagnostic = browserFetchURLPolicyDiagnostic(nextURL, hostAllowlist, "redirect");
+        if (redirectDiagnostic) {
+          await response.body?.cancel().catch(() => {});
+          return outcome("failed", redirectDiagnostic, {
+            redirectBlocked: true,
+            networkPolicyBlocked: true,
+          });
+        }
+
+        await response.body?.cancel().catch(() => {});
+        currentURL = nextURL;
+        continue;
+      }
+
+      if (!response.ok) {
+        await response.body?.cancel().catch(() => {});
+        return outcome("failed", "http-error", { isRetryable: response.status >= 500 });
+      }
+
+      try {
+        const html = await response.text();
+        return outcome("succeeded", "fetch-succeeded", { html });
+      } catch {
+        return controller.signal.aborted
+          ? outcome("failed", "fetch-timeout", { isRetryable: true })
+          : outcome("failed", "network-error", { isRetryable: true });
+      }
+    }
   } finally {
     clearTimeout(timer);
   }
+}
+
+function browserFetchURLPolicyDiagnostic(url, hostAllowlist, phase) {
+  if (!["http:", "https:"].includes(url.protocol)) {
+    return `${phase}-protocol-blocked`;
+  }
+  if (url.username || url.password) {
+    return `${phase}-credentials-blocked`;
+  }
+  if (!allowlistContains(hostAllowlist, url.hostname)) {
+    return `${phase}-host-blocked`;
+  }
+  return "";
 }
 
 function extractHTML(html) {

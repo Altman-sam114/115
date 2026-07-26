@@ -1670,6 +1670,13 @@ enum LogicSmoke {
             expect(browserReview.appPolicyChecked == false, "browser control review should expose app policy checked state")
             expect(browserReview.hostPolicyChecked == false, "browser control review should expose host policy checked state")
             expect(browserReview.networkBlocked == false, "browser control review should expose network block state")
+            expect(browserReview.networkFetchSucceeded == false, "browser control review should expose network fetch success")
+            expect(browserReview.networkPolicyDiagnostic == "not-requested", "browser control review should expose network policy diagnostic")
+            expect(browserReview.networkPolicyDiagnosticRejected == false, "browser control review should accept fixed network diagnostic")
+            expect(browserReview.redirectPolicyChecked == false, "browser control review should expose redirect policy state")
+            expect(browserReview.redirectCount == 0, "browser control review should expose redirect count")
+            expect(browserReview.redirectBlocked == false, "browser control review should expose redirect block state")
+            expect(browserReview.redirectLimitExceeded == false, "browser control review should expose redirect limit state")
             expect(browserReview.resultStatus == "succeeded", "browser control review should expose result status")
             expect(browserReview.requiresPolicyReview == false, "browser control review should not require review for dry-run metadata")
             expect(browserReview.safetyFlags.contains("url-omitted"), "browser control review should omit URL")
@@ -2417,6 +2424,62 @@ enum LogicSmoke {
             failures.append("sensitive extraction review should be derived")
         }
 
+        let redirectBlockedBrowserControl = ClawGatewayArtifact(
+            kind: .browserTrace,
+            title: "browser-trace-redirect-blocked.json",
+            reference: "file:///tmp/browser-trace-redirect-blocked.json",
+            isRedacted: true,
+            metadata: [
+                "browserReview": "controlPlan",
+                "mode": "browser-control-dry-run",
+                "actionKind": "controlBrowser",
+                "browserControlPolicy": "dry-run",
+                "policyDiagnostic": "dry-run",
+                "retryableReason": "enable-browser-control",
+                "networkFetchAttempted": "true",
+                "networkFetchSucceeded": "false",
+                "networkBlocked": "true",
+                "networkPolicyDiagnostic": "redirect-host-blocked",
+                "redirectPolicyChecked": "true",
+                "redirectCount": "1",
+                "redirectBlocked": "true",
+                "redirectLimitExceeded": "false",
+                "resultStatus": "failed",
+                "safetyFlags": "metadata-only,network-allowlist-enforced,redirect-policy-enforced,redirect-policy-blocked,url-omitted"
+            ]
+        )
+        if let redirectReview = ClawGatewayBrowserControlReviewSummary.latest(from: [redirectBlockedBrowserControl]) {
+            expect(redirectReview.networkPolicyDiagnostic == "redirect-host-blocked", "browser redirect review should expose fixed diagnostic")
+            expect(redirectReview.redirectPolicyChecked == true, "browser redirect review should expose policy check")
+            expect(redirectReview.redirectCount == 1, "browser redirect review should expose bounded count")
+            expect(redirectReview.redirectBlocked == true, "browser redirect review should expose redirect block")
+            expect(redirectReview.redirectLimitExceeded == false, "browser redirect review should expose redirect limit state")
+            expect(redirectReview.requiresPolicyReview, "browser redirect block should require policy review")
+            expect(redirectReview.safetyFlags.contains("redirect-policy-blocked"), "browser redirect review should expose block safety flag")
+        } else {
+            failures.append("redirect-blocked browser control review should be derived")
+        }
+
+        var unsafeSucceededNetworkMetadata = redirectBlockedBrowserControl.metadata ?? [:]
+        unsafeSucceededNetworkMetadata["networkPolicyDiagnostic"] = "future-success https://example.com/private"
+        unsafeSucceededNetworkMetadata["networkBlocked"] = "false"
+        unsafeSucceededNetworkMetadata["redirectBlocked"] = "false"
+        unsafeSucceededNetworkMetadata["resultStatus"] = "succeeded"
+        let unsafeSucceededNetworkArtifact = ClawGatewayArtifact(
+            kind: .browserTrace,
+            title: "browser-trace-unsafe-network-diagnostic.json",
+            reference: "file:///tmp/browser-trace-unsafe-network-diagnostic.json",
+            isRedacted: true,
+            metadata: unsafeSucceededNetworkMetadata
+        )
+        if let unsafeSucceededNetworkReview = ClawGatewayBrowserControlReviewSummary.latest(from: [unsafeSucceededNetworkArtifact]) {
+            expect(unsafeSucceededNetworkReview.networkPolicyDiagnostic == nil, "browser review should reject future unsafe network diagnostic")
+            expect(unsafeSucceededNetworkReview.networkPolicyDiagnosticRejected, "browser review should mark rejected network diagnostic")
+            expect(unsafeSucceededNetworkReview.requiresPolicyReview, "rejected network diagnostic should fail closed even when result says succeeded")
+        } else {
+            failures.append("unsafe succeeded browser network review should be derived")
+        }
+
         let sensitiveBrowserControl = ClawGatewayArtifact(
             kind: .screenshot,
             title: "browser-control file:///private/tmp/browser.json https://example.com/private?q=secret",
@@ -2436,7 +2499,13 @@ enum LogicSmoke {
                 "searchQueryPresent": "true",
                 "localHTMLInput": "true",
                 "networkFetchAttempted": "true",
+                "networkFetchSucceeded": "false",
                 "networkBlocked": "true",
+                "networkPolicyDiagnostic": "redirect-host-blocked https://example.com/private",
+                "redirectPolicyChecked": "true",
+                "redirectCount": "99",
+                "redirectBlocked": "true",
+                "redirectLimitExceeded": "false",
                 "appAllowlistEnforced": "true",
                 "hostAllowlistEnforced": "true",
                 "appPolicyChecked": "true",
@@ -2457,6 +2526,7 @@ enum LogicSmoke {
                 sensitiveBrowserReview.browserControlPolicy ?? "",
                 sensitiveBrowserReview.policyDiagnostic ?? "",
                 sensitiveBrowserReview.retryableReason ?? "",
+                sensitiveBrowserReview.networkPolicyDiagnostic ?? "",
                 sensitiveBrowserReview.resultStatus ?? "",
                 sensitiveBrowserReview.safetyFlags.joined(separator: " ")
             ].joined(separator: " ")
@@ -2466,6 +2536,9 @@ enum LogicSmoke {
             expect(sensitiveBrowserReview.browserControlPolicy == nil, "browser control review should reject unsafe policy")
             expect(sensitiveBrowserReview.policyDiagnostic == nil, "browser control review should reject unsafe diagnostic")
             expect(sensitiveBrowserReview.retryableReason == nil, "browser control review should reject unsafe retry reason")
+            expect(sensitiveBrowserReview.networkPolicyDiagnostic == nil, "browser control review should reject unsafe network diagnostic")
+            expect(sensitiveBrowserReview.networkPolicyDiagnosticRejected, "browser control review should flag rejected network diagnostic")
+            expect(sensitiveBrowserReview.redirectCount == nil, "browser control review should reject out-of-range redirect count")
             expect(sensitiveBrowserReview.resultStatus == nil, "browser control review should reject unsafe result")
             expect(sensitiveBrowserReview.openAttempted == false, "browser control review should keep open attempt boolean")
             expect(sensitiveBrowserReview.appPolicyChecked == true, "browser control review should keep app policy boolean")

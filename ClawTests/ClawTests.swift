@@ -442,7 +442,14 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(review.targetURLPresent, true)
         XCTAssertEqual(review.searchQueryPresent, true)
         XCTAssertEqual(review.networkFetchAttempted, false)
+        XCTAssertEqual(review.networkFetchSucceeded, false)
         XCTAssertEqual(review.networkBlocked, false)
+        XCTAssertEqual(review.networkPolicyDiagnostic, "not-requested")
+        XCTAssertFalse(review.networkPolicyDiagnosticRejected)
+        XCTAssertEqual(review.redirectPolicyChecked, false)
+        XCTAssertEqual(review.redirectCount, 0)
+        XCTAssertEqual(review.redirectBlocked, false)
+        XCTAssertEqual(review.redirectLimitExceeded, false)
         XCTAssertEqual(review.appPolicyChecked, false)
         XCTAssertEqual(review.hostPolicyChecked, false)
         XCTAssertEqual(review.resultStatus, "succeeded")
@@ -453,6 +460,7 @@ final class ClawTests: XCTestCase {
         XCTAssertTrue(review.safetyFlags.contains("tool-arguments-omitted"))
         XCTAssertTrue(review.compactStatus.contains("policy dry-run"))
         XCTAssertTrue(review.compactStatus.contains("diagnostic dry-run"))
+        XCTAssertTrue(review.compactStatus.contains("network not-requested"))
 
         let browserResult = try XCTUnwrap(store.clawGatewaySessions.first?.results.first { $0.actionKind == .controlBrowser })
         let browserReview = try XCTUnwrap(ClawGatewayBrowserControlReviewSummary.latest(from: browserResult.artifacts))
@@ -2706,7 +2714,13 @@ final class ClawTests: XCTestCase {
                 "searchQueryPresent": "true",
                 "localHTMLInput": "true",
                 "networkFetchAttempted": "true",
+                "networkFetchSucceeded": "false",
                 "networkBlocked": "true",
+                "networkPolicyDiagnostic": "redirect-host-blocked https://example.com/private",
+                "redirectPolicyChecked": "true",
+                "redirectCount": "99",
+                "redirectBlocked": "true",
+                "redirectLimitExceeded": "false",
                 "appAllowlistEnforced": "true",
                 "hostAllowlistEnforced": "true",
                 "appPolicyChecked": "true",
@@ -2728,6 +2742,7 @@ final class ClawTests: XCTestCase {
             review.browserControlPolicy ?? "",
             review.policyDiagnostic ?? "",
             review.retryableReason ?? "",
+            review.networkPolicyDiagnostic ?? "",
             review.resultStatus ?? "",
             review.safetyFlags.joined(separator: " ")
         ].joined(separator: " ")
@@ -2738,6 +2753,9 @@ final class ClawTests: XCTestCase {
         XCTAssertNil(review.browserControlPolicy)
         XCTAssertNil(review.policyDiagnostic)
         XCTAssertNil(review.retryableReason)
+        XCTAssertNil(review.networkPolicyDiagnostic)
+        XCTAssertTrue(review.networkPolicyDiagnosticRejected)
+        XCTAssertNil(review.redirectCount)
         XCTAssertNil(review.resultStatus)
         XCTAssertEqual(review.browserControlRequested, true)
         XCTAssertEqual(review.openInBrowser, true)
@@ -2746,7 +2764,11 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(review.searchQueryPresent, true)
         XCTAssertEqual(review.localHTMLInput, true)
         XCTAssertEqual(review.networkFetchAttempted, true)
+        XCTAssertEqual(review.networkFetchSucceeded, false)
         XCTAssertEqual(review.networkBlocked, true)
+        XCTAssertEqual(review.redirectPolicyChecked, true)
+        XCTAssertEqual(review.redirectBlocked, true)
+        XCTAssertEqual(review.redirectLimitExceeded, false)
         XCTAssertEqual(review.appAllowlistEnforced, true)
         XCTAssertEqual(review.hostAllowlistEnforced, true)
         XCTAssertEqual(review.appPolicyChecked, true)
@@ -2767,6 +2789,63 @@ final class ClawTests: XCTestCase {
         XCTAssertFalse(visibleText.contains("secret"))
         XCTAssertFalse(visibleText.contains("<input"))
         XCTAssertFalse(visibleText.contains("candidateLabel"))
+    }
+
+    func testBrowserControlReviewParsesRedirectPolicyBlock() throws {
+        let artifact = ClawGatewayArtifact(
+            kind: .browserTrace,
+            title: "browser-trace-redirect-blocked.json",
+            reference: "file:///tmp/browser-trace-redirect-blocked.json",
+            isRedacted: true,
+            metadata: [
+                "browserReview": "controlPlan",
+                "mode": "browser-control-dry-run",
+                "actionKind": "controlBrowser",
+                "browserControlPolicy": "dry-run",
+                "policyDiagnostic": "dry-run",
+                "retryableReason": "enable-browser-control",
+                "browserControlRequested": "true",
+                "networkFetchAttempted": "true",
+                "networkFetchSucceeded": "false",
+                "networkBlocked": "true",
+                "networkPolicyDiagnostic": "redirect-host-blocked",
+                "redirectPolicyChecked": "true",
+                "redirectCount": "1",
+                "redirectBlocked": "true",
+                "redirectLimitExceeded": "false",
+                "resultStatus": "failed",
+                "safetyFlags": "metadata-only,network-allowlist-enforced,redirect-policy-enforced,redirect-policy-blocked,url-omitted"
+            ]
+        )
+
+        let review = try XCTUnwrap(ClawGatewayBrowserControlReviewSummary.latest(from: [artifact]))
+        XCTAssertEqual(review.networkPolicyDiagnostic, "redirect-host-blocked")
+        XCTAssertEqual(review.networkFetchSucceeded, false)
+        XCTAssertEqual(review.redirectPolicyChecked, true)
+        XCTAssertEqual(review.redirectCount, 1)
+        XCTAssertEqual(review.redirectBlocked, true)
+        XCTAssertEqual(review.redirectLimitExceeded, false)
+        XCTAssertTrue(review.requiresPolicyReview)
+        XCTAssertTrue(review.safetyFlags.contains("redirect-policy-enforced"))
+        XCTAssertTrue(review.safetyFlags.contains("redirect-policy-blocked"))
+        XCTAssertTrue(review.compactStatus.contains("network redirect-host-blocked"))
+
+        var unsafeMetadata = artifact.metadata ?? [:]
+        unsafeMetadata["networkPolicyDiagnostic"] = "future-success https://example.com/private"
+        unsafeMetadata["networkBlocked"] = "false"
+        unsafeMetadata["redirectBlocked"] = "false"
+        unsafeMetadata["resultStatus"] = "succeeded"
+        let unsafeSucceededArtifact = ClawGatewayArtifact(
+            kind: .browserTrace,
+            title: "browser-trace-unsafe-network-diagnostic.json",
+            reference: "file:///tmp/browser-trace-unsafe-network-diagnostic.json",
+            isRedacted: true,
+            metadata: unsafeMetadata
+        )
+        let unsafeReview = try XCTUnwrap(ClawGatewayBrowserControlReviewSummary.latest(from: [unsafeSucceededArtifact]))
+        XCTAssertNil(unsafeReview.networkPolicyDiagnostic)
+        XCTAssertTrue(unsafeReview.networkPolicyDiagnosticRejected)
+        XCTAssertTrue(unsafeReview.requiresPolicyReview)
     }
 
     func testDeliverySafetyReviewFallsBackAndRedactsSensitiveMetadata() throws {

@@ -5780,7 +5780,7 @@ struct ClawGatewayBrowserControlReviewRow: View {
         guard review.hasMetadata else {
             return .secondary
         }
-        return review.networkBlocked == true || review.resultStatus == "failed" ? .orange : .blue
+        return review.networkBlocked == true || review.redirectBlocked == true || review.redirectLimitExceeded == true || review.resultStatus == "failed" ? .orange : .blue
     }
 
     private var statusChips: [(text: String, icon: String, tint: Color)] {
@@ -5799,6 +5799,12 @@ struct ClawGatewayBrowserControlReviewRow: View {
         }
         if let policyDiagnostic = review.policyDiagnostic {
             items.append(("diagnostic \(policyDiagnostic)", diagnosticIcon(for: policyDiagnostic), diagnosticTint(for: policyDiagnostic)))
+        }
+        if let networkPolicyDiagnostic = review.networkPolicyDiagnostic {
+            let needsReview = !["not-requested", "fetch-succeeded"].contains(networkPolicyDiagnostic)
+            items.append(("network \(networkPolicyDiagnostic)", needsReview ? "exclamationmark.triangle.fill" : "checkmark.shield.fill", needsReview ? .orange : .green))
+        } else if review.networkPolicyDiagnosticRejected {
+            items.append(("network metadata 待复核", "exclamationmark.triangle.fill", .orange))
         }
         if items.isEmpty {
             items.append(("metadata 待同步", "hourglass", .secondary))
@@ -5837,6 +5843,10 @@ struct ClawGatewayBrowserControlReviewRow: View {
         if let networkFetchAttempted = review.networkFetchAttempted {
             items.append((networkFetchAttempted ? "network fetch" : "network 未取回", "network", networkFetchAttempted ? .blue : .secondary))
         }
+        if let networkFetchSucceeded = review.networkFetchSucceeded,
+           review.networkFetchAttempted == true || review.networkPolicyDiagnostic.map({ $0 != "not-requested" }) == true {
+            items.append((networkFetchSucceeded ? "fetch succeeded" : "fetch 未成功", networkFetchSucceeded ? "checkmark.circle.fill" : "xmark.circle.fill", networkFetchSucceeded ? .green : .orange))
+        }
         if let networkBlocked = review.networkBlocked {
             items.append((networkBlocked ? "network blocked" : "network 未阻断", networkBlocked ? "lock.fill" : "checkmark.circle.fill", networkBlocked ? .orange : .green))
         }
@@ -5851,6 +5861,18 @@ struct ClawGatewayBrowserControlReviewRow: View {
         }
         if let hostPolicyChecked = review.hostPolicyChecked {
             items.append((hostPolicyChecked ? "host policy checked" : "host policy 未检查", "network.badge.shield.half.filled", hostPolicyChecked ? .blue : .secondary))
+        }
+        if let redirectPolicyChecked = review.redirectPolicyChecked {
+            items.append((redirectPolicyChecked ? "redirect policy checked" : "redirect policy 未检查", "arrow.triangle.branch", redirectPolicyChecked ? .blue : .secondary))
+        }
+        if let redirectCount = review.redirectCount {
+            items.append(("redirect \(redirectCount)", "arrow.turn.down.right", .blue))
+        }
+        if review.redirectBlocked == true {
+            items.append(("redirect blocked", "lock.fill", .orange))
+        }
+        if review.redirectLimitExceeded == true {
+            items.append(("redirect limit", "exclamationmark.triangle.fill", .orange))
         }
         if let openAttempted = review.openAttempted {
             items.append((openAttempted ? "已尝试打开" : "未尝试打开", openAttempted ? "play.circle.fill" : "pause.circle.fill", openAttempted ? .green : .secondary))

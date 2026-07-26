@@ -2,6 +2,7 @@
 import { spawn } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
+import http from "node:http";
 import net from "node:net";
 import path from "node:path";
 
@@ -539,7 +540,158 @@ await fs.access(shellProvenanceMarker).then(
   (error) => expect(error?.code === "ENOENT", "websocket shell provenance marker check failed unexpectedly"),
 );
 
-console.log(`Claw Gateway smoke passed (${events.length + firstReplayEvents.length + replayGuardEvents.length + shellIdentityEvents.length + shellProvenanceEvents.length} events)`);
+const browserRedirectPort = port + 4;
+const redirectCanary = `redirect-${crypto.randomUUID()}`;
+let redirectTargetHits = 0;
+const redirectTargetServer = http.createServer((_request, response) => {
+  redirectTargetHits += 1;
+  response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  response.end("<html><head><title>Redirect target reached</title></head></html>");
+});
+const redirectTargetAddress = await listenHTTPServer(redirectTargetServer, "localhost");
+const redirectEntryServer = http.createServer((_request, response) => {
+  response.writeHead(302, {
+    Location: `http://localhost:${redirectTargetAddress.port}/${redirectCanary}`,
+  });
+  response.end();
+});
+const redirectEntryAddress = await listenHTTPServer(redirectEntryServer, host);
+const browserRedirectServer = spawn(
+  process.execPath,
+  ["Tools/claw-gateway-server.mjs", "--once"],
+  {
+    env: {
+      ...process.env,
+      ...gatewayPolicyDefaults(),
+      CLAW_GATEWAY_HOST: host,
+      CLAW_GATEWAY_PORT: String(browserRedirectPort),
+      CLAW_GATEWAY_TOKEN: token,
+      CLAW_WORKSPACE: ".build/claw-gateway-websocket-browser-redirect",
+      CLAW_ALLOW_BROWSER_NETWORK: "1",
+      CLAW_BROWSER_HOST_ALLOWLIST: host,
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  },
+);
+let browserRedirectServerOutput = "";
+browserRedirectServer.stdout.on("data", (chunk) => {
+  browserRedirectServerOutput += chunk.toString("utf8");
+});
+browserRedirectServer.stderr.on("data", (chunk) => {
+  browserRedirectServerOutput += chunk.toString("utf8");
+});
+const browserRedirectEnvelope = makeEnvelope(token, browserRedirectPort);
+browserRedirectEnvelope.gateway.allowedActionKinds = ["controlBrowser"];
+browserRedirectEnvelope.task.command = "verify websocket browser redirect host policy";
+browserRedirectEnvelope.task.summary = "websocket browser redirect host policy smoke";
+const browserTemplateAction = browserRedirectEnvelope.task.actions.find((action) => action.kind === "controlBrowser");
+const redirectBlockedActionID = crypto.randomUUID();
+const redirectFollowUpActionID = crypto.randomUUID();
+browserRedirectEnvelope.task.actions = [
+  {
+    ...browserTemplateAction,
+    id: redirectBlockedActionID,
+    title: "Block cross-host browser redirect",
+    instruction: "Fetch an allowed URL without crossing the host allowlist",
+    toolArguments: {
+      browserGoal: "verify redirect host policy",
+      captureTrace: "true",
+      url: `http://${host}:${redirectEntryAddress.port}/start`,
+    },
+  },
+  {
+    ...browserTemplateAction,
+    id: redirectFollowUpActionID,
+    title: "Continue after blocked browser redirect",
+    instruction: "Process local HTML after the redirect policy failure",
+    toolArguments: {
+      browserGoal: "verify session continuity",
+      captureTrace: "true",
+      html: "<html><head><title>Redirect recovery</title></head><body>continued</body></html>",
+    },
+  },
+];
+let browserRedirectEvents = [];
+try {
+  await waitFor(
+    () => browserRedirectServerOutput.includes("Claw Gateway listening"),
+    3000,
+    () => browserRedirectServerOutput,
+  );
+  browserRedirectEvents = await connectAndCollectEvents({
+    host,
+    port: browserRedirectPort,
+    token,
+    envelope: browserRedirectEnvelope,
+  });
+} finally {
+  browserRedirectServer.kill();
+  await Promise.all([
+    closeHTTPServer(redirectEntryServer),
+    closeHTTPServer(redirectTargetServer),
+  ]);
+}
+expect(redirectTargetHits === 0, "websocket cross-host redirect contacted the blocked target");
+const redirectFailureEvent = browserRedirectEvents.find((event) =>
+  event.kind === "actionFailed" && event.actionID === redirectBlockedActionID && event.actionKind === "controlBrowser"
+);
+expect(Boolean(redirectFailureEvent), "websocket cross-host redirect should produce an action-bound failure");
+const redirectFailureArtifactEvent = browserRedirectEvents.find((event) =>
+  event.kind === "artifactStored" &&
+  event.actionID === redirectBlockedActionID &&
+  event.artifacts?.some((artifact) => artifact.kind === "browserTrace")
+);
+const redirectFailureArtifact = redirectFailureArtifactEvent?.artifacts?.find((artifact) => artifact.kind === "browserTrace");
+expect(Boolean(redirectFailureArtifact), "websocket cross-host redirect failure missing action-bound browser artifact");
+assertBrowserControlReviewMetadata(redirectFailureArtifact.metadata, {
+  mode: "browser-network-failed",
+  browserControlPolicy: "not-requested",
+  browserControlRequested: false,
+  openInBrowser: false,
+  targetURLPresent: false,
+  searchQueryPresent: false,
+  localHTMLInput: false,
+  networkFetchAttempted: true,
+  networkBlocked: true,
+  networkPolicyDiagnostic: "redirect-host-blocked",
+  redirectPolicyChecked: true,
+  redirectCount: 1,
+  redirectBlocked: true,
+  redirectLimitExceeded: false,
+  networkFetchSucceeded: false,
+  appAllowlistEnforced: false,
+  hostAllowlistEnforced: false,
+  policyDiagnostic: "not-requested",
+  retryableReason: "none",
+  executed: false,
+  timedOut: false,
+  resultStatus: "failed",
+  safetyFlags: ["metadata-only", "network-allowlist-enforced", "redirect-policy-enforced", "redirect-policy-blocked"],
+}, "websocket cross-host browser redirect");
+const redirectFailurePayload = await fs.readFile(new URL(redirectFailureArtifact.reference), "utf8");
+expect(
+  browserRedirectEvents.some((event) =>
+    event.kind === "actionCompleted" && event.actionID === redirectFollowUpActionID && event.actionKind === "controlBrowser"
+  ),
+  "websocket redirect policy failure should not block the following action",
+);
+expect(browserRedirectEvents.some((event) => event.kind === "sessionCompleted"), "websocket redirect policy session should complete");
+const serializedBrowserRedirectEvents = JSON.stringify(browserRedirectEvents);
+for (const forbidden of [
+  redirectCanary,
+  `http://${host}:${redirectEntryAddress.port}/start`,
+  `http://localhost:${redirectTargetAddress.port}/${redirectCanary}`,
+  "localhost",
+  "Location",
+  token,
+  "Authorization",
+  "Bearer",
+]) {
+  expect(!serializedBrowserRedirectEvents.includes(forbidden), `websocket redirect events leaked ${forbidden}`);
+  expect(!redirectFailurePayload.includes(forbidden), `websocket redirect failure artifact leaked ${forbidden}`);
+}
+
+console.log(`Claw Gateway smoke passed (${events.length + firstReplayEvents.length + replayGuardEvents.length + shellIdentityEvents.length + shellProvenanceEvents.length + browserRedirectEvents.length} events)`);
 
 function makeEnvelope(rawToken, endpointPort = port) {
   const taskID = crypto.randomUUID();
@@ -1140,9 +1292,15 @@ function assertBrowserControlReviewMetadata(metadata, expected, label) {
     "mode",
     "networkBlocked",
     "networkFetchAttempted",
+    "networkFetchSucceeded",
+    "networkPolicyDiagnostic",
     "openAttempted",
     "openInBrowser",
     "policyDiagnostic",
+    "redirectBlocked",
+    "redirectCount",
+    "redirectLimitExceeded",
+    "redirectPolicyChecked",
     "resultStatus",
     "retryableReason",
     "safetyFlags",
@@ -1173,6 +1331,41 @@ function assertBrowserControlReviewMetadata(metadata, expected, label) {
   expect(metadata.localHTMLInput === String(expected.localHTMLInput), `${label} HTML input metadata mismatch`);
   expect(metadata.networkFetchAttempted === String(expected.networkFetchAttempted), `${label} network fetch metadata mismatch`);
   expect(metadata.networkBlocked === String(expected.networkBlocked), `${label} network block metadata mismatch`);
+  const expectedNetworkPolicyDiagnostic = expected.networkPolicyDiagnostic ?? "not-requested";
+  const allowedNetworkPolicyDiagnostics = new Set([
+    "not-requested",
+    "fetch-succeeded",
+    "initial-host-blocked",
+    "initial-protocol-blocked",
+    "initial-credentials-blocked",
+    "redirect-host-blocked",
+    "redirect-protocol-blocked",
+    "redirect-credentials-blocked",
+    "redirect-location-invalid",
+    "redirect-limit-exceeded",
+    "fetch-timeout",
+    "http-error",
+    "network-error",
+  ]);
+  expect(allowedNetworkPolicyDiagnostics.has(metadata.networkPolicyDiagnostic), `${label} network policy diagnostic metadata invalid`);
+  expect(metadata.networkPolicyDiagnostic === expectedNetworkPolicyDiagnostic, `${label} network policy diagnostic metadata mismatch`);
+  expect(metadata.redirectPolicyChecked === String(expected.redirectPolicyChecked ?? false), `${label} redirect policy checked metadata mismatch`);
+  expect(Number(metadata.redirectCount) === (expected.redirectCount ?? 0), `${label} redirect count metadata mismatch`);
+  expect(metadata.redirectBlocked === String(expected.redirectBlocked ?? false), `${label} redirect block metadata mismatch`);
+  expect(metadata.redirectLimitExceeded === String(expected.redirectLimitExceeded ?? false), `${label} redirect limit metadata mismatch`);
+  expect(metadata.networkFetchSucceeded === String(expected.networkFetchSucceeded ?? false), `${label} network fetch success metadata mismatch`);
+  expect(
+    metadata.safetyFlags.includes("redirect-policy-enforced") === (metadata.redirectPolicyChecked === "true"),
+    `${label} redirect policy safety flag mismatch`,
+  );
+  expect(
+    metadata.safetyFlags.includes("redirect-policy-blocked") === (metadata.redirectBlocked === "true"),
+    `${label} redirect blocked safety flag mismatch`,
+  );
+  expect(
+    metadata.safetyFlags.includes("redirect-limit-exceeded") === (metadata.redirectLimitExceeded === "true"),
+    `${label} redirect limit safety flag mismatch`,
+  );
   expect(metadata.appAllowlistEnforced === String(expected.appAllowlistEnforced), `${label} app allowlist metadata mismatch`);
   expect(metadata.hostAllowlistEnforced === String(expected.hostAllowlistEnforced), `${label} host allowlist metadata mismatch`);
   expect(metadata.appPolicyChecked === String(expectedAppPolicyChecked), `${label} app policy checked metadata mismatch`);
@@ -1192,6 +1385,10 @@ function assertBrowserControlReviewMetadata(metadata, expected, label) {
     "Gateway Smoke Page",
     "Browser trace is available",
     "https://",
+    "http://",
+    "127.0.0.1",
+    "localhost",
+    "Location",
     "file://",
     "/sessions/",
     "stdout",
@@ -1590,6 +1787,22 @@ function gatewayPolicyDefaults() {
     CLAW_DESKTOP_APP_ALLOWLIST: "",
     CLAW_DESKTOP_KEY_ALLOWLIST: "",
   };
+}
+
+function listenHTTPServer(server, listenHost) {
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, listenHost, () => {
+      server.off("error", reject);
+      resolve(server.address());
+    });
+  });
+}
+
+function closeHTTPServer(server) {
+  return new Promise((resolve, reject) => {
+    server.close((error) => error ? reject(error) : resolve());
+  });
 }
 
 function isoNow() {

@@ -2535,7 +2535,14 @@ struct ClawGatewayBrowserControlReviewSummary: Equatable, Codable, Sendable {
     var searchQueryPresent: Bool?
     var localHTMLInput: Bool?
     var networkFetchAttempted: Bool?
+    var networkFetchSucceeded: Bool?
     var networkBlocked: Bool?
+    var networkPolicyDiagnostic: String?
+    var networkPolicyDiagnosticRejected: Bool
+    var redirectPolicyChecked: Bool?
+    var redirectCount: Int?
+    var redirectBlocked: Bool?
+    var redirectLimitExceeded: Bool?
     var appAllowlistEnforced: Bool?
     var hostAllowlistEnforced: Bool?
     var appPolicyChecked: Bool?
@@ -2550,7 +2557,11 @@ struct ClawGatewayBrowserControlReviewSummary: Equatable, Codable, Sendable {
         guard hasMetadata else {
             return true
         }
-        if networkBlocked == true || resultStatus == "failed" || timedOut == true {
+        if networkPolicyDiagnosticRejected || networkBlocked == true || redirectBlocked == true || redirectLimitExceeded == true || resultStatus == "failed" || timedOut == true {
+            return true
+        }
+        if let networkPolicyDiagnostic,
+           !["not-requested", "fetch-succeeded"].contains(networkPolicyDiagnostic) {
             return true
         }
         if let policyDiagnostic {
@@ -2586,7 +2597,8 @@ struct ClawGatewayBrowserControlReviewSummary: Equatable, Codable, Sendable {
             network = "network 待复核"
         }
         let diagnostic = policyDiagnostic.map { "diagnostic \($0)" } ?? "diagnostic 待复核"
-        return "\(policy) · \(diagnostic) · \(request) · \(network)"
+        let networkDiagnostic = networkPolicyDiagnostic.map { "network \($0)" } ?? "network policy 待复核"
+        return "\(policy) · \(diagnostic) · \(networkDiagnostic) · \(request) · \(network)"
     }
 
     static func latest(from session: ClawGatewaySession?) -> ClawGatewayBrowserControlReviewSummary? {
@@ -2603,6 +2615,7 @@ struct ClawGatewayBrowserControlReviewSummary: Equatable, Codable, Sendable {
         }
         let metadata = latest.metadata ?? [:]
         let hasReviewMetadata = ClawArtifactMetadataParser.cleanValue(metadata["browserReview"]) == "controlPlan"
+        let networkPolicyDiagnostic = allowedNetworkPolicyDiagnostic(metadata["networkPolicyDiagnostic"])
         return ClawGatewayBrowserControlReviewSummary(
             reviewCount: browserArtifacts.count,
             latestTitle: ClawArtifactMetadataDisplaySanitizer.safeValue(latest.title) ?? latest.kind.title,
@@ -2619,7 +2632,14 @@ struct ClawGatewayBrowserControlReviewSummary: Equatable, Codable, Sendable {
             searchQueryPresent: ClawArtifactMetadataParser.boolValue(metadata["searchQueryPresent"]),
             localHTMLInput: ClawArtifactMetadataParser.boolValue(metadata["localHTMLInput"]),
             networkFetchAttempted: ClawArtifactMetadataParser.boolValue(metadata["networkFetchAttempted"]),
+            networkFetchSucceeded: ClawArtifactMetadataParser.boolValue(metadata["networkFetchSucceeded"]),
             networkBlocked: ClawArtifactMetadataParser.boolValue(metadata["networkBlocked"]),
+            networkPolicyDiagnostic: networkPolicyDiagnostic,
+            networkPolicyDiagnosticRejected: metadata["networkPolicyDiagnostic"] != nil && networkPolicyDiagnostic == nil,
+            redirectPolicyChecked: ClawArtifactMetadataParser.boolValue(metadata["redirectPolicyChecked"]),
+            redirectCount: allowedRedirectCount(metadata["redirectCount"]),
+            redirectBlocked: ClawArtifactMetadataParser.boolValue(metadata["redirectBlocked"]),
+            redirectLimitExceeded: ClawArtifactMetadataParser.boolValue(metadata["redirectLimitExceeded"]),
             appAllowlistEnforced: ClawArtifactMetadataParser.boolValue(metadata["appAllowlistEnforced"]),
             hostAllowlistEnforced: ClawArtifactMetadataParser.boolValue(metadata["hostAllowlistEnforced"]),
             appPolicyChecked: ClawArtifactMetadataParser.boolValue(metadata["appPolicyChecked"]),
@@ -2652,6 +2672,7 @@ struct ClawGatewayBrowserControlReviewSummary: Equatable, Codable, Sendable {
         let allowed = [
             "browser-control-not-requested",
             "browser-control-dry-run",
+            "browser-network-failed",
             "browser-control-unavailable",
             "browser-control-policy-blocked",
             "browser-control-host-blocked",
@@ -2702,9 +2723,39 @@ struct ClawGatewayBrowserControlReviewSummary: Equatable, Codable, Sendable {
             "requires-macos",
             "allow-browser-app",
             "allow-browser-host",
+            "retry-network-fetch",
             "automation-failed"
         ]
         return allowed.contains(clean) ? clean : nil
+    }
+
+    private static func allowedNetworkPolicyDiagnostic(_ value: String?) -> String? {
+        guard let clean = ClawArtifactMetadataParser.cleanValue(value) else {
+            return nil
+        }
+        let allowed = [
+            "not-requested",
+            "fetch-succeeded",
+            "initial-host-blocked",
+            "initial-protocol-blocked",
+            "initial-credentials-blocked",
+            "redirect-host-blocked",
+            "redirect-protocol-blocked",
+            "redirect-credentials-blocked",
+            "redirect-location-invalid",
+            "redirect-limit-exceeded",
+            "fetch-timeout",
+            "http-error",
+            "network-error"
+        ]
+        return allowed.contains(clean) ? clean : nil
+    }
+
+    private static func allowedRedirectCount(_ value: String?) -> Int? {
+        guard let count = ClawArtifactMetadataParser.intValue(value), (0...5).contains(count) else {
+            return nil
+        }
+        return count
     }
 
     private static func allowedResultStatus(_ value: String?) -> String? {
@@ -2724,6 +2775,9 @@ struct ClawGatewayBrowserControlReviewSummary: Equatable, Codable, Sendable {
             "form-fields-omitted",
             "metadata-only",
             "network-allowlist-enforced",
+            "redirect-limit-exceeded",
+            "redirect-policy-blocked",
+            "redirect-policy-enforced",
             "page-content-omitted",
             "search-query-omitted",
             "tool-arguments-omitted",

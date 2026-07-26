@@ -22,6 +22,46 @@
 
 ## 历史记录
 
+### v0.61 / Browser Redirect Host Allowlist 浏览器重定向逐跳白名单
+
+日期：2026-07-26
+
+核心变更：
+
+- Gateway URL 抓取改为手动重定向，最多跟随 5 跳并共享 12 秒总超时；每跳请求前精确检查 HTTP(S)、URL credentials 和 host allowlist。
+- 跨 host、非法协议/credentials/Location、超限、HTTP、timeout 和 network 错误均形成 action-bound 脱敏 Browser artifact，只失败当前 action。
+- Browser Control metadata 与手机/iPad 复核新增固定 network diagnostic、逐跳检查、计数、阻断和上限证据，不外显 URL、host、Location、header、cookie、正文或 redirect chain。
+- direct smoke 覆盖相对跳转和 5 跳边界；direct/WebSocket 都以本地 HTTP fixture 的目标 hit count 为 0 证明跨 host 目标未被联系。
+- 本轮保证只覆盖 Gateway fetch；AppleScript 打开后的桌面浏览器导航仍不受 Gateway 逐跳策略控制。
+
+关键文件：
+
+- `Tools/claw-gateway-server.mjs`
+- `Tools/claw-gateway-direct-smoke.mjs`
+- `Tools/claw-gateway-smoke.mjs`
+- `Claw/Core/ClawModels.swift`
+- `Claw/Services/ClawStore.swift`
+- `Claw/Views/ContentView.swift`
+- `Tools/ClawGatewayEventFixture.swift`
+- `ClawTests/ClawTests.swift`
+- `Tools/LogicSmoke.swift`
+- `README.md`
+- `Docs/claw-mobile-gateway-protocol.md`
+- `md/flow/flow.md`
+- `md/flow/flowchart.md`
+- `md/test/test.md`
+- `md/prompt/v0（核心智能能力）/v0.61（BrowserRedirectHostAllowlist）.md`
+
+验证结果：
+
+- 本地只运行非编译静态检查；build/smoke 等待云端 workflow。
+- GitHub Actions 结果包待本轮 push 后由 Agent C 下载复判。
+
+遗留事项：
+
+- DNS rebinding、CNAME/代理改写、私网 CIDR 和桌面浏览器自身跳转不在本轮覆盖范围。
+- Mission Run session affinity、Agent Loop 推荐动作与 envelope allowlist 交集仍待后续迭代。
+
 ### v0.60 / Shell Structured Argument Provenance Shell 结构化参数来源
 
 日期：2026-07-26

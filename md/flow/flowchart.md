@@ -84,7 +84,7 @@ flowchart TD
   POL -->|不允许| SKIP["actionSkipped<br/>写 auditLog 说明原因"]
   POL -->|允许| KIND{"action.kind"}
   KIND --> OBS["observeScreen<br/>dry-run、macOS 截图、窗口元数据或受控 Accessibility 摘要与信号质量 metadata"]
-  KIND --> BRO["controlBrowser<br/>HTML/URL trace、浏览器打开/搜索计划和 policy diagnostics metadata 复核"]
+  KIND --> BRO["controlBrowser<br/>HTML/URL trace、Gateway fetch 重定向逐跳 allowlist、浏览器打开/搜索计划和 policy diagnostics metadata 复核"]
   KIND --> FILE["manageFiles<br/>workspace 内结构化写文件、路径逃逸阻断、File Change Safety metadata"]
   KIND --> SH["runShellCommand<br/>仅 toolArguments 来源、顶层 alias/冲突来源阻断、裸 executable allowlist、Shell Safety metadata"]
   KIND --> EXT["extractData<br/>消费已有 artifact 生成结构化数据和完整性 metadata"]
