@@ -3156,14 +3156,15 @@ enum LogicSmoke {
         expect(store.gatewayLiveHealthSummary.canAttemptLive == false, "live health should preserve preflight status")
         expect(store.gatewayLiveHealthSummary.detailLine.contains("Authorization") == false, "live health should not expose headers")
         let fallbackStrip = store.missionRunLiveGatewayHealthStrip
-        expect(fallbackStrip.healthState == "fallback", "mission health strip should mark fallback state")
+        expect(fallbackStrip.hasError, "mission health strip should expose the blocked fallback session error")
+        expect(fallbackStrip.healthState == "error", "mission health strip should prioritize error while preserving fallback evidence")
         expect(fallbackStrip.hasFallback, "mission health strip should expose fallback")
         expect(fallbackStrip.guidance.contains("Authorization") == false, "mission health strip should not expose headers")
         let fallbackControl = store.missionRunSummary.controlSnapshot(focusedOn: nil, liveHealth: fallbackStrip)
         let fallbackOperator = store.missionRunSummary.operatorStrip(liveHealth: fallbackStrip)
         expect(fallbackOperator.lanes.contains { $0.id == "live" }, "operator strip should expose live lane with health")
         expect(fallbackControl.hasLiveFallback, "control snapshot should expose live fallback signal")
-        expect(fallbackControl.liveHealthState == "fallback", "control snapshot should expose live health state")
+        expect(fallbackControl.liveHealthState == "error", "control snapshot should preserve prioritized live health state")
         expect((fallbackControl.liveHealthStatus ?? "").contains("Authorization") == false, "control snapshot live status should redact headers")
 
         let liveProgressStore = ClawStore(autoScanLocalArtifacts: false)
