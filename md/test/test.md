@@ -68,6 +68,11 @@ ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci-results.yml"); put
 - 浏览器网络重定向测试必须使用小型本地 HTTP fixture：direct smoke 覆盖同 host 相对跳转、5 跳边界、非法 Location/协议和跨 host 阻断；direct/WebSocket 都必须以目标 hit count 为 0 证明未授权目标未被联系，并核对 action-bound 脱敏 Browser artifact。
 - Agent Loop 推荐策略测试必须覆盖 request、envelope 与固定支持种类的交集：direct smoke 覆盖全阻断、部分交集、request 子集、固定集合过滤和显式空请求，并验证所有 trace 派生字段都属于三方交集且 metadata 不泄露列表；WebSocket smoke 覆盖 envelope 只允许 `runAgentLoop` 的 `requested/effective/blocked=2/0/2`、`none`、blocked handoff 和 session 完成。Swift/XCTest 覆盖未知 policy、越界/矛盾计数、selected 未授权均进入人工复核并禁止继续 Loop。
 - Agent Loop selected-action decision 测试必须核对 `evidence-first-safe-v1`、固定 reason、候选数量、1-based 序位、候选成员和一致性。双 smoke 覆盖 policy-blocked、证据恢复、免审批优先和审批回退，并证明未选高风险候选不污染 selected stop/handoff；Swift/XCTest 对审批字段缺失、未知 reason、ordinal 越界、成员/一致性 false 及 kind/approval/readiness/stop/handoff 矛盾统一 fail closed。
+- 以下 v0.66 条目定义生产合同必须最终达到的云端覆盖，不代表当前工作区 diff 已完整覆盖。当前 baseline 只覆盖主要成功路径、receipt 复用/并发复用、单组 binding mismatch、wire offer 提取与 redaction，以及一条 Swift continuation happy path；其余签发拒绝、expiry/eviction/restart、action shape/parameter/policy/side-effect、六种 kind/state/UI 和 Direct/WebSocket 对称矩阵均为残余必补覆盖。最新云端 artifact 未证明这些残余项前，Agent C 不得把完整矩阵判为通过。
+- v0.66 receipt 签发测试必须覆盖严格 valid/allowed/`safe-without-approval`/`ready-to-continue`/selected non-none 成功，以及 approval-required、final-submit、external/destructive、needs-evidence、policy-blocked、no-action、complete、unknown/missing/contradictory contract、effective intersection/handler 漂移和父 context 超过 6 条或 256 KiB 时不签发。offer 固定 TTL 600 秒、cache 容量 128、单次进程内消费；raw receipt 只允许出现在 WebSocket 或 `--emit-events-stream` stdout 的私有 framed wire offer，不得进入诊断 stdout/stderr、artifact/metadata/event summary、JUnit、failure summary、manifest 或 UI 可见输出。
+- v0.66 child success 测试必须证明 child task/action/session ID 全新，actions 恰好按 receipt selected kind、`runAgentLoop` 排列；按精确 task ID 审批/冻结/发送后，Gateway 在新 workspace 中把冻结父快照复制为与父隔离的可变 child session context，先执行 selected handler，再由 child 本轮结果生成新的 AgentTrace 和不同的可选下一轮 receipt。首次发送尝试后 iOS vault 必须清理，continuation transport 不得自动重连/重发同一 frozen envelope；receipt 成功消费后 iOS vault 和 Gateway cache 都不能复用。
+- v0.66 child fail-closed 测试必须逐项覆盖 lineage/contract/receipt 缺失、空值、未知、污染或格式错误，伪造/过期/已消费/淘汰/重启失效 receipt，并发双消费，父 task/session/artifact/digest、round、selected kind、decision、token/profile/policy 不匹配，父 child ID 复用，action 数量/顺序/唯一性错误，当前 allowlist/handler/policy 阻断，以及参数缺失、未知 key、alias 冲突、超长、类型错误和路径逃逸。每个失败都必须发生在 replay/workspace/event/artifact/handler 前，断言无文件、网络、Shell、浏览器、桌面或草稿副作用，错误不可重试且不回显 marker 或 raw receipt。
+- v0.66 Direct/WebSocket 必须对称覆盖父 receipt 签发、child 成功、context 继承、新 workspace、action 顺序、新 AgentTrace、新 receipt 和单次消费，以及 forged/expired/consumed/mismatch/policy/shape/parameter/side-effect 全矩阵。WebSocket 失败只允许无 action identity 的安全 envelope error，不得把 receipt 或未知 action kind送入 Swift 闭合 enum event。Swift Gateway fixture `--self-test` 必须覆盖私有 offer 提取、公开 event 剥离、receipt redaction、成功 child contract 和无 handler/已消费 fail-closed。
 - Gateway unsupported handler 测试必须在 direct 与 WebSocket 两条云端路径覆盖 known-enum + envelope-allowed + handler-unsupported：最终事件只能是 action-bound `actionFailed`/`failed`/non-retryable，不得出现同 action 的 `actionCompleted`、`approvalRequested` 或 policy `actionSkipped`；只允许 redacted `auditLog`，禁止 screenshot、browserTrace、fileDiff、commandOutput、extractedData、messageDraft、agentTrace 等业务 artifact。
 - unsupported smoke 必须用唯一敏感 marker 和文件/Shell/网络/桌面/草稿副作用哨兵，断言 summary、artifact title/metadata/payload 不泄漏 instruction、inputPreview、target、`toolArguments`、URL/path/command/正文，且后续合法 action 和 `sessionCompleted` 仍到达。Swift Gateway fixture 必须对同类已知 action输出 `actionFailed`、不可重试和 action-bound redacted audit；fixture 编译运行只在云端执行。
 - direct/WebSocket 还必须各自覆盖未知 action kind：固定返回不可重试的 `unsupported_action_kind`，不进入 replay/session workspace、action-bound event、handler、artifact 或正常 `sessionCompleted`，错误不得回显未知 kind；WebSocket 只允许无 action identity 的 envelope error event。Swift fixture云端 `--self-test` 必须真实检查 known-enum unsupported 合同。
@@ -82,12 +87,15 @@ ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci-results.yml"); put
 - 修改 Mission Run presentation summary、Approval Fast Lane 审批快车道、Mac Agent Control Snapshot（含 Live Health 信号） 控制态势快照、Operator Strip（gateway/live/policy/evidence/review/next）、Loop 继续态势、Mac Agent Readiness Board、Policy Diagnostics Board 就绪看板、Mac Gateway Action Preflight Matrix 动作预检矩阵、Mac Agent Evidence Coverage Map 证据覆盖图、Mac Agent Next Step Deck 下一步候选卡组、Mac Agent Run Timeline 执行时间线、Mac Agent Continuation Gate 继续闸门、Mac Agent Review Radar 复核雷达、Mac Agent Handoff Brief 人工交接简报、Focus Context 聚焦上下文、Review Detail Dock、Review Trail 复核路径、Approval Queue 审批队列、Payload Safety Ledger 载荷安全账本、Artifact 证据索引、复核优先队列、复核聚焦模式、复核态势摘要、下一步复核行动或 SwiftUI 展示派生模型。
 - Mission Run 会话归属测试必须覆盖连续任务 A/B：B 未发送时不得继承 A 的 session、结果、artifact、metadata 复核或 Live Gateway 状态；B 发送后 session.taskID 必须等于 B task.id。
 - scoped review focus 测试必须覆盖同 scope 保留、切换 task 失效、task-to-session 失效、全量详情回退、固定 stale 提示，以及旧命令敏感片段和 scope UUID 不外显。
+- continuation Swift/XCTest/LogicSmoke 最终必须覆盖六种推荐 kind 的 typed 参数草稿及 `readyForInput`，strict safe selected 的 `readyForApproval`，approval selected 只能 `needsApproval` 且无法 queue/send，以及 invalid metadata、selected none、policy blocked、no-action、stale trace、错误父 task/session/artifact、profile 变化和 receipt 过期统一 fail closed。当前 `readyForInput` 没有参数编辑 API/UI，是不可 queue/approve/send 的阻断态；上述完整六种 kind 和负向状态矩阵仍是残余必补覆盖。
+- 创建 continuation draft 前后必须断言父 Mission scope、task/session/events/live request 和 review focus 不变；只有显式 queue child 后才切换 scope并显示安全 lineage breadcrumb。旧按钮、错误 task ID、摘要不匹配、重复 send、审批后 action/profile/lineage 变化都必须拒绝或使 approval/frozen envelope 失效。
+- compact iPhone 与 regular iPad/mac 必须复用同一 continuation presentation summary，覆盖生成草稿、参数缺口、needsApproval、过期、queued、approvedFrozen 和 sent 状态；动态文本不得溢出，按钮至少 44pt并带“不自动发送”的 VoiceOver hint。UI、accessibility label、日志和 redacted envelope 不得出现 raw receipt、完整 `toolArguments`、父 payload、URL/path/正文、token/header、workspace 或敏感 marker。
 - 修改 `Tools/LogicSmoke（含 Mission Run Live Gateway Health Strip）.swift`。
 
 本地规则：
 
 - 默认不运行 `swiftc`、`.build/claw-logic-smoke`、`xcodebuild build`、`xcodebuild build-for-testing` 或模拟器测试。
-- 通过代码复核和非编译静态检查确认提交范围后，push 到 `origin/main`，由云端 workflow 覆盖 Swift logic smoke、iOS build、XCTest 编译或等价检查。
+- 通过代码复核和非编译静态检查确认提交范围后，push 到 `origin/main`，由云端 workflow 覆盖 Swift logic smoke、iOS build 和真实 iPhone Simulator XCTest。
 
 ## GitHub Actions 云端重验证
 
@@ -111,6 +119,7 @@ on:
 - Gateway direct smoke。
 - Gateway WebSocket smoke。
 - `xcodebuild build`。
+- 在动态发现的可用 iPhone Simulator 上执行 `xcodebuild test`。
 - 结果包 manifest、failure summary、JUnit 或等价摘要、主日志和 `.xcresult`。
 
 结果包最低内容：
@@ -119,7 +128,10 @@ on:
 - `ci-failure-summary.md`
 - `junit.xml`
 - `xcodebuild.log`
+- `xctest.log`（总是预创建，包含 simulator discovery 和 XCTest 失败诊断）
+- `ClawTests.xcresult`（XCTest outcome 为 success 时强制存在；缺失会使 packaging 失败）
 - `swift-logic-smoke.log`
+- `swift-gateway-fixture.log`
 - `gateway-direct-smoke.log`
 - `gateway-websocket-smoke.log`
 - `Claw.xcresult`（如果 xcodebuild 能生成）
@@ -138,6 +150,9 @@ manifest 必须至少记录：
 - `scheme`
 - `destination`
 - `resultBundlePath`
+- `xctestLogPath`
+- `xctestResultBundlePath`
+- `xctestArtifactsOutcome`
 - `junitPath`
 - `buildLogPath`
 - `failureSummaryPath`

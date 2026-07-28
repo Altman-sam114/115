@@ -52,7 +52,7 @@ Claw 的当前主链路是：用户在 iPhone 输入电脑任务，App 生成可
   -> Agent B 同步 origin/main 并在 main 上实现
   -> Agent B 本地非编译静态检查
   -> Agent B commit 并 push 到 origin/main
-  -> GitHub Actions 运行 build / smoke / 静态检查
+  -> GitHub Actions 运行 build / XCTest / smoke / 静态检查
   -> GitHub Actions 上传未加密 ci-results 结果包
   -> Agent C 下载结果包并核对 manifest / JUnit / 日志 / 关键文件
       -> 不通过：退回 Agent B 在 main 上追加修复 commit
@@ -100,6 +100,29 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 12. 手机端 reducer 用事件更新 session；无 action 绑定的 `artifactStored` 进入 `sessionArtifacts` 和 auditTrail，action-bound artifact 保持 result 合并逻辑。
 13. UI 显示结果、artifact、审批点、retry 状态、Live Gateway 连接健康摘要、Approval Fast Lane 审批快车道、Mac Agent Control Snapshot 控制态势快照、Mission Run Operator Strip、Loop 继续态势、Mac Agent Readiness Board 就绪看板、Mac Gateway Action Preflight Matrix 动作预检矩阵、Mac Agent Evidence Coverage Map 证据覆盖图、Mac Agent Next Step Deck 下一步候选卡组、Mac Agent Run Timeline 执行时间线、Mac Agent Continuation Gate 继续闸门、Mac Agent Review Radar 复核雷达、Mac Agent Handoff Brief 人工交接简报、Focus Context 聚焦上下文、Review Detail Dock、Review Trail 复核路径、Approval Queue 审批队列、Payload Safety Ledger 载荷安全账本、Artifact 证据索引、复核态势摘要、下一步人工复核行动、按风险/可行动性排序的复核优先队列、当前聚焦的队列项详情、Artifact metadata 复核摘要、文件变更安全复核摘要、提取完整性复核摘要、浏览器控制计划复核摘要、草稿/最终提交安全复核摘要、Gateway 能力复核摘要、Accessibility 复核摘要、Replay Guard 复核摘要和 AgentTrace handoff 复核摘要。
 14. `ClawAutonomousLoopState` 记录计划、审批、发送、观察、重试等自动循环状态。
+
+### 3.1 v0.66 可信跨任务续接流
+
+```text
+父 session 完成
+  -> 校验最新 AgentTrace 的 v0.65 safe decision
+  -> Gateway 冻结有界父 context，并签发 10 分钟、单次、进程内 receipt
+  -> transport 提取 raw receipt 到 iOS 内存 vault，公开 event 不含 receipt
+  -> 用户显式生成独立 continuation draft，父 Mission scope 和 focus 不变
+  -> 参数完整时用户可显式入队全新 child task
+     参数不完整则停在 readyForInput；v0.66 尚无参数编辑器
+  -> child 固定等待新审批
+  -> 用户按 task ID 审批，绑定 task/profile/lineage digest 并冻结 raw envelope
+  -> 用户按同一 task ID 发送 frozen envelope
+  -> Gateway 在 replay/workspace/event/artifact/handler 前验证并原子消费 receipt
+  -> 冻结父快照深拷贝为与父隔离的可变 child session context
+  -> 先执行 receipt 绑定的 selected action
+  -> 再执行 runAgentLoop，基于父 seed 与本轮结果产生新 decision/可选新 receipt
+```
+
+decision、receipt 和 child approval 是三个独立信任条件，互不替代。只有 `safe-without-approval + ready-to-continue + selected != none` 能获得 receipt；approval-required、final-submit、external/destructive、needs-evidence、blocked、complete、policy-blocked、no-action 或 metadata gap 只能生成不可派发的 `needsApproval`/blocked draft。receipt 固定 TTL 600 秒、容量 128、单次消费、进程内有效；过期、淘汰、重启、并发复用、profile/allowlist/handler/参数变化或任一 lineage 不匹配都在业务副作用前拒绝。首次发送尝试后清理 iOS vault，continuation 不使用普通任务的同-envelope 自动重连/重发。
+
+child task/action/session ID 全部新建，actions 必须恰好是 selected action 后接 `runAgentLoop`。父 context 每条最多 6 个来源记录、最多 256 KiB；Gateway 冻结缓存快照，消费后再深拷贝为与父隔离的可变 child session context，供 child 追加本轮结果。child 使用新 workspace，不读取父 `file://`、父绝对路径或父 workspace。当前 v0.66 没有参数编辑器，`readyForInput` 只能保持阻断，不能 queue/send。raw receipt 只存在于 wire DTO、内存 vault、私有 frozen envelope 和 Gateway cache；公开 envelope、UI/VoiceOver、event、artifact/metadata、日志和 CI 摘要一律省略。
 
 ## 4. 核心模块
 
@@ -320,6 +343,7 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 - 执行层：桌面 Gateway Node 原型负责真实或 dry-run 工具动作。
 - 文档层：README 面向开发者，`Docs/*` 面向协议，`md/flow/*` 面向当前真实逻辑和协作闭环，`AGENTS.md` 面向 Agent 工作规则。
 - 测试层：本地非编译静态检查、GitHub Actions 云端重验证、云端 XCTest/Swift logic smoke、云端 Gateway JS smoke。
+- v0.66 起 CI 会动态选择可用 iPhone Simulator 实际执行 `ClawTests`，并把 `xctest.log`、`ClawTests.xcresult` 和 outcome 纳入 manifest/JUnit/fail gate；不再只用 build 证明 XCTest 源码可编译。
 
 ## 8. 已确认铁律
 
@@ -333,6 +357,9 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 - Gateway capability snapshot 只能作为审计复核 artifact，不能新增权限，不能成为执行计划来源，payload 和 metadata 不能包含 raw token、Authorization header、自然语言 instruction、`toolArguments`、网页正文、命令输出、截图内容、草稿正文、联系人或完整 workspace path。
 - `agentTrace` metadata、degradedSignals 和 handoffStatus 只能用于手机端复核展示，不能成为执行计划来源，不能放入浏览器正文、命令输出、截图内容、草稿正文、联系人或 token；手机端展示前必须统一脱敏 raw token、Authorization/header、`toolArguments`、`file://` 和完整 workspace path；handoffStatus 只能使用固定枚举，不能从自然语言或 payload 解析，degradedSignals 只能使用固定 source 枚举，不能从 payload 文本解析。
 - `runAgentLoop` 推荐集合必须按结构化 request、envelope action allowlist 和 Gateway 固定支持推荐种类取交集。空交集只生成 `none` 并 blocked handoff；metadata 只记录固定 policy/diagnostic、有限计数和 selected 授权布尔，不记录完整列表。推荐是 artifact 审计证据，真实执行仍须重新通过 `actionPolicy`、审批、workspace 和 handler allowlist。
+- continuation 必须把 v0.65 decision、Gateway receipt 和 child 用户审批分开；receipt 不是授权，父审批不能继承。所有操作按精确 task/session/draft ID 执行，不得 latest-first；审批和发送分离，冻结 envelope 内容变化即失效。
+- continuation lineage/receipt preflight 必须早于 task replay、workspace、session/event、artifact 和 handler。失败路径无 replay record、无 workspace、无业务事件/artifact、无 handler 或外部副作用，且不回显 raw receipt 或污染 payload。
+- receipt 只能进程内保存 10 分钟、最多 128 条并单次消费；Gateway 重启、过期、淘汰或并发复用必须 fail closed。Gateway 只可把有界冻结父快照复制为与父隔离的可变 child session context，并使用新 workspace；child 不能读取父 `file://` 或父路径。
 - `extractData` 完整性 metadata 只能用于手机端复核展示，不能成为执行计划来源，不能放入 row 内容、URL/path、命令输出、网页正文、草稿正文、联系人、token 或 `toolArguments`；手机端展示前必须统一脱敏敏感值。
 - File Change Safety metadata 只能用于手机端复核展示，不能成为执行计划来源，不能放入 raw path、workspace/sessionWorkspace、文件名/目录名、文件内容、diff hunk、patch、stdout/stderr、token、Authorization/header、cookie、secret 或 `toolArguments`；metadata 缺失时必须显示“metadata 待同步”，不能假定写入安全。
 - Shell Command Safety metadata 只能用于手机端复核展示，不能成为执行计划来源，不能放入 raw command、binary/args、cwd、workspace/session path、stdout/stderr 内容、token、Authorization/header、cookie、secret、自然语言 instruction 或 `toolArguments`；v0.51 起固定展示 `shellPolicyDiagnostic`/`shellRetryableReason` 与 policy/binary/structured checked 状态，v0.58 起 dry-run 在 binary allowlist 查询前短路时必须是 `binaryAllowlistChecked=false`，不能把未检查误报为已检查；v0.59 起含路径分隔符的 executable token 即使 basename 命中也必须阻断，且不能把原始路径写入事件；v0.60 起顶层 Shell alias 或来源冲突必须显示 `invalid-structured-command-source`，保持 parse/allowlist/execution 未开始并省略 alias 值；metadata 缺失时必须显示“metadata 待同步”，不能假定命令安全、已阻断或已执行。
@@ -347,7 +374,7 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 
 - Planner/bridge/schema 变更：本地只做非编译静态检查，云端 xcodebuild/logic smoke/结果包验收。
 - Gateway handler 变更：本地只做非编译静态检查，云端 `node --check`、direct smoke、WebSocket smoke 和结果包验收。
-- Event reducer 变更：本地只做非编译静态检查，云端 Swift logic smoke、XCTest 编译或等价 build 结果。
+- Event reducer 变更：本地只做非编译静态检查，云端 Swift logic smoke、真实 iPhone Simulator XCTest 和 Xcode build 结果。
 - Mission Run 派生摘要或首屏任务回合 UI 变更：XCTest/Swift logic smoke 覆盖 idle、待审批、需处理、完成、阻断摘要、Approval Fast Lane 审批快车道、Mac Agent Control Snapshot 控制态势快照、Operator Strip、Loop 继续态势、Mac Agent Readiness Board 就绪看板、Mac Gateway Action Preflight Matrix 动作预检矩阵、Mac Agent Evidence Coverage Map 证据覆盖图、Mac Agent Next Step Deck 下一步候选卡组、Mac Agent Run Timeline 执行时间线、Mac Agent Continuation Gate 继续闸门、Focus Context 聚焦上下文、Review Detail Dock、Review Trail 复核路径、Approval Queue 审批队列、Payload Safety Ledger 载荷安全账本、AgentTrace handoff 状态、Artifact 证据索引、复核优先队列、复核聚焦、复核态势摘要、下一步复核行动和敏感字符串不外显；Artifact metadata、File Change Safety、Shell Command Safety、提取完整性、Browser Control、Delivery Safety、Gateway capability、Accessibility signal quality、Replay Guard 和 AgentTrace 复核摘要需覆盖 metadata 存在和缺失两种路径；云端 xcodebuild 覆盖 SwiftUI 编译。
 - 文档-only 变更：本地 `git diff --check`、workflow YAML 语法检查；云端由 `main` push 触发结果包。
 
@@ -356,7 +383,7 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 - 将 Gateway prototype handler 拆成可插拔工具层。
 - 将当前 macOS Accessibility 观察摘要演进为完整 Accessibility bridge。
 - 增加 Playwright/browser-use 兼容浏览器控制器。
-- 强化 `runAgentLoop` 多轮状态机、失败恢复、下一步策略和手机端完整 artifact 复核体验。
+- 在 v0.66 受限可信跨 task 续接基础上继续强化多轮失败恢复、持久但可撤销的用户授权、跨进程协调和完整 artifact 复核；当前 receipt 不跨重启且不支持无人值守循环。
 - 在 v0.12 有界重连/ping 可观测性基础上，继续补完整 live Gateway 后台保活、真实心跳协议、配对和审计日志持久化。
 - UI 上继续增强 Mission Run 内的 artifact 预览、完整审批处理体验和回滚提示。
 - 配置真实 `origin` 后持续执行 main 直推和 Agent C 下载结果包复判。

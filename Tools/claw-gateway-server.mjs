@@ -5,11 +5,28 @@ import { constants as fsConstants } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import readline from "node:readline";
 import { spawn } from "node:child_process";
 
 const DEFAULT_PORT = 18789;
 const SCHEMA_VERSION = "claw.computer.control.v1";
 const TASK_REPLAY_CACHE_LIMIT = 128;
+const CONTINUATION_RECEIPT_CACHE_LIMIT = 128;
+const CONTINUATION_RECEIPT_TTL_MS = 600_000;
+const CONTINUATION_CONTEXT_RECORD_LIMIT = 6;
+const CONTINUATION_CONTEXT_BYTE_LIMIT = 256 * 1024;
+const CONTINUATION_LINEAGE_CONTRACT = "claw.continuation.lineage.v1";
+const CONTINUATION_RECEIPT_CONTRACT = "claw.continuation.receipt.v1";
+const CONTINUATION_DECISION_POLICY = "evidence-first-safe-v1";
+const CONTINUATION_DECISION_REASON = "safe-without-approval";
+const CONTINUATION_ACTION_KINDS = new Set([
+  "observeScreen",
+  "controlBrowser",
+  "manageFiles",
+  "extractData",
+  "operateDesktopApp",
+  "composeMessage",
+]);
 const SCHEMA_ACTION_KINDS = new Set([
   "analyzeLocalContext",
   "requestPermission",
@@ -120,7 +137,29 @@ const options = {
   ),
   taskReplayCache: new Map(),
   taskReplayCacheLimit: TASK_REPLAY_CACHE_LIMIT,
+  continuationReceiptCache: new Map(),
+  continuationReceiptCacheLimit: CONTINUATION_RECEIPT_CACHE_LIMIT,
 };
+
+if (process.argv.includes("--emit-events-stream")) {
+  const lines = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+  for await (const line of lines) {
+    if (!line.trim()) {
+      continue;
+    }
+    let events;
+    try {
+      events = await makeGatewayEvents(JSON.parse(line), options);
+    } catch (error) {
+      events = [errorEvent(error, true)];
+    }
+    for (const event of events) {
+      console.log(JSON.stringify(event));
+    }
+  }
+  await flushStdout();
+  process.exit(0);
+}
 
 if (process.argv.includes("--emit-events")) {
   const input = JSON.parse(await readEnvelopeInput());
@@ -380,8 +419,26 @@ async function makeGatewayEvents(envelope, config) {
   validateEnvelope(envelope, config);
   const replayKey = taskReplayKey(envelope);
   const cache = config.taskReplayCache;
+  const lineage = envelope.task?.lineage;
+  let continuationState = null;
+
+  if (lineage !== undefined && lineage !== null) {
+    const lineageDigest = validateContinuationLineageShape(envelope);
+    const existingRecord = cache?.get(replayKey);
+    if (existingRecord) {
+      if (existingRecord.continuationLineageDigest !== lineageDigest) {
+        throw new GatewayError(400, "continuation_replay_binding_mismatch");
+      }
+      if (existingRecord.status === "running") {
+        throw new GatewayError(400, "continuation_replay_in_progress");
+      }
+      return makeTaskReplayGuardEvents(envelope, config, existingRecord);
+    }
+    continuationState = consumeContinuationReceipt(envelope, config, lineageDigest);
+  }
+
   if (!cache) {
-    return buildGatewayEvents(envelope, config);
+    return buildGatewayEvents(envelope, config, undefined, continuationState);
   }
 
   const existingRecord = cache.get(replayKey);
@@ -390,12 +447,12 @@ async function makeGatewayEvents(envelope, config) {
   }
 
   const firstSessionID = crypto.randomUUID();
-  const replayRecord = makeTaskReplayRecord(envelope, replayKey, firstSessionID);
+  const replayRecord = makeTaskReplayRecord(envelope, replayKey, firstSessionID, continuationState?.lineageDigest || "");
   cache.set(replayKey, replayRecord);
   pruneTaskReplayCache(cache, config.taskReplayCacheLimit || TASK_REPLAY_CACHE_LIMIT);
 
   try {
-    const events = await buildGatewayEvents(envelope, config, firstSessionID);
+    const events = await buildGatewayEvents(envelope, config, firstSessionID, continuationState);
     markTaskReplayCompleted(replayRecord, events);
     return events;
   } catch (error) {
@@ -404,10 +461,10 @@ async function makeGatewayEvents(envelope, config) {
   }
 }
 
-async function buildGatewayEvents(envelope, config, sessionID = crypto.randomUUID()) {
+async function buildGatewayEvents(envelope, config, sessionID = crypto.randomUUID(), continuationState = null) {
   const task = envelope.task;
   const sessionWorkspace = await prepareSessionWorkspace(config.workspace, sessionID);
-  const sessionContext = makeSessionContext();
+  const sessionContext = makeSessionContext(continuationState?.trustedParentContext);
   let sequence = 0;
   const events = [
     event({
@@ -423,6 +480,7 @@ async function buildGatewayEvents(envelope, config, sessionID = crypto.randomUUI
     sessionWorkspace,
     sessionContext,
     allowedActionKinds: [...new Set(envelope.gateway?.allowedActionKinds || [])],
+    continuationState,
   };
   const capabilitySnapshot = gatewayCapabilitySnapshot(envelope, config, sessionID, sessionWorkspace);
   const capabilitySnapshotArtifact = await writeArtifact(
@@ -444,6 +502,7 @@ async function buildGatewayEvents(envelope, config, sessionID = crypto.randomUUI
     }),
   );
 
+  const actionResults = [];
   for (const [index, action] of task.actions.entries()) {
     const policy = actionPolicy(action, envelope.gateway);
     const unsupportedByHandler = policy.allowed && fixedActionHandler(action.kind) === null;
@@ -462,6 +521,7 @@ async function buildGatewayEvents(envelope, config, sessionID = crypto.randomUUI
     );
 
     const result = await runAction(action, index, envelope.gateway, sessionConfig);
+    actionResults.push(result);
     if (result.artifacts.length > 0) {
       events.push(
         event({
@@ -491,6 +551,11 @@ async function buildGatewayEvents(envelope, config, sessionID = crypto.randomUUI
     );
   }
 
+  const continuationOffer = actionResults.length === task.actions.length &&
+    actionResults.every((result) => result.status === "succeeded")
+    ? issueContinuationOffer(envelope, sessionID, sessionContext, config)
+    : null;
+
   events.push(
     event({
       sessionID,
@@ -498,6 +563,7 @@ async function buildGatewayEvents(envelope, config, sessionID = crypto.randomUUI
       sequence,
       kind: "sessionCompleted",
       summary: "Gateway event stream completed",
+      continuationOffer,
     }),
   );
   return events;
@@ -572,8 +638,8 @@ async function makeTaskReplayGuardEvents(envelope, config, record) {
   return events;
 }
 
-function makeSessionContext() {
-  return {
+function makeSessionContext(trustedParentContext = null) {
+  const context = {
     artifacts: [],
     browserTraces: [],
     screenObservations: [],
@@ -583,6 +649,604 @@ function makeSessionContext() {
     messageDrafts: [],
     agentTraces: [],
   };
+  if (!trustedParentContext) {
+    return context;
+  }
+  const seed = deepCloneJSON(trustedParentContext);
+  for (const key of [
+    "browserTraces",
+    "screenObservations",
+    "accessibilityTrees",
+    "fileDiffs",
+    "commandOutputs",
+    "messageDrafts",
+  ]) {
+    context[key] = Array.isArray(seed[key]) ? seed[key] : [];
+  }
+  return context;
+}
+
+function validateContinuationLineageShape(envelope) {
+  const lineage = envelope.task?.lineage;
+  const allowedKeys = [
+    "childRound",
+    "contract",
+    "decisionPolicy",
+    "decisionReason",
+    "parentAgentTraceArtifactID",
+    "parentDecisionDigest",
+    "parentRound",
+    "parentSessionID",
+    "parentTaskID",
+    "receipt",
+    "selectedActionKind",
+  ];
+  if (!isPlainObject(lineage) || !hasExactKeys(lineage, allowedKeys)) {
+    throw new GatewayError(400, "continuation_lineage_invalid");
+  }
+  if (
+    lineage.contract !== CONTINUATION_LINEAGE_CONTRACT ||
+    lineage.decisionPolicy !== CONTINUATION_DECISION_POLICY ||
+    lineage.decisionReason !== CONTINUATION_DECISION_REASON ||
+    !isUUID(lineage.parentTaskID) ||
+    !isUUID(lineage.parentSessionID) ||
+    !isUUID(lineage.parentAgentTraceArtifactID) ||
+    !isSHA256Digest(lineage.parentDecisionDigest) ||
+    !Number.isSafeInteger(lineage.parentRound) ||
+    !Number.isSafeInteger(lineage.childRound) ||
+    lineage.parentRound < 0 ||
+    lineage.parentRound >= 32 ||
+    lineage.childRound !== lineage.parentRound + 1 ||
+    !CONTINUATION_ACTION_KINDS.has(lineage.selectedActionKind) ||
+    typeof lineage.receipt !== "string" ||
+    !/^[A-Za-z0-9_-]{43}$/.test(lineage.receipt) ||
+    envelope.task.id === lineage.parentTaskID
+  ) {
+    throw new GatewayError(400, "continuation_lineage_invalid");
+  }
+  return continuationLineageDigest(lineage);
+}
+
+function continuationLineageDigest(lineage) {
+  return `sha256:${hashJSON({
+    contract: lineage.contract,
+    parentTaskID: lineage.parentTaskID,
+    parentSessionID: lineage.parentSessionID,
+    parentAgentTraceArtifactID: lineage.parentAgentTraceArtifactID,
+    parentDecisionDigest: lineage.parentDecisionDigest,
+    parentRound: lineage.parentRound,
+    childRound: lineage.childRound,
+    selectedActionKind: lineage.selectedActionKind,
+    decisionPolicy: lineage.decisionPolicy,
+    decisionReason: lineage.decisionReason,
+    receiptHash: continuationReceiptHash(lineage.receipt),
+  })}`;
+}
+
+function consumeContinuationReceipt(envelope, config, lineageDigest) {
+  const lineage = envelope.task.lineage;
+  const cache = config.continuationReceiptCache;
+  if (!(cache instanceof Map)) {
+    throw new GatewayError(400, "continuation_receipt_unavailable");
+  }
+  const now = Date.now();
+  const receiptHash = continuationReceiptHash(lineage.receipt);
+  const existing = cache.get(receiptHash);
+  if (existing?.expiresAtMs <= now) {
+    cache.delete(receiptHash);
+    throw new GatewayError(400, "continuation_receipt_expired");
+  }
+  pruneContinuationReceiptCache(cache, config.continuationReceiptCacheLimit || CONTINUATION_RECEIPT_CACHE_LIMIT, now);
+  const record = cache.get(receiptHash);
+  if (!record) {
+    throw new GatewayError(400, "continuation_receipt_not_found");
+  }
+
+  const bindingMatches = safeEqualString(record.parentTaskID, lineage.parentTaskID) &&
+    safeEqualString(record.parentSessionID, lineage.parentSessionID) &&
+    safeEqualString(record.parentAgentTraceArtifactID, lineage.parentAgentTraceArtifactID) &&
+    safeEqualString(record.decisionDigest, lineage.parentDecisionDigest) &&
+    safeEqualString(record.selectedActionKind, lineage.selectedActionKind) &&
+    safeEqualString(record.decisionPolicy, lineage.decisionPolicy) &&
+    safeEqualString(record.decisionReason, lineage.decisionReason) &&
+    safeEqualString(record.sourceApp, envelope.sourceApp) &&
+    safeEqualString(record.sourceDevice, envelope.task?.sourceDevice || "") &&
+    safeEqualString(record.destinationGateway, envelope.task?.destinationGateway || "") &&
+    record.parentRound === lineage.parentRound &&
+    record.expectedChildRound === lineage.childRound;
+  if (!bindingMatches) {
+    throw new GatewayError(400, "continuation_binding_mismatch");
+  }
+  if (!safeEqualString(record.tokenFingerprint, envelope.gateway?.tokenFingerprint || "")) {
+    throw new GatewayError(400, "continuation_token_mismatch");
+  }
+  if (!safeEqualString(record.parentProfileDigest, continuationProfileDigest(envelope.gateway))) {
+    throw new GatewayError(400, "continuation_profile_mismatch");
+  }
+  if (!safeEqualString(record.parentPolicyDigest, continuationPolicyDigest(config))) {
+    throw new GatewayError(400, "continuation_policy_mismatch");
+  }
+
+  validateContinuationChildActions(envelope, record, config);
+  const inheritedContext = deepCloneJSON(record.trustedParentContext);
+  cache.delete(receiptHash);
+  return {
+    lineageDigest,
+    parentTaskID: record.parentTaskID,
+    parentSessionID: record.parentSessionID,
+    parentRound: record.parentRound,
+    childRound: record.expectedChildRound,
+    selectedActionKind: record.selectedActionKind,
+    trustedParentContext: inheritedContext,
+  };
+}
+
+function validateContinuationChildActions(envelope, record, config) {
+  const actions = envelope.task.actions;
+  if (
+    envelope.task.status !== "readyToSend" ||
+    envelope.auditRequired !== true ||
+    envelope.gateway?.auditEnabled !== true ||
+    envelope.gateway?.requiresApprovalForSensitiveData !== true ||
+    actions.length !== 2 ||
+    actions[0]?.kind !== record.selectedActionKind ||
+    actions[1]?.kind !== "runAgentLoop" ||
+    actions.some((action) => action?.approval !== "userConfirmation")
+  ) {
+    throw new GatewayError(400, "continuation_action_shape_invalid");
+  }
+  if (
+    !isUUID(actions[0]?.id) ||
+    !isUUID(actions[1]?.id) ||
+    actions[0].id === actions[1].id ||
+    record.parentActionIDs.includes(actions[0].id) ||
+    record.parentActionIDs.includes(actions[1].id)
+  ) {
+    throw new GatewayError(400, "continuation_action_identity_invalid");
+  }
+  for (const action of actions) {
+    if (actionPolicy(action, envelope.gateway).allowed !== true || fixedActionHandler(action.kind) === null) {
+      throw new GatewayError(400, "continuation_action_policy_blocked");
+    }
+  }
+  validateContinuationActionArguments(actions[0], config);
+  validateContinuationLoopArguments(actions[1]);
+}
+
+function validateContinuationActionArguments(action, config) {
+  const args = requireStringArguments(action.toolArguments);
+  switch (action.kind) {
+    case "observeScreen":
+      requireExactArgumentKeys(args, ["includeAccessibilityTree", "includeScreenshot", "includeWindowTitles", "maxCandidateControls", "observationGoal", "redaction"]);
+      requireBoundedText(args.observationGoal, 1, 500);
+      requireBooleanString(args.includeScreenshot);
+      requireBooleanString(args.includeAccessibilityTree);
+      requireBooleanString(args.includeWindowTitles);
+      requireIntegerString(args.maxCandidateControls, 1, 50);
+      if (args.redaction !== "maskSensitiveText") throw new GatewayError(400, "continuation_action_arguments_invalid");
+      break;
+    case "controlBrowser": {
+      requireExactArgumentKeys(args, ["browserApp", "browserGoal", "captureTrace", "openInBrowser"], ["openURL", "searchQuery", "searchURLTemplate"]);
+      requireBoundedText(args.browserGoal, 1, 500);
+      requireBoundedText(args.browserApp, 1, 80);
+      requireBooleanString(args.openInBrowser);
+      requireBooleanString(args.captureTrace);
+      const hasURL = Boolean(args.openURL?.trim());
+      const hasSearch = Boolean(args.searchQuery?.trim());
+      if (hasURL === hasSearch || args.openInBrowser !== "true" || args.captureTrace !== "true") {
+        throw new GatewayError(400, "continuation_action_arguments_invalid");
+      }
+      if (!allowlistContains(config.browserAppAllowlist, args.browserApp)) {
+        throw new GatewayError(400, "continuation_action_policy_blocked");
+      }
+      if (hasURL) {
+        const url = validateContinuationURL(args.openURL);
+        if (!config.allowBrowserControl || !config.browserHostAllowlist.has(url.hostname)) {
+          throw new GatewayError(400, "continuation_action_policy_blocked");
+        }
+      } else {
+        requireBoundedText(args.searchQuery, 1, 500);
+        if (args.searchURLTemplate !== "https://www.google.com/search?q={query}") {
+          throw new GatewayError(400, "continuation_action_arguments_invalid");
+        }
+        if (!config.allowBrowserControl || !config.browserHostAllowlist.has("www.google.com")) {
+          throw new GatewayError(400, "continuation_action_policy_blocked");
+        }
+      }
+      break;
+    }
+    case "manageFiles":
+      requireExactArgumentKeys(args, ["operation", "workspaceOnly", "writePath", "writeText"]);
+      if (args.operation !== "writeText" || args.workspaceOnly !== "true") throw new GatewayError(400, "continuation_action_arguments_invalid");
+      requireSafeRelativePath(args.writePath);
+      requireBoundedText(args.writeText, 1, 32_768);
+      break;
+    case "extractData":
+      requireExactArgumentKeys(args, ["extractionGoal", "outputPath", "schema", "sourcePriority", "validateCompleteness"]);
+      requireBoundedText(args.extractionGoal, 1, 500);
+      requireSafeRelativePath(args.outputPath);
+      requireBoundedText(args.schema, 1, 1000);
+      if (args.validateCompleteness !== "true") throw new GatewayError(400, "continuation_action_arguments_invalid");
+      validateSourcePriority(args.sourcePriority);
+      break;
+    case "operateDesktopApp":
+    case "composeMessage":
+      throw new GatewayError(400, "continuation_action_policy_blocked");
+    default:
+      throw new GatewayError(400, "continuation_action_arguments_invalid");
+  }
+}
+
+function validateContinuationLoopArguments(action) {
+  const args = requireStringArguments(action.toolArguments);
+  requireExactArgumentKeys(args, ["allowedNextActions", "approvalRequiredFor", "inputSources", "loopMode", "maxIterations", "objective", "stopBeforeDestructiveAction", "writeTrace"]);
+  requireBoundedText(args.objective, 1, 500);
+  if (args.loopMode !== "observe-plan-act-verify") throw new GatewayError(400, "continuation_loop_arguments_invalid");
+  requireIntegerString(args.maxIterations, 1, 8);
+  requireBooleanString(args.stopBeforeDestructiveAction);
+  if (args.writeTrace !== "true") throw new GatewayError(400, "continuation_loop_arguments_invalid");
+  const inputs = parseCSV(args.inputSources);
+  const inputAllowlist = new Set(["screenObservation", "accessibilityTree", "browserTrace", "fileDiff", "commandOutput", "messageDraft"]);
+  const nextActions = parseCSV(args.allowedNextActions);
+  if (
+    inputs.length === 0 || inputs.some((item) => !inputAllowlist.has(item)) ||
+    nextActions.length === 0 || nextActions.some((item) => !CONTINUATION_ACTION_KINDS.has(item))
+  ) {
+    throw new GatewayError(400, "continuation_loop_arguments_invalid");
+  }
+  const approvals = parseCSV(args.approvalRequiredFor);
+  const approvalAllowlist = new Set(["runShellCommand", "operateDesktopAppFinalSubmit", "externalNetwork", "destructiveFileChange", ...CONTINUATION_ACTION_KINDS]);
+  if (approvals.some((item) => !approvalAllowlist.has(item))) {
+    throw new GatewayError(400, "continuation_loop_arguments_invalid");
+  }
+}
+
+function issueContinuationOffer(envelope, sessionID, sessionContext, config) {
+  const traceArtifact = [...(sessionContext.artifacts || [])].reverse().find((artifact) => artifact.kind === "agentTrace");
+  const trace = traceArtifact?.payload;
+  if (!isContinuationDecisionEligible(trace, envelope)) {
+    return null;
+  }
+  const contextResult = makeTrustedContinuationContext(sessionContext);
+  if (!contextResult) {
+    return null;
+  }
+  const parentRound = envelope.task.lineage?.childRound ?? 0;
+  if (!Number.isSafeInteger(parentRound) || parentRound < 0 || parentRound >= 32) {
+    return null;
+  }
+  const cache = config.continuationReceiptCache;
+  if (!(cache instanceof Map)) {
+    return null;
+  }
+  const issuedAtMs = Date.now();
+  pruneContinuationReceiptCache(cache, config.continuationReceiptCacheLimit || CONTINUATION_RECEIPT_CACHE_LIMIT, issuedAtMs);
+  const receipt = crypto.randomBytes(32).toString("base64url");
+  const receiptHash = continuationReceiptHash(receipt);
+  const decisionDigest = continuationDecisionDigest(trace);
+  const record = deepFreeze({
+    receiptHash,
+    issuedAtMs,
+    expiresAtMs: issuedAtMs + CONTINUATION_RECEIPT_TTL_MS,
+    parentTaskID: envelope.task.id,
+    parentSessionID: sessionID,
+    parentAgentTraceArtifactID: traceArtifact.id,
+    parentTaskDigest: continuationTaskDigest(envelope.task),
+    parentProfileDigest: continuationProfileDigest(envelope.gateway),
+    parentPolicyDigest: continuationPolicyDigest(config),
+    tokenFingerprint: envelope.gateway?.tokenFingerprint || "",
+    sourceApp: envelope.sourceApp,
+    sourceDevice: envelope.task.sourceDevice || "",
+    destinationGateway: envelope.task.destinationGateway || "",
+    parentRound,
+    expectedChildRound: parentRound + 1,
+    selectedActionKind: trace.selectedNextAction.kind,
+    decisionPolicy: CONTINUATION_DECISION_POLICY,
+    decisionReason: CONTINUATION_DECISION_REASON,
+    decisionDigest,
+    parentActionIDs: envelope.task.actions.map((action) => action.id),
+    trustedParentContext: contextResult.context,
+  });
+  cache.set(receiptHash, record);
+  pruneContinuationReceiptCache(cache, config.continuationReceiptCacheLimit || CONTINUATION_RECEIPT_CACHE_LIMIT, issuedAtMs);
+  return {
+    contract: CONTINUATION_RECEIPT_CONTRACT,
+    receipt,
+    expiresAt: new Date(record.expiresAtMs).toISOString().replace(/\.\d{3}Z$/, "Z"),
+    parentTaskID: record.parentTaskID,
+    parentSessionID: record.parentSessionID,
+    parentAgentTraceArtifactID: record.parentAgentTraceArtifactID,
+    parentDecisionDigest: decisionDigest,
+    parentRound,
+    selectedActionKind: record.selectedActionKind,
+  };
+}
+
+function isContinuationDecisionEligible(trace, envelope) {
+  if (!trace || typeof trace !== "object") return false;
+  if (
+    envelope.auditRequired !== true ||
+    envelope.gateway?.auditEnabled !== true ||
+    envelope.gateway?.requiresApprovalForSensitiveData !== true ||
+    envelope.gateway?.securityMode !== "mutualApproval"
+  ) return false;
+  const selected = trace.selectedNextAction;
+  const decision = trace.selectedActionDecision;
+  const requested = Number(trace.requestedNextActionCount);
+  const effective = Number(trace.effectiveNextActionCount);
+  const blocked = Number(trace.blockedNextActionCount);
+  const kind = selected?.kind;
+  const forbiddenRisks = new Set(["approval-required", "external-network-gate", "destructive-action-gate", "final-submit-gate", "next-action-policy-blocked"]);
+  return trace.nextActionPolicy === "envelope-intersection" &&
+    trace.nextActionPolicyDiagnostic === "allowed" &&
+    Number.isInteger(requested) && Number.isInteger(effective) && Number.isInteger(blocked) &&
+    requested === effective + blocked && effective > 0 &&
+    trace.readiness?.canContinue === true &&
+    Array.isArray(trace.readiness?.degradedSignals) && trace.readiness.degradedSignals.length === 0 &&
+    Array.isArray(trace.readiness?.missingSignals) && trace.readiness.missingSignals.length === 0 &&
+    trace.handoffStatus === "ready-to-continue" && trace.stopReason === "none" &&
+    CONTINUATION_ACTION_KINDS.has(kind) && kind !== "none" &&
+    selected.requiresApproval === false && trace.selectedNextActionAllowedByEnvelope === true &&
+    decision?.policy === CONTINUATION_DECISION_POLICY && decision?.reason === CONTINUATION_DECISION_REASON &&
+    decision?.fromCandidates === true && decision?.consistent === true &&
+    Number.isInteger(decision?.candidateCount) && decision.candidateCount >= 1 && decision.candidateCount <= 6 &&
+    Number.isInteger(decision?.candidateOrdinal) && decision.candidateOrdinal >= 1 && decision.candidateOrdinal <= decision.candidateCount &&
+    Array.isArray(trace.allowedNextActions) && trace.allowedNextActions.includes(kind) &&
+    Array.isArray(trace.nextActions) && trace.nextActions.some((candidate) => candidate?.kind === kind && candidate?.requiresApproval === false) &&
+    Array.isArray(trace.riskTags) && !trace.riskTags.some((risk) => forbiddenRisks.has(risk)) &&
+    (envelope.gateway?.allowedActionKinds || []).includes(kind) && fixedActionHandler(kind) !== null;
+}
+
+function continuationDecisionDigest(trace) {
+  const fields = [
+    trace.nextActionPolicy,
+    trace.nextActionPolicyDiagnostic,
+    trace.requestedNextActionCount,
+    trace.effectiveNextActionCount,
+    trace.blockedNextActionCount,
+    trace.readiness?.canContinue,
+    trace.selectedNextAction?.kind,
+    trace.selectedNextAction?.requiresApproval,
+    trace.selectedNextActionAllowedByEnvelope,
+    trace.selectedActionDecision?.policy,
+    trace.selectedActionDecision?.reason,
+    trace.selectedActionDecision?.candidateCount,
+    trace.selectedActionDecision?.candidateOrdinal,
+    trace.selectedActionDecision?.fromCandidates,
+    trace.selectedActionDecision?.consistent,
+    trace.stopReason,
+    trace.handoffStatus,
+  ];
+  return `sha256:${crypto.createHash("sha256").update(fields.join("|")).digest("hex")}`;
+}
+
+function makeTrustedContinuationContext(context) {
+  const sourceRecords = [
+    ...(context.browserTraces || []).map(sanitizeInheritedBrowserTrace),
+    ...(context.screenObservations || []).map(sanitizeInheritedScreenObservation),
+    ...(context.accessibilityTrees || []).map(sanitizeInheritedAccessibilityTree),
+    ...(context.fileDiffs || []).map(sanitizeInheritedFileDiff),
+    ...(context.commandOutputs || []).map(sanitizeInheritedCommandOutput),
+    ...(context.messageDrafts || []).map(() => "<inherited-redacted-draft>"),
+  ];
+  if (sourceRecords.length === 0 || sourceRecords.length > CONTINUATION_CONTEXT_RECORD_LIMIT) {
+    return null;
+  }
+  const trusted = {
+    browserTraces: (context.browserTraces || []).map(sanitizeInheritedBrowserTrace),
+    screenObservations: (context.screenObservations || []).map(sanitizeInheritedScreenObservation),
+    accessibilityTrees: (context.accessibilityTrees || []).map(sanitizeInheritedAccessibilityTree),
+    fileDiffs: (context.fileDiffs || []).map(sanitizeInheritedFileDiff),
+    commandOutputs: (context.commandOutputs || []).map(sanitizeInheritedCommandOutput),
+    messageDrafts: (context.messageDrafts || []).map(() => "<inherited-redacted-draft>"),
+  };
+  const serialized = JSON.stringify(trusted);
+  if (Buffer.byteLength(serialized, "utf8") > CONTINUATION_CONTEXT_BYTE_LIMIT) {
+    return null;
+  }
+  return { context: deepFreeze(JSON.parse(serialized)), recordCount: sourceRecords.length };
+}
+
+function sanitizeInheritedBrowserTrace(trace) {
+  return {
+    mode: boundedString(trace?.mode, 80),
+    title: boundedString(trace?.title, 256),
+    textPreview: boundedString(trace?.textPreview, 4_000),
+    headings: (trace?.headings || []).slice(0, 12).map((item) => ({ level: Number(item?.level || 0), text: boundedString(item?.text, 256) })),
+    tables: (trace?.tables || []).slice(0, 4).map((table, index) => ({
+      index,
+      headers: (table?.headers || []).slice(0, 12).map((item) => boundedString(item, 256)),
+      rows: (table?.rows || []).slice(0, 20).map((row) => (row || []).slice(0, 12).map((item) => boundedString(item, 256))),
+    })),
+    links: (trace?.links || []).slice(0, 12).map((item) => ({ text: boundedString(item?.text, 256) })),
+  };
+}
+
+function sanitizeInheritedScreenObservation(observation) {
+  return {
+    mode: boundedString(observation?.mode, 80),
+    platform: boundedString(observation?.platform, 40),
+    windows: (observation?.windows || []).slice(0, 8).map((window) => ({
+      app: boundedString(window?.app, 120),
+      title: boundedString(window?.title, 256),
+    })),
+  };
+}
+
+function sanitizeInheritedAccessibilityTree(tree) {
+  return {
+    mode: boundedString(tree?.mode, 80),
+    nodes: (tree?.nodes || []).slice(0, 20).map((node) => ({
+      role: boundedString(node?.role, 80),
+      title: boundedString(node?.title || node?.label, 256),
+      app: boundedString(node?.app, 120),
+    })),
+  };
+}
+
+function sanitizeInheritedFileDiff(diff) {
+  return { mode: boundedString(diff?.mode, 80), created: [] };
+}
+
+function sanitizeInheritedCommandOutput(output) {
+  return {
+    text: boundedString(output?.text, 1_200),
+    mode: boundedString(output?.mode, 80),
+    structuredCommandPresent: boundedString(output?.structuredCommandPresent, 8),
+    commandParsed: boundedString(output?.commandParsed, 8),
+    executionAttempted: boundedString(output?.executionAttempted, 8),
+    executed: boundedString(output?.executed, 8),
+    resultStatus: boundedString(output?.resultStatus, 40),
+  };
+}
+
+function continuationReceiptHash(receipt) {
+  return `sha256:${crypto.createHash("sha256").update(String(receipt)).digest("hex")}`;
+}
+
+function continuationTaskDigest(task) {
+  const clone = deepCloneJSON(task);
+  if (clone?.lineage?.receipt) clone.lineage.receipt = continuationReceiptHash(clone.lineage.receipt);
+  return `sha256:${hashJSON(clone)}`;
+}
+
+function continuationProfileDigest(gateway) {
+  return `sha256:${hashJSON({
+    endpoint: gateway?.endpoint || "",
+    deviceName: gateway?.deviceName || "",
+    securityMode: gateway?.securityMode || "",
+    tokenFingerprint: gateway?.tokenFingerprint || "",
+    allowedActionKinds: sortedStrings(gateway?.allowedActionKinds || []),
+    requiresApprovalForSensitiveData: gateway?.requiresApprovalForSensitiveData === true,
+    auditEnabled: gateway?.auditEnabled === true,
+  })}`;
+}
+
+function continuationPolicyDigest(config) {
+  return `sha256:${hashJSON({
+    workspace: path.resolve(config.workspace),
+    fixedHandlers: Object.keys(FIXED_ACTION_HANDLERS).sort(),
+    allowShell: Boolean(config.allowShell),
+    shellAllowlist: sortedAllowlist(config.shellAllowlist),
+    allowBrowserNetwork: Boolean(config.allowBrowserNetwork),
+    browserHostAllowlist: sortedAllowlist(config.browserHostAllowlist),
+    allowBrowserControl: Boolean(config.allowBrowserControl),
+    browserAppAllowlist: sortedAllowlist(config.browserAppAllowlist),
+    allowScreenCapture: Boolean(config.allowScreenCapture),
+    allowWindowMetadata: Boolean(config.allowWindowMetadata),
+    allowAccessibilityObserve: Boolean(config.allowAccessibilityObserve),
+    allowDesktopControl: Boolean(config.allowDesktopControl),
+    desktopAppAllowlist: sortedAllowlist(config.desktopAppAllowlist),
+    desktopKeyAllowlist: sortedAllowlist(config.desktopKeyAllowlist),
+  })}`;
+}
+
+function pruneContinuationReceiptCache(cache, limit, now = Date.now()) {
+  for (const [key, record] of cache) {
+    if (!record || record.expiresAtMs <= now) cache.delete(key);
+  }
+  while (cache.size > limit) {
+    const oldest = cache.keys().next().value;
+    if (!oldest) break;
+    cache.delete(oldest);
+  }
+}
+
+function requireStringArguments(value) {
+  if (!isPlainObject(value) || Object.values(value).some((item) => typeof item !== "string")) {
+    throw new GatewayError(400, "continuation_action_arguments_invalid");
+  }
+  return value;
+}
+
+function requireExactArgumentKeys(args, required, optional = []) {
+  const allowed = new Set([...required, ...optional]);
+  if (required.some((key) => !Object.hasOwn(args, key)) || Object.keys(args).some((key) => !allowed.has(key))) {
+    throw new GatewayError(400, "continuation_action_arguments_invalid");
+  }
+}
+
+function requireBoundedText(value, min, max) {
+  if (typeof value !== "string" || value.trim().length < min || value.length > max) {
+    throw new GatewayError(400, "continuation_action_arguments_invalid");
+  }
+}
+
+function requireBooleanString(value) {
+  if (value !== "true" && value !== "false") throw new GatewayError(400, "continuation_action_arguments_invalid");
+}
+
+function requireIntegerString(value, min, max) {
+  if (!/^\d+$/.test(String(value)) || Number(value) < min || Number(value) > max) {
+    throw new GatewayError(400, "continuation_action_arguments_invalid");
+  }
+}
+
+function requireSafeRelativePath(value) {
+  requireBoundedText(value, 1, 500);
+  const normalized = path.posix.normalize(value.replace(/\\/g, "/"));
+  if (path.isAbsolute(value) || normalized === ".." || normalized.startsWith("../") || normalized.includes("\0")) {
+    throw new GatewayError(400, "continuation_action_arguments_invalid");
+  }
+}
+
+function validateSourcePriority(value) {
+  const allowed = new Set(["browserTrace", "accessibilityTree", "fileDiff", "commandOutput", "screenObservation"]);
+  const sources = parseCSV(value);
+  if (sources.length === 0 || sources.length > 5 || sources.some((source) => !allowed.has(source))) {
+    throw new GatewayError(400, "continuation_action_arguments_invalid");
+  }
+}
+
+function validateContinuationURL(value) {
+  requireBoundedText(value, 1, 2_048);
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new GatewayError(400, "continuation_action_arguments_invalid");
+  }
+  if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) {
+    throw new GatewayError(400, "continuation_action_arguments_invalid");
+  }
+  return url;
+}
+
+function hasExactKeys(value, keys) {
+  return Object.keys(value).sort().join(",") === [...keys].sort().join(",");
+}
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
+}
+
+function isUUID(value) {
+  return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function isSHA256Digest(value) {
+  return typeof value === "string" && /^sha256:[0-9a-f]{64}$/.test(value);
+}
+
+function safeEqualString(left, right) {
+  const leftHash = crypto.createHash("sha256").update(String(left)).digest();
+  const rightHash = crypto.createHash("sha256").update(String(right)).digest();
+  return crypto.timingSafeEqual(leftHash, rightHash);
+}
+
+function boundedString(value, max) {
+  return String(value || "").slice(0, max);
+}
+
+function deepCloneJSON(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function deepFreeze(value) {
+  if (!value || typeof value !== "object" || Object.isFrozen(value)) return value;
+  Object.freeze(value);
+  for (const child of Object.values(value)) deepFreeze(child);
+  return value;
 }
 
 function taskReplayKey(envelope) {
@@ -606,7 +1270,7 @@ function hashJSON(value) {
   return crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
-function makeTaskReplayRecord(envelope, replayKey, firstSessionID) {
+function makeTaskReplayRecord(envelope, replayKey, firstSessionID, continuationLineageDigest = "") {
   const actionKinds = sortedStrings(envelope.task.actions.map((action) => action?.kind).filter(Boolean));
   return {
     replayKey,
@@ -625,6 +1289,7 @@ function makeTaskReplayRecord(envelope, replayKey, firstSessionID) {
     finalSequence: null,
     finalEventKind: "",
     failureCode: "",
+    continuationLineageDigest,
   };
 }
 
@@ -1018,6 +1683,7 @@ function event({
   summary,
   artifacts = [],
   isRetryable = false,
+  continuationOffer = null,
 }) {
   return {
     id: crypto.randomUUID(),
@@ -1038,6 +1704,7 @@ function event({
     isRetryable,
     retryCount: 0,
     createdAt: isoNow(),
+    ...(continuationOffer ? { continuationOffer } : {}),
   };
 }
 
@@ -3898,13 +4565,18 @@ function kebabCase(value) {
 }
 
 async function messageDraftAction(action, index, config) {
+  const args = action.toolArguments || {};
+  const recipientOrChannel = String(args.recipientOrChannel || args.recipient || args.channel || "").trim();
+  const deliverySurface = String(args.deliverySurface || args.channel || "").trim();
+  const draftText = String(args.draftText || args.body || "").trim();
   const artifacts = [
     await writeArtifact(
       "messageDraft",
       `message-draft-${index + 1}.txt`,
       [
-        `Target: ${action.target}`,
-        `Instruction: ${action.instruction}`,
+        `Recipient or channel: ${recipientOrChannel || "not-provided"}`,
+        `Delivery surface: ${deliverySurface || "not-provided"}`,
+        draftText ? "Draft body is stored under the approval gate." : "Draft body was not provided.",
         "",
         "Draft requires user confirmation before send.",
       ].join("\n"),
@@ -4156,7 +4828,7 @@ function isSatisfiedEvidence(source, payload) {
     case "accessibilityTree":
       return mode === "accessibility-summary";
     case "browserTrace":
-      return mode === "local-html" || mode === "network-fetch";
+      return mode === "local-html" || mode === "network-fetch" || mode === "artifact-grounded-extraction";
     case "fileDiff":
       return mode === "workspace-write";
     case "commandOutput":
@@ -4540,8 +5212,9 @@ function statusText(status) {
   return status === 400 ? "Bad Request" : status === 401 ? "Unauthorized" : "Internal Server Error";
 }
 
-function errorEvent(error) {
+function errorEvent(error, forceFailClosed = false) {
   const code = error instanceof GatewayError ? error.code : "internal_error";
+  const failClosed = forceFailClosed || code === "unsupported_action_kind" || code.startsWith("continuation_");
   return {
     id: crypto.randomUUID(),
     sessionID: crypto.randomUUID(),
@@ -4550,7 +5223,7 @@ function errorEvent(error) {
     kind: "actionFailed",
     summary: `gateway error: ${code}`,
     artifacts: [],
-    isRetryable: code !== "unsupported_action_kind",
+    isRetryable: !failClosed,
     retryCount: 0,
     createdAt: isoNow(),
   };

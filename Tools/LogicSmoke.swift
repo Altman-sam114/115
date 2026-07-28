@@ -2384,6 +2384,43 @@ enum LogicSmoke {
         if let readyLoopReview = ClawAgentTraceReviewSummary.latest(from: [readyLoopTrace]) {
             expect(readyLoopReview.stopReason == nil, "generic metadata parser should continue treating none stop reason as absent")
             expect(ClawAgentTraceReviewSummary.allowedNextActionKind("None") == nil, "next action kind parsing should remain case sensitive")
+            let continuationDigestInput = "envelope-intersection|allowed|2|2|0|true|extractData|false|true|evidence-first-safe-v1|safe-without-approval|2|1|true|true|none|ready-to-continue"
+            let continuationDigest = readyLoopReview.continuationDecisionDigest(
+                taskID: UUID(),
+                sessionID: UUID(),
+                artifactID: readyLoopTrace.id,
+                round: 0
+            )
+            expect(
+                continuationDigest == ClawContinuationContract.sha256(continuationDigestInput),
+                "Swift continuation decision digest should match the Gateway field contract"
+            )
+            if var lineageTask = missionStore.clawMobileTasks.first {
+                lineageTask.continuationLineage = ClawContinuationLineage(
+                    contract: ClawContinuationLineage.contractVersion,
+                    parentTaskID: UUID(),
+                    parentSessionID: UUID(),
+                    parentAgentTraceArtifactID: readyLoopTrace.id,
+                    parentDecisionDigest: continuationDigest,
+                    parentRound: 0,
+                    childRound: 1,
+                    selectedActionKind: .extractData,
+                    decisionPolicy: "evidence-first-safe-v1",
+                    decisionReason: "safe-without-approval",
+                    receipt: String(repeating: "r", count: 43)
+                )
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = [.sortedKeys]
+                if let encoded = try? encoder.encode(lineageTask) {
+                    let text = String(decoding: encoded, as: UTF8.self)
+                    expect(text.contains("\"lineage\""), "continuation task should encode the protocol lineage field")
+                    expect(text.contains("continuationLineage") == false, "continuation task should not leak the Swift property name")
+                } else {
+                    failures.append("continuation task should encode")
+                }
+            } else {
+                failures.append("continuation lineage smoke requires a queued task")
+            }
             let readyLoopSummary = ClawMissionRunSummary(
                 command: "ready loop",
                 phaseTitle: "复核中",

@@ -801,6 +801,68 @@ for (const blockedAction of ["operateDesktopApp", "composeMessage"]) {
   expect(!serializedAgentLoopPolicyTrace.includes(serializedAction), `websocket agent loop trace leaked ${blockedAction}`);
 }
 
+const continuationPort = port + 7;
+const continuationWorkspace = `.build/claw-gateway-websocket-trusted-continuation-${crypto.randomUUID()}`;
+const continuationServer = spawn(
+  process.execPath,
+  ["Tools/claw-gateway-server.mjs"],
+  {
+    env: {
+      ...process.env,
+      ...gatewayPolicyDefaults(),
+      CLAW_GATEWAY_HOST: host,
+      CLAW_GATEWAY_PORT: String(continuationPort),
+      CLAW_GATEWAY_TOKEN: token,
+      CLAW_WORKSPACE: continuationWorkspace,
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  },
+);
+let continuationServerOutput = "";
+continuationServer.stdout.on("data", (chunk) => {
+  continuationServerOutput += chunk.toString("utf8");
+});
+continuationServer.stderr.on("data", (chunk) => {
+  continuationServerOutput += chunk.toString("utf8");
+});
+await waitFor(
+  () => continuationServerOutput.includes("Claw Gateway listening"),
+  3000,
+  () => continuationServerOutput,
+);
+const continuationParentEnvelope = makeContinuationParentEnvelope(token, continuationPort);
+const continuationParentEvents = await connectAndCollectEvents({
+  host,
+  port: continuationPort,
+  token,
+  envelope: continuationParentEnvelope,
+});
+const continuationOffer = continuationParentEvents.find((event) => event.kind === "sessionCompleted")?.continuationOffer;
+assertContinuationOffer(continuationOffer, continuationParentEnvelope, "websocket continuation parent");
+assertPrivateContinuationOffer(continuationParentEvents, continuationOffer.receipt, "websocket continuation parent");
+const concurrentChildA = makeContinuationChildEnvelope(continuationParentEnvelope, continuationOffer);
+const concurrentChildB = makeContinuationChildEnvelope(continuationParentEnvelope, continuationOffer);
+const concurrentResults = await Promise.all([
+  connectAndCollectEvents({ host, port: continuationPort, token, envelope: concurrentChildA }),
+  connectAndCollectEvents({ host, port: continuationPort, token, envelope: concurrentChildB }),
+]);
+const successfulContinuationIndex = concurrentResults.findIndex((result) => result.some((event) => event.kind === "sessionCompleted"));
+expect(successfulContinuationIndex >= 0, "websocket continuation did not accept one concurrent child");
+const failedContinuationIndex = successfulContinuationIndex === 0 ? 1 : 0;
+const successfulContinuationEvents = concurrentResults[successfulContinuationIndex];
+const successfulContinuationEnvelope = successfulContinuationIndex === 0 ? concurrentChildA : concurrentChildB;
+const failedContinuationEvents = concurrentResults[failedContinuationIndex];
+await assertContinuationChildSuccess(
+  continuationParentEvents,
+  successfulContinuationEvents,
+  successfulContinuationEnvelope,
+  continuationOffer.receipt,
+  "websocket continuation child",
+);
+assertContinuationEnvelopeFailure(failedContinuationEvents, "continuation_receipt_not_found", continuationOffer.receipt, "websocket concurrent continuation");
+expect(await sessionDirectoryCount(continuationWorkspace) === 2, "websocket rejected continuation created a workspace");
+continuationServer.kill();
+
 const unsupportedHandlerPort = port + 6;
 const unsupportedMarker = `unsupported-handler-${crypto.randomUUID()}`;
 const unsupportedSideEffectPath = path.resolve(`.build/claw-gateway-websocket-unsupported-side-effect-${unsupportedMarker}`);
@@ -889,7 +951,149 @@ expect(unknownActionEvents[0].actionID === undefined && unknownActionEvents[0].a
 expect(!unknownActionEvents.some((event) => event.kind === "actionStarted" || event.kind === "sessionCompleted"), "unknown websocket action must not enter a session");
 expect(!JSON.stringify(unknownActionEvents).includes(unsupportedMarker), "unknown websocket action error leaked the raw kind");
 
-console.log(`Claw Gateway smoke passed (${events.length + firstReplayEvents.length + replayGuardEvents.length + shellIdentityEvents.length + shellProvenanceEvents.length + browserRedirectEvents.length + agentLoopPolicyEvents.length + unsupportedHandlerEvents.length + unknownActionEvents.length} events)`);
+console.log(`Claw Gateway smoke passed (${events.length + firstReplayEvents.length + replayGuardEvents.length + shellIdentityEvents.length + shellProvenanceEvents.length + browserRedirectEvents.length + agentLoopPolicyEvents.length + continuationParentEvents.length + successfulContinuationEvents.length + failedContinuationEvents.length + unsupportedHandlerEvents.length + unknownActionEvents.length} events)`);
+
+function makeContinuationParentEnvelope(rawToken, endpointPort) {
+  const endpoint = `ws://${host}:${endpointPort}`;
+  return {
+    schemaVersion: "claw.computer.control.v1",
+    sourceApp: "Claw Controller",
+    gateway: {
+      endpoint,
+      deviceName: "smoke",
+      securityMode: "mutualApproval",
+      tokenFingerprint: tokenFingerprint(rawToken),
+      allowedActionKinds: ["controlBrowser", "extractData", "runAgentLoop"],
+      requiresApprovalForSensitiveData: true,
+      auditEnabled: true,
+    },
+    task: {
+      id: crypto.randomUUID(),
+      command: "prepare a trusted websocket continuation receipt",
+      summary: "trusted websocket continuation parent",
+      sourceDevice: "smoke",
+      destinationGateway: endpoint,
+      actions: [
+        {
+          id: crypto.randomUUID(),
+          kind: "controlBrowser",
+          title: "Collect continuation evidence",
+          target: "Desktop Browser",
+          instruction: "Collect bounded browser evidence for the next approved task",
+          approval: "gatewayApproval",
+          sourceSurface: "clawGateway",
+          handlesSensitiveData: true,
+          inputPreview: "continuation parent",
+          toolArguments: {
+            browserGoal: "collect bounded continuation evidence",
+            captureTrace: "true",
+            html: "<html><head><title>Continuation Evidence</title></head><body><h1>Bounded result</h1><table><tr><th>Name</th><th>Status</th></tr><tr><td>Claw</td><td>Ready</td></tr></table></body></html>",
+          },
+        },
+        {
+          id: crypto.randomUUID(),
+          kind: "runAgentLoop",
+          title: "Select continuation action",
+          target: "Desktop Agent Loop",
+          instruction: "Select a safe action from bounded evidence",
+          approval: "gatewayApproval",
+          sourceSurface: "clawGateway",
+          handlesSensitiveData: true,
+          inputPreview: "continuation parent",
+          toolArguments: {
+            objective: "select a safe continuation action",
+            loopMode: "observe-plan-act-verify",
+            maxIterations: "1",
+            inputSources: "browserTrace",
+            allowedNextActions: "extractData",
+            approvalRequiredFor: "",
+            stopBeforeDestructiveAction: "true",
+            writeTrace: "true",
+          },
+        },
+      ],
+      status: "readyToSend",
+      riskScore: 20,
+      createdAt: isoNow(),
+    },
+    approvalSummary: "trusted continuation parent",
+    auditRequired: true,
+  };
+}
+
+function makeContinuationChildEnvelope(parent, offer) {
+  return {
+    schemaVersion: parent.schemaVersion,
+    sourceApp: parent.sourceApp,
+    gateway: JSON.parse(JSON.stringify(parent.gateway)),
+    task: {
+      id: crypto.randomUUID(),
+      command: "continue from a trusted parent receipt",
+      summary: "trusted continuation child",
+      sourceDevice: parent.task.sourceDevice,
+      destinationGateway: parent.task.destinationGateway,
+      lineage: {
+        contract: "claw.continuation.lineage.v1",
+        parentTaskID: offer.parentTaskID,
+        parentSessionID: offer.parentSessionID,
+        parentAgentTraceArtifactID: offer.parentAgentTraceArtifactID,
+        parentDecisionDigest: offer.parentDecisionDigest,
+        parentRound: offer.parentRound,
+        childRound: offer.parentRound + 1,
+        selectedActionKind: offer.selectedActionKind,
+        decisionPolicy: "evidence-first-safe-v1",
+        decisionReason: "safe-without-approval",
+        receipt: offer.receipt,
+      },
+      actions: [
+        {
+          id: crypto.randomUUID(),
+          kind: offer.selectedActionKind,
+          title: "Execute approved continuation action",
+          target: "Desktop Data",
+          instruction: "Extract a bounded result from trusted inherited evidence",
+          approval: "userConfirmation",
+          sourceSurface: "clawGateway",
+          handlesSensitiveData: true,
+          inputPreview: "trusted child",
+          toolArguments: {
+            extractionGoal: "extract inherited continuation evidence",
+            sourcePriority: "browserTrace",
+            schema: "title:string,source:string,summary:string,confidence:number",
+            outputPath: "continuation/extracted.json",
+            validateCompleteness: "true",
+          },
+        },
+        {
+          id: crypto.randomUUID(),
+          kind: "runAgentLoop",
+          title: "Run child agent loop",
+          target: "Desktop Agent Loop",
+          instruction: "Recompute the next decision from inherited and child evidence",
+          approval: "userConfirmation",
+          sourceSurface: "clawGateway",
+          handlesSensitiveData: true,
+          inputPreview: "trusted child",
+          toolArguments: {
+            objective: "recompute the next safe continuation decision",
+            loopMode: "observe-plan-act-verify",
+            maxIterations: "1",
+            inputSources: "browserTrace",
+            allowedNextActions: "extractData",
+            approvalRequiredFor: "",
+            stopBeforeDestructiveAction: "true",
+            writeTrace: "true",
+          },
+        },
+      ],
+      status: "readyToSend",
+      riskScore: 20,
+      createdAt: isoNow(),
+    },
+    approvalSummary: "new child approval",
+    auditRequired: true,
+  };
+}
 
 function makeEnvelope(rawToken, endpointPort = port) {
   const taskID = crypto.randomUUID();
@@ -1153,6 +1357,80 @@ async function readArtifacts(events, kind) {
     parsed.push(JSON.parse(await fs.readFile(new URL(artifact.reference), "utf8")));
   }
   return parsed;
+}
+
+function assertContinuationOffer(offer, parentEnvelope, label) {
+  expect(offer?.contract === "claw.continuation.receipt.v1", `${label} missing receipt contract`);
+  expect(typeof offer.receipt === "string" && /^[A-Za-z0-9_-]{43}$/.test(offer.receipt), `${label} receipt shape mismatch`);
+  expect(offer.parentTaskID === parentEnvelope.task.id, `${label} parent task mismatch`);
+  expect(typeof offer.parentSessionID === "string" && offer.parentSessionID.length > 0, `${label} parent session missing`);
+  expect(typeof offer.parentAgentTraceArtifactID === "string" && offer.parentAgentTraceArtifactID.length > 0, `${label} trace artifact missing`);
+  expect(/^sha256:[0-9a-f]{64}$/.test(offer.parentDecisionDigest || ""), `${label} decision digest mismatch`);
+  expect(offer.parentRound === 0, `${label} parent round mismatch`);
+  expect(offer.selectedActionKind === "extractData", `${label} selected action mismatch`);
+  const ttl = Date.parse(offer.expiresAt) - Date.now();
+  expect(ttl > 590_000 && ttl <= 600_000, `${label} receipt TTL mismatch`);
+}
+
+function assertPrivateContinuationOffer(events, receipt, label) {
+  const offerEvents = events.filter((event) => event.continuationOffer);
+  expect(offerEvents.length === 1 && offerEvents[0].kind === "sessionCompleted", `${label} offer should only be on sessionCompleted`);
+  const publicEvents = events.map((event) => {
+    const clone = { ...event };
+    delete clone.continuationOffer;
+    return clone;
+  });
+  expect(!JSON.stringify(publicEvents).includes(receipt), `${label} public event fields leaked receipt`);
+  expect(!JSON.stringify(events.flatMap((event) => event.artifacts || [])).includes(receipt), `${label} artifact fields leaked receipt`);
+}
+
+async function assertContinuationChildSuccess(parentEvents, childEvents, childEnvelope, consumedReceipt, label) {
+  const parentSessionID = parentEvents[0]?.sessionID;
+  const childSessionID = childEvents[0]?.sessionID;
+  expect(Boolean(parentSessionID) && Boolean(childSessionID) && parentSessionID !== childSessionID, `${label} should use a new session`);
+  const started = childEvents.filter((event) => event.kind === "actionStarted");
+  expect(started.length === 2, `${label} action count mismatch`);
+  expect(started[0].actionKind === childEnvelope.task.lineage.selectedActionKind, `${label} selected action order mismatch`);
+  expect(started[1].actionKind === "runAgentLoop", `${label} loop action order mismatch`);
+  expect(childEvents.some((event) => event.kind === "actionCompleted" && event.actionKind === "extractData"), `${label} selected action did not complete`);
+  expect(childEvents.some((event) => event.kind === "actionCompleted" && event.actionKind === "runAgentLoop"), `${label} loop action did not complete`);
+  const extracted = (await readArtifacts(childEvents, "browserTrace")).find((payload) => payload.mode === "artifact-grounded-extraction");
+  expect(Boolean(extracted) && extracted.rows?.length > 0, `${label} did not consume inherited context`);
+  expect(extracted.sourceArtifacts?.browserTraceCount >= 1, `${label} missing inherited browser evidence`);
+  const childTrace = (await readArtifacts(childEvents, "agentTrace"))[0];
+  expect(childTrace?.selectedActionDecision?.policy === "evidence-first-safe-v1", `${label} child decision contract mismatch`);
+  const nextOffer = childEvents.find((event) => event.kind === "sessionCompleted")?.continuationOffer;
+  expect(nextOffer?.receipt && nextOffer.receipt !== consumedReceipt, `${label} did not rotate receipt`);
+  expect(nextOffer.parentRound === 1, `${label} next receipt round mismatch`);
+  assertPrivateContinuationOffer(childEvents, nextOffer.receipt, label);
+  expect(workspaceRootFromEvents(parentEvents) !== workspaceRootFromEvents(childEvents), `${label} reused parent workspace`);
+  expect(!JSON.stringify(childEvents).includes(consumedReceipt), `${label} leaked consumed receipt`);
+}
+
+function assertContinuationEnvelopeFailure(events, code, receipt, label) {
+  expect(events.length === 1, `${label} should emit one envelope failure`);
+  const failure = events[0];
+  expect(failure.kind === "actionFailed" && failure.summary === `gateway error: ${code}`, `${label} error code mismatch`);
+  expect(failure.actionID === undefined && failure.actionKind === undefined, `${label} failure should not bind an action`);
+  expect(failure.isRetryable === false && (failure.artifacts || []).length === 0, `${label} failure should be side-effect free`);
+  expect(!JSON.stringify(events).includes(receipt), `${label} leaked receipt`);
+  expect(!events.some((event) => ["gatewayConnected", "actionStarted", "artifactStored", "sessionCompleted"].includes(event.kind)), `${label} emitted business events`);
+}
+
+function workspaceRootFromEvents(events) {
+  const reference = events.flatMap((event) => event.artifacts || []).find((artifact) => artifact.reference?.startsWith("file://"))?.reference;
+  if (!reference) return "";
+  const pathname = new URL(reference).pathname;
+  const marker = "/sessions/";
+  const start = pathname.indexOf(marker);
+  if (start < 0) return "";
+  const rest = pathname.slice(start + marker.length);
+  return `${pathname.slice(0, start)}${marker}${rest.split("/")[0]}`;
+}
+
+async function sessionDirectoryCount(root) {
+  const entries = await fs.readdir(path.resolve(root, "sessions")).catch(() => []);
+  return entries.length;
 }
 
 function findArtifact(events, kind) {

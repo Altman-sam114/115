@@ -2530,6 +2530,284 @@ final class ClawTests: XCTestCase {
         XCTAssertTrue(deck.candidates.contains { $0.guidance.contains("用户显式触发下一轮") })
     }
 
+    func testTrustedContinuationOfferUsesGatewaySessionAndExplicitApproval() async throws {
+        let store = ClawStore(autoScanLocalArtifacts: false)
+        store.setGateway(url: "ws://127.0.0.1:18789", token: "continuation-test-token")
+        store.phoneAgentCommand = "打开浏览器采集证据后提取结构化数据"
+        store.generatePhoneAgentPlan()
+        store.queueClawMobileTaskFromCurrentPlan()
+        store.approveLatestClawMobileTask()
+        store.simulateSendLatestClawMobileTask()
+
+        let parentTask = try XCTUnwrap(store.clawMobileTasks.first)
+        let localSession = try XCTUnwrap(store.clawGatewaySessions.first)
+        let traceAction = try XCTUnwrap(parentTask.actions.first(where: { $0.kind == .runAgentLoop }))
+        let trace = ClawGatewayArtifact(
+            kind: .agentTrace,
+            title: "trusted-continuation-trace.json",
+            reference: "file:///omitted/trusted-continuation-trace.json",
+            isRedacted: true,
+            metadata: [
+                "readinessScore": "100",
+                "readinessCanContinue": "true",
+                "satisfiedSignals": "browserTrace,accessibilityTree",
+                "degradedSignals": "",
+                "missingSignals": "",
+                "selectedNextActionKind": "extractData",
+                "selectedNextActionRequiresApproval": "false",
+                "nextActionPolicy": "envelope-intersection",
+                "nextActionPolicyDiagnostic": "allowed",
+                "requestedNextActionCount": "2",
+                "effectiveNextActionCount": "2",
+                "blockedNextActionCount": "0",
+                "selectedNextActionAllowedByEnvelope": "true",
+                "selectedActionDecisionPolicy": "evidence-first-safe-v1",
+                "selectedActionDecisionReason": "safe-without-approval",
+                "selectedActionCandidateCount": "2",
+                "selectedActionCandidateOrdinal": "1",
+                "selectedActionFromCandidates": "true",
+                "selectedActionDecisionConsistent": "true",
+                "riskTags": "",
+                "stopReason": "none",
+                "handoffStatus": "ready-to-continue"
+            ]
+        )
+        let traceSequence = (store.gatewayEvents.map(\.sequence).max() ?? 0) + 1
+        store.ingestGatewayEvents([
+            ClawGatewayEvent(
+                sessionID: localSession.id,
+                taskID: parentTask.id,
+                sequence: traceSequence,
+                kind: .artifactStored,
+                actionID: traceAction.id,
+                actionKind: traceAction.kind,
+                actionTitle: traceAction.title,
+                resultStatus: .succeeded,
+                summary: "Stored trusted continuation trace",
+                artifacts: [trace]
+            )
+        ])
+
+        let review = try XCTUnwrap(ClawAgentTraceReviewSummary.latest(from: store.clawGatewaySessions.first))
+        let digest = review.continuationDecisionDigest(
+            taskID: parentTask.id,
+            sessionID: localSession.id,
+            artifactID: trace.id,
+            round: 0
+        )
+        let digestInput = "envelope-intersection|allowed|2|2|0|true|extractData|false|true|evidence-first-safe-v1|safe-without-approval|2|1|true|true|none|ready-to-continue"
+        XCTAssertEqual(digest, ClawContinuationContract.sha256(digestInput))
+
+        let gatewaySessionID = UUID()
+        let rawReceipt = String(repeating: "r", count: 43)
+        let offer = ClawGatewayContinuationOffer(
+            contract: ClawContinuationContract.receiptContract,
+            receipt: rawReceipt,
+            expiresAt: Date.now.addingTimeInterval(300),
+            parentTaskID: parentTask.id,
+            parentSessionID: gatewaySessionID,
+            parentAgentTraceArtifactID: trace.id,
+            parentDecisionDigest: digest,
+            parentRound: 0,
+            selectedActionKind: .extractData
+        )
+        store.ingestGatewayWireEvents([
+            ClawGatewayWireEvent(
+                event: ClawGatewayEvent(
+                    sessionID: localSession.id,
+                    taskID: parentTask.id,
+                    sequence: traceSequence + 1,
+                    kind: .sessionCompleted,
+                    summary: "Gateway completed with a private continuation offer"
+                ),
+                continuationOffer: offer
+            )
+        ])
+
+        XCTAssertEqual(store.missionRunSummary.continuationDraft.actionKind, .prepare)
+        store.prepareContinuationDraft(sourceTaskID: parentTask.id, sourceSessionID: localSession.id)
+        let draft = try XCTUnwrap(store.continuationDraft)
+        XCTAssertEqual(draft.state, .readyForApproval)
+        XCTAssertEqual(draft.sourceSessionID, localSession.id)
+
+        let childTaskID = try XCTUnwrap(store.queueContinuationDraft(id: draft.id))
+        let childTask = try XCTUnwrap(store.clawMobileTasks.first(where: { $0.id == childTaskID }))
+        XCTAssertNotEqual(childTask.id, parentTask.id)
+        XCTAssertEqual(childTask.status, .waitingForApproval)
+        XCTAssertEqual(childTask.continuationLineage?.parentSessionID, gatewaySessionID)
+        XCTAssertEqual(childTask.actions.map(\.kind), [.extractData, .runAgentLoop])
+        XCTAssertEqual(Set(childTask.actions.map(\.id)).count, 2)
+        XCTAssertTrue(Set(childTask.actions.map(\.id)).isDisjoint(with: Set(parentTask.actions.map(\.id))))
+        XCTAssertFalse(store.lastClawMobileEnvelope.contains(rawReceipt))
+        XCTAssertTrue(store.lastClawMobileEnvelope.contains("\"lineage\""))
+        XCTAssertFalse(store.lastClawMobileEnvelope.contains("continuationLineage"))
+
+        store.approveTask(id: childTaskID)
+        XCTAssertEqual(store.clawMobileTasks.first(where: { $0.id == childTaskID })?.status, .readyToSend)
+        XCTAssertEqual(store.continuationDraft?.state, .approvedFrozen)
+        XCTAssertFalse(store.lastClawMobileEnvelope.contains(rawReceipt))
+
+        store.approveTask(id: childTaskID)
+        XCTAssertEqual(store.clawMobileTasks.first(where: { $0.id == childTaskID })?.status, .readyToSend)
+        XCTAssertEqual(store.continuationDraft?.state, .approvedFrozen)
+
+        await store.sendTaskOverLiveGateway(id: childTaskID, transport: MockClawGatewayTransport())
+        XCTAssertEqual(store.clawMobileTasks.first(where: { $0.id == childTaskID })?.status, .sent)
+        XCTAssertEqual(store.continuationDraft?.state, .sent)
+        XCTAssertNotNil(store.lastGatewayLiveRequest)
+        XCTAssertFalse(store.lastClawMobileEnvelope.contains(rawReceipt))
+    }
+
+    func testContinuationTransportFailureMarksConsumedAuthorizationBlocked() async throws {
+        let (store, childTaskID) = try makeApprovedContinuationForTransportFailure()
+
+        await store.sendTaskOverLiveGateway(
+            id: childTaskID,
+            transport: SensitiveFailingClawGatewayTransport()
+        )
+
+        XCTAssertEqual(store.clawMobileTasks.first(where: { $0.id == childTaskID })?.status, .blocked)
+        XCTAssertEqual(store.continuationDraft?.state, .blocked)
+        XCTAssertEqual(store.missionRunSummary.continuationDraft.status, "续接发送失败")
+        XCTAssertTrue(store.missionRunSummary.continuationDraft.guidance.contains("已消费 receipt"))
+        XCTAssertEqual(store.gatewayConnectionState, .failed)
+        XCTAssertTrue(store.gatewayEvents.contains {
+            $0.taskID == childTaskID &&
+                $0.kind == .sessionCompleted &&
+                $0.resultStatus == .failed &&
+                $0.isRetryable == false
+        })
+
+        let sessionCount = store.clawGatewaySessions.count
+        await store.sendTaskOverLiveGateway(
+            id: childTaskID,
+            transport: MockClawGatewayTransport()
+        )
+        XCTAssertEqual(store.clawGatewaySessions.count, sessionCount)
+        XCTAssertEqual(store.continuationDraft?.state, .blocked)
+    }
+
+    func testContinuationExplicitFailedCompletionUsesSingleGatewayTerminalEvent() async throws {
+        let (store, childTaskID) = try makeApprovedContinuationForTransportFailure()
+
+        await store.sendTaskOverLiveGateway(
+            id: childTaskID,
+            transport: FailedCompletionClawGatewayTransport()
+        )
+
+        XCTAssertEqual(store.clawMobileTasks.first(where: { $0.id == childTaskID })?.status, .blocked)
+        XCTAssertEqual(store.continuationDraft?.state, .blocked)
+        XCTAssertEqual(store.gatewayConnectionState, .failed)
+        let terminalEvents = store.gatewayEvents.filter {
+            $0.taskID == childTaskID && $0.kind == .sessionCompleted
+        }
+        XCTAssertEqual(terminalEvents.count, 1)
+        XCTAssertEqual(terminalEvents.first?.resultStatus, .failed)
+        XCTAssertEqual(terminalEvents.first?.summary, "Gateway rejected consumed continuation")
+
+        let sessionCount = store.clawGatewaySessions.count
+        await store.sendTaskOverLiveGateway(
+            id: childTaskID,
+            transport: MockClawGatewayTransport()
+        )
+        XCTAssertEqual(store.clawGatewaySessions.count, sessionCount)
+        XCTAssertEqual(store.continuationDraft?.state, .blocked)
+    }
+
+    private func makeApprovedContinuationForTransportFailure() throws -> (ClawStore, UUID) {
+        let store = ClawStore(autoScanLocalArtifacts: false)
+        store.setGateway(url: "ws://127.0.0.1:18789", token: "continuation-failure-token")
+        store.phoneAgentCommand = "打开浏览器采集证据后提取结构化数据"
+        store.generatePhoneAgentPlan()
+        store.queueClawMobileTaskFromCurrentPlan()
+        store.approveLatestClawMobileTask()
+        store.simulateSendLatestClawMobileTask()
+
+        let parentTask = try XCTUnwrap(store.clawMobileTasks.first)
+        let localSession = try XCTUnwrap(store.clawGatewaySessions.first)
+        let traceAction = try XCTUnwrap(parentTask.actions.first(where: { $0.kind == .runAgentLoop }))
+        let trace = ClawGatewayArtifact(
+            kind: .agentTrace,
+            title: "continuation-failure-trace.json",
+            reference: "file:///omitted/continuation-failure-trace.json",
+            isRedacted: true,
+            metadata: [
+                "readinessScore": "100",
+                "readinessCanContinue": "true",
+                "satisfiedSignals": "browserTrace,accessibilityTree",
+                "degradedSignals": "",
+                "missingSignals": "",
+                "selectedNextActionKind": "extractData",
+                "selectedNextActionRequiresApproval": "false",
+                "nextActionPolicy": "envelope-intersection",
+                "nextActionPolicyDiagnostic": "allowed",
+                "requestedNextActionCount": "2",
+                "effectiveNextActionCount": "2",
+                "blockedNextActionCount": "0",
+                "selectedNextActionAllowedByEnvelope": "true",
+                "selectedActionDecisionPolicy": "evidence-first-safe-v1",
+                "selectedActionDecisionReason": "safe-without-approval",
+                "selectedActionCandidateCount": "2",
+                "selectedActionCandidateOrdinal": "1",
+                "selectedActionFromCandidates": "true",
+                "selectedActionDecisionConsistent": "true",
+                "riskTags": "",
+                "stopReason": "none",
+                "handoffStatus": "ready-to-continue"
+            ]
+        )
+        let sequence = (store.gatewayEvents.map(\.sequence).max() ?? 0) + 1
+        store.ingestGatewayEvents([
+            ClawGatewayEvent(
+                sessionID: localSession.id,
+                taskID: parentTask.id,
+                sequence: sequence,
+                kind: .artifactStored,
+                actionID: traceAction.id,
+                actionKind: traceAction.kind,
+                actionTitle: traceAction.title,
+                resultStatus: .succeeded,
+                summary: "Stored continuation failure trace",
+                artifacts: [trace]
+            )
+        ])
+        let review = try XCTUnwrap(ClawAgentTraceReviewSummary.latest(from: store.clawGatewaySessions.first))
+        let digest = review.continuationDecisionDigest(
+            taskID: parentTask.id,
+            sessionID: localSession.id,
+            artifactID: trace.id,
+            round: 0
+        )
+        store.ingestGatewayWireEvents([
+            ClawGatewayWireEvent(
+                event: ClawGatewayEvent(
+                    sessionID: localSession.id,
+                    taskID: parentTask.id,
+                    sequence: sequence + 1,
+                    kind: .sessionCompleted,
+                    summary: "Gateway completed with continuation failure receipt"
+                ),
+                continuationOffer: ClawGatewayContinuationOffer(
+                    contract: ClawContinuationContract.receiptContract,
+                    receipt: String(repeating: "x", count: 43),
+                    expiresAt: Date.now.addingTimeInterval(300),
+                    parentTaskID: parentTask.id,
+                    parentSessionID: UUID(),
+                    parentAgentTraceArtifactID: trace.id,
+                    parentDecisionDigest: digest,
+                    parentRound: 0,
+                    selectedActionKind: .extractData
+                )
+            )
+        ])
+        store.prepareContinuationDraft(sourceTaskID: parentTask.id, sourceSessionID: localSession.id)
+        let draftID = try XCTUnwrap(store.continuationDraft?.id)
+        let childTaskID = try XCTUnwrap(store.queueContinuationDraft(id: draftID))
+        store.approveTask(id: childTaskID)
+        XCTAssertEqual(store.continuationDraft?.state, .approvedFrozen)
+        return (store, childTaskID)
+    }
+
     func testMissionRunSummaryDerivesAccessibilityReview() throws {
         let store = ClawStore(autoScanLocalArtifacts: false)
 
@@ -4257,12 +4535,17 @@ private struct MockClawGatewayTransport: ClawGatewayTransport {
         envelopeJSON: String,
         sessionID: UUID,
         taskID: UUID
-    ) -> AsyncThrowingStream<ClawGatewayEvent, Error> {
+    ) -> AsyncThrowingStream<ClawGatewayWireEvent, Error> {
         AsyncThrowingStream { continuation in
             let decoder = JSONDecoder.clawGateway
             guard let data = envelopeJSON.data(using: .utf8),
                   let envelope = try? decoder.decode(ClawMobileEnvelope.self, from: data) else {
                 continuation.finish()
+                return
+            }
+            if let lineage = envelope.task.continuationLineage,
+               lineage.receipt.count != 43 || lineage.receipt == "omitted" {
+                continuation.finish(throwing: ClawGatewayTransportError.invalidContinuationOffer)
                 return
             }
 
@@ -4273,7 +4556,7 @@ private struct MockClawGatewayTransport: ClawGatewayTransport {
                 startingSequence: 2
             )
             for event in events {
-                continuation.yield(event)
+                continuation.yield(ClawGatewayWireEvent(event: event))
             }
             continuation.finish()
         }
@@ -4286,9 +4569,9 @@ private struct ReconnectingClawGatewayTransport: ClawGatewayTransport {
         envelopeJSON: String,
         sessionID: UUID,
         taskID: UUID
-    ) -> AsyncThrowingStream<ClawGatewayEvent, Error> {
+    ) -> AsyncThrowingStream<ClawGatewayWireEvent, Error> {
         AsyncThrowingStream { continuation in
-            continuation.yield(ClawGatewayLiveClient.liveTransportProgressEvent(
+            continuation.yield(ClawGatewayWireEvent(event: ClawGatewayLiveClient.liveTransportProgressEvent(
                 taskID: taskID,
                 sessionID: sessionID,
                 sequence: 2,
@@ -4297,15 +4580,15 @@ private struct ReconnectingClawGatewayTransport: ClawGatewayTransport {
                 pingStatus: "failed",
                 transportErrorSummary: "network_lost",
                 willRetry: true
-            ))
-            continuation.yield(ClawGatewayLiveClient.liveTransportProgressEvent(
+            )))
+            continuation.yield(ClawGatewayWireEvent(event: ClawGatewayLiveClient.liveTransportProgressEvent(
                 taskID: taskID,
                 sessionID: sessionID,
                 sequence: 3,
                 attempt: 2,
                 reconnectCount: 1,
                 pingStatus: "ok"
-            ))
+            )))
             yieldSimulatedEvents(envelopeJSON: envelopeJSON, sessionID: sessionID, startingSequence: 4, continuation: continuation)
             continuation.finish()
         }
@@ -4318,16 +4601,16 @@ private struct PingFailedClawGatewayTransport: ClawGatewayTransport {
         envelopeJSON: String,
         sessionID: UUID,
         taskID: UUID
-    ) -> AsyncThrowingStream<ClawGatewayEvent, Error> {
+    ) -> AsyncThrowingStream<ClawGatewayWireEvent, Error> {
         AsyncThrowingStream { continuation in
-            continuation.yield(ClawGatewayLiveClient.liveTransportProgressEvent(
+            continuation.yield(ClawGatewayWireEvent(event: ClawGatewayLiveClient.liveTransportProgressEvent(
                 taskID: taskID,
                 sessionID: sessionID,
                 sequence: 2,
                 attempt: 1,
                 reconnectCount: 0,
                 pingStatus: "failed"
-            ))
+            )))
             yieldSimulatedEvents(envelopeJSON: envelopeJSON, sessionID: sessionID, startingSequence: 3, continuation: continuation)
             continuation.finish()
         }
@@ -4340,7 +4623,7 @@ private struct SensitiveFailingClawGatewayTransport: ClawGatewayTransport {
         envelopeJSON: String,
         sessionID: UUID,
         taskID: UUID
-    ) -> AsyncThrowingStream<ClawGatewayEvent, Error> {
+    ) -> AsyncThrowingStream<ClawGatewayWireEvent, Error> {
         AsyncThrowingStream { continuation in
             continuation.finish(throwing: ClawGatewayTransportError.invalidEndpoint(
                 "headers={Authorization: Bearer paired-secret} password:open-sesame secret=raw-secret token=raw-token file:///Users/a114514/private.txt workspace=/private/tmp/claw-work"
@@ -4349,11 +4632,33 @@ private struct SensitiveFailingClawGatewayTransport: ClawGatewayTransport {
     }
 }
 
+private struct FailedCompletionClawGatewayTransport: ClawGatewayTransport {
+    func streamEvents(
+        request: ClawGatewayLiveRequest,
+        envelopeJSON: String,
+        sessionID: UUID,
+        taskID: UUID
+    ) -> AsyncThrowingStream<ClawGatewayWireEvent, Error> {
+        AsyncThrowingStream { continuation in
+            continuation.yield(ClawGatewayWireEvent(event: ClawGatewayEvent(
+                sessionID: sessionID,
+                taskID: taskID,
+                sequence: 2,
+                kind: .sessionCompleted,
+                resultStatus: .failed,
+                summary: "Gateway rejected consumed continuation",
+                isRetryable: false
+            )))
+            continuation.finish()
+        }
+    }
+}
+
 private func yieldSimulatedEvents(
     envelopeJSON: String,
     sessionID: UUID,
     startingSequence: Int,
-    continuation: AsyncThrowingStream<ClawGatewayEvent, Error>.Continuation
+    continuation: AsyncThrowingStream<ClawGatewayWireEvent, Error>.Continuation
 ) {
     let decoder = JSONDecoder.clawGateway
     guard let data = envelopeJSON.data(using: .utf8),
@@ -4367,6 +4672,6 @@ private func yieldSimulatedEvents(
         startingSequence: startingSequence
     )
     for event in events {
-        continuation.yield(event)
+        continuation.yield(ClawGatewayWireEvent(event: event))
     }
 }

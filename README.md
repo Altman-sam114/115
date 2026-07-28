@@ -144,12 +144,19 @@ v0.62 起，`runAgentLoop` 的推荐动作严格取 `toolArguments.allowedNextAc
 
 v0.65 起，`selectedNextAction` 额外带有 `evidence-first-safe-v1` 决策合同：固定 reason、候选数量、1-based 序位、候选成员和一致性证据。Gateway 区分交集为空的 `policy-blocked` 与无需后续动作的 `no-action-needed`，并只用实际选中动作派生 approval/stop/handoff；手机/iPad 对合同缺失、未知、越界或组合矛盾一律禁止 Loop 继续并要求人工复核。该合同仍是 advisory metadata，不是执行授权。
 
+v0.66 的可信跨任务续接把三种信任明确分开：v0.65 decision 只说明父回合推荐，Gateway receipt 只说明当前 Gateway 进程仍持有与该 decision 绑定的有界父 context，child task approval 才是用户对新任务、参数、lineage、当前 profile 和冻结 envelope 的再次授权。只有完整 `safe-without-approval + ready-to-continue + selected != none` 父合同可以获得 receipt；approval-required、final-submit、external/destructive、needs-evidence、blocked、complete、policy-blocked、no-action 或 metadata gap 只显示 `needsApproval`/不可派发草稿，不会获得可执行续接能力。
+
+用户必须依次显式生成 draft、确认结构化参数完整、入队、按精确 task ID 审批并冻结 envelope、再按同一 task ID 发送。当前 v0.66 尚无参数编辑器；参数不完整的 draft 保持 `readyForInput` 阻断态，必须等待后续编辑能力，不能入队、审批或发送。创建 draft 不改变父 Mission scope、session、AgentTrace、review focus、连接状态或任务队列；child task 和两个 child action 都使用新 UUID，动作形状固定为 receipt 绑定的 selected action 后接 `runAgentLoop`。Gateway 在 task replay、workspace、session/event、artifact 和 handler 之前校验 lineage、receipt、round、父绑定、内容摘要、token/profile、当前 allowlist、固定 handler、action policy 和参数 schema；成功后才原子消费 receipt。Gateway 保存冻结且有界的父 context 快照，再把它深拷贝成与父隔离、可由 child 追加本轮结果的 session context；child 先执行 selected action，再用本轮结果重新生成 AgentTrace，不能复制父 decision。
+
+receipt 不是授权或持久身份：固定 10 分钟 TTL、进程内最多 128 条、单次消费，Gateway 重启、过期、淘汰、并发复用或任一绑定不匹配都 fail closed。raw receipt 只允许存在于 live wire DTO、iOS 内存 vault、私有 frozen envelope 和 Gateway receipt cache；公开 envelope 固定显示 `receipt: omitted`，普通 event、artifact/metadata、UI/VoiceOver、日志、JUnit、failure summary 和 CI manifest 都不得保存原文。continuation 首次发送尝试后立即清理 iOS vault，并禁用普通任务的同-envelope 自动重连/重发；网络不确定时也不能复用该 receipt。v0.66 不做自动创建、自动审批、自动发送、自动重试 receipt、无人值守循环、跨进程/跨重启续接、父 workspace 复用或 Shell continuation。
+
 ## 运行
 
-打开 `Claw.xcodeproj`，选择 `Claw` scheme，在 iPhone 模拟器或真机运行。默认协作验证不在本机跑命令行编译或 smoke；命令行 build、Swift logic smoke、Gateway smoke 和 `node --check` 统一由 GitHub Actions workflow 执行并通过 Agent C 下载 artifact 复判。
+打开 `Claw.xcodeproj`，选择 `Claw` scheme，在 iPhone 模拟器或真机运行。默认协作验证不在本机跑命令行编译、XCTest 或 smoke；命令行 build、真实 iPhone Simulator XCTest、Swift logic smoke、Gateway smoke 和 `node --check` 统一由 GitHub Actions workflow 执行。结果包始终保留 `xctest.log`（包含 simulator discovery 错误）；XCTest 成功时必须同时包含 `ClawTests.xcresult`，否则 packaging 失败。结果包还包含 manifest、JUnit、`xcodebuild.log` 和各 smoke 日志，并由 Agent C 下载复判。
 
 ## 完成情况
 
+- 2026-07-26：v0.66 Trusted Cross-Task Multi-Round Continuation 的工作区实现已包含 Swift、Gateway、测试、workflow 和文档改动，云端验收仍待提交后的最新 `origin/main` GitHub Actions artifact 与 Agent C 复判。受限闭环固定为父 safe decision 签发 10 分钟、128 条容量、单次、进程内 receipt；用户显式 draft -> queue -> approve/freeze -> send；child 新 task 在全部前置校验后用新 workspace 执行 selected action，再运行 `runAgentLoop`。审批型/最终提交/外部/破坏性/证据不足/无动作路径不可派发，raw receipt 和父 payload 不进入公开展示、普通事件、artifact 或日志；不预写 run、commit 或通过结论。
 - 2026-07-26：新增 v0.65 Agent Loop Selected Action Decision Contract。Gateway 为选中动作生成固定策略分支、候选数量/序位和一致性证据，风险与 handoff 只绑定实际选中项；Swift 对缺失、未知、越界或矛盾合同 fail closed，推荐仍需用户显式触发并重新通过全部 Gateway gate。
 - 2026-07-26：新增 v0.62 Agent Loop Envelope Allowlist Intersection。Gateway 推荐动作取 request、envelope 与固定支持种类的交集，空交集只返回 `none` 并 blocked handoff；双 smoke 覆盖全阻断和部分交集，手机/iPad 对未知、未授权或矛盾策略 metadata fail closed。推荐 metadata 不构成执行授权，真实动作仍经过 `actionPolicy`。
 - 2026-07-26：新增 v0.61 Browser Redirect Host Allowlist。Gateway URL 抓取改为逐跳手动重定向检查，阻断跨 host、非法协议、credentials、非法 Location 和超限跳转；Browser Control metadata 与手机/iPad 复核新增固定 network/redirect 诊断，双 smoke 断言跨 host 目标零访问和 action-bound 失败。

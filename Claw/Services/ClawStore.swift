@@ -11,6 +11,12 @@ final class ClawStore: ObservableObject {
         var connectionState: ClawGatewayConnectionState
     }
 
+    private struct ContinuationReceiptEntry {
+        var handle: String
+        var localSessionID: UUID
+        var offer: ClawGatewayContinuationOffer
+    }
+
     @Published private(set) var model: LocalClawModel
     @Published private(set) var validation: ArtifactValidationResult
     @Published var selectedCategory: ClawCapabilityCategory?
@@ -37,9 +43,13 @@ final class ClawStore: ObservableObject {
     @Published private(set) var lastGatewayLiveRequest: ClawGatewayLiveRequest?
     @Published private(set) var gatewayEvents: [ClawGatewayEvent]
     @Published private(set) var autonomousLoop: ClawAutonomousLoopState
+    @Published private(set) var continuationDraft: ClawContinuationDraft?
 
     private let artifactDirectoryURL: URL
     private var gatewayConnectionSessionID: UUID?
+    private var continuationReceipts: [String: ContinuationReceiptEntry]
+    private var continuationApprovalRecords: [UUID: ClawContinuationApprovalRecord]
+    private var frozenContinuationEnvelopes: [UUID: String]
 
     init(
         model: LocalClawModel? = nil,
@@ -82,6 +92,10 @@ final class ClawStore: ObservableObject {
         self.lastGatewayLiveRequest = nil
         self.gatewayEvents = []
         self.gatewayConnectionSessionID = nil
+        self.continuationDraft = nil
+        self.continuationReceipts = [:]
+        self.continuationApprovalRecords = [:]
+        self.frozenContinuationEnvelopes = [:]
         self.autonomousLoop = ClawAutonomousLoopState(
             phase: .idle,
             runMode: .simulatedEventStream,
@@ -235,7 +249,12 @@ final class ClawStore: ObservableObject {
             taskID: task?.id,
             sessionID: session?.id,
             sessionTaskID: session?.taskID,
-            missionScopeID: session?.id ?? task?.id
+            missionScopeID: session?.id ?? task?.id,
+            continuationDraft: continuationDraftPresentation(
+                task: task,
+                session: session,
+                agentTraceReview: agentTraceReview
+            )
         )
     }
 
@@ -1198,6 +1217,7 @@ final class ClawStore: ObservableObject {
         gatewayToken = token
         clawGatewayProfile.endpoint = url.trimmingCharacters(in: .whitespacesAndNewlines)
         clawGatewayProfile.tokenFingerprint = ClawMobileBridge.tokenFingerprint(for: token)
+        invalidateContinuationAuthorization(reason: .profileChanged)
         automationTargets = automationTargets.map { target in
             var updated = target
             if updated.channel == .clawGateway {
@@ -1360,16 +1380,218 @@ final class ClawStore: ObservableObject {
         lastClawMobileEnvelope = ClawMobileBridge.makeEnvelopeString(task: task, profile: clawGatewayProfile)
     }
 
-    func approveLatestClawMobileTask() {
-        guard clawMobileTasks.isEmpty == false else {
+    func ingestGatewayWireEvents(_ wireEvents: [ClawGatewayWireEvent]) {
+        for wireEvent in wireEvents {
+            captureContinuationOffer(wireEvent.continuationOffer, for: wireEvent.event)
+            ingestGatewayEvents([wireEvent.event])
+        }
+    }
+
+    func prepareContinuationDraft(sourceTaskID: UUID, sourceSessionID: UUID) {
+        guard let task = clawMobileTasks.first(where: { $0.id == sourceTaskID }),
+              let session = clawGatewaySessions.first(where: {
+                  $0.id == sourceSessionID && $0.taskID == sourceTaskID
+              }),
+              let review = ClawAgentTraceReviewSummary.latest(from: session),
+              let artifactID = review.latestArtifactID else {
+            continuationDraft = nil
             return
         }
-        if clawMobileTasks[0].blockedCount > 0 {
-            clawMobileTasks[0].status = .blocked
-        } else {
-            clawMobileTasks[0].status = .readyToSend
+
+        let sourceRound = task.continuationLineage?.childRound ?? 0
+        let decisionDigest = review.continuationDecisionDigest(
+            taskID: task.id,
+            sessionID: session.id,
+            artifactID: artifactID,
+            round: sourceRound
+        )
+        let eligibility = review.continuationEligibility
+        let selectedKind: ClawMobileActionKind
+        let sourceRequiresApproval: Bool
+        switch eligibility {
+        case .ready(let kind):
+            selectedKind = kind
+            sourceRequiresApproval = false
+        case .needsApproval(let kind):
+            selectedKind = kind
+            sourceRequiresApproval = true
+        case .invalid:
+            continuationDraft = nil
+            return
         }
-        lastClawMobileEnvelope = ClawMobileBridge.makeEnvelopeString(task: clawMobileTasks[0], profile: clawGatewayProfile)
+
+        let proposal = ClawContinuationActionArguments.makeAction(
+            kind: selectedKind,
+            objective: task.command,
+            sourceTask: task
+        )
+        let loopAction = ClawContinuationActionArguments.makeLoopAction(objective: task.command)
+        let receiptEntry = matchingReceipt(
+            taskID: task.id,
+            sessionID: session.id,
+            artifactID: artifactID,
+            decisionDigest: decisionDigest,
+            round: sourceRound,
+            selectedKind: selectedKind
+        )
+        let state: ClawContinuationDraftState
+        var issues = proposal.issues
+        if sourceRequiresApproval {
+            state = .needsApproval
+            issues.append(.approvalRequired)
+        } else if receiptEntry == nil {
+            state = .stale
+            issues.append(.missingReceipt)
+        } else if issues.isEmpty == false {
+            state = .readyForInput
+        } else {
+            state = .readyForApproval
+        }
+
+        continuationDraft = ClawContinuationDraft(
+            sourceTaskID: task.id,
+            sourceSessionID: session.id,
+            sourceAgentTraceArtifactID: artifactID,
+            sourceSessionUpdatedAt: session.updatedAt,
+            sourceDecisionDigest: decisionDigest,
+            sourceDecisionPolicy: review.selectedActionDecisionPolicy ?? "",
+            sourceDecisionReason: review.selectedActionDecisionReason ?? "",
+            sourceSelectedActionKind: selectedKind,
+            sourceSelectedActionRequiresApproval: sourceRequiresApproval,
+            sourceRound: sourceRound,
+            proposedAction: proposal.action,
+            proposedLoopAction: loopAction,
+            receiptHandle: receiptEntry?.handle,
+            receiptExpiresAt: receiptEntry?.offer.expiresAt,
+            state: state,
+            validationIssues: Array(Set(issues)).sorted { $0.rawValue < $1.rawValue }
+        )
+    }
+
+    @discardableResult
+    func queueContinuationDraft(id: UUID) -> UUID? {
+        guard var draft = continuationDraft,
+              draft.id == id,
+              draft.state == .readyForApproval,
+              draft.validationIssues.isEmpty,
+              let handle = draft.receiptHandle,
+              let receipt = continuationReceipts[handle],
+              receipt.offer.expiresAt > Date(),
+              validateContinuationSource(draft),
+              clawGatewayProfile.allowedActionKinds.contains(draft.sourceSelectedActionKind) else {
+            invalidateContinuationAuthorization(reason: .sourceScopeMismatch)
+            return nil
+        }
+
+        let lineage = ClawContinuationLineage(
+            contract: ClawContinuationLineage.contractVersion,
+            parentTaskID: draft.sourceTaskID,
+            parentSessionID: receipt.offer.parentSessionID,
+            parentAgentTraceArtifactID: draft.sourceAgentTraceArtifactID,
+            parentDecisionDigest: draft.sourceDecisionDigest,
+            parentRound: draft.sourceRound,
+            childRound: draft.sourceRound + 1,
+            selectedActionKind: draft.sourceSelectedActionKind,
+            decisionPolicy: draft.sourceDecisionPolicy,
+            decisionReason: draft.sourceDecisionReason,
+            receipt: handle
+        )
+        guard lineage.hasValidShape else {
+            invalidateContinuationAuthorization(reason: .invalidDecision)
+            return nil
+        }
+
+        let childTask = ClawMobileTask(
+            command: "继续：\(clawMobileTasks.first(where: { $0.id == draft.sourceTaskID })?.command ?? "电脑任务")",
+            summary: "可信续接草稿包含选中动作和新一轮 Agent Loop；必须重新审批后发送。",
+            sourceDevice: clawGatewayProfile.deviceName,
+            destinationGateway: clawGatewayProfile.endpoint.isEmpty ? "未配置" : clawGatewayProfile.endpoint,
+            actions: [draft.proposedAction, draft.proposedLoopAction],
+            status: .waitingForApproval,
+            riskScore: 64,
+            continuationLineage: lineage
+        )
+        clawMobileTasks.insert(childTask, at: 0)
+        draft.state = .queued
+        draft.childTaskID = childTask.id
+        draft.updatedAt = Date()
+        continuationDraft = draft
+        lastClawMobileEnvelope = ClawMobileBridge.makeEnvelopeString(
+            task: childTask,
+            profile: clawGatewayProfile,
+            redactingContinuationReceipt: true
+        )
+        return childTask.id
+    }
+
+    func approveTask(id taskID: UUID) {
+        guard let index = clawMobileTasks.firstIndex(where: { $0.id == taskID }) else {
+            return
+        }
+        let task = clawMobileTasks[index]
+        guard task.blockedCount == 0 else {
+            clawMobileTasks[index].status = .blocked
+            return
+        }
+        guard let lineage = task.continuationLineage else {
+            clawMobileTasks[index].status = .readyToSend
+            lastClawMobileEnvelope = ClawMobileBridge.makeEnvelopeString(
+                task: clawMobileTasks[index],
+                profile: clawGatewayProfile
+            )
+            return
+        }
+        if task.status == .readyToSend, validateContinuationApproval(for: task) {
+            return
+        }
+        guard task.status == .waitingForApproval,
+              validateContinuationTask(task),
+              let receiptEntry = continuationReceipts[lineage.receipt],
+              receiptEntry.offer.expiresAt > Date(),
+              receiptEntry.offer.parentTaskID == lineage.parentTaskID,
+              receiptEntry.offer.parentSessionID == lineage.parentSessionID,
+              receiptEntry.offer.parentDecisionDigest == lineage.parentDecisionDigest,
+              receiptEntry.offer.selectedActionKind == lineage.selectedActionKind else {
+            invalidateContinuationAuthorization(reason: .approvalInvalidated)
+            return
+        }
+
+        var approvedTask = task
+        approvedTask.status = .readyToSend
+        let rawEnvelope = ClawMobileBridge.makeEnvelopeString(
+            task: approvedTask,
+            profile: clawGatewayProfile,
+            continuationReceipt: receiptEntry.offer.receipt
+        )
+        let taskDigest = canonicalTaskDigest(approvedTask)
+        let profileDigest = canonicalProfileDigest(clawGatewayProfile)
+        let lineageDigest = ClawContinuationContract.sha256(
+            lineage.parentDecisionDigest + "|" + ClawContinuationContract.sha256(receiptEntry.offer.receipt)
+        )
+        continuationApprovalRecords[taskID] = ClawContinuationApprovalRecord(
+            taskID: taskID,
+            canonicalTaskDigest: taskDigest,
+            canonicalProfileDigest: profileDigest,
+            lineageDigest: lineageDigest,
+            approvedAt: Date()
+        )
+        frozenContinuationEnvelopes[taskID] = rawEnvelope
+        clawMobileTasks[index] = approvedTask
+        lastClawMobileEnvelope = ClawMobileBridge.makeEnvelopeString(
+            task: clawMobileTasks[index],
+            profile: clawGatewayProfile,
+            redactingContinuationReceipt: true
+        )
+        if var draft = continuationDraft, draft.childTaskID == taskID {
+            draft.state = .approvedFrozen
+            draft.updatedAt = Date()
+            continuationDraft = draft
+        }
+    }
+
+    func approveLatestClawMobileTask() {
+        guard let taskID = clawMobileTasks.first?.id else { return }
+        approveTask(id: taskID)
     }
 
     func simulateSendLatestClawMobileTask() {
@@ -1380,7 +1602,16 @@ final class ClawStore: ObservableObject {
     }
 
     func sendLatestClawMobileTask() {
-        guard let dispatch = beginLatestGatewaySession(mode: gatewayDispatchMode) else {
+        guard let taskID = clawMobileTasks.first?.id else { return }
+        sendTask(id: taskID)
+    }
+
+    func sendTask(id taskID: UUID) {
+        guard clawMobileTasks.first(where: { $0.id == taskID })?.continuationLineage == nil else {
+            lastGatewayEvent = "可信续接必须通过 live transport 显式发送；同步入口不会消费 receipt。"
+            return
+        }
+        guard let dispatch = beginGatewaySession(taskID: taskID, mode: gatewayDispatchMode) else {
             return
         }
 
@@ -1399,7 +1630,8 @@ final class ClawStore: ObservableObject {
             prepareLiveGatewayRequest(
                 task: dispatch.task,
                 sessionID: dispatch.sessionID,
-                fallbackToSimulation: true
+                fallbackToSimulation: dispatch.task.continuationLineage == nil,
+                envelopeJSON: dispatch.envelopeJSON
             )
         }
     }
@@ -1407,9 +1639,42 @@ final class ClawStore: ObservableObject {
     func sendLatestClawMobileTaskOverLiveGateway<T: ClawGatewayTransport>(
         transport: T = URLSessionClawGatewayTransport()
     ) async {
+        guard let taskID = clawMobileTasks.first?.id else { return }
+        await sendTaskOverLiveGateway(id: taskID, transport: transport)
+    }
+
+    func sendTaskOverLiveGateway<T: ClawGatewayTransport>(
+        id taskID: UUID,
+        transport: T = URLSessionClawGatewayTransport()
+    ) async {
         let previousMode = gatewayDispatchMode
         gatewayDispatchMode = .liveGateway
-        guard let dispatch = beginLatestGatewaySession(mode: .liveGateway) else {
+        if let task = clawMobileTasks.first(where: { $0.id == taskID }),
+           task.continuationLineage != nil {
+            guard task.status == .readyToSend else {
+                gatewayDispatchMode = previousMode
+                return
+            }
+            guard validateContinuationApproval(for: task),
+                  let frozenEnvelope = frozenContinuationEnvelopes[taskID] else {
+                gatewayDispatchMode = previousMode
+                return
+            }
+            let preflight = ClawGatewayLiveClient.makeRequest(
+                task: task,
+                profile: clawGatewayProfile,
+                envelopeJSON: frozenEnvelope,
+                rawToken: gatewayToken,
+                sessionID: UUID()
+            )
+            guard preflight.canAttemptLive else {
+                gatewayConnectionState = .notConfigured
+                lastGatewayEvent = "可信续接 live preflight 未通过；receipt 保持冻结且未发送。"
+                gatewayDispatchMode = previousMode
+                return
+            }
+        }
+        guard let dispatch = beginGatewaySession(taskID: taskID, mode: .liveGateway) else {
             gatewayDispatchMode = previousMode
             return
         }
@@ -1417,35 +1682,66 @@ final class ClawStore: ObservableObject {
         guard let request = prepareLiveGatewayRequest(
             task: dispatch.task,
             sessionID: dispatch.sessionID,
-            fallbackToSimulation: false
+            fallbackToSimulation: false,
+            envelopeJSON: dispatch.envelopeJSON
         ) else {
             gatewayDispatchMode = previousMode
             return
         }
 
         guard request.canAttemptLive else {
-            fallbackLatestSessionToSimulatedEvents(
-                task: dispatch.task,
-                sessionID: dispatch.sessionID,
-                reason: request.preflightMessage,
-                startingSequence: 2
-            )
+            if dispatch.task.continuationLineage != nil {
+                failContinuationTransport(
+                    task: dispatch.task,
+                    sessionID: dispatch.sessionID,
+                    sequence: 2,
+                    diagnostic: "live_preflight_failed"
+                )
+            } else {
+                fallbackLatestSessionToSimulatedEvents(
+                    task: dispatch.task,
+                    sessionID: dispatch.sessionID,
+                    reason: request.preflightMessage,
+                    startingSequence: 2
+                )
+            }
             gatewayDispatchMode = previousMode
             return
         }
 
+        var receivedGatewayCompletion = false
+        var gatewayCompletionFailed = false
         do {
             if gatewayConnectionSessionID == dispatch.sessionID {
                 gatewayConnectionState = .streaming
             }
             let stream = transport.streamEvents(
                 request: request,
-                envelopeJSON: lastClawMobileEnvelope,
+                envelopeJSON: dispatch.envelopeJSON,
                 sessionID: dispatch.sessionID,
                 taskID: dispatch.task.id
             )
-            for try await event in stream {
-                ingestGatewayEvents([event])
+            for try await wireEvent in stream {
+                captureContinuationOffer(wireEvent.continuationOffer, for: wireEvent.event)
+                ingestGatewayEvents([wireEvent.event])
+                if wireEvent.event.kind == .sessionCompleted {
+                    receivedGatewayCompletion = true
+                    gatewayCompletionFailed = gatewayCompletionFailed || wireEvent.event.resultStatus == .failed
+                }
+            }
+            if dispatch.task.continuationLineage != nil {
+                if gatewayCompletionFailed {
+                    markContinuationTransportFailed(taskID: dispatch.task.id)
+                } else if receivedGatewayCompletion {
+                    markContinuationTransportSucceeded(taskID: dispatch.task.id)
+                } else {
+                    failContinuationTransport(
+                        task: dispatch.task,
+                        sessionID: dispatch.sessionID,
+                        sequence: gatewayEvents.map(\.sequence).max().map { $0 + 1 } ?? 2,
+                        diagnostic: "live_transport_incomplete"
+                    )
+                }
             }
         } catch {
             if gatewayConnectionSessionID == dispatch.sessionID {
@@ -1455,27 +1751,108 @@ final class ClawStore: ObservableObject {
                 error.localizedDescription,
                 request: request
             )
-            fallbackLatestSessionToSimulatedEvents(
-                task: dispatch.task,
-                sessionID: dispatch.sessionID,
-                reason: error.localizedDescription,
-                startingSequence: gatewayEvents.map(\.sequence).max().map { $0 + 1 } ?? 2,
-                transportErrorSummary: safeError
-            )
+            if dispatch.task.continuationLineage != nil {
+                if receivedGatewayCompletion {
+                    if gatewayCompletionFailed {
+                        markContinuationTransportFailed(taskID: dispatch.task.id)
+                    } else {
+                        markContinuationTransportSucceeded(taskID: dispatch.task.id)
+                    }
+                } else {
+                    failContinuationTransport(
+                        task: dispatch.task,
+                        sessionID: dispatch.sessionID,
+                        sequence: gatewayEvents.map(\.sequence).max().map { $0 + 1 } ?? 2,
+                        diagnostic: "live_transport_failed"
+                    )
+                }
+            } else {
+                fallbackLatestSessionToSimulatedEvents(
+                    task: dispatch.task,
+                    sessionID: dispatch.sessionID,
+                    reason: error.localizedDescription,
+                    startingSequence: gatewayEvents.map(\.sequence).max().map { $0 + 1 } ?? 2,
+                    transportErrorSummary: safeError
+                )
+            }
         }
 
         gatewayDispatchMode = previousMode
     }
 
-    private func beginLatestGatewaySession(
+    private func failContinuationTransport(
+        task: ClawMobileTask,
+        sessionID: UUID,
+        sequence: Int,
+        diagnostic: String
+    ) {
+        gatewayConnectionState = .failed
+        markContinuationTransportFailed(taskID: task.id)
+        ingestGatewayEvents([
+            ClawGatewayEvent(
+                sessionID: sessionID,
+                taskID: task.id,
+                sequence: sequence,
+                kind: .sessionCompleted,
+                resultStatus: .failed,
+                summary: "可信续接失败（\(diagnostic)）；receipt 已作废，不会自动重连、重发或模拟执行。",
+                isRetryable: false
+            )
+        ])
+    }
+
+    private func markContinuationTransportFailed(taskID: UUID) {
+        gatewayConnectionState = .failed
+        if let index = clawMobileTasks.firstIndex(where: { $0.id == taskID }) {
+            clawMobileTasks[index].status = .blocked
+        }
+        if var draft = continuationDraft, draft.childTaskID == taskID {
+            draft.state = .blocked
+            draft.updatedAt = Date()
+            continuationDraft = draft
+        }
+    }
+
+    private func markContinuationTransportSucceeded(taskID: UUID) {
+        guard var draft = continuationDraft, draft.childTaskID == taskID else {
+            return
+        }
+        draft.state = .sent
+        draft.updatedAt = Date()
+        continuationDraft = draft
+    }
+
+    private func beginGatewaySession(
+        taskID: UUID,
         mode: ClawGatewayDispatchMode
-    ) -> (task: ClawMobileTask, sessionID: UUID, mode: ClawGatewayDispatchMode)? {
-        guard clawMobileTasks.isEmpty == false else {
+    ) -> (task: ClawMobileTask, sessionID: UUID, mode: ClawGatewayDispatchMode, envelopeJSON: String)? {
+        guard let index = clawMobileTasks.firstIndex(where: { $0.id == taskID }) else {
             return nil
         }
-        if clawMobileTasks[0].status == .readyToSend || clawMobileTasks[0].status == .queued {
-            clawMobileTasks[0].status = .sent
-            let task = clawMobileTasks[0]
+        let candidate = clawMobileTasks[index]
+        let envelopeJSON: String
+        if candidate.continuationLineage != nil {
+            if candidate.status == .sent {
+                return nil
+            }
+            guard mode == .liveGateway,
+                  candidate.status == .readyToSend,
+                  validateContinuationApproval(for: candidate),
+                  let frozen = frozenContinuationEnvelopes[candidate.id] else {
+                invalidateContinuationAuthorization(reason: .approvalInvalidated)
+                return nil
+            }
+            envelopeJSON = frozen
+        } else {
+            guard candidate.status == .readyToSend || candidate.status == .queued else {
+                lastClawMobileEnvelope = ClawMobileBridge.makeEnvelopeString(task: candidate, profile: clawGatewayProfile)
+                return nil
+            }
+            envelopeJSON = ClawMobileBridge.makeEnvelopeString(task: candidate, profile: clawGatewayProfile)
+        }
+        if candidate.status == .readyToSend || candidate.status == .queued {
+            clawMobileTasks[index].status = .sent
+            let task = clawMobileTasks[index]
             let session = ClawGatewayEventStream.makePreparedSession(
                 task: task,
                 profile: clawGatewayProfile,
@@ -1488,10 +1865,18 @@ final class ClawStore: ObservableObject {
             )
             clawGatewaySessions.insert(session, at: 0)
             ingestGatewayEvents([preparedEvent])
-            lastClawMobileEnvelope = ClawMobileBridge.makeEnvelopeString(task: task, profile: clawGatewayProfile)
-            return (task, session.id, mode)
+            lastClawMobileEnvelope = ClawMobileBridge.makeEnvelopeString(
+                task: task,
+                profile: clawGatewayProfile,
+                redactingContinuationReceipt: task.continuationLineage != nil
+            )
+            if let handle = task.continuationLineage?.receipt {
+                continuationReceipts.removeValue(forKey: handle)
+                frozenContinuationEnvelopes.removeValue(forKey: task.id)
+                continuationApprovalRecords.removeValue(forKey: task.id)
+            }
+            return (task, session.id, mode, envelopeJSON)
         }
-        lastClawMobileEnvelope = ClawMobileBridge.makeEnvelopeString(task: clawMobileTasks[0], profile: clawGatewayProfile)
         return nil
     }
 
@@ -1499,10 +1884,15 @@ final class ClawStore: ObservableObject {
     private func prepareLiveGatewayRequest(
         task: ClawMobileTask,
         sessionID: UUID,
-        fallbackToSimulation: Bool
+        fallbackToSimulation: Bool,
+        envelopeJSON: String? = nil
     ) -> ClawGatewayLiveRequest? {
-        let envelope = ClawMobileBridge.makeEnvelopeString(task: task, profile: clawGatewayProfile)
-        lastClawMobileEnvelope = envelope
+        let envelope = envelopeJSON ?? ClawMobileBridge.makeEnvelopeString(task: task, profile: clawGatewayProfile)
+        lastClawMobileEnvelope = ClawMobileBridge.makeEnvelopeString(
+            task: task,
+            profile: clawGatewayProfile,
+            redactingContinuationReceipt: task.continuationLineage != nil
+        )
         let request = ClawGatewayLiveClient.makeRequest(
             task: task,
             profile: clawGatewayProfile,
@@ -1599,7 +1989,7 @@ final class ClawStore: ObservableObject {
            let eventSession = clawGatewaySessions.first(where: { $0.id == event.sessionID }) {
             if event.sessionID == gatewayConnectionSessionID {
                 if event.kind == .sessionCompleted {
-                    gatewayConnectionState = eventSession.status == .blocked ? .failed : .completed
+                    gatewayConnectionState = eventSession.status == .completed ? .completed : .failed
                 } else if event.kind == .fallbackUsed {
                     gatewayConnectionState = .fallbackSimulated
                 } else if gatewayDispatchMode == .liveGateway,
@@ -1628,6 +2018,311 @@ final class ClawStore: ObservableObject {
         case .sessionPrepared, .liveRequestPrepared, .sessionCompleted, .fallbackUsed:
             return false
         }
+    }
+
+    private func captureContinuationOffer(
+        _ offer: ClawGatewayContinuationOffer?,
+        for event: ClawGatewayEvent
+    ) {
+        guard let offer,
+              event.kind == .sessionCompleted,
+              offer.hasValidShape,
+              offer.expiresAt > Date(),
+              offer.expiresAt.timeIntervalSinceNow <= 600,
+              offer.parentTaskID == event.taskID,
+              let task = clawMobileTasks.first(where: { $0.id == offer.parentTaskID }),
+              let session = clawGatewaySessions.first(where: {
+                  $0.id == event.sessionID && $0.taskID == offer.parentTaskID
+              }),
+              let review = ClawAgentTraceReviewSummary.latest(from: session),
+              review.latestArtifactID == offer.parentAgentTraceArtifactID,
+              review.continuationEligibility == .ready(offer.selectedActionKind) else {
+            return
+        }
+        let round = task.continuationLineage?.childRound ?? 0
+        let digest = review.continuationDecisionDigest(
+            taskID: task.id,
+            sessionID: session.id,
+            artifactID: offer.parentAgentTraceArtifactID,
+            round: round
+        )
+        guard digest == offer.parentDecisionDigest, round == offer.parentRound else {
+            return
+        }
+
+        pruneContinuationReceipts()
+        if continuationReceipts.count >= 128,
+           let oldest = continuationReceipts.values.min(by: {
+               $0.offer.expiresAt < $1.offer.expiresAt
+           }) {
+            continuationReceipts.removeValue(forKey: oldest.handle)
+        }
+        let handle = UUID().uuidString.lowercased()
+        continuationReceipts[handle] = ContinuationReceiptEntry(
+            handle: handle,
+            localSessionID: event.sessionID,
+            offer: offer
+        )
+    }
+
+    private func pruneContinuationReceipts(now: Date = Date()) {
+        continuationReceipts = continuationReceipts.filter { $0.value.offer.expiresAt > now }
+    }
+
+    private func matchingReceipt(
+        taskID: UUID,
+        sessionID: UUID,
+        artifactID: UUID,
+        decisionDigest: String,
+        round: Int,
+        selectedKind: ClawMobileActionKind
+    ) -> ContinuationReceiptEntry? {
+        continuationReceipts.values.first { entry in
+            let offer = entry.offer
+            return offer.expiresAt > Date() &&
+                offer.parentTaskID == taskID &&
+                entry.localSessionID == sessionID &&
+                offer.parentAgentTraceArtifactID == artifactID &&
+                offer.parentDecisionDigest == decisionDigest &&
+                offer.parentRound == round &&
+                offer.selectedActionKind == selectedKind
+        }
+    }
+
+    private func validateContinuationSource(_ draft: ClawContinuationDraft) -> Bool {
+        guard let task = clawMobileTasks.first(where: { $0.id == draft.sourceTaskID }),
+              let session = clawGatewaySessions.first(where: {
+                  $0.id == draft.sourceSessionID && $0.taskID == draft.sourceTaskID
+              }),
+              session.updatedAt == draft.sourceSessionUpdatedAt,
+              let review = ClawAgentTraceReviewSummary.latest(from: session),
+              review.latestArtifactID == draft.sourceAgentTraceArtifactID else {
+            return false
+        }
+        let round = task.continuationLineage?.childRound ?? 0
+        return review.continuationDecisionDigest(
+            taskID: task.id,
+            sessionID: session.id,
+            artifactID: draft.sourceAgentTraceArtifactID,
+            round: round
+        ) == draft.sourceDecisionDigest
+    }
+
+    private func validateContinuationTask(_ task: ClawMobileTask) -> Bool {
+        guard let lineage = task.continuationLineage,
+              lineage.hasValidShape,
+              task.id != lineage.parentTaskID,
+              task.actions.count == 2,
+              task.actions[0].kind == lineage.selectedActionKind,
+              task.actions[1].kind == .runAgentLoop,
+              task.actions[0].id != task.actions[1].id,
+              task.actions.allSatisfy({ $0.approval == .userConfirmation }),
+              task.actions.allSatisfy({ clawGatewayProfile.allowedActionKinds.contains($0.kind) }),
+              ClawContinuationActionArguments.validate(
+                  kind: task.actions[0].kind,
+                  arguments: task.actions[0].toolArguments
+              ).isEmpty,
+              ClawContinuationActionArguments.validateLoop(task.actions[1].toolArguments).isEmpty else {
+            return false
+        }
+        return true
+    }
+
+    private func validateContinuationApproval(for task: ClawMobileTask) -> Bool {
+        guard let lineage = task.continuationLineage,
+              let record = continuationApprovalRecords[task.id],
+              let receipt = continuationReceipts[lineage.receipt],
+              receipt.offer.expiresAt > Date(),
+              record.canonicalTaskDigest == canonicalTaskDigest(task),
+              record.canonicalProfileDigest == canonicalProfileDigest(clawGatewayProfile) else {
+            return false
+        }
+        let expectedLineageDigest = ClawContinuationContract.sha256(
+            lineage.parentDecisionDigest + "|" + ClawContinuationContract.sha256(receipt.offer.receipt)
+        )
+        return record.lineageDigest == expectedLineageDigest && validateContinuationTask(task)
+    }
+
+    private func canonicalTaskDigest(_ task: ClawMobileTask) -> String {
+        var sanitized = task
+        if let lineage = sanitized.continuationLineage {
+            sanitized.continuationLineage = lineage.replacingReceipt(with: "vault-handle-omitted")
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        let data = (try? encoder.encode(sanitized)) ?? Data()
+        return ClawContinuationContract.sha256(String(decoding: data, as: UTF8.self))
+    }
+
+    private func canonicalProfileDigest(_ profile: ClawGatewayProfile) -> String {
+        let allowed = profile.allowedActionKinds.map(\.rawValue).sorted().joined(separator: ",")
+        let value = [
+            profile.endpoint.trimmingCharacters(in: .whitespacesAndNewlines),
+            profile.deviceName,
+            profile.securityMode.rawValue,
+            profile.tokenFingerprint,
+            allowed,
+            String(profile.requiresApprovalForSensitiveData),
+            String(profile.auditEnabled)
+        ].joined(separator: "|")
+        return ClawContinuationContract.sha256(value)
+    }
+
+    private func invalidateContinuationAuthorization(reason: ClawContinuationValidationIssue) {
+        continuationApprovalRecords.removeAll()
+        frozenContinuationEnvelopes.removeAll()
+        guard var draft = continuationDraft else { return }
+        draft.state = .stale
+        if draft.validationIssues.contains(reason) == false {
+            draft.validationIssues.append(reason)
+        }
+        draft.updatedAt = Date()
+        continuationDraft = draft
+        if let childTaskID = draft.childTaskID,
+           let index = clawMobileTasks.firstIndex(where: { $0.id == childTaskID }),
+           clawMobileTasks[index].status != .sent {
+            clawMobileTasks[index].status = .waitingForApproval
+        }
+    }
+
+    private func continuationDraftPresentation(
+        task: ClawMobileTask?,
+        session: ClawGatewaySession?,
+        agentTraceReview: ClawAgentTraceReviewSummary?
+    ) -> ClawContinuationDraftPresentationSummary {
+        if let draft = continuationDraft {
+            let matchesCurrentScope: Bool
+            if let childTaskID = draft.childTaskID {
+                matchesCurrentScope = task?.id == childTaskID
+            } else {
+                matchesCurrentScope = task?.id == draft.sourceTaskID && session?.id == draft.sourceSessionID
+            }
+            guard matchesCurrentScope else {
+                return .unavailable
+            }
+            let state: ClawContinuationDraftState = if let expiresAt = draft.receiptExpiresAt,
+                                                       expiresAt <= Date.now,
+                                                       draft.state != .sent,
+                                                       draft.state != .blocked {
+                .stale
+            } else {
+                draft.state
+            }
+            let action: (ClawContinuationDraftActionKind?, String?, Bool)
+            switch state {
+            case .readyForApproval:
+                action = (.queue, "加入任务队列", true)
+            case .queued:
+                action = (.approve, "审批新任务", draft.childTaskID != nil)
+            case .approvedFrozen:
+                action = (.send, "发送新任务", draft.childTaskID != nil)
+            case .readyForInput, .needsApproval, .stale, .sent, .blocked:
+                action = (nil, nil, false)
+            }
+            let status: String
+            let guidance: String
+            switch state {
+            case .readyForInput:
+                status = "结构化参数待补齐"
+                guidance = "草稿不会发送；补齐并复核参数后才能加入任务队列。"
+            case .readyForApproval:
+                status = "可信凭据与参数已就绪"
+                guidance = "加入队列后仍需单独审批和发送，不继承父任务授权。"
+            case .needsApproval:
+                status = "下一步需要审批"
+                guidance = "v0.66 只保留 needsApproval 草稿，不允许 continuation dispatch。"
+            case .stale:
+                status = "续接凭据已失效"
+                guidance = "父证据、profile 或 10 分钟凭据已变化，请重新运行可信父回合。"
+            case .queued:
+                status = "新任务等待审批"
+                guidance = "审批只冻结当前 task 内容，不会自动发送。"
+            case .approvedFrozen:
+                status = "新任务已审批并冻结"
+                guidance = "发送将使用该 task 的私有冻结 envelope，不读取全局展示内容。"
+            case .sent:
+                status = "续接任务已发送"
+                guidance = "Gateway 将先执行选中动作，再运行新一轮 Agent Loop。"
+            case .blocked:
+                status = "续接发送失败"
+                guidance = "本次发送尝试已消费 receipt；不会自动重连、重发或模拟执行，请重新运行可信父回合。"
+            }
+            return ClawContinuationDraftPresentationSummary(
+                title: "可信多轮续接",
+                status: status,
+                guidance: guidance,
+                icon: "arrow.triangle.branch",
+                selectedActionTitle: draft.sourceSelectedActionKind.title,
+                state: state,
+                actionKind: action.0,
+                actionTitle: action.1,
+                sourceTaskID: draft.sourceTaskID,
+                sourceSessionID: draft.sourceSessionID,
+                draftID: draft.id,
+                childTaskID: draft.childTaskID,
+                canPerformAction: action.2,
+                requiresHumanAction: state != .sent,
+                hasMetadataGap: draft.validationIssues.contains(.invalidDecision),
+                isVisible: true
+            )
+        }
+
+        guard let task, let session, let review = agentTraceReview else {
+            return .unavailable
+        }
+        let eligibility = review.continuationEligibility
+        guard eligibility != .invalid else { return .unavailable }
+        let kind: ClawMobileActionKind
+        let hasReceipt: Bool
+        switch eligibility {
+        case .ready(let selected):
+            kind = selected
+            if let artifactID = review.latestArtifactID {
+                let round = task.continuationLineage?.childRound ?? 0
+                let digest = review.continuationDecisionDigest(
+                    taskID: task.id,
+                    sessionID: session.id,
+                    artifactID: artifactID,
+                    round: round
+                )
+                hasReceipt = matchingReceipt(
+                    taskID: task.id,
+                    sessionID: session.id,
+                    artifactID: artifactID,
+                    decisionDigest: digest,
+                    round: round,
+                    selectedKind: selected
+                ) != nil
+            } else {
+                hasReceipt = false
+            }
+        case .needsApproval(let selected):
+            kind = selected
+            hasReceipt = true
+        case .invalid:
+            return .unavailable
+        }
+        return ClawContinuationDraftPresentationSummary(
+            title: "可信多轮续接",
+            status: hasReceipt ? "可生成下一步草稿" : "等待 Gateway 续接凭据",
+            guidance: hasReceipt
+                ? "只生成独立草稿，不改变当前 Mission scope，也不会自动审批或发送。"
+                : "只有短时、单次 Gateway receipt 到达后才能生成可派发草稿。",
+            icon: "arrow.triangle.branch",
+            selectedActionTitle: kind.title,
+            state: nil,
+            actionKind: hasReceipt ? .prepare : nil,
+            actionTitle: hasReceipt ? "生成下一步草稿" : nil,
+            sourceTaskID: task.id,
+            sourceSessionID: session.id,
+            draftID: nil,
+            childTaskID: nil,
+            canPerformAction: hasReceipt,
+            requiresHumanAction: true,
+            hasMetadataGap: false,
+            isVisible: true
+        )
     }
 
     func retryLatestGatewayFailures() {
@@ -2111,6 +2806,232 @@ enum PhoneAgentPlanner {
     }
 }
 
+enum ClawContinuationActionArguments {
+    struct Proposal {
+        var action: ClawMobileAction
+        var issues: [ClawContinuationValidationIssue]
+    }
+
+    static func makeAction(
+        kind: ClawMobileActionKind,
+        objective: String,
+        sourceTask: ClawMobileTask
+    ) -> Proposal {
+        let sourceArguments = sourceTask.actions.first { $0.kind == kind }?.toolArguments ?? [:]
+        let cleanObjective = objective.trimmingCharacters(in: .whitespacesAndNewlines)
+        let arguments: [String: String]
+        switch kind {
+        case .observeScreen:
+            arguments = [
+                "observationGoal": cleanObjective,
+                "includeScreenshot": "true",
+                "includeAccessibilityTree": "true",
+                "includeWindowTitles": "true",
+                "maxCandidateControls": "20",
+                "redaction": "maskSensitiveText"
+            ]
+        case .controlBrowser:
+            arguments = [
+                "browserGoal": cleanObjective,
+                "browserApp": sourceArguments["browserApp"] ?? "Safari",
+                "openInBrowser": "true",
+                "searchQuery": sourceArguments["searchQuery"] ?? cleanObjective,
+                "searchURLTemplate": "https://www.google.com/search?q={query}",
+                "captureTrace": "true"
+            ]
+        case .manageFiles:
+            let sourceText = sourceArguments["writeText"] ?? ""
+            arguments = [
+                "operation": "writeText",
+                "workspaceOnly": "true",
+                "writePath": sourceArguments["writePath"] ?? "claw-output/continuation.txt",
+                "writeText": sourceText.contains("placeholder") ? "" : sourceText
+            ]
+        case .extractData:
+            arguments = [
+                "extractionGoal": cleanObjective,
+                "sourcePriority": "browserTrace,accessibilityTree,commandOutput,fileDiff,screenObservation",
+                "schema": "title:string,source:string,summary:string,confidence:number",
+                "outputPath": "claw-output/continuation-extracted-data.json",
+                "validateCompleteness": "true"
+            ]
+        case .operateDesktopApp:
+            arguments = [
+                "targetApp": sourceArguments["targetApp"] ?? "",
+                "automationMode": "accessibility",
+                "inputMode": "typeOrPaste",
+                "draftText": sourceArguments["draftText"] ?? "",
+                "keySequence": sourceArguments["keySequence"] ?? "command+k",
+                "finalSubmitRequiresApproval": "true",
+                "captureBeforeAfter": "true"
+            ]
+        case .composeMessage:
+            arguments = [
+                "recipientOrChannel": "",
+                "deliverySurface": "messageDraft",
+                "draftText": "",
+                "finalSubmitRequiresApproval": "true"
+            ]
+        default:
+            arguments = [:]
+        }
+        let action = ClawMobileAction(
+            kind: kind,
+            title: "续接：\(kind.title)",
+            target: "Claw Gateway",
+            instruction: "执行用户复核后的结构化续接动作。",
+            approval: .userConfirmation,
+            sourceSurface: .clawGateway,
+            handlesSensitiveData: true,
+            inputPreview: "结构化参数已省略",
+            toolArguments: arguments
+        )
+        return Proposal(action: action, issues: validate(kind: kind, arguments: arguments))
+    }
+
+    static func makeLoopAction(objective: String) -> ClawMobileAction {
+        ClawMobileAction(
+            kind: .runAgentLoop,
+            title: "续接：运行新一轮智能体循环",
+            target: "Desktop Agent Loop",
+            instruction: "基于可信父 context 和本轮选中动作结果重新观察、规划和验证。",
+            approval: .userConfirmation,
+            sourceSurface: .clawGateway,
+            handlesSensitiveData: true,
+            inputPreview: "结构化参数已省略",
+            toolArguments: [
+                "objective": objective.trimmingCharacters(in: .whitespacesAndNewlines),
+                "loopMode": "observe-plan-act-verify",
+                "maxIterations": "1",
+                "inputSources": "screenObservation,accessibilityTree,browserTrace,fileDiff,commandOutput,messageDraft",
+                "allowedNextActions": "observeScreen,controlBrowser,manageFiles,extractData,operateDesktopApp,composeMessage",
+                "approvalRequiredFor": "runShellCommand,operateDesktopAppFinalSubmit,externalNetwork,destructiveFileChange",
+                "stopBeforeDestructiveAction": "true",
+                "writeTrace": "true"
+            ]
+        )
+    }
+
+    static func validate(
+        kind: ClawMobileActionKind,
+        arguments: [String: String]
+    ) -> [ClawContinuationValidationIssue] {
+        let allowedKeys: Set<String>
+        let valid: Bool
+        switch kind {
+        case .observeScreen:
+            allowedKeys = ["observationGoal", "includeScreenshot", "includeAccessibilityTree", "includeWindowTitles", "maxCandidateControls", "redaction"]
+            let maxControls = Int(arguments["maxCandidateControls"] ?? "") ?? 0
+            valid = nonempty(arguments["observationGoal"]) &&
+                bool(arguments["includeScreenshot"]) &&
+                bool(arguments["includeAccessibilityTree"]) &&
+                bool(arguments["includeWindowTitles"]) &&
+                (1...50).contains(maxControls) &&
+                arguments["redaction"] == "maskSensitiveText"
+        case .controlBrowser:
+            allowedKeys = ["browserGoal", "browserApp", "openInBrowser", "searchQuery", "openURL", "searchURLTemplate", "captureTrace"]
+            let searchPresent = nonempty(arguments["searchQuery"])
+            let openURLPresent = nonempty(arguments["openURL"])
+            valid = nonempty(arguments["browserGoal"]) &&
+                nonempty(arguments["browserApp"]) &&
+                arguments["openInBrowser"] == "true" &&
+                searchPresent != openURLPresent &&
+                arguments["captureTrace"] == "true" &&
+                (openURLPresent == false || isHTTPURL(arguments["openURL"])) &&
+                (searchPresent == false || arguments["searchURLTemplate"] == "https://www.google.com/search?q={query}")
+        case .manageFiles:
+            allowedKeys = ["operation", "workspaceOnly", "writePath", "writeText"]
+            valid = arguments["operation"] == "writeText" &&
+                arguments["workspaceOnly"] == "true" &&
+                isRelativeWorkspacePath(arguments["writePath"]) &&
+                nonempty(arguments["writeText"])
+        case .extractData:
+            allowedKeys = ["extractionGoal", "sourcePriority", "schema", "outputPath", "validateCompleteness"]
+            let sources = Set((arguments["sourcePriority"] ?? "").split(separator: ",").map(String.init))
+            let allowedSources: Set<String> = ["browserTrace", "accessibilityTree", "commandOutput", "fileDiff", "screenObservation"]
+            valid = nonempty(arguments["extractionGoal"]) &&
+                sources.isEmpty == false && sources.isSubset(of: allowedSources) &&
+                nonempty(arguments["schema"]) &&
+                isRelativeWorkspacePath(arguments["outputPath"]) &&
+                arguments["validateCompleteness"] == "true"
+        case .operateDesktopApp:
+            allowedKeys = ["targetApp", "automationMode", "inputMode", "draftText", "pasteText", "keySequence", "finalSubmitRequiresApproval", "captureBeforeAfter"]
+            let keys = (arguments["keySequence"] ?? "").lowercased()
+            valid = nonempty(arguments["targetApp"]) &&
+                arguments["automationMode"] == "accessibility" &&
+                arguments["inputMode"] == "typeOrPaste" &&
+                (nonempty(arguments["draftText"]) || nonempty(arguments["pasteText"])) &&
+                keys.contains("return") == false && keys.contains("enter") == false &&
+                arguments["finalSubmitRequiresApproval"] == "true" &&
+                arguments["captureBeforeAfter"] == "true"
+        case .composeMessage:
+            allowedKeys = ["recipientOrChannel", "deliverySurface", "draftText", "finalSubmitRequiresApproval"]
+            valid = nonempty(arguments["recipientOrChannel"]) &&
+                arguments["deliverySurface"] == "messageDraft" &&
+                nonempty(arguments["draftText"]) &&
+                arguments["finalSubmitRequiresApproval"] == "true"
+        default:
+            return [.unsupportedSelectedAction]
+        }
+        let bounded = arguments.values.allSatisfy { $0.utf8.count <= 4_096 }
+        return valid && bounded && Set(arguments.keys).isSubset(of: allowedKeys) ? [] : [.invalidArguments]
+    }
+
+    static func validateLoop(_ arguments: [String: String]) -> [ClawContinuationValidationIssue] {
+        let allowedKeys: Set<String> = ["objective", "loopMode", "maxIterations", "inputSources", "allowedNextActions", "approvalRequiredFor", "stopBeforeDestructiveAction", "writeTrace"]
+        let inputSources = csv(arguments["inputSources"])
+        let allowedInputs: Set<String> = ["screenObservation", "accessibilityTree", "browserTrace", "fileDiff", "commandOutput", "messageDraft"]
+        let nextActions = csv(arguments["allowedNextActions"])
+        let approvals = csv(arguments["approvalRequiredFor"])
+        let allowedApprovals: Set<String> = [
+            "runShellCommand", "operateDesktopAppFinalSubmit", "externalNetwork", "destructiveFileChange",
+            "observeScreen", "controlBrowser", "manageFiles", "extractData", "operateDesktopApp", "composeMessage"
+        ]
+        let maxIterations = Int(arguments["maxIterations"] ?? "") ?? 0
+        let objectiveSize = arguments["objective"]?.utf8.count ?? 0
+        let valid = (1...500).contains(objectiveSize) &&
+            arguments["loopMode"] == "observe-plan-act-verify" &&
+            (1...8).contains(maxIterations) &&
+            arguments["stopBeforeDestructiveAction"] == "true" &&
+            arguments["writeTrace"] == "true" &&
+            inputSources.isEmpty == false && inputSources.isSubset(of: allowedInputs) &&
+            nextActions.isEmpty == false && nextActions.isSubset(of: Set(ClawContinuationContract.supportedActionKinds.map(\.rawValue))) &&
+            approvals.isSubset(of: allowedApprovals) &&
+            Set(arguments.keys) == allowedKeys &&
+            arguments.values.allSatisfy { $0.utf8.count <= 4_096 }
+        return valid ? [] : [.invalidArguments]
+    }
+
+    private static func csv(_ value: String?) -> Set<String> {
+        Set((value ?? "").split(separator: ",").map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines)
+        }.filter { $0.isEmpty == false })
+    }
+
+    private static func nonempty(_ value: String?) -> Bool {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty == false
+    }
+
+    private static func bool(_ value: String?) -> Bool {
+        value == "true" || value == "false"
+    }
+
+    private static func isHTTPURL(_ value: String?) -> Bool {
+        guard let value, let url = URL(string: value), let scheme = url.scheme?.lowercased() else { return false }
+        return (scheme == "http" || scheme == "https") && url.host?.isEmpty == false
+    }
+
+    private static func isRelativeWorkspacePath(_ value: String?) -> Bool {
+        guard let value else { return false }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty == false &&
+            trimmed.hasPrefix("/") == false &&
+            trimmed.hasPrefix("~") == false &&
+            trimmed.split(separator: "/").contains("..") == false
+    }
+}
+
 enum ClawMobileBridge {
     static func makeTask(
         from plan: PhoneAgentPlan,
@@ -2163,8 +3084,18 @@ enum ClawMobileBridge {
         )
     }
 
-    static func makeEnvelopeString(task: ClawMobileTask, profile: ClawGatewayProfile) -> String {
-        let envelope = makeEnvelope(task: task, profile: profile)
+    static func makeEnvelopeString(
+        task: ClawMobileTask,
+        profile: ClawGatewayProfile,
+        continuationReceipt: String? = nil,
+        redactingContinuationReceipt: Bool = false
+    ) -> String {
+        var envelope = makeEnvelope(task: task, profile: profile)
+        if let continuationReceipt {
+            envelope = envelope.replacingContinuationReceipt(with: continuationReceipt)
+        } else if redactingContinuationReceipt, task.continuationLineage != nil {
+            envelope = envelope.redactedForDisplay
+        }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
@@ -3251,7 +4182,7 @@ protocol ClawGatewayTransport: Sendable {
         envelopeJSON: String,
         sessionID: UUID,
         taskID: UUID
-    ) -> AsyncThrowingStream<ClawGatewayEvent, Error>
+    ) -> AsyncThrowingStream<ClawGatewayWireEvent, Error>
 }
 
 struct ClawGatewayTransportRetryPolicy: Equatable, Sendable {
@@ -3282,18 +4213,22 @@ struct URLSessionClawGatewayTransport: ClawGatewayTransport {
         envelopeJSON: String,
         sessionID: UUID,
         taskID: UUID
-    ) -> AsyncThrowingStream<ClawGatewayEvent, Error> {
+    ) -> AsyncThrowingStream<ClawGatewayWireEvent, Error> {
         AsyncThrowingStream { continuation in
             guard let url = URL(string: request.endpoint) else {
                 continuation.finish(throwing: ClawGatewayTransportError.invalidEndpoint(request.endpoint))
                 return
             }
+            let isContinuationTask = envelopeJSON.data(using: .utf8).flatMap { data in
+                try? JSONDecoder.clawGateway.decode(ClawMobileEnvelope.self, from: data)
+            }?.task.continuationLineage != nil
+            let maxAttempts = isContinuationTask ? 1 : retryPolicy.maxAttempts
 
             let task = Task {
                 var nextSequence = 2
                 var attempt = 1
                 do {
-                    while attempt <= retryPolicy.maxAttempts, Task.isCancelled == false {
+                    while attempt <= maxAttempts, Task.isCancelled == false {
                         var receivedDesktopEvent = false
                         let socket = URLSession.shared.webSocketTask(with: urlRequest(for: url, request: request))
                         do {
@@ -3301,13 +4236,15 @@ struct URLSessionClawGatewayTransport: ClawGatewayTransport {
                             try await socket.send(.string(envelopeJSON))
 
                             let pingStatus = await pingStatus(for: socket, policy: retryPolicy)
-                            continuation.yield(ClawGatewayLiveClient.liveTransportProgressEvent(
-                                taskID: taskID,
-                                sessionID: sessionID,
-                                sequence: nextSequence,
-                                attempt: attempt,
-                                reconnectCount: attempt - 1,
-                                pingStatus: pingStatus
+                            continuation.yield(ClawGatewayWireEvent(event:
+                                ClawGatewayLiveClient.liveTransportProgressEvent(
+                                    taskID: taskID,
+                                    sessionID: sessionID,
+                                    sequence: nextSequence,
+                                    attempt: attempt,
+                                    reconnectCount: attempt - 1,
+                                    pingStatus: pingStatus
+                                )
                             ))
                             nextSequence += 1
 
@@ -3322,7 +4259,16 @@ struct URLSessionClawGatewayTransport: ClawGatewayTransport {
                                 @unknown default:
                                     continue
                                 }
-                                var event = try JSONDecoder.clawGateway.decode(ClawGatewayEvent.self, from: data)
+                                let decoded = try JSONDecoder.clawGateway.decode(ClawGatewayWireEvent.self, from: data)
+                                if let offer = decoded.continuationOffer,
+                                   offer.parentTaskID != decoded.event.taskID ||
+                                   offer.parentSessionID != decoded.event.sessionID {
+                                    throw ClawGatewayTransportError.invalidContinuationOffer
+                                }
+                                guard decoded.event.taskID == taskID else {
+                                    throw ClawGatewayTransportError.invalidEventIdentity
+                                }
+                                var event = decoded.event
                                 receivedDesktopEvent = true
                                 if event.sessionID != sessionID {
                                     event = ClawGatewayEvent(
@@ -3348,7 +4294,10 @@ struct URLSessionClawGatewayTransport: ClawGatewayTransport {
                                 } else {
                                     nextSequence = max(nextSequence, event.sequence + 1)
                                 }
-                                continuation.yield(event)
+                                continuation.yield(ClawGatewayWireEvent(
+                                    event: event,
+                                    continuationOffer: decoded.continuationOffer
+                                ))
                                 if event.kind == .sessionCompleted {
                                     socket.cancel(with: .normalClosure, reason: nil)
                                     continuation.finish()
@@ -3360,22 +4309,24 @@ struct URLSessionClawGatewayTransport: ClawGatewayTransport {
                             return
                         } catch {
                             socket.cancel(with: .goingAway, reason: nil)
-                            let canRetry = attempt < retryPolicy.maxAttempts && receivedDesktopEvent == false
+                            let canRetry = attempt < maxAttempts && receivedDesktopEvent == false
                             if canRetry {
                                 attempt += 1
                                 let safeError = ClawGatewayLiveClient.safeTransportErrorSummary(
                                     error.localizedDescription,
                                     request: request
                                 )
-                                continuation.yield(ClawGatewayLiveClient.liveTransportProgressEvent(
-                                    taskID: taskID,
-                                    sessionID: sessionID,
-                                    sequence: nextSequence,
-                                    attempt: attempt,
-                                    reconnectCount: attempt - 1,
-                                    pingStatus: "skipped",
-                                    transportErrorSummary: safeError,
-                                    willRetry: true
+                                continuation.yield(ClawGatewayWireEvent(event:
+                                    ClawGatewayLiveClient.liveTransportProgressEvent(
+                                        taskID: taskID,
+                                        sessionID: sessionID,
+                                        sequence: nextSequence,
+                                        attempt: attempt,
+                                        reconnectCount: attempt - 1,
+                                        pingStatus: "skipped",
+                                        transportErrorSummary: safeError,
+                                        willRetry: true
+                                    )
                                 ))
                                 nextSequence += 1
                                 try await Task.sleep(for: .nanoseconds(Int64(retryPolicy.retryDelayNanoseconds)))
@@ -3430,11 +4381,17 @@ struct URLSessionClawGatewayTransport: ClawGatewayTransport {
 
 enum ClawGatewayTransportError: LocalizedError {
     case invalidEndpoint(String)
+    case invalidContinuationOffer
+    case invalidEventIdentity
 
     var errorDescription: String? {
         switch self {
         case .invalidEndpoint(let endpoint):
             return "Invalid Claw Gateway endpoint: \(endpoint)"
+        case .invalidContinuationOffer:
+            return "Invalid continuation offer identity"
+        case .invalidEventIdentity:
+            return "Invalid Gateway event identity"
         }
     }
 }
@@ -3609,7 +4566,7 @@ enum ClawGatewayEventStream {
         case .actionCompleted, .actionFailed, .approvalRequested, .actionSkipped:
             upsertResult(from: event, in: &updated, fallbackStatus: event.resultStatus ?? .succeeded, finished: true)
         case .sessionCompleted:
-            updated.status = finalStatus(for: updated.results)
+            updated.status = event.resultStatus == .failed ? .needsAttention : finalStatus(for: updated.results)
             updated.auditTrail.append("event.\(event.sequence) sessionCompleted \(event.summary)")
         case .fallbackUsed:
             updated.status = .running

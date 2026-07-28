@@ -179,6 +179,57 @@ enum ClawGatewayEventFixture {
             for: noActionOverrideAction,
             allowedActionKinds: [.runAgentLoop, .observeScreen]
         )
+        let receiptMarker = String(repeating: "f", count: 43)
+        let offerTaskID = UUID()
+        let offerSessionID = UUID()
+        let offerArtifactID = UUID()
+        let wireEvent = ClawGatewayEvent(
+            sessionID: offerSessionID,
+            taskID: offerTaskID,
+            sequence: 99,
+            kind: .sessionCompleted,
+            summary: "fixture continuation offer stored privately"
+        )
+        let wireEncoder = JSONEncoder()
+        wireEncoder.dateEncodingStrategy = .iso8601
+        var wireObject = try JSONSerialization.jsonObject(with: wireEncoder.encode(wireEvent)) as? [String: Any] ?? [:]
+        wireObject["continuationOffer"] = [
+            "contract": ClawContinuationContract.receiptContract,
+            "receipt": receiptMarker,
+            "expiresAt": ISO8601DateFormatter().string(from: Date().addingTimeInterval(300)),
+            "parentTaskID": offerTaskID.uuidString,
+            "parentSessionID": offerSessionID.uuidString,
+            "parentAgentTraceArtifactID": offerArtifactID.uuidString,
+            "parentDecisionDigest": "sha256:" + String(repeating: "a", count: 64),
+            "parentRound": 0,
+            "selectedActionKind": ClawMobileActionKind.extractData.rawValue
+        ]
+        let wireData = try JSONSerialization.data(withJSONObject: wireObject, options: [.sortedKeys])
+        let wireDecoder = JSONDecoder()
+        wireDecoder.dateDecodingStrategy = .iso8601
+        let decodedWire = try wireDecoder.decode(ClawGatewayWireEvent.self, from: wireData)
+        let publicEventData = try wireEncoder.encode(decodedWire.event)
+        let publicEventText = String(decoding: publicEventData, as: UTF8.self)
+
+        let lineage = ClawContinuationLineage(
+            contract: ClawContinuationLineage.contractVersion,
+            parentTaskID: offerTaskID,
+            parentSessionID: offerSessionID,
+            parentAgentTraceArtifactID: offerArtifactID,
+            parentDecisionDigest: "sha256:" + String(repeating: "a", count: 64),
+            parentRound: 0,
+            childRound: 1,
+            selectedActionKind: .extractData,
+            decisionPolicy: "evidence-first-safe-v1",
+            decisionReason: "safe-without-approval",
+            receipt: receiptMarker
+        )
+        var lineageEnvelope = envelope
+        lineageEnvelope.task.continuationLineage = lineage
+        let redactedEnvelopeText = String(
+            decoding: try wireEncoder.encode(lineageEnvelope.redactedForDisplay),
+            as: UTF8.self
+        )
         guard
             failed != nil,
             audit != nil,
@@ -207,7 +258,25 @@ enum ClawGatewayEventFixture {
             noActionOverrideDecision["selectedNextActionRequiresApproval"] == "false",
             noActionOverrideDecision["selectedActionDecisionReason"] == "no-action-needed",
             noActionOverrideDecision["stopReason"] == "complete",
-            noActionOverrideDecision["handoffStatus"] == "complete"
+            noActionOverrideDecision["handoffStatus"] == "complete",
+            decodedWire.event.kind == .sessionCompleted,
+            decodedWire.continuationOffer?.receipt == receiptMarker,
+            decodedWire.continuationOffer?.hasValidShape == true,
+            ClawGatewayContinuationOffer(
+                contract: ClawContinuationContract.receiptContract,
+                receipt: String(repeating: "f", count: 42),
+                expiresAt: Date().addingTimeInterval(300),
+                parentTaskID: offerTaskID,
+                parentSessionID: offerSessionID,
+                parentAgentTraceArtifactID: offerArtifactID,
+                parentDecisionDigest: "sha256:" + String(repeating: "a", count: 64),
+                parentRound: 0,
+                selectedActionKind: .extractData
+            ).hasValidShape == false,
+            publicEventText.contains(receiptMarker) == false,
+            lineage.hasValidShape,
+            redactedEnvelopeText.contains(receiptMarker) == false,
+            redactedEnvelopeText.contains("\"receipt\":\"omitted\"")
         else {
             throw FixtureError.selfTestFailed
         }

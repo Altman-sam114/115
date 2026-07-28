@@ -719,6 +719,11 @@ struct ClawMissionRunPanel: View {
                 onFocusReviewKind: focusReviewKind
             )
 
+            ClawMissionRunContinuationDraftView(
+                summary: summary.continuationDraft,
+                onAction: performContinuationDraftAction
+            )
+
             ClawMissionMacAgentReadinessBoardView(
                 board: macAgentReadiness,
                 onFocusReviewKind: focusReviewKind
@@ -902,6 +907,27 @@ struct ClawMissionRunPanel: View {
             break
         }
     }
+
+    private func performContinuationDraftAction(_ summary: ClawContinuationDraftPresentationSummary) {
+        switch summary.actionKind {
+        case .prepare:
+            guard let taskID = summary.sourceTaskID, let sessionID = summary.sourceSessionID else { return }
+            store.prepareContinuationDraft(sourceTaskID: taskID, sourceSessionID: sessionID)
+        case .queue:
+            guard let draftID = summary.draftID else { return }
+            store.queueContinuationDraft(id: draftID)
+        case .approve:
+            guard let taskID = summary.childTaskID else { return }
+            store.approveTask(id: taskID)
+        case .send:
+            guard let taskID = summary.childTaskID else { return }
+            Task {
+                await store.sendTaskOverLiveGateway(id: taskID)
+            }
+        case nil:
+            break
+        }
+    }
 }
 
 struct ClawMissionReviewDetailDockView: View {
@@ -1012,6 +1038,11 @@ struct ClawMissionReviewDetailDockView: View {
                     onFocusReviewKind: focusReviewKind
                 )
 
+                ClawMissionRunContinuationDraftView(
+                    summary: summary.continuationDraft,
+                    onAction: performContinuationDraftAction
+                )
+
                 ClawMissionMacAgentReviewRadarView(
                     radar: reviewRadar,
                     onFocusReviewKind: focusReviewKind
@@ -1076,6 +1107,27 @@ struct ClawMissionReviewDetailDockView: View {
 
     private func clearFocusedReviewKind() {
         reviewFocus = nil
+    }
+
+    private func performContinuationDraftAction(_ summary: ClawContinuationDraftPresentationSummary) {
+        switch summary.actionKind {
+        case .prepare:
+            guard let taskID = summary.sourceTaskID, let sessionID = summary.sourceSessionID else { return }
+            store.prepareContinuationDraft(sourceTaskID: taskID, sourceSessionID: sessionID)
+        case .queue:
+            guard let draftID = summary.draftID else { return }
+            store.queueContinuationDraft(id: draftID)
+        case .approve:
+            guard let taskID = summary.childTaskID else { return }
+            store.approveTask(id: taskID)
+        case .send:
+            guard let taskID = summary.childTaskID else { return }
+            Task {
+                await store.sendTaskOverLiveGateway(id: taskID)
+            }
+        case nil:
+            break
+        }
     }
 
     private func accessibilitySummary(for dock: ClawMissionRunReviewDetailDockSummary) -> String {
@@ -1495,6 +1547,114 @@ struct ClawMissionRunLoopContinuationBriefView: View {
             return "arrow.forward.circle.fill"
         default:
             return "point.topleft.down.curvedto.point.bottomright.up"
+        }
+    }
+}
+
+struct ClawMissionRunContinuationDraftView: View {
+    let summary: ClawContinuationDraftPresentationSummary
+    let onAction: (ClawContinuationDraftPresentationSummary) -> Void
+
+    var body: some View {
+        if summary.isVisible {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Label(summary.title, systemImage: summary.icon)
+                        .font(.subheadline.bold())
+                        .foregroundStyle(tint)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                    if let state = summary.state {
+                        PhoneAgentTag(text: stateTitle(state), icon: stateIcon(state), tint: tint)
+                    }
+                }
+
+                Text(summary.status)
+                    .font(.footnote.bold())
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(summary.guidance)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let selectedActionTitle = summary.selectedActionTitle {
+                    PhoneAgentTag(text: selectedActionTitle, icon: "arrow.forward.circle.fill", tint: tint)
+                }
+
+                if let actionTitle = summary.actionTitle {
+                    Button(actionTitle, systemImage: actionIcon) {
+                        onAction(summary)
+                    }
+                    .font(.footnote.bold())
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .buttonStyle(SecondaryActionButtonStyle())
+                    .disabled(summary.canPerformAction == false)
+                    .opacity(summary.canPerformAction ? 1 : 0.55)
+                    .accessibilityHint("只执行当前草稿步骤；不会自动审批、自动发送或复用父任务授权")
+                    .accessibilityInputLabels([actionTitle, "可信续接草稿"])
+                }
+            }
+            .padding(10)
+            .background(tint.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(tint.opacity(0.16), lineWidth: 1)
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("可信多轮续接，\(summary.status)")
+        }
+    }
+
+    private var tint: Color {
+        switch summary.state {
+        case .readyForApproval, .approvedFrozen, .sent:
+            return .green
+        case .needsApproval, .queued, .readyForInput:
+            return .orange
+        case .stale, .blocked:
+            return .red
+        case nil:
+            return summary.canPerformAction ? .blue : .secondary
+        }
+    }
+
+    private var actionIcon: String {
+        switch summary.actionKind {
+        case .prepare:
+            return "doc.badge.plus"
+        case .queue:
+            return "tray.and.arrow.down.fill"
+        case .approve:
+            return "checkmark.seal.fill"
+        case .send:
+            return "paperplane.fill"
+        case nil:
+            return "arrow.triangle.branch"
+        }
+    }
+
+    private func stateTitle(_ state: ClawContinuationDraftState) -> String {
+        switch state {
+        case .readyForInput: return "参数待补齐"
+        case .readyForApproval: return "草稿就绪"
+        case .needsApproval: return "仅待审批"
+        case .stale: return "已过期"
+        case .queued: return "待审批"
+        case .approvedFrozen: return "已冻结"
+        case .sent: return "已发送"
+        case .blocked: return "已阻断"
+        }
+    }
+
+    private func stateIcon(_ state: ClawContinuationDraftState) -> String {
+        switch state {
+        case .readyForApproval, .approvedFrozen: return "checkmark.shield.fill"
+        case .sent: return "paperplane.fill"
+        case .readyForInput: return "slider.horizontal.3"
+        case .needsApproval, .queued: return "person.crop.circle.badge.checkmark"
+        case .stale: return "clock.badge.exclamationmark.fill"
+        case .blocked: return "nosign"
         }
     }
 }

@@ -15,12 +15,48 @@
 
 - 项目方向：OpenClaw 式电脑接管智能体，iPhone 作为控制台，桌面 Claw Gateway 作为执行端。
 - 当前 schema：`claw.computer.control.v1`。
-- 当前核心闭环：用户自然语言任务 -> `PhoneAgentPlanner` -> `ClawMobileTask` -> `ClawMobileEnvelope` -> 模拟事件流或带有界重连/ping 可观测性和进程内 task replay guard 的 WebSocket Gateway -> `ClawGatewayEvent` -> session reducer -> Mission Run / Approval Fast Lane 审批快车道 / Control Snapshot 控制态势快照 / Operator Strip / Loop 继续态势 / Mac Agent Readiness Board 就绪看板 / Mac Gateway Action Preflight Matrix 动作预检矩阵 / Mac Agent Evidence Coverage Map 证据覆盖图 / Mac Agent Next Step Deck 下一步候选卡组 / Mac Agent Run Timeline 执行时间线 / Mac Agent Continuation Gate 继续闸门 / Mac Agent Review Radar 复核雷达 / Mac Agent Handoff Brief 人工交接简报 / Focus Context 聚焦上下文 / Review Detail Dock / Review Trail 复核路径 / Approval Queue 审批队列 / Payload Safety Ledger 载荷安全账本 / Artifact 证据索引 / 复核态势摘要 / 复核优先队列 / 复核聚焦详情 / Live Gateway 连接健康 / Artifact metadata 复核摘要 / 文件变更安全复核摘要 / Shell 命令安全复核摘要 / 提取完整性复核摘要 / 浏览器控制计划和策略诊断复核摘要 / 草稿最终提交安全和桌面策略诊断复核摘要 / Gateway 能力复核摘要 / Accessibility 信号质量复核摘要 / Replay Guard 复核摘要 / AgentTrace handoff 复核 UI / iPad 多栏工作台展示和审批。
+- 当前核心闭环：用户自然语言任务 -> `PhoneAgentPlanner` -> `ClawMobileTask` -> `ClawMobileEnvelope` -> 模拟事件流或带有界重连/ping 可观测性和进程内 task replay guard 的 WebSocket Gateway -> `ClawGatewayEvent` -> session reducer -> Mission Run / Approval Fast Lane 审批快车道 / Control Snapshot 控制态势快照 / Operator Strip / Loop 继续态势 / Mac Agent Readiness Board 就绪看板 / Mac Gateway Action Preflight Matrix 动作预检矩阵 / Mac Agent Evidence Coverage Map 证据覆盖图 / Mac Agent Next Step Deck 下一步候选卡组 / Mac Agent Run Timeline 执行时间线 / Mac Agent Continuation Gate 继续闸门 / Mac Agent Review Radar 复核雷达 / Mac Agent Handoff Brief 人工交接简报 / Focus Context 聚焦上下文 / Review Detail Dock / Review Trail 复核路径 / Approval Queue 审批队列 / Payload Safety Ledger 载荷安全账本 / Artifact 证据索引 / 复核态势摘要 / 复核优先队列 / 复核聚焦详情 / Live Gateway 连接健康 / Artifact metadata 复核摘要 / 文件变更安全复核摘要 / Shell 命令安全复核摘要 / 提取完整性复核摘要 / 浏览器控制计划和策略诊断复核摘要 / 草稿最终提交安全和桌面策略诊断复核摘要 / Gateway 能力复核摘要 / Accessibility 信号质量复核摘要 / Replay Guard 复核摘要 / AgentTrace handoff 复核 UI / iPad 多栏工作台展示和审批。v0.66 工作区实现进一步加入父 safe decision -> 短时单次 receipt -> 显式 draft/queue/approve/freeze/send -> 全新 child selected action + `runAgentLoop` 的受限跨 task 续接；是否可验收仍以提交后最新 `origin/main` artifact 为准。
 - 当前 Gateway 能力：进程内 task replay guard、session-start 能力快照 `auditLog`、屏幕观察 dry-run/截图/窗口元数据/带 signal quality metadata 的受控 Accessibility 摘要策略、浏览器 HTML/URL trace、带 metadata-only 计划复核和 policy diagnostics 的浏览器打开/搜索计划、workspace 文件写入与 metadata-only 文件变更安全复核、Shell 仅结构化 `toolArguments` 来源、dry-run、裸 executable allowlist 执行、同名路径/顶层 alias/来源冲突阻断与 metadata-only Shell 命令安全复核、带 metadata-only 完整性复核的结构化提取、带 metadata-only 草稿/最终提交安全复核和桌面策略诊断的 messageDraft/桌面 App 审批闸门、带 readiness/checklist/risk/stop/handoff status、mac 证据质量分层、推荐动作 envelope 交集和安全 metadata 的 `runAgentLoop`/`agentTrace`。
 - 当前协作闭环：默认 `main` 直推，GitHub Actions 生成未加密 `ci-results` 结果包，Agent C 下载并核对 manifest/JUnit/日志后验收。
-- 当前主要遗留：完整 macOS Accessibility bridge、Playwright/browser-use 兼容控制器、真实多轮 agent loop、live Gateway 后台保活/真实心跳协议/配对、完整 artifact 内容复核体验。
+- 当前主要遗留：v0.66 完整负向/action/六种 kind/UI 对称测试矩阵与最新云端 artifact 验收、`readyForInput` 参数编辑器、完整 macOS Accessibility bridge、Playwright/browser-use 兼容控制器、跨重启/跨进程多轮状态、live Gateway 后台保活/真实心跳协议/配对、完整 artifact 内容复核体验。
 
 ## 历史记录
+
+### v0.66 / Trusted Cross-Task Multi-Round Continuation 可信跨任务多轮续接
+
+日期：2026-07-26
+
+核心变更：
+
+- 正式定义 v0.65 decision、Gateway continuation receipt 与 child 用户审批三个独立信任条件；任一都不能替代另一项。
+- 只有完整 `safe-without-approval + ready-to-continue + selected != none` 父合同可以签发 receipt；approval-required、final-submit、external/destructive、needs-evidence、blocked、complete、policy-blocked、no-action 或 metadata gap 只能形成不可派发草稿。
+- receipt 固定为 32 字节随机 base64url、服务端 hash 索引、TTL 600 秒、进程内最多 128 条、单次原子消费；过期、淘汰、并发复用或 Gateway 重启全部失效。
+- continuation 流固定为用户显式 draft -> queue -> 按 task ID approve/freeze -> 按同一 task ID send；child 使用全新 task/action/session ID，actions 恰好是 receipt selected action 后接 `runAgentLoop`，首次发送尝试后清理 iOS vault，不自动创建、审批、发送、重连、重发或重试 receipt。
+- Gateway child preflight 先于 replay、workspace、event、artifact 和 handler；成功后才把最多 6 条/256 KiB 的冻结父 context 快照复制为与父隔离的可变 child session context，先执行 selected action，再基于本轮结果生成新 AgentTrace。任一校验失败均不可重试且无业务副作用。
+- raw receipt 仅存在于 wire DTO、iOS 内存 vault、私有 frozen envelope 和 Gateway cache；公开 envelope、UI/VoiceOver、普通 event、artifact/metadata、日志、JUnit、failure summary 和 manifest 一律省略。
+- GitHub Actions 新增真实 iPhone Simulator XCTest step；simulator discovery 前预创建 `xctest.log` 并捕获 discovery 错误，XCTest 成功时缺少 `xctest.log` 或 `ClawTests.xcresult` 会在写出摘要后使 packaging 失败。
+
+关键文件：
+
+- `README.md`
+- `Docs/claw-mobile-gateway-protocol.md`
+- `md/flow/flow.md`
+- `md/flow/flowchart.md`
+- `md/test/test.md`
+- `update_log.md`
+- `md/prompt/v0（核心智能能力）/v0.66（可信跨任务多轮续接）.md`
+
+验证结果：
+
+- 本轮工作区修复只允许本地非编译静态检查；未运行编译、build、XCTest、Swift/Gateway smoke、fixture、`xcodebuild` 或 `node --check`。
+- v0.66 Swift、Gateway、测试、workflow 和文档实现已存在于当前工作区；GitHub Actions run、commit SHA、run attempt、artifact 名称和 Agent C 复判结论仍待提交后的最新 `origin/main` 云端验收，不预写通过结果。
+
+遗留事项：
+
+- receipt 不跨 Gateway 进程、重启、设备或 10 分钟，不提供持久授权、分布式 exactly-once 或无人值守循环。
+- approval 型、最终提交、外部网络、破坏性、证据不足和无动作 recommendation 在 v0.66 没有 continuation dispatch 路径。
+- simulator/fixture 只能使用明确测试 provider 或显示不可 live dispatch，不得伪造生产 receipt。
+- 当前 baseline 测试未覆盖完整签发拒绝、expiry/eviction/restart、action shape/parameter/policy/side-effect、六种 kind/state/UI 和 Direct/WebSocket 对称矩阵；这些是保持生产合同不变的残余必补覆盖。
 
 ### v0.65 / Agent Loop Selected Action Decision Contract 智能体选中动作决策契约
 

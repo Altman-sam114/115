@@ -4,6 +4,8 @@
 
 v0.63 的 Mission Run 展示先以当前 task 为根，只接收同 task 的 session、request 和 events。复核聚焦绑定 task/session scope；新 Mission 或 task-to-session 切换会使旧聚焦失效，iPhone 与 iPad/mac 均恢复当前 Mission 的全量详情。
 
+v0.66 的 continuation 不复用父 task/session/envelope/workspace。父 safe decision、Gateway receipt 和 child 用户审批是三个独立条件；receipt 只在当前 Gateway 进程内保留 10 分钟、最多 128 条并单次消费，任何失败都在 replay、workspace、event、artifact 和 handler 前停止。
+
 ## 1. Claw 核心逻辑图
 
 读图说明：从左到右看。用户任务先进入 iPhone 控制台，经过规划、任务转换和 envelope 编码后，进入模拟事件流或桌面 Gateway。Gateway 产出事件和 artifact，手机端 reducer 把它们还原成 session，最后显示给用户审批或继续下一轮。
@@ -113,7 +115,37 @@ flowchart TD
   SOUT --> OUT
 ```
 
-## 3. Agent X 主控循环与云端验证流程图
+## 3. v0.66 可信跨任务续接图
+
+读图说明：只有严格 safe 的父 AgentTrace 才可能签发 receipt。生成草稿、入队、审批和发送都是独立人工动作；approval 型建议没有派发路径。Gateway 必须先完成 continuation preflight 和原子消费，之后才能登记 replay、创建 workspace 或产生事件。
+
+```mermaid
+flowchart TD
+  PARENT["父 sessionCompleted<br/>最新 AgentTrace"] --> SAFE{"完整 v0.65 safe contract?<br/>safe-without-approval / ready-to-continue / non-none"}
+  SAFE -->|否: approval / evidence / blocked / complete / no-action| DRAFTONLY["needsApproval 或 blocked draft<br/>v0.66 不可 queue/send"]
+  SAFE -->|是| LIMIT{"父 context <= 6 条且 <= 256 KiB?<br/>request/envelope/handler 交集仍一致?"}
+  LIMIT -->|否| NOOFFER["不签发 receipt<br/>固定脱敏状态"]
+  LIMIT -->|是| OFFER["私有 continuation offer<br/>600 秒 / 128 条 / 单次 / 进程内"]
+  OFFER --> VAULT["transport 提取 raw receipt 到内存 vault<br/>公开 event / metadata / UI 不含原文"]
+  VAULT --> CREATE["用户显式生成 draft<br/>父 Mission scope 与 focus 不变"]
+  CREATE --> PARAM{"结构化参数完整且合法?"}
+  PARAM -->|否| INPUT["readyForInput 阻断<br/>v0.66 尚无参数编辑器<br/>不入队、不审批、不发送"]
+  PARAM -->|是| QUEUE["用户显式入队<br/>全新 child task + 两个全新 action"]
+  QUEUE --> APPROVE["用户按 task ID 审批<br/>绑定 task/profile/lineage digest 并冻结 raw envelope"]
+  APPROVE --> SEND["用户按同一 task ID 显式发送"]
+  SEND --> PREFLIGHT{"lineage / receipt / round / parent / digest<br/>token/profile/current policy/allowlist/handler/params 全部匹配?"}
+  PREFLIGHT -->|否| FAIL["不可重试 envelope error<br/>无 replay/workspace/event/artifact/handler/副作用"]
+  PREFLIGHT -->|是| CONSUME["同步 compare-and-consume<br/>并发最多一个成功"]
+  CONSUME --> CHILD["登记 child replay + 新 session/workspace<br/>冻结父快照复制为隔离的可变 child context"]
+  CHILD --> SELECTED["先执行 receipt 绑定 selected action<br/>重新通过当前 action policy"]
+  SELECTED --> LOOP["再执行 runAgentLoop<br/>基于 inherited seed + child 新结果"]
+  LOOP --> NEXT["新 AgentTrace decision<br/>满足条件时签发不同下一轮 receipt"]
+  EXPIRE["receipt 过期 / 淘汰 / 已消费 / Gateway 重启"] --> FAIL
+```
+
+raw receipt 只允许存在于 wire DTO、iOS 内存 vault、私有 frozen envelope 和 Gateway receipt cache。child 不能复用父 task/action/session ID、父 envelope、父 workspace 或父 `file://` reference；handler 失败也不会恢复已消费 receipt。本轮不支持 Shell continuation、自动审批/发送、自动重试 receipt、无人值守循环或跨进程/跨重启续接。
+
+## 4. Agent X 主控循环与云端验证流程图
 
 读图说明：未来人工可用 `agentx:` 给出总目标 X。Agent X 只做主控调度，把总目标拆成小轮次；每轮仍必须经过 Agent A 写提示词、Agent B 在 `main` 上实现并 push、GitHub Actions 生成未加密结果包、Agent C 下载 artifact 复判。Agent X 只能基于 Agent C 结论决定继续、退回、暂停或完成，不能跳过云端 artifact 验收。
 
@@ -127,7 +159,7 @@ flowchart TD
   B0 --> B1["Agent B 小步实现<br/>代码、测试、必要文档"]
   B1 --> B2["Agent B 本地非编译静态检查<br/>git diff --check、YAML/plutil、diff 复核"]
   B2 --> B3["Agent B commit 并 push<br/>vX.Y: 简要概括本轮工作 -> origin/main"]
-  B3 --> CI["GitHub Actions ci-results<br/>build、smoke、静态检查"]
+  B3 --> CI["GitHub Actions ci-results<br/>build、XCTest、smoke、静态检查"]
   CI --> ART["未加密 CI artifact<br/>manifest、JUnit/摘要、日志、关键结果文件"]
   ART --> C0["Agent C 下载最新结果包<br/>/private/tmp/claw-c-review-run_id"]
   C0 --> C1["Agent C 复判<br/>commitSha、runId、runAttempt、artifact 名称、日志和结果"]

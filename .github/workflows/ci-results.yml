@@ -146,6 +146,43 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             build 2>&1 | tee "$RESULT_DIR/xcodebuild.log"
 
+      - name: XCTest
+        id: xctest
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          rm -rf "$RESULT_DIR/ClawTests.xcresult" .derivedData-tests
+          : > "$RESULT_DIR/xctest.log"
+          {
+            echo "Discovering an available iPhone simulator."
+            simulator_udid="$(
+              xcrun simctl list devices available -j | python3 -c '
+            import json, sys
+            payload = json.load(sys.stdin)
+            for runtime, devices in payload.get("devices", {}).items():
+                if "iOS" not in runtime:
+                    continue
+                for device in devices:
+                    if device.get("isAvailable") and device.get("name", "").startswith("iPhone"):
+                        print(device["udid"])
+                        raise SystemExit(0)
+            raise SystemExit("No available iPhone simulator")
+            '
+            )"
+            echo "Using iPhone simulator $simulator_udid."
+            /usr/bin/xcodebuild \
+              -project "$XCODE_PROJECT" \
+              -scheme "$XCODE_SCHEME" \
+              -configuration Debug \
+              -destination "platform=iOS Simulator,id=$simulator_udid" \
+              -derivedDataPath .derivedData-tests \
+              -resultBundlePath "$RESULT_DIR/ClawTests.xcresult" \
+              -parallel-testing-enabled NO \
+              CODE_SIGNING_ALLOWED=NO \
+              test
+          } 2>&1 | tee -a "$RESULT_DIR/xctest.log"
+
       - name: Write CI manifest and summaries
         id: package_results
         if: always()
@@ -161,6 +198,7 @@ jobs:
           GATEWAY_DIRECT_OUTCOME: ${{ steps.gateway_direct_smoke.outcome }}
           GATEWAY_WEBSOCKET_OUTCOME: ${{ steps.gateway_websocket_smoke.outcome }}
           XCODE_BUILD_OUTCOME: ${{ steps.xcode_build.outcome }}
+          XCTEST_OUTCOME: ${{ steps.xctest.outcome }}
         run: |
           python3 - <<'PY'
           import datetime
@@ -181,7 +219,22 @@ jobs:
               ("gateway-direct-smoke", os.environ["GATEWAY_DIRECT_OUTCOME"], "ci-results/gateway-direct-smoke.log"),
               ("gateway-websocket-smoke", os.environ["GATEWAY_WEBSOCKET_OUTCOME"], "ci-results/gateway-websocket-smoke.log"),
               ("xcodebuild", os.environ["XCODE_BUILD_OUTCOME"], "ci-results/xcodebuild.log"),
+              ("xctest", os.environ["XCTEST_OUTCOME"], "ci-results/xctest.log"),
           ]
+
+          xctest_log = result_dir / "xctest.log"
+          xctest_result_bundle = result_dir / "ClawTests.xcresult"
+          missing_xctest_artifacts = []
+          if os.environ["XCTEST_OUTCOME"] == "success":
+              if not xctest_log.is_file():
+                  missing_xctest_artifacts.append("ci-results/xctest.log")
+              if not xctest_result_bundle.is_dir():
+                  missing_xctest_artifacts.append("ci-results/ClawTests.xcresult")
+              checks.append((
+                  "xctest-artifacts",
+                  "failure" if missing_xctest_artifacts else "success",
+                  "ci-results/xctest.log; ci-results/ClawTests.xcresult",
+              ))
 
           def aggregate(names):
               selected = [outcome for name, outcome, _ in checks if name in names]
@@ -200,17 +253,27 @@ jobs:
               "scheme": os.environ["XCODE_SCHEME"],
               "destination": os.environ["XCODE_DESTINATION"],
               "resultBundlePath": os.environ["RESULT_BUNDLE"],
+              "xctestLogPath": "ci-results/xctest.log",
+              "xctestResultBundlePath": "ci-results/ClawTests.xcresult",
+              "xctestArtifactsOutcome": (
+                  "failure"
+                  if missing_xctest_artifacts
+                  else "success"
+                  if os.environ["XCTEST_OUTCOME"] == "success"
+                  else "retained-failure-log"
+              ),
               "junitPath": "ci-results/junit.xml",
               "buildLogPath": "ci-results/xcodebuild.log",
               "failureSummaryPath": "ci-results/ci-failure-summary.md",
               "staticChecksOutcome": aggregate({"git-diff-check", "plutil", "node-check"}),
               "buildOutcome": os.environ["XCODE_BUILD_OUTCOME"],
-              "testOutcome": aggregate({"swift-logic-smoke", "swift-gateway-fixture", "gateway-direct-smoke", "gateway-websocket-smoke"}),
+              "testOutcome": aggregate({"swift-logic-smoke", "swift-gateway-fixture", "gateway-direct-smoke", "gateway-websocket-smoke", "xctest", "xctest-artifacts"}),
               "projectSpecificReports": [
                   "ci-results/swift-logic-smoke.log",
                   "ci-results/swift-gateway-fixture.log",
                   "ci-results/gateway-direct-smoke.log",
                   "ci-results/gateway-websocket-smoke.log",
+                  "ci-results/xctest.log",
                   "ci-results/node-check.log",
               ],
               "artifactName": os.environ["ARTIFACT_NAME"],
@@ -265,6 +328,11 @@ jobs:
               '',
           ]
           (result_dir / "junit.xml").write_text("\n".join(junit), encoding="utf-8")
+          if missing_xctest_artifacts:
+              raise SystemExit(
+                  "XCTest succeeded but required result artifacts are missing: "
+                  + ", ".join(missing_xctest_artifacts)
+              )
           PY
 
       - name: Upload CI result package
@@ -288,6 +356,8 @@ jobs:
           GATEWAY_DIRECT_OUTCOME: ${{ steps.gateway_direct_smoke.outcome }}
           GATEWAY_WEBSOCKET_OUTCOME: ${{ steps.gateway_websocket_smoke.outcome }}
           XCODE_BUILD_OUTCOME: ${{ steps.xcode_build.outcome }}
+          XCTEST_OUTCOME: ${{ steps.xctest.outcome }}
+          PACKAGE_RESULTS_OUTCOME: ${{ steps.package_results.outcome }}
         run: |
           python3 - <<'PY'
           import os
@@ -302,6 +372,8 @@ jobs:
               "gateway-direct-smoke": os.environ["GATEWAY_DIRECT_OUTCOME"],
               "gateway-websocket-smoke": os.environ["GATEWAY_WEBSOCKET_OUTCOME"],
               "xcodebuild": os.environ["XCODE_BUILD_OUTCOME"],
+              "xctest": os.environ["XCTEST_OUTCOME"],
+              "package-results": os.environ["PACKAGE_RESULTS_OUTCOME"],
           }
           failed = {name: outcome for name, outcome in outcomes.items() if outcome != "success"}
           if failed:

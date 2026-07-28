@@ -847,6 +847,161 @@ struct ClawMobileAction: Identifiable, Equatable, Codable, Sendable {
     }
 }
 
+enum ClawContinuationDraftState: String, CaseIterable, Codable, Sendable {
+    case readyForInput
+    case readyForApproval
+    case needsApproval
+    case stale
+    case queued
+    case approvedFrozen
+    case sent
+    case blocked
+}
+
+enum ClawContinuationValidationIssue: String, CaseIterable, Codable, Sendable {
+    case missingDecision
+    case invalidDecision
+    case noSelectedAction
+    case unsupportedSelectedAction
+    case sourceScopeMismatch
+    case sourceTraceChanged
+    case missingReceipt
+    case receiptExpired
+    case profileChanged
+    case actionNotAllowed
+    case invalidArguments
+    case approvalRequired
+    case approvalInvalidated
+}
+
+struct ClawContinuationLineage: Equatable, Codable, Sendable {
+    var contract: String
+    var parentTaskID: UUID
+    var parentSessionID: UUID
+    var parentAgentTraceArtifactID: UUID
+    var parentDecisionDigest: String
+    var parentRound: Int
+    var childRound: Int
+    var selectedActionKind: ClawMobileActionKind
+    var decisionPolicy: String
+    var decisionReason: String
+    // App-owned tasks store an opaque vault handle here. Only a private frozen
+    // envelope substitutes the raw Gateway receipt immediately before dispatch.
+    var receipt: String
+
+    static let contractVersion = "claw.continuation.lineage.v1"
+
+    var hasValidShape: Bool {
+        contract == Self.contractVersion &&
+            (0...31).contains(parentRound) &&
+            childRound == parentRound + 1 &&
+            decisionPolicy == "evidence-first-safe-v1" &&
+            decisionReason == "safe-without-approval" &&
+            ClawContinuationContract.supportedActionKinds.contains(selectedActionKind) &&
+            parentDecisionDigest.hasPrefix("sha256:") &&
+            parentDecisionDigest.count == 71 &&
+            receipt.isEmpty == false
+    }
+
+    func replacingReceipt(with value: String) -> ClawContinuationLineage {
+        var updated = self
+        updated.receipt = value
+        return updated
+    }
+}
+
+struct ClawContinuationDraft: Identifiable, Equatable, Codable, Sendable {
+    let id: UUID
+    var sourceTaskID: UUID
+    var sourceSessionID: UUID
+    var sourceAgentTraceArtifactID: UUID
+    var sourceSessionUpdatedAt: Date
+    var sourceDecisionDigest: String
+    var sourceDecisionPolicy: String
+    var sourceDecisionReason: String
+    var sourceSelectedActionKind: ClawMobileActionKind
+    var sourceSelectedActionRequiresApproval: Bool
+    var sourceRound: Int
+    var proposedAction: ClawMobileAction
+    var proposedLoopAction: ClawMobileAction
+    var receiptHandle: String?
+    var receiptExpiresAt: Date?
+    var state: ClawContinuationDraftState
+    var validationIssues: [ClawContinuationValidationIssue]
+    var childTaskID: UUID?
+    var createdAt: Date
+    var updatedAt: Date
+
+    init(
+        id: UUID = UUID(),
+        sourceTaskID: UUID,
+        sourceSessionID: UUID,
+        sourceAgentTraceArtifactID: UUID,
+        sourceSessionUpdatedAt: Date,
+        sourceDecisionDigest: String,
+        sourceDecisionPolicy: String,
+        sourceDecisionReason: String,
+        sourceSelectedActionKind: ClawMobileActionKind,
+        sourceSelectedActionRequiresApproval: Bool,
+        sourceRound: Int,
+        proposedAction: ClawMobileAction,
+        proposedLoopAction: ClawMobileAction,
+        receiptHandle: String?,
+        receiptExpiresAt: Date?,
+        state: ClawContinuationDraftState,
+        validationIssues: [ClawContinuationValidationIssue] = [],
+        childTaskID: UUID? = nil,
+        createdAt: Date = Date(),
+        updatedAt: Date = Date()
+    ) {
+        self.id = id
+        self.sourceTaskID = sourceTaskID
+        self.sourceSessionID = sourceSessionID
+        self.sourceAgentTraceArtifactID = sourceAgentTraceArtifactID
+        self.sourceSessionUpdatedAt = sourceSessionUpdatedAt
+        self.sourceDecisionDigest = sourceDecisionDigest
+        self.sourceDecisionPolicy = sourceDecisionPolicy
+        self.sourceDecisionReason = sourceDecisionReason
+        self.sourceSelectedActionKind = sourceSelectedActionKind
+        self.sourceSelectedActionRequiresApproval = sourceSelectedActionRequiresApproval
+        self.sourceRound = sourceRound
+        self.proposedAction = proposedAction
+        self.proposedLoopAction = proposedLoopAction
+        self.receiptHandle = receiptHandle
+        self.receiptExpiresAt = receiptExpiresAt
+        self.state = state
+        self.validationIssues = validationIssues
+        self.childTaskID = childTaskID
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
+struct ClawContinuationApprovalRecord: Equatable, Codable, Sendable {
+    var taskID: UUID
+    var canonicalTaskDigest: String
+    var canonicalProfileDigest: String
+    var lineageDigest: String
+    var approvedAt: Date
+}
+
+enum ClawContinuationContract {
+    static let receiptContract = "claw.continuation.receipt.v1"
+    static let supportedActionKinds: Set<ClawMobileActionKind> = [
+        .observeScreen,
+        .controlBrowser,
+        .manageFiles,
+        .extractData,
+        .operateDesktopApp,
+        .composeMessage
+    ]
+
+    static func sha256(_ value: String) -> String {
+        let digest = SHA256.hash(data: Data(value.utf8))
+        return "sha256:" + digest.map { String(format: "%02x", $0) }.joined()
+    }
+}
+
 struct ClawMobileTask: Identifiable, Equatable, Codable, Sendable {
     let id: UUID
     var command: String
@@ -857,6 +1012,20 @@ struct ClawMobileTask: Identifiable, Equatable, Codable, Sendable {
     var status: ClawTaskStatus
     var riskScore: Int
     var createdAt: Date
+    var continuationLineage: ClawContinuationLineage?
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case command
+        case summary
+        case sourceDevice
+        case destinationGateway
+        case actions
+        case status
+        case riskScore
+        case createdAt
+        case continuationLineage = "lineage"
+    }
 
     init(
         id: UUID = UUID(),
@@ -867,7 +1036,8 @@ struct ClawMobileTask: Identifiable, Equatable, Codable, Sendable {
         actions: [ClawMobileAction],
         status: ClawTaskStatus,
         riskScore: Int,
-        createdAt: Date = Date()
+        createdAt: Date = Date(),
+        continuationLineage: ClawContinuationLineage? = nil
     ) {
         self.id = id
         self.command = command
@@ -878,6 +1048,7 @@ struct ClawMobileTask: Identifiable, Equatable, Codable, Sendable {
         self.status = status
         self.riskScore = min(max(riskScore, 0), 100)
         self.createdAt = createdAt
+        self.continuationLineage = continuationLineage
     }
 
     var approvalCount: Int {
@@ -900,6 +1071,18 @@ struct ClawMobileEnvelope: Equatable, Codable, Sendable {
     var gateway: ClawGatewayProfile
     var approvalSummary: String
     var auditRequired: Bool
+
+    func replacingContinuationReceipt(with value: String) -> ClawMobileEnvelope {
+        var updated = self
+        if let lineage = updated.task.continuationLineage {
+            updated.task.continuationLineage = lineage.replacingReceipt(with: value)
+        }
+        return updated
+    }
+
+    var redactedForDisplay: ClawMobileEnvelope {
+        replacingContinuationReceipt(with: "omitted")
+    }
 }
 
 enum ClawGatewaySessionStatus: String, CaseIterable, Codable, Identifiable, Sendable {
@@ -1318,6 +1501,51 @@ enum ClawMissionRunPrimaryActionKind: String, Codable, Sendable {
     case continueAfterReview
     case waitForGateway
     case inspectBlocked
+}
+
+enum ClawContinuationDraftActionKind: String, Codable, Sendable {
+    case prepare
+    case queue
+    case approve
+    case send
+}
+
+struct ClawContinuationDraftPresentationSummary: Equatable, Codable, Sendable {
+    var title: String
+    var status: String
+    var guidance: String
+    var icon: String
+    var selectedActionTitle: String?
+    var state: ClawContinuationDraftState?
+    var actionKind: ClawContinuationDraftActionKind?
+    var actionTitle: String?
+    var sourceTaskID: UUID?
+    var sourceSessionID: UUID?
+    var draftID: UUID?
+    var childTaskID: UUID?
+    var canPerformAction: Bool
+    var requiresHumanAction: Bool
+    var hasMetadataGap: Bool
+    var isVisible: Bool
+
+    static let unavailable = ClawContinuationDraftPresentationSummary(
+        title: "可信续接待生成",
+        status: "尚无可续接决策",
+        guidance: "Gateway 返回可信的下一步决策后，可由用户显式生成草稿。",
+        icon: "arrow.triangle.branch",
+        selectedActionTitle: nil,
+        state: nil,
+        actionKind: nil,
+        actionTitle: nil,
+        sourceTaskID: nil,
+        sourceSessionID: nil,
+        draftID: nil,
+        childTaskID: nil,
+        canPerformAction: false,
+        requiresHumanAction: false,
+        hasMetadataGap: false,
+        isVisible: false
+    )
 }
 
 struct ClawMissionRunStage: Identifiable, Equatable, Codable, Sendable {
@@ -3392,6 +3620,7 @@ struct ClawAgentTraceReviewSummary: Equatable, Codable, Sendable {
     var handoffStatus: String?
     var handoffSummary: String?
     var isRedacted: Bool
+    var latestArtifactID: UUID? = nil
 
     var requiresNextActionPolicyReview: Bool {
         guard nextActionPolicy == "envelope-intersection",
@@ -3488,6 +3717,61 @@ struct ClawAgentTraceReviewSummary: Equatable, Codable, Sendable {
         }
     }
 
+    var continuationEligibility: ClawContinuationEligibility {
+        guard hasMetadata,
+              requiresNextActionPolicyReview == false,
+              let selectedNextActionKind,
+              selectedNextActionKind != "none",
+              let kind = ClawMobileActionKind(rawValue: selectedNextActionKind),
+              ClawContinuationContract.supportedActionKinds.contains(kind) else {
+            return .invalid
+        }
+        guard selectedActionDecisionPolicy == "evidence-first-safe-v1" else {
+            return .invalid
+        }
+        if selectedNextActionRequiresApproval == true ||
+            selectedActionDecisionReason == "approval-required-fallback" ||
+            handoffStatus == "waiting-for-approval" ||
+            handoffStatus == "final-submit-review" {
+            return .needsApproval(kind)
+        }
+        guard selectedNextActionRequiresApproval == false,
+              selectedActionDecisionReason == "safe-without-approval",
+              readinessCanContinue == true,
+              handoffStatus == "ready-to-continue" else {
+            return .invalid
+        }
+        return .ready(kind)
+    }
+
+    func continuationDecisionDigest(
+        taskID _: UUID,
+        sessionID _: UUID,
+        artifactID _: UUID,
+        round _: Int
+    ) -> String {
+        let fields = [
+            nextActionPolicy ?? "missing",
+            nextActionPolicyDiagnostic ?? "missing",
+            requestedNextActionCount.map(String.init) ?? "missing",
+            effectiveNextActionCount.map(String.init) ?? "missing",
+            blockedNextActionCount.map(String.init) ?? "missing",
+            readinessCanContinue.map(String.init) ?? "missing",
+            selectedNextActionKind ?? "missing",
+            selectedNextActionRequiresApproval.map(String.init) ?? "missing",
+            selectedNextActionAllowedByEnvelope.map(String.init) ?? "missing",
+            selectedActionDecisionPolicy ?? "missing",
+            selectedActionDecisionReason ?? "missing",
+            selectedActionCandidateCount.map(String.init) ?? "missing",
+            selectedActionCandidateOrdinal.map(String.init) ?? "missing",
+            selectedActionFromCandidates.map(String.init) ?? "missing",
+            selectedActionDecisionConsistent.map(String.init) ?? "missing",
+            stopReason ?? "none",
+            handoffStatus ?? "missing"
+        ]
+        return ClawContinuationContract.sha256(fields.joined(separator: "|"))
+    }
+
     var compactStatus: String {
         guard hasMetadata else {
             return "已收到智能体轨迹，metadata 待同步。"
@@ -3539,7 +3823,8 @@ struct ClawAgentTraceReviewSummary: Equatable, Codable, Sendable {
             stopReason: ClawArtifactMetadataDisplaySanitizer.safeValue(metadata["stopReason"]),
             handoffStatus: Self.allowedHandoffStatus(metadata["handoffStatus"]),
             handoffSummary: ClawArtifactMetadataDisplaySanitizer.safeValue(metadata["handoffSummary"]),
-            isRedacted: latest.isRedacted
+            isRedacted: latest.isRedacted,
+            latestArtifactID: latest.id
         )
     }
 
@@ -3649,6 +3934,12 @@ struct ClawAgentTraceReviewSummary: Equatable, Codable, Sendable {
             return false
         }
     }
+}
+
+enum ClawContinuationEligibility: Equatable, Sendable {
+    case invalid
+    case needsApproval(ClawMobileActionKind)
+    case ready(ClawMobileActionKind)
 }
 
 struct ClawGatewayAccessibilityReviewSummary: Equatable, Codable, Sendable {
@@ -3995,6 +4286,7 @@ struct ClawMissionRunSummary: Equatable, Codable, Sendable {
     var sessionID: UUID? = nil
     var sessionTaskID: UUID? = nil
     var missionScopeID: UUID? = nil
+    var continuationDraft: ClawContinuationDraftPresentationSummary = .unavailable
 }
 
 extension ClawMissionRunSummary {
@@ -8302,6 +8594,53 @@ struct ClawGatewayEvent: Identifiable, Equatable, Codable, Sendable {
         self.isRetryable = isRetryable
         self.retryCount = retryCount
         self.createdAt = createdAt
+    }
+}
+
+struct ClawGatewayContinuationOffer: Equatable, Codable, Sendable {
+    var contract: String
+    var receipt: String
+    var expiresAt: Date
+    var parentTaskID: UUID
+    var parentSessionID: UUID
+    var parentAgentTraceArtifactID: UUID
+    var parentDecisionDigest: String
+    var parentRound: Int
+    var selectedActionKind: ClawMobileActionKind
+
+    var hasValidShape: Bool {
+        contract == ClawContinuationContract.receiptContract &&
+            receipt.count == 43 &&
+            receipt.allSatisfy { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" } &&
+            parentDecisionDigest.hasPrefix("sha256:") &&
+            parentDecisionDigest.count == 71 &&
+            (0...31).contains(parentRound) &&
+            ClawContinuationContract.supportedActionKinds.contains(selectedActionKind)
+    }
+}
+
+// Transport-only DTO. The receipt is extracted into the private store vault and
+// this wrapper is never appended to the public event reducer or UI state.
+struct ClawGatewayWireEvent: Decodable, Sendable {
+    var event: ClawGatewayEvent
+    var continuationOffer: ClawGatewayContinuationOffer?
+
+    init(event: ClawGatewayEvent, continuationOffer: ClawGatewayContinuationOffer? = nil) {
+        self.event = event
+        self.continuationOffer = continuationOffer
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case continuationOffer
+    }
+
+    init(from decoder: Decoder) throws {
+        event = try ClawGatewayEvent(from: decoder)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        continuationOffer = try container.decodeIfPresent(
+            ClawGatewayContinuationOffer.self,
+            forKey: .continuationOffer
+        )
     }
 }
 

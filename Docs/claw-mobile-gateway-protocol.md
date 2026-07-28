@@ -161,6 +161,8 @@ v0.47 起，Mission Run 可从既有 Approval Queue 派生 Approval Fast Lane �
 
 v0.8 在 iPad/regular horizontal size class 上把同一组 presentation layer 信息重排为多栏复核工作台：左侧为命令输入和 Mission Run 主操作，右侧为 Mission 复核详情 Dock、计划、Claw 电脑任务、Gateway 会话、事件/envelope、权限和日志。compact iPhone 布局仍保持单栏滚动。
 
+v0.66 在 Loop continuation brief 后增加独立 continuation draft。创建 draft 必须携带精确父 task/session/AgentTrace artifact 身份，不插入 `clawMobileTasks`，也不改变父 Mission scope、review focus、connection state 或 live request。compact iPhone 在 Loop brief 后展示同一 draft summary；regular iPad/mac 在 Detail Dock 的 Continuation Gate 后复用该 summary。UI 只能展示固定 eligibility、round、selected kind、参数完整性、审批/冻结/发送和 stale 状态，不展示 raw receipt、完整 `toolArguments`、父 payload、URL/path/正文、token/header 或 workspace。所有按钮至少 44pt，并明确说明生成草稿不会自动审批或发送。
+
 这不是 envelope 字段：Mission Run、Approval Fast Lane、Control Snapshot、Operator Strip、Loop continuation brief、Mac Agent Readiness Board、Mac Gateway Action Preflight Matrix、Mac Agent Evidence Coverage Map、Mac Agent Next Step Deck、Mac Agent Run Timeline、Mac Agent Continuation Gate、Mac Agent Review Radar、Mac Agent Handoff Brief、Focus Context、Review Detail Dock、Review Trail、Approval Queue、Payload Safety Ledger、Artifact 证据索引、复核优先队列、复核聚焦模式、复核态势摘要、下一步复核行动、Live Gateway health summary、Artifact metadata review、File Change Safety review、Shell Command Safety review、Extraction completeness review、Browser Control review、Delivery Safety review、AgentTrace handoff status、Gateway capability review、Accessibility artifact review、Replay Guard review 和 iPad 多栏工作台都不写入 `ClawMobileEnvelope`，不改变 `claw.computer.control.v1` schema，不新增 action kind、artifact kind、Gateway event kind，也不扩大桌面 Gateway 的执行权限。桌面端仍只接收结构化 `task.actions[].toolArguments`，手机端仍只负责计划、审批、发送 envelope 和查看事件。手机端展示 Approval Fast Lane、Control Snapshot、Operator Strip、Loop continuation brief、Mac Agent Readiness Board、Mac Gateway Action Preflight Matrix、Mac Agent Evidence Coverage Map、Mac Agent Next Step Deck、Mac Agent Run Timeline、Mac Agent Continuation Gate、Mac Agent Review Radar、Mac Agent Handoff Brief、Focus Context、Review Detail Dock、Review Trail、Approval Queue、Payload Safety Ledger、Artifact 证据索引、复核优先队列、复核聚焦详情、复核态势摘要、下一步复核行动、Artifact metadata、File Change Safety、Shell Command Safety、Extraction completeness、Browser Control、Delivery Safety、AgentTrace handoff status、Gateway capability、Accessibility artifact、Replay Guard 和 Live Gateway health summary 时只读取安全 metadata、固定枚举或既有事件摘要，不读取 Gateway `file://` artifact 内容；所有专用 metadata review 的 UI 可见字符串必须先经过同一套敏感值脱敏。
 
 ## Live Gateway Transport
@@ -200,6 +202,8 @@ v0.13 起，桌面 Gateway 原型增加进程内 task replay guard，作为 v0.1
   - `runAgentLoop` 会消费同一 session 内的 artifact context，写出 `agentTrace` artifact。v0.6 保留旧字段 `sourceArtifacts`、`evidenceRows`、`observations`、`nextActions`、`safetyGates`，并新增 `readiness`、`decisionChecklist`、`selectedNextAction`、`riskTags`、`stopReason`、`handoffSummary`，用于说明证据分数、满足/缺失信号、当前推荐下一步、风险标签和停在审批/最终提交前的原因。v0.7 会把这些安全摘要压缩成 artifact event 上的可选字符串 `metadata`，供手机端复核；旧事件缺少 metadata 仍合法。v0.31 起，`decisionChecklist[].status` 可为 `satisfied`、`degraded` 或 `missing`，`readiness.degradedSignals` 记录 dry-run、window metadata、network blocked、failed、unavailable 或 not-requested 等降级证据；这些降级证据不计入 readiness score。这些字段不进入 `ClawMobileEnvelope` schema，也不能作为可执行指令。
   - v0.62 起，`runAgentLoop` 的有效推荐集合严格为 `toolArguments.allowedNextActions ∩ gateway.allowedActionKinds ∩ Gateway 固定支持推荐种类`，去重并保持请求顺序。固定集合仅包含 `observeScreen`、`controlBrowser`、`manageFiles`、`extractData`、`operateDesktopApp` 和 `composeMessage`。空交集只能生成 `none`，不得产生越权 `nextActions`、iteration proposal 或 safety gate，并以 `policy-blocked`、blocked handoff 和 `blocked-by-next-action-policy` 停止。推荐是 advisory artifact；后续真实 action 仍必须作为结构化 action 重新通过 `actionPolicy`、审批、workspace 和 handler allowlist。
   - v0.65 起，`selectedNextAction` 同时写入 `selectedActionDecision`。policy 固定为 `evidence-first-safe-v1`，reason 仅允许 `policy-blocked`、`no-action-needed`、`evidence-recovery`、`insufficient-evidence-fallback`、`safe-without-approval` 和 `approval-required-fallback`；candidate count、1-based ordinal、from-candidates 与 consistent 证明选择来自确定候选分支。approval、stop、handoff 和 selected 风险只描述实际选中项，不受未选候选污染。该对象和 metadata 只是审计摘要，不授权或执行动作。
+  - v0.66 起，Gateway 只为完整 `safe-without-approval + ready-to-continue + selected != none` 父 decision 签发私有 continuation offer。receipt 使用 32 字节随机 base64url 值，服务端只以 SHA-256 hash 索引；固定 TTL 600 秒、进程内最多 128 条、单次原子消费，重启、过期、淘汰或并发复用均失效。approval-required、final-submit、external/destructive、needs-evidence、blocked、complete、policy-blocked、no-action、合同异常或 context 超限均不签发。
+  - continuation child 使用 `claw.continuation.lineage.v1`，必须是全新 task，且 actions 恰好按 `receipt.selectedActionKind`、`runAgentLoop` 排列。Gateway 在 replay record、workspace、session/event、artifact 和 handler 前核对 lineage、receipt、父 task/session/trace/digest、round、token/profile、当前 allowlist、固定 handler、action policy 和结构化参数；任一失败固定不可重试且无业务副作用。成功后原子消费 receipt，以全新 workspace 把冻结父快照复制为与父隔离的可变 child session context，先执行 selected action，再基于 inherited context 与本轮结果重新运行 agent loop。
   - `observeScreen` 默认 dry-run；设置 `CLAW_ALLOW_SCREEN_CAPTURE=1` 后可在 macOS 上生成真实截图 artifact，设置 `CLAW_ALLOW_WINDOW_METADATA=1` 后可读取前台窗口元数据，设置 `CLAW_ALLOW_ACCESSIBILITY_OBSERVE=1` 后可在授权 macOS Gateway 上通过固定只读 System Events 脚本采集前台 App/窗口和有限候选控件摘要。该摘要只写既有 `accessibilityTree` artifact，并在 artifact event metadata 上附 signal quality、evidence tier、control coverage、省略标志和 `actionExecutionSupported=false`；metadata 不写前台 App 名、窗口标题、控件 label/description、raw text 或密码字段值，不执行点击、输入或任意选择器。无权限或非 macOS 时写入可审计 permission-missing/platform-unavailable 信号。
   - `operateDesktopApp` 默认停在审批闸门；设置 `CLAW_ALLOW_DESKTOP_CONTROL=1`、`CLAW_DESKTOP_APP_ALLOWLIST` 和 `CLAW_DESKTOP_KEY_ALLOWLIST` 后，可在 macOS 上聚焦允许的 App、粘贴结构化草稿、执行允许的非提交快捷键，并在最终提交前回到用户确认。该 handler 会在相关 artifact event metadata 上附 Delivery Safety 和桌面策略诊断摘要，只写固定策略诊断、重试原因、是否尝试自动化、是否检查 app/key 策略、最终提交闸门、用户确认、正文/paste 省略和按键计数，不写草稿正文、paste text、按键原文、target app、allowlist 值或 `toolArguments`。
   - `composeMessage`/`composeEmail` 写既有 `messageDraft` artifact 并等待用户确认；v0.20 起会附 Delivery Safety metadata，说明草稿正文已从 metadata 中省略且最终发送需要用户确认，不新增真实发送能力。
@@ -335,6 +339,77 @@ v0.31 起，`agentTrace` metadata 建议包含 `degradedSignals`，只使用固�
 v0.62 起，`nextActionPolicy` 固定为 `envelope-intersection`，diagnostic 只允许 `allowed` 或 `policy-blocked`；三个计数必须是有限非负整数且满足 requested = effective + blocked，selected action 只能使用固定推荐枚举并带 envelope 授权布尔。metadata 不包含 requested/effective/envelope 完整列表。手机/iPad 对缺失、未知、越界或矛盾证据进入人工复核，不能据此继续 Loop；这些字段是审计证据，不是 Gateway `actionPolicy` 的替代品。
 
 v0.65 起，selected-action decision metadata 必须完整满足固定 policy/reason、1...6 candidate count、1-based ordinal、`fromCandidates=true` 和 `consistent=true`。候选集合包含 Gateway 在无可执行建议时生成的合成安全停止候选 `none`，因此 `policy-blocked` 固定为 candidate count/ordinal `1/1`，并对应 effective 0 和 blocked handoff；`no-action-needed` 必须对应 `none` 和 complete。非 `none` 的 candidate count 不得大于 effective action count；合法 `ready-to-continue` 只能对应非 `none`、明确无需审批和 `safe-without-approval`。任何字段缺失、未知、越界或组合矛盾都由手机/iPad fail closed，且不得读取 artifact payload 补全。
+
+### v0.66 Continuation Offer 与 Lineage
+
+父 `sessionCompleted` wire DTO 可以附带私有 offer；transport 必须先把 raw receipt 放入内存 vault，再构造不含 receipt 的公开 `ClawGatewayEvent`。offer 不属于 artifact metadata，不写磁盘，也不进入 event summary：
+
+```json
+{
+  "contract": "claw.continuation.receipt.v1",
+  "receipt": "opaque-base64url",
+  "expiresAt": "ISO-8601",
+  "parentTaskID": "uuid",
+  "parentSessionID": "uuid",
+  "parentAgentTraceArtifactID": "uuid",
+  "parentDecisionDigest": "sha256:bounded-hex",
+  "parentRound": 0,
+  "selectedActionKind": "extractData"
+}
+```
+
+child task 的可选 lineage 是正式协议字段，不得塞入 `toolArguments`：
+
+```json
+{
+  "contract": "claw.continuation.lineage.v1",
+  "parentTaskID": "uuid",
+  "parentSessionID": "uuid",
+  "parentAgentTraceArtifactID": "uuid",
+  "parentDecisionDigest": "sha256:bounded-hex",
+  "parentRound": 0,
+  "childRound": 1,
+  "selectedActionKind": "extractData",
+  "decisionPolicy": "evidence-first-safe-v1",
+  "decisionReason": "safe-without-approval",
+  "receipt": "opaque-base64url"
+}
+```
+
+root task 的 lineage 为 nil。child 必须满足 `childRound == parentRound + 1`；`parentRound` 只能在 `0...31`，`childRound` 只能在 `1...32`。selected kind 必须属于六种固定推荐 kind，并与 receipt 和第一个 child action 完全一致。parent decision digest 对下列 17 个字段按顺序用 `|` 连接后做 SHA-256：`nextActionPolicy`、`nextActionPolicyDiagnostic`、`requestedNextActionCount`、`effectiveNextActionCount`、`blockedNextActionCount`、`readinessCanContinue`、`selectedActionKind`、`selectedActionRequiresApproval`、`selectedActionAllowedByEnvelope`、`decisionPolicy`、`decisionReason`、`candidateCount`、`candidateOrdinal`、`fromCandidates`、`consistent`、`stopReason`、`handoffStatus`。布尔值固定为小写 `true/false`，安全无停止语义固定为 `none`；digest 不包含自然语言、payload、`toolArguments` 或 raw receipt。公开 envelope 固定把 receipt 写成 `omitted`；live transport 只能发送按 task ID 保存且通过 task/profile/lineage digest 复核的私有 frozen bytes。
+
+### Draft、审批与发送状态机
+
+```text
+no draft
+  -> 用户显式生成
+readyForInput | needsApproval | readyForApproval
+  -> readyForInput: 当前版本阻断，等待未来参数编辑器
+  -> needsApproval: 当前版本无 queue/send 转换
+  -> readyForApproval: 参数已完整，可继续
+  -> 用户显式入队
+queued child / waitingForApproval
+  -> 用户按精确 task ID 审批并冻结
+approvedFrozen
+  -> 用户按同一 task ID 发送
+sent / observing child session
+```
+
+`readyForInput` 表示 typed 参数草稿不完整；v0.66 尚无参数编辑 API/UI，因此该状态保持阻断，不能 queue、approve 或 send，后续版本需先提供受校验的参数编辑器。`needsApproval` 同样没有通往 queue/send 的转换。v0.65 的 no-approval decision 和 receipt 都不能替代 child approval。审批记录必须绑定 task digest、profile digest、lineage digest 和 receipt hash；参数、profile、lineage、receipt 或 task 内容变化会清除审批与 frozen envelope并回到待审批。发送不得读取会变化的全局展示 envelope，也不得按“最新任务”隐式选择目标。首次发送尝试后 iOS vault 立即清理 receipt；continuation transport 必须禁用普通任务使用的同-envelope 自动重连/重发。超时或网络结果不确定也不得复用 receipt，需要用户重新获取可信 offer。
+
+### Receipt Cache 与父 Context
+
+每条 Gateway record 绑定父 task/session/AgentTrace、父 task/profile/token digest、round、selected kind、decision contract/digest、签发/过期时间及可信父 context。context 在签发时深拷贝并冻结，每条最多 6 个来源记录、序列化后最多 256 KiB，字符串逐项限长；禁止保存 raw token/header、receipt、完整 envelope、任意 `file://` reference、父 workspace 绝对路径或未限制对象引用。容量达到 128 时先清理过期项，再淘汰最早签发项；cache 不落盘，Gateway 重启即全部失效。
+
+child preflight 必须在任何 `await`/副作用前完成 compare-and-consume；两个并发请求最多一个成功。消费后 record 立即从全局 cache 删除；cache 中冻结的父 context 快照会被深拷贝成与父隔离的可变 child session context，child 可向自己的 context 追加本轮 artifact/result，但不能修改缓存快照或父 session。即使后续 handler 失败，receipt 也不得恢复。child 始终使用新 workspace，不能直接访问父 workspace、父绝对路径或父 `file://` reference。
+
+### Preflight 与错误语义
+
+基础 schema/token 校验后，continuation preflight 必须先于 replay guard 和 `prepareSessionWorkspace`。它依次校验 contract/UUID/digest/round、receipt 状态及全部父绑定、当前 token/profile/policy、两个 action 的数量/顺序/唯一 ID、当前 envelope allowlist、固定 handler、action policy，以及各 kind 的结构化参数 key/type/length/enum/互斥/path 合同。未知 key、alias 冲突、缺少必填字段、超长值、绝对或逃逸路径全部 fail closed。
+
+失败时 direct 返回固定不可重试错误；WebSocket 只返回无 action identity 的 envelope-level error。失败路径不得创建 child workspace 或 replay record，不得发送 `gatewayConnected`/action/session 业务流，不得写 audit/business artifact，不得调用 handler，也不得尝试文件、网络、Shell、浏览器、桌面或草稿副作用。错误不得回显 receipt、污染字段、`toolArguments`、URL/path、正文、父 payload 或 token。
+
+v0.66 不新增 action/event/artifact kind，不支持 Shell continuation、自动循环、跨进程/跨重启/跨设备 receipt、父 workspace 复用或 approval-required continuation dispatch。模拟器/fixture 只能使用明确测试 provider 或显示不可 live dispatch，不能伪造生产可消费 receipt。
 
 metadata 只能包含安全摘要，不能放入浏览器正文、命令输出、截图内容、消息草稿、联系人、token、完整 URL/path、row 内容、`toolArguments` 或其他敏感 payload。旧 Gateway 事件不带 metadata 时，手机端必须正常 decode，并按对应复核摘要降级显示 metadata 待同步。
 
