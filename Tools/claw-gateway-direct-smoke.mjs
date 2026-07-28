@@ -389,7 +389,7 @@ expect(
   replayEvents.filter((event) => event.kind === "actionStarted").length === envelope.task.actions.length,
   "direct replay guard should not duplicate actionStarted events",
 );
-await assertTaskReplayGuard(replayGuardEvents, envelope.task.actions.length, "direct replay guard");
+await assertTaskReplayGuard(replayGuardEvents, envelope, "direct replay guard");
 await assertArtifactsExist(replayEvents);
 
 const allowlistEvents = await runEmitEvents({
@@ -935,7 +935,7 @@ await assertContinuationChildSuccess(
   "direct continuation child",
 );
 const continuationReplayEvents = await continuationStream.send(continuationChildEnvelope);
-await assertTaskReplayGuard(continuationReplayEvents, continuationChildEnvelope.task.actions.length, "direct continuation replay");
+await assertTaskReplayGuard(continuationReplayEvents, continuationChildEnvelope, "direct continuation replay");
 const continuationSessionsBeforeReuse = await sessionDirectoryCount(continuationWorkspace);
 const reusedContinuationEnvelope = makeContinuationChildEnvelope(continuationParentEnvelope, continuationOffer);
 const continuationReuseFailure = await continuationStream.sendExpectFailure(reusedContinuationEnvelope);
@@ -1509,15 +1509,16 @@ function assertUnsupportedHandlerAudit(metadata, audit, action, label) {
   }
 }
 
-async function assertTaskReplayGuard(events, expectedActionCount, label) {
+async function assertTaskReplayGuard(events, expectedEnvelope, label) {
+  const expectedActions = expectedEnvelope.task.actions;
   expect(Array.isArray(events) && events.length > 0, `${label} missing events`);
   const allowedEventKinds = new Set(["gatewayConnected", "artifactStored", "actionSkipped", "sessionCompleted"]);
   expect(events.every((event) => allowedEventKinds.has(event.kind)), `${label} emitted unexpected event kind`);
   expect(!events.some((event) => event.kind === "actionStarted"), `${label} should not start actions`);
   const skippedEvents = events.filter((event) => event.kind === "actionSkipped");
-  expect(skippedEvents.length === expectedActionCount, `${label} actionSkipped count mismatch`);
+  expect(skippedEvents.length === expectedActions.length, `${label} actionSkipped count mismatch`);
   for (const skipped of skippedEvents) {
-    const action = envelope.task.actions.find((candidate) => candidate.id === skipped.actionID);
+    const action = expectedActions.find((candidate) => candidate.id === skipped.actionID);
     expect(Boolean(action), `${label} actionSkipped should keep action id`);
     expect(skipped.actionKind === action.kind, `${label} actionSkipped should keep action kind`);
     expect(skipped.actionTitle === action.title, `${label} actionSkipped should keep action title`);
@@ -1542,8 +1543,8 @@ async function assertTaskReplayGuard(events, expectedActionCount, label) {
   assertTaskReplayGuardMetadata(replayArtifact.metadata, audit, label);
   expect(audit.mode === "gateway-task-replay-guard", `${label} audit mode mismatch`);
   expect(audit.decision === "skip-duplicate-task", `${label} audit decision mismatch`);
-  expect(audit.task?.id === envelope.task.id, `${label} task id mismatch`);
-  expect(audit.task?.actionCount === expectedActionCount, `${label} action count mismatch`);
+  expect(audit.task?.id === expectedEnvelope.task.id, `${label} task id mismatch`);
+  expect(audit.task?.actionCount === expectedActions.length, `${label} action count mismatch`);
   expect(audit.replay?.count === 1, `${label} replay count mismatch`);
   expect(audit.safety?.businessArtifacts === "not-written", `${label} should not write business artifacts`);
   expect(audit.safety?.handlerExecution === "blocked", `${label} should block handler execution`);

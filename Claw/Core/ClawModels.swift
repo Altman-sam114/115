@@ -3750,22 +3750,32 @@ struct ClawAgentTraceReviewSummary: Equatable, Codable, Sendable {
         artifactID _: UUID,
         round _: Int
     ) -> String {
-        let fields = [
+        let requestedCount = requestedNextActionCount.map { String($0) } ?? "missing"
+        let effectiveCount = effectiveNextActionCount.map { String($0) } ?? "missing"
+        let blockedCount = blockedNextActionCount.map { String($0) } ?? "missing"
+        let canContinue = readinessCanContinue.map { String($0) } ?? "missing"
+        let requiresApproval = selectedNextActionRequiresApproval.map { String($0) } ?? "missing"
+        let allowedByEnvelope = selectedNextActionAllowedByEnvelope.map { String($0) } ?? "missing"
+        let candidateCount = selectedActionCandidateCount.map { String($0) } ?? "missing"
+        let candidateOrdinal = selectedActionCandidateOrdinal.map { String($0) } ?? "missing"
+        let selectedFromCandidates = selectedActionFromCandidates.map { String($0) } ?? "missing"
+        let decisionConsistent = selectedActionDecisionConsistent.map { String($0) } ?? "missing"
+        let fields: [String] = [
             nextActionPolicy ?? "missing",
             nextActionPolicyDiagnostic ?? "missing",
-            requestedNextActionCount.map(String.init) ?? "missing",
-            effectiveNextActionCount.map(String.init) ?? "missing",
-            blockedNextActionCount.map(String.init) ?? "missing",
-            readinessCanContinue.map(String.init) ?? "missing",
+            requestedCount,
+            effectiveCount,
+            blockedCount,
+            canContinue,
             selectedNextActionKind ?? "missing",
-            selectedNextActionRequiresApproval.map(String.init) ?? "missing",
-            selectedNextActionAllowedByEnvelope.map(String.init) ?? "missing",
+            requiresApproval,
+            allowedByEnvelope,
             selectedActionDecisionPolicy ?? "missing",
             selectedActionDecisionReason ?? "missing",
-            selectedActionCandidateCount.map(String.init) ?? "missing",
-            selectedActionCandidateOrdinal.map(String.init) ?? "missing",
-            selectedActionFromCandidates.map(String.init) ?? "missing",
-            selectedActionDecisionConsistent.map(String.init) ?? "missing",
+            candidateCount,
+            candidateOrdinal,
+            selectedFromCandidates,
+            decisionConsistent,
             stopReason ?? "none",
             handoffStatus ?? "missing"
         ]
