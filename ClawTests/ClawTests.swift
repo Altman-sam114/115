@@ -4787,21 +4787,21 @@ final class ClawTests: XCTestCase {
     }
 
     func testGatewayPairingDiagnosticsSeparatesConfiguredFromConfirmed() async throws {
-        let store = ClawStore(autoScanLocalArtifacts: false)
+        let configuredStore = ClawStore(autoScanLocalArtifacts: false)
 
-        let empty = store.gatewayPairingDiagnosticsSummary
+        let empty = configuredStore.gatewayPairingDiagnosticsSummary
         XCTAssertEqual(empty.state, .unavailable)
         XCTAssertFalse(empty.isVisible)
 
-        store.gatewayDispatchMode = .liveGateway
-        store.setGateway(url: "ws://127.0.0.1:18789", token: "paired-secret")
-        store.phoneAgentCommand = "打开浏览器搜索资料"
-        store.generatePhoneAgentPlan()
-        store.queueClawMobileTaskFromCurrentPlan()
-        store.approveLatestClawMobileTask()
-        store.sendLatestClawMobileTask()
+        configuredStore.gatewayDispatchMode = .liveGateway
+        configuredStore.setGateway(url: "ws://127.0.0.1:18789", token: "paired-secret")
+        configuredStore.phoneAgentCommand = "打开浏览器搜索资料"
+        configuredStore.generatePhoneAgentPlan()
+        configuredStore.queueClawMobileTaskFromCurrentPlan()
+        configuredStore.approveLatestClawMobileTask()
+        configuredStore.sendLatestClawMobileTask()
 
-        let configured = store.gatewayPairingDiagnosticsSummary
+        let configured = configuredStore.gatewayPairingDiagnosticsSummary
         XCTAssertEqual(configured.state, .configuredUnconfirmed)
         XCTAssertTrue(configured.canAttemptLive)
         XCTAssertFalse(configured.hasGatewayAck)
@@ -4809,17 +4809,24 @@ final class ClawTests: XCTestCase {
         let configuredText = [configured.title, configured.status, configured.guidance, configured.endpoint, configured.tokenFingerprint].joined(separator: " ")
         XCTAssertFalse(configuredText.contains("Bearer"))
         XCTAssertFalse(configuredText.contains("file://"))
-        XCTAssertFalse(configuredText.contains(store.clawMobileTasks[0].id.uuidString))
+        XCTAssertFalse(configuredText.contains(configuredStore.clawMobileTasks[0].id.uuidString))
 
-        let resume = store.gatewayResumeIntentPresentationSummary
-        let requestBefore = store.lastGatewayLiveRequest
+        let resume = configuredStore.gatewayResumeIntentPresentationSummary
+        let requestBefore = configuredStore.lastGatewayLiveRequest
         XCTAssertFalse(resume.canPrepare)
-        XCTAssertFalse(store.prepareExplicitResumeIntent(for: resume))
-        XCTAssertEqual(store.lastGatewayLiveRequest, requestBefore)
+        XCTAssertFalse(configuredStore.prepareExplicitResumeIntent(for: resume))
+        XCTAssertEqual(configuredStore.lastGatewayLiveRequest, requestBefore)
 
-        await store.sendLatestClawMobileTaskOverLiveGateway(transport: MockClawGatewayTransport())
-        XCTAssertEqual(store.gatewayPairingDiagnosticsSummary.state, .completed)
-        XCTAssertNotEqual(store.gatewayPairingDiagnosticsSummary.state, .fallbackSimulated)
+        let confirmedStore = ClawStore(autoScanLocalArtifacts: false)
+        confirmedStore.setGateway(url: "ws://127.0.0.1:18789", token: "paired-secret")
+        confirmedStore.phoneAgentCommand = "打开浏览器搜索资料"
+        confirmedStore.generatePhoneAgentPlan()
+        confirmedStore.queueClawMobileTaskFromCurrentPlan()
+        confirmedStore.approveLatestClawMobileTask()
+
+        await confirmedStore.sendLatestClawMobileTaskOverLiveGateway(transport: MockClawGatewayTransport())
+        XCTAssertEqual(confirmedStore.gatewayPairingDiagnosticsSummary.state, .completed)
+        XCTAssertNotEqual(confirmedStore.gatewayPairingDiagnosticsSummary.state, .fallbackSimulated)
     }
 
     func testGatewayResumeIntentFailsClosedWithoutCurrentRetryableLiveScope() {
