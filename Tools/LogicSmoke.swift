@@ -514,8 +514,8 @@ enum LogicSmoke {
         missionStore.approveAndContinueAutonomousLoop()
         missionSummary = missionStore.missionRunSummary
         expect(missionSummary.primaryActionKind == .continueAfterReview, "mission summary should expose review action")
-        expect(missionSummary.primaryActionTitle == "复核后重试", "review primary action should expose retry title")
-        expect(missionSummary.primaryActionIcon == "arrow.clockwise.circle.fill", "review primary action should expose retry icon")
+        expect(missionSummary.primaryActionTitle == "查看处理要求", "review primary action should expose attention title")
+        expect(missionSummary.primaryActionIcon == "exclamationmark.magnifyingglass", "review primary action should expose attention icon")
         expect(missionSummary.isPrimaryActionEnabled, "review primary action should be enabled")
         var waitingGatewaySummary = missionSummary
         waitingGatewaySummary.primaryActionTitle = "等待桌面 Gateway 事件"

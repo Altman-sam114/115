@@ -408,7 +408,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 6.0;
-				TARGETED_DEVICE_FAMILY = 1,2;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
 		};
@@ -446,7 +446,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 6.0;
-				TARGETED_DEVICE_FAMILY = 1,2;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
 		};
@@ -468,7 +468,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = "com.claw.prototype.tests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 6.0;
-				TARGETED_DEVICE_FAMILY = 1,2;
+				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Claw.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Claw";
 			};
 			name = Debug;
@@ -491,7 +491,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = "com.claw.prototype.tests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 6.0;
-				TARGETED_DEVICE_FAMILY = 1,2;
+				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Claw.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Claw";
 			};
 			name = Release;

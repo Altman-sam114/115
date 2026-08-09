@@ -512,8 +512,8 @@ final class ClawTests: XCTestCase {
 
         XCTAssertEqual(summary.phaseTitle, ClawAutonomousLoopPhase.needsAttention.title)
         XCTAssertEqual(summary.primaryActionKind, .continueAfterReview)
-        XCTAssertEqual(summary.primaryActionTitle, "复核后重试")
-        XCTAssertEqual(summary.primaryActionIcon, "arrow.clockwise.circle.fill")
+        XCTAssertEqual(summary.primaryActionTitle, "查看处理要求")
+        XCTAssertEqual(summary.primaryActionIcon, "exclamationmark.magnifyingglass")
         XCTAssertTrue(summary.isPrimaryActionEnabled)
         XCTAssertTrue(summary.requiresUserApproval)
         XCTAssertGreaterThan(summary.succeededCount, 0)

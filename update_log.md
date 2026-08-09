@@ -30,7 +30,7 @@
 
 - regular iPad/宽屏工作台的右侧 Review Detail Dock 就地复用 `missionRunSummary` 的 primary action 标题、SF Symbol、enabled 状态和既有 Store dispatcher；regular 左栏隐藏重复入口，compact iPhone 保持原单栏入口。
 - 共享 primary action view/dispatcher 接收渲染时的 Mission summary，并在执行前重新核对 command、task/session/sessionTask、mission scope、phase、primary title/icon/kind 和 enabled 状态；旧 summary、旧 scope、stale action、等待 Gateway 与阻断状态均 fail closed，不能绕过审批、workspace、allowlist、live preflight、continuation receipt 或冻结/发送闸门。
-- app 与 test target 的 `TARGETED_DEVICE_FAMILY` 仅从 `1` 扩展为 `1,2`，没有修改用户的 team/bundle/scheme 配置，也没有修改 xcuserdata；工程仍没有原生 macOS 或 Mac Catalyst target。
+- app 与 test target 的 `TARGETED_DEVICE_FAMILY` 仅从 `1` 扩展为 `"1,2"`，没有修改用户的 team/bundle/scheme 配置，也没有修改 xcuserdata；工程仍没有原生 macOS 或 Mac Catalyst target。
 - 补充 idle、审批、复核、完成、Gateway wait 和 blocked 的 presentation action 状态覆盖，以及 disabled/blocked dispatcher 无副作用断言。UI 继续只读 metadata-only 展示状态，不暴露 token、receipt、payload、路径、URL、正文或 UUID。
 
 关键文件：
@@ -49,7 +49,8 @@
 验证结果：
 
 - 本轮仅进行 `git status`、`git diff --check`、文本/diff 复核和必要的 `plutil -lint`；未运行本地编译、build、XCTest、Swift LogicSmoke、Gateway fixture、direct/WebSocket smoke、`xcodebuild` 或 `node --check`。
-- commit/push 后的 GitHub Actions 云端 run、run attempt、未加密 artifact 和 Agent C 复判尚未产生；不得把本地静态检查描述为业务通过。
+- 首次提交 `91edee2e30583231801b847e8c359e5c33033a53` 的 GitHub Actions run `31297226825` attempt `1` 失败：OpenStep project 中未加引号的 `TARGETED_DEVICE_FAMILY = 1,2;` 破坏 `plutil`/Xcode project parse，且 LogicSmoke 对非 retryable needsAttention 状态错误期待 retry title/icon。
+- 本修复轮次改为 `TARGETED_DEVICE_FAMILY = "1,2"`，并把同一非 retryable 命令的 primary action 期待改为 `查看处理要求` / `exclamationmark.magnifyingglass`；只做静态复核后提交并 push，新的云端 artifact 与 Agent C 复判待产生，不能将本地静态检查描述为业务通过。
 
 遗留事项：
 
