@@ -29,10 +29,10 @@
 核心变更：
 
 - 为选中的 `manageFiles` continuation draft 增加受限 typed 参数编辑：`operation` 固定为 `writeText`，`workspaceOnly` 固定为 `true`，只允许编辑 `writePath` 和 `writeText`。
-- 编辑 API 继续使用既有 continuation validator；路径必须是 workspace 内的相对路径，拒绝绝对路径、`~` 和 `..` 路径段；路径/正文等参数每个字符串值最多 4096 个 UTF-8 bytes，非法输入返回固定脱敏提示并保持 `readyForInput`，合法输入才进入 `readyForApproval`。
+- 编辑 API 继续使用既有 continuation validator；路径必须是 workspace 内的相对路径，拒绝绝对路径、`~` 和 `..` 路径段；路径/正文等参数每个字符串值最多 4096 个 UTF-8 bytes，非法输入返回固定脱敏提示并保持 `readyForInput`。只有带有效 receipt 的 safe-without-approval 草稿在参数合法后进入 `readyForApproval`；approval-required/destructive 的 `manageFiles` 草稿即使参数合法也保持 `needsApproval`、无 receipt、不可 queue/send，但未入队前仍可编辑。
 - 编辑只发生在尚未入队的 draft，且不改变父 task/session/AgentTrace、decision digest、receipt handle/expiry、Mission scope 或 review focus。入队生成全新 child，actions 恰好为 `[manageFiles, runAgentLoop]`；入队、审批冻结、发送以及 stale/blocked 状态后均锁定编辑。
 - compact iPhone 与 regular iPad/mac 复用同一 continuation presentation summary、编辑视图和 typed API。raw receipt、token、父 payload、Gateway 绝对路径和未过滤 metadata 继续按 redaction 规则从 UI/VoiceOver、event、artifact metadata、日志和 CI 摘要中省略；用户正文不复制到 auditLog 或 artifact metadata。
-- 不修改 Gateway handler、continuation receipt/lineage/TTL/单次消费、审批或发送协议；v0.67 仍不提供其他 action kind 的通用参数编辑器。
+- 不修改 Gateway handler、continuation receipt/lineage/TTL/单次消费、审批或发送协议；v0.67 仍不提供其他 action kind 的通用参数编辑器，也不放宽 destructive/approval-required 策略。
 
 关键文件：
 
@@ -50,12 +50,12 @@
 验证结果：
 
 - 本 sidecar 只允许文档非编译静态检查；未运行本地编译、build、XCTest、Swift LogicSmoke、Gateway fixture、direct/WebSocket smoke、`xcodebuild` 或 `node --check`。
-- v0.67 必须提交并 push 到 `origin/main` 后交给 GitHub Actions；Agent C 需要用仓库授权账号下载最新未加密 artifact，核对 manifest、JUnit/摘要、主日志、XCTest、LogicSmoke、fixture、direct/WebSocket smoke 和 Xcode build 与最新 commit/run/attempt 完全匹配后再判定。
-- 当前工作区 v0.67 云端 run、commit、run attempt、artifact 名称和 Agent C 复判结论尚未产生，不能预写通过结果。
+- 初版 commit `d9d3426f70f5c1d894702196496dde078eb36e91` 的 GitHub Actions run `31291864338` attempt `1` 与 commit 匹配，但 XCTest 的 75 个测试中有 2 个失败：`manageFiles` fixture 伪造了 approval-required action 的 safe receipt，违反既有 receipt 签发合同；静态检查、LogicSmoke、fixture、direct/WebSocket smoke、Xcode build 等其余结果通过。
+- 本修复轮次改为真实 approval-gated fixture，必须提交并 push 到 `origin/main` 后交给 GitHub Actions；Agent C 需要用仓库授权账号下载最新未加密 artifact，核对 manifest、JUnit/摘要、主日志、XCTest、LogicSmoke、fixture、direct/WebSocket smoke 和 Xcode build 与最新 commit/run/attempt 完全匹配后再判定。修复 run 尚未产生，不能预写通过结果。
 
 遗留事项：
 
-- 当前 v0.67 还需由实现 Agent 补齐/核对 `manageFiles` editor 的测试 helper、LogicSmoke 覆盖及完整云端负向矩阵，然后由 Agent C 复判；不能将本地文档检查视为业务验证。
+- 当前 v0.67 还需由实现 Agent 提交/核对 `manageFiles` editor 的 approval-gated helper、LogicSmoke 覆盖及完整云端负向矩阵，然后由 Agent C 复判；不能将本地文档检查视为业务验证。
 - receipt 仍不跨 Gateway 进程、重启、设备或 10 分钟；其他五种 continuation action 仍没有通用参数编辑器。
 
 ### v0.66 / Trusted Cross-Task Multi-Round Continuation 可信跨任务多轮续接

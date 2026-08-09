@@ -2636,7 +2636,6 @@ enum LogicSmoke {
             failures.append("ready loop agent trace review should be derived")
         }
 
-        let manageFilesRawReceipt = String(repeating: "r", count: 43)
         let manageFilesRawToken = "continuation-test-secret"
         func makeManageFilesContinuationSmoke() -> (
             store: ClawStore,
@@ -2669,7 +2668,7 @@ enum LogicSmoke {
                     "degradedSignals": "",
                     "missingSignals": "",
                     "selectedNextActionKind": "manageFiles",
-                    "selectedNextActionRequiresApproval": "false",
+                    "selectedNextActionRequiresApproval": "true",
                     "nextActionPolicy": "envelope-intersection",
                     "nextActionPolicyDiagnostic": "allowed",
                     "requestedNextActionCount": "2",
@@ -2677,14 +2676,14 @@ enum LogicSmoke {
                     "blockedNextActionCount": "0",
                     "selectedNextActionAllowedByEnvelope": "true",
                     "selectedActionDecisionPolicy": "evidence-first-safe-v1",
-                    "selectedActionDecisionReason": "safe-without-approval",
+                    "selectedActionDecisionReason": "approval-required-fallback",
                     "selectedActionCandidateCount": "2",
                     "selectedActionCandidateOrdinal": "1",
                     "selectedActionFromCandidates": "true",
                     "selectedActionDecisionConsistent": "true",
-                    "riskTags": "",
-                    "stopReason": "none",
-                    "handoffStatus": "ready-to-continue"
+                    "riskTags": "approval-required,destructive-action-gate",
+                    "stopReason": "approval-required",
+                    "handoffStatus": "waiting-for-approval"
                 ]
             )
             let traceSequence = (store.gatewayEvents.map(\.sequence).max() ?? 0) + 1
@@ -2702,36 +2701,13 @@ enum LogicSmoke {
                     artifacts: [trace]
                 )
             ])
-            guard let review = ClawAgentTraceReviewSummary.latest(from: store.clawGatewaySessions.first),
-                  review.latestArtifactID == trace.id else {
-                return nil
-            }
-            let digest = review.continuationDecisionDigest(
-                taskID: parentTask.id,
-                sessionID: parentSession.id,
-                artifactID: trace.id,
-                round: 0
-            )
-            store.ingestGatewayWireEvents([
-                ClawGatewayWireEvent(
-                    event: ClawGatewayEvent(
-                        sessionID: parentSession.id,
-                        taskID: parentTask.id,
-                        sequence: traceSequence + 1,
-                        kind: .sessionCompleted,
-                        summary: "Gateway completed with a private manageFiles continuation offer"
-                    ),
-                    continuationOffer: ClawGatewayContinuationOffer(
-                        contract: ClawContinuationContract.receiptContract,
-                        receipt: manageFilesRawReceipt,
-                        expiresAt: Date.now.addingTimeInterval(300),
-                        parentTaskID: parentTask.id,
-                        parentSessionID: UUID(),
-                        parentAgentTraceArtifactID: trace.id,
-                        parentDecisionDigest: digest,
-                        parentRound: 0,
-                        selectedActionKind: .manageFiles
-                    )
+            store.ingestGatewayEvents([
+                ClawGatewayEvent(
+                    sessionID: parentSession.id,
+                    taskID: parentTask.id,
+                    sequence: traceSequence + 1,
+                    kind: .sessionCompleted,
+                    summary: "Gateway completed with approval-gated manageFiles continuation"
                 )
             ])
             store.prepareContinuationDraft(sourceTaskID: parentTask.id, sourceSessionID: parentSession.id)
@@ -2810,6 +2786,19 @@ enum LogicSmoke {
             expect(invalidPathSummary.validationMessage?.contains("private-marker") == false, "path validation should redact raw input")
             expect(invalidPathSummary.validationMessage?.contains("..") == false, "path validation should not echo traversal syntax")
 
+            expect(
+                fileStore.updateContinuationFileArguments(
+                    writePath: "~/private-marker.txt",
+                    writeText: "private-marker-body"
+                ) == false,
+                "manageFiles editor should reject tilde paths"
+            )
+            expect(fileStore.continuationDraft?.state == .readyForInput, "tilde path should keep draft ready for input")
+            expect(
+                fileStore.missionRunSummary.continuationDraft.fileArguments.validationMessage == "路径必须是 workspace 内的相对路径。",
+                "tilde path should use a fixed validation message"
+            )
+
             let oversizedText = String(repeating: "x", count: 4_097)
             expect(
                 fileStore.updateContinuationFileArguments(
@@ -2850,10 +2839,10 @@ enum LogicSmoke {
                     writePath: "notes/report.txt",
                     writeText: "approved body"
                 ),
-                "valid manageFiles arguments should promote the draft"
+                "valid manageFiles arguments should be accepted for approval review"
             )
             let validFileSummary = fileStore.missionRunSummary.continuationDraft.fileArguments
-            expect(fileStore.continuationDraft?.state == .readyForApproval, "valid file arguments should be ready for approval")
+            expect(fileStore.continuationDraft?.state == .needsApproval, "approval-gated file arguments should remain needsApproval")
             expect(validFileSummary.writePath == "notes/report.txt", "draft summary should expose the approved relative path")
             expect(validFileSummary.writeText == "approved body", "draft summary should expose the approved body")
             expect(validFileSummary.validationMessage == nil, "valid file arguments should have no validation message")
@@ -2875,39 +2864,13 @@ enum LogicSmoke {
             expect(fileStore.continuationDraft?.receiptHandle == receiptHandle, "editing should preserve the receipt handle")
             expect(fileStore.lastClawMobileEnvelope.contains(manageFilesRawToken) == false, "editor flow should not expose the raw token")
 
-            if let draftID = fileStore.continuationDraft?.id,
-               let childTaskID = fileStore.queueContinuationDraft(id: draftID),
-               let childTask = fileStore.clawMobileTasks.first(where: { $0.id == childTaskID }) {
-                expect(childTask.actions.map(\.kind) == [.manageFiles, .runAgentLoop], "queued continuation should preserve action order")
-                expect(childTask.actions.first?.toolArguments["writePath"] == "notes/report.txt", "queued continuation should preserve writePath")
-                expect(childTask.actions.first?.toolArguments["writeText"] == "approved body", "queued continuation should preserve writeText")
-                expect(fileStore.continuationDraft?.state == .queued, "queued continuation should expose queued state")
-                expect(fileStore.missionRunSummary.continuationDraft.fileArguments.isEditable == false, "queued continuation should lock the file editor")
-                expect(fileStore.missionRunSummary.continuationDraft.fileArguments.isVisible == false, "queued continuation should hide editable file controls")
-                expect(fileStore.missionRunSummary.continuationDraft.fileArguments.writePath.isEmpty, "queued continuation should omit the relative path from the locked summary")
-                expect(fileStore.missionRunSummary.continuationDraft.fileArguments.writeText.isEmpty, "queued continuation should omit the file body from the locked summary")
-                expect(
-                    fileStore.updateContinuationFileArguments(writePath: "notes/late.txt", writeText: "late") == false,
-                    "queued continuation should reject file edits"
-                )
-                expect(fileStore.continuationDraft?.state == .queued, "rejected queued edit should preserve queued state")
-
-                fileStore.approveTask(id: childTaskID)
-                expect(fileStore.continuationDraft?.state == .approvedFrozen, "approved continuation should expose frozen state")
-                expect(fileStore.missionRunSummary.continuationDraft.fileArguments.isEditable == false, "approved continuation should keep the file editor locked")
-                expect(fileStore.missionRunSummary.continuationDraft.fileArguments.isVisible == false, "approved continuation should keep editable file controls hidden")
-                expect(
-                    fileStore.updateContinuationFileArguments(writePath: "notes/after-approval.txt", writeText: "blocked" ) == false,
-                    "approved frozen continuation should reject file edits"
-                )
-                expect(fileStore.continuationDraft?.state == .approvedFrozen, "rejected approved edit should preserve frozen state")
-                expect(fileStore.lastClawMobileEnvelope.contains(manageFilesRawReceipt) == false, "frozen envelope display should redact the raw receipt")
-                expect(fileStore.lastClawMobileEnvelope.contains(manageFilesRawToken) == false, "frozen envelope display should redact the raw token")
-                expect(fileStore.lastClawMobileEnvelope.contains("notes/report.txt") == false, "frozen envelope display should redact the relative path")
-                expect(fileStore.lastClawMobileEnvelope.contains("approved body") == false, "frozen envelope display should redact the file body")
-            } else {
-                failures.append("valid manageFiles continuation should queue a child task")
-            }
+            expect(fileStore.continuationDraft?.validationIssues == [.approvalRequired], "valid file arguments should retain the approval gate")
+            expect(fileStore.queueContinuationDraft(id: draft.id) == nil, "approval-gated file continuation should not queue")
+            expect(fileStore.continuationDraft?.state == .needsApproval, "rejected approval-gated queue should preserve needsApproval")
+            expect(fileStore.clawMobileTasks.count == 1, "approval-gated file continuation should not create a child task")
+            expect(fileStore.updateContinuationFileArguments(writePath: "notes/late.txt", writeText: "late"), "approval-gated draft should remain editable")
+            expect(fileStore.continuationDraft?.state == .needsApproval, "edited approval-gated draft should remain needsApproval")
+            expect(fileStore.lastClawMobileEnvelope.contains(manageFilesRawToken) == false, "approval-gated editor flow should not expose the raw token")
         } else {
             failures.append("manageFiles continuation smoke fixture should produce a readyForInput draft")
         }

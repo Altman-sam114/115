@@ -105,8 +105,9 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 
 ```text
 父 session 完成
-  -> 校验最新 AgentTrace 的 v0.65 safe decision
-  -> Gateway 冻结有界父 context，并签发 10 分钟、单次、进程内 receipt
+  -> 校验最新 AgentTrace 的 v0.65 safe/approval decision
+  -> 只有完整 safe contract 才冻结有界父 context并签发 10 分钟、单次、进程内 receipt
+     approval-required/destructive decision 不签发 receipt，只允许生成 needsApproval 草稿
   -> transport 提取 raw receipt 到 iOS 内存 vault，公开 event 不含 receipt
   -> 用户显式生成独立 continuation draft，父 Mission scope 和 focus 不变
   -> 参数完整时用户可显式入队全新 child task
@@ -114,7 +115,8 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
   -> v0.67 仅 manageFiles 提供 typed 编辑器：
      operation 固定 writeText，workspaceOnly 固定 true，用户填写 writePath/writeText
      validator 要求 workspace 相对路径、非空正文和每个字符串值 <= 4096 UTF-8 bytes
-     非法输入留在 readyForInput；合法输入进入 readyForApproval
+     非法输入留在 readyForInput；safe receipt 草稿的合法输入进入 readyForApproval
+     approval-gated 草稿的合法输入仍是 needsApproval，无 receipt 且不可 queue/send
      其他 selected kind 的 readyForInput 仍无通用编辑路径
   -> child 固定等待新审批
   -> 用户按 task ID 审批，绑定 task/profile/lineage digest 并冻结 raw envelope
@@ -127,7 +129,7 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 
 decision、receipt 和 child approval 是三个独立信任条件，互不替代。只有 `safe-without-approval + ready-to-continue + selected != none` 能获得 receipt；approval-required、final-submit、external/destructive、needs-evidence、blocked、complete、policy-blocked、no-action 或 metadata gap 只能生成不可派发的 `needsApproval`/blocked draft。receipt 固定 TTL 600 秒、容量 128、单次消费、进程内有效；过期、淘汰、重启、并发复用、profile/allowlist/handler/参数变化或任一 lineage 不匹配都在业务副作用前拒绝。首次发送尝试后清理 iOS vault，continuation 不使用普通任务的同-envelope 自动重连/重发。
 
-child task/action/session ID 全部新建，actions 必须恰好是 selected action 后接 `runAgentLoop`。父 context 每条最多 6 个来源记录、最多 256 KiB；Gateway 冻结缓存快照，消费后再深拷贝为与父隔离的可变 child session context，供 child 追加本轮结果。child 使用新 workspace，不读取父 `file://`、父绝对路径或父 workspace。v0.67 合法 `manageFiles` 参数只能在 draft 入队前编辑；入队创建 child 后、审批冻结后以及 `sent`/`stale`/`blocked` 状态均锁定，不能 queue/send 以外再次修改。compact iPhone 与 regular iPad/mac 复用同一 continuation summary/view/API；编辑器和摘要可显示当前用户正在复核的文件参数，但 raw receipt、token、父 payload、Gateway 绝对路径和未过滤 metadata 不进入 UI/VoiceOver、event、artifact metadata、日志或 CI 摘要。raw receipt 只存在于 wire DTO、内存 vault、私有 frozen envelope 和 Gateway cache。
+child task/action/session ID 全部新建，actions 必须恰好是 selected action 后接 `runAgentLoop`。父 context 每条最多 6 个来源记录、最多 256 KiB；Gateway 冻结缓存快照，消费后再深拷贝为与父隔离的可变 child session context，供 child 追加本轮结果。child 使用新 workspace，不读取父 `file://`、父绝对路径或父 workspace。v0.67 合法 `manageFiles` 参数只能在 draft 入队前编辑；safe receipt 草稿可进入 `readyForApproval`，approval-gated 草稿保持 `needsApproval` 且不可 queue/send。入队创建 child 后、审批冻结后以及 `sent`/`stale`/`blocked` 状态均锁定，不能 queue/send 以外再次修改。compact iPhone 与 regular iPad/mac 复用同一 continuation summary/view/API；编辑器和摘要可显示当前用户正在复核的文件参数，但 raw receipt、token、父 payload、Gateway 绝对路径和未过滤 metadata 不进入 UI/VoiceOver、event、artifact metadata、日志或 CI 摘要。raw receipt 只存在于 wire DTO、内存 vault、私有 frozen envelope 和 Gateway cache。
 
 ## 4. 核心模块
 

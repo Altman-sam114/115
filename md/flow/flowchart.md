@@ -122,7 +122,8 @@ flowchart TD
 ```mermaid
 flowchart TD
   PARENT["父 sessionCompleted<br/>最新 AgentTrace"] --> SAFE{"完整 v0.65 safe contract?<br/>safe-without-approval / ready-to-continue / non-none"}
-  SAFE -->|否: approval / evidence / blocked / complete / no-action| DRAFTONLY["needsApproval 或 blocked draft<br/>v0.66 不可 queue/send"]
+  SAFE -->|否: approval / destructive| APPROVALDRAFT["approval-gated draft<br/>manageFiles 可编辑<br/>无 receipt，保持 needsApproval"]
+  SAFE -->|否: evidence / blocked / complete / no-action| DRAFTONLY["blocked draft<br/>v0.66 不可 queue/send"]
   SAFE -->|是| LIMIT{"父 context <= 6 条且 <= 256 KiB?<br/>request/envelope/handler 交集仍一致?"}
   LIMIT -->|否| NOOFFER["不签发 receipt<br/>固定脱敏状态"]
   LIMIT -->|是| OFFER["私有 continuation offer<br/>600 秒 / 128 条 / 单次 / 进程内"]
@@ -130,10 +131,12 @@ flowchart TD
   VAULT --> CREATE["用户显式生成 draft<br/>父 Mission scope 与 focus 不变"]
   CREATE --> PARAM{"结构化参数完整且合法?"}
   PARAM -->|否| INPUT["readyForInput<br/>仅 manageFiles 可编辑；其他 kind 仍阻断"]
-  PARAM -->|是| READY["readyForApproval<br/>参数已通过 validator"]
+  PARAM -->|是 + safe receipt| READY["readyForApproval<br/>参数已通过 validator"]
   INPUT -->|selected=manageFiles| EDIT["typed 参数编辑器<br/>operation=writeText / workspaceOnly=true<br/>writePath + writeText<br/>相对 workspace path / 每字符串 <= 4096 UTF-8 bytes"]
   EDIT -->|非法| INPUT
   EDIT -->|合法| READY
+  APPROVALDRAFT -->|manageFiles 合法参数| APPROVALKEEP["needsApproval<br/>仍不可 queue/send"]
+  APPROVALDRAFT -->|非法参数| INPUT
   INPUT -->|其他 kind| BLOCK["保持阻断<br/>不入队、不审批、不发送"]
   READY --> QUEUE["用户显式入队<br/>全新 child task + 两个全新 action"]
   QUEUE --> APPROVE["用户按 task ID 审批<br/>绑定 task/profile/lineage digest 并冻结 raw envelope"]

@@ -2701,6 +2701,7 @@ final class ClawTests: XCTestCase {
             ("", "body", "请输入 workspace 相对路径。"),
             ("notes/report.txt", "  ", "请输入文件内容。"),
             ("/private/tmp/report.txt", "body", "路径必须是 workspace 内的相对路径。"),
+            ("~/report.txt", "body", "路径必须是 workspace 内的相对路径。"),
             ("../report.txt", "body", "路径必须是 workspace 内的相对路径。"),
             ("notes/report.txt", oversizedText, "文件参数长度超过限制。")
         ]
@@ -2731,7 +2732,7 @@ final class ClawTests: XCTestCase {
         XCTAssertFalse(unknownKeyMessage?.contains("private-marker") == true)
     }
 
-    func testContinuationManageFilesEditorPromotesValidArgumentsAndLocksAfterQueue() throws {
+    func testContinuationManageFilesEditorKeepsApprovalGateAfterValidArguments() throws {
         let (store, parentTask, parentSession, draft) = try makeManageFilesContinuationDraft()
         let parentSummary = store.missionRunSummary
         let parentScope = try XCTUnwrap(parentSummary.missionScopeID)
@@ -2749,8 +2750,8 @@ final class ClawTests: XCTestCase {
             writePath: "notes/report.txt",
             writeText: "approved body"
         ))
-        XCTAssertEqual(store.continuationDraft?.state, .readyForApproval)
-        XCTAssertEqual(store.continuationDraft?.validationIssues, [])
+        XCTAssertEqual(store.continuationDraft?.state, .needsApproval)
+        XCTAssertEqual(store.continuationDraft?.validationIssues, [.approvalRequired])
         XCTAssertEqual(store.continuationDraft?.sourceDecisionDigest, sourceDigest)
         XCTAssertEqual(store.continuationDraft?.receiptHandle, receiptHandle)
         XCTAssertNil(store.continuationDraft?.childTaskID)
@@ -2761,26 +2762,14 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(store.missionRunSummary.taskID, parentTask.id)
         XCTAssertEqual(store.missionRunSummary.sessionID, parentSession.id)
         XCTAssertEqual(store.missionRunSummary.activeReviewFocus(from: parentFocus), "agent-trace")
-
-        let childTaskID = try XCTUnwrap(store.queueContinuationDraft(id: draft.id))
-        let childTask = try XCTUnwrap(store.clawMobileTasks.first(where: { $0.id == childTaskID }))
-        XCTAssertEqual(childTask.actions.map(\.kind), [.manageFiles, .runAgentLoop])
-        XCTAssertEqual(childTask.actions.first?.toolArguments["writePath"], "notes/report.txt")
-        XCTAssertEqual(childTask.actions.first?.toolArguments["writeText"], "approved body")
-        XCTAssertFalse(store.updateContinuationFileArguments(writePath: "notes/late.txt", writeText: "late"))
-        XCTAssertEqual(store.continuationDraft?.state, .queued)
-
-        store.approveTask(id: childTaskID)
-        XCTAssertEqual(store.continuationDraft?.state, .approvedFrozen)
-        XCTAssertFalse(store.updateContinuationFileArguments(writePath: "notes/after-approval.txt", writeText: "blocked"))
-        XCTAssertEqual(store.continuationDraft?.state, .approvedFrozen)
-        XCTAssertEqual(store.clawMobileTasks.first(where: { $0.id == childTaskID })?.status, .readyToSend)
-        XCTAssertFalse(store.missionRunSummary.continuationDraft.fileArguments.isVisible)
-        XCTAssertEqual(store.missionRunSummary.continuationDraft.fileArguments.writePath, "")
-        XCTAssertEqual(store.missionRunSummary.continuationDraft.fileArguments.writeText, "")
+        XCTAssertNil(store.queueContinuationDraft(id: draft.id))
+        XCTAssertEqual(store.continuationDraft?.state, .needsApproval)
+        XCTAssertEqual(store.clawMobileTasks.count, 1)
         XCTAssertFalse(store.lastClawMobileEnvelope.contains("continuation-test-secret"))
-        XCTAssertFalse(store.lastClawMobileEnvelope.contains("notes/report.txt"))
-        XCTAssertFalse(store.lastClawMobileEnvelope.contains("approved body"))
+        XCTAssertTrue(store.updateContinuationFileArguments(writePath: "notes/late.txt", writeText: "late"))
+        XCTAssertEqual(store.continuationDraft?.state, .needsApproval)
+        XCTAssertEqual(store.missionRunSummary.continuationDraft.fileArguments.writePath, "notes/late.txt")
+        XCTAssertEqual(store.missionRunSummary.continuationDraft.fileArguments.writeText, "late")
     }
 
     private func makeManageFilesContinuationDraft() throws -> (ClawStore, ClawMobileTask, ClawGatewaySession, ClawContinuationDraft) {
@@ -2807,7 +2796,7 @@ final class ClawTests: XCTestCase {
                 "degradedSignals": "",
                 "missingSignals": "",
                 "selectedNextActionKind": "manageFiles",
-                "selectedNextActionRequiresApproval": "false",
+                "selectedNextActionRequiresApproval": "true",
                 "nextActionPolicy": "envelope-intersection",
                 "nextActionPolicyDiagnostic": "allowed",
                 "requestedNextActionCount": "2",
@@ -2815,14 +2804,14 @@ final class ClawTests: XCTestCase {
                 "blockedNextActionCount": "0",
                 "selectedNextActionAllowedByEnvelope": "true",
                 "selectedActionDecisionPolicy": "evidence-first-safe-v1",
-                "selectedActionDecisionReason": "safe-without-approval",
+                "selectedActionDecisionReason": "approval-required-fallback",
                 "selectedActionCandidateCount": "2",
                 "selectedActionCandidateOrdinal": "1",
                 "selectedActionFromCandidates": "true",
                 "selectedActionDecisionConsistent": "true",
-                "riskTags": "",
-                "stopReason": "none",
-                "handoffStatus": "ready-to-continue"
+                "riskTags": "approval-required,destructive-action-gate",
+                "stopReason": "approval-required",
+                "handoffStatus": "waiting-for-approval"
             ]
         )
         let sequence = (store.gatewayEvents.map(\.sequence).max() ?? 0) + 1
@@ -2841,33 +2830,13 @@ final class ClawTests: XCTestCase {
             )
         ])
 
-        let review = try XCTUnwrap(ClawAgentTraceReviewSummary.latest(from: store.clawGatewaySessions.first))
-        let digest = review.continuationDecisionDigest(
-            taskID: parentTask.id,
-            sessionID: parentSession.id,
-            artifactID: trace.id,
-            round: 0
-        )
-        store.ingestGatewayWireEvents([
-            ClawGatewayWireEvent(
-                event: ClawGatewayEvent(
-                    sessionID: parentSession.id,
-                    taskID: parentTask.id,
-                    sequence: sequence + 1,
-                    kind: .sessionCompleted,
-                    summary: "Gateway completed with manageFiles continuation receipt"
-                ),
-                continuationOffer: ClawGatewayContinuationOffer(
-                    contract: ClawContinuationContract.receiptContract,
-                    receipt: String(repeating: "m", count: 43),
-                    expiresAt: Date.now.addingTimeInterval(300),
-                    parentTaskID: parentTask.id,
-                    parentSessionID: UUID(),
-                    parentAgentTraceArtifactID: trace.id,
-                    parentDecisionDigest: digest,
-                    parentRound: 0,
-                    selectedActionKind: .manageFiles
-                )
+        store.ingestGatewayEvents([
+            ClawGatewayEvent(
+                sessionID: parentSession.id,
+                taskID: parentTask.id,
+                sequence: sequence + 1,
+                kind: .sessionCompleted,
+                summary: "Gateway completed with approval-gated manageFiles continuation"
             )
         ])
 
@@ -2875,7 +2844,8 @@ final class ClawTests: XCTestCase {
         let draft = try XCTUnwrap(store.continuationDraft)
         XCTAssertEqual(draft.state, .readyForInput)
         XCTAssertEqual(draft.sourceSelectedActionKind, .manageFiles)
-        XCTAssertEqual(draft.sourceSelectedActionRequiresApproval, false)
+        XCTAssertEqual(draft.sourceSelectedActionRequiresApproval, true)
+        XCTAssertNil(draft.receiptHandle)
         return (store, parentTask, parentSession, draft)
     }
 

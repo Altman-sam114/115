@@ -391,9 +391,9 @@ v0.67 只为选中 `manageFiles` 的 continuation draft 提供参数编辑入口
 }
 ```
 
-`operation` 只能是 `writeText`，`workspaceOnly` 只能是 `true`；未知 key、alias 或额外字段均拒绝。`writePath` 必须是非空 workspace 相对路径，拒绝绝对路径、以 `~` 开头的路径和包含 `..` 路径段的路径；`writeText` 必须是非空正文。既有 `ClawContinuationActionArguments.validate` 仍是唯一结构化校验边界，并对参数 map 中每个字符串值执行不超过 4096 个 UTF-8 bytes 的限制。路径和正文不通过时保持 `readyForInput`，返回固定、不回显危险路径或正文的提示；合法输入清空 validation issue 并转为 `readyForApproval`。`readyForInput` 不能 queue、approve 或 send；本轮未选中 `manageFiles` 的其他 kind 仍没有通用编辑路径。
+`operation` 只能是 `writeText`，`workspaceOnly` 只能是 `true`；未知 key、alias 或额外字段均拒绝。`writePath` 必须是非空 workspace 相对路径，拒绝绝对路径、以 `~` 开头的路径和包含 `..` 路径段的路径；`writeText` 必须是非空正文。既有 `ClawContinuationActionArguments.validate` 仍是唯一结构化校验边界，并对参数 map 中每个字符串值执行不超过 4096 个 UTF-8 bytes 的限制。路径和正文不通过时保持 `readyForInput`，返回固定、不回显危险路径或正文的提示；带有效 receipt 的 safe-without-approval 草稿在合法输入后才清空参数 issue 并转为 `readyForApproval`。approval-required/destructive 的 `manageFiles` 草稿没有 receipt，即使参数合法也保留 `approvalRequired` issue 和 `needsApproval` 状态，不能 queue、approve 或 send；但在未入队前仍可编辑。`readyForInput` 不能 queue、approve 或 send；本轮未选中 `manageFiles` 的其他 kind 仍没有通用编辑路径。
 
-编辑 API 只接受尚未创建 child 的 `readyForInput` 或 `readyForApproval` draft，并先复核父 task/session/AgentTrace scope、decision digest、receipt handle 和 receipt 时效。编辑只替换 child proposal 的四个结构化文件参数，不改变父 Mission scope、review focus、source identity、round、receipt 或 expiry。入队仍要求 `readyForApproval`、无 validation issue、当前 profile/allowlist 和 lineage 有效，随后生成全新 child task，actions 恰好为 `[manageFiles, runAgentLoop]`；child 创建后，以及 `queued`、`approvedFrozen`、`sent`、`stale` 或 `blocked` 状态下，编辑器不可见或不可编辑。审批只冻结当时的 task/profile/lineage digest 和私有 envelope，不能再修改参数。
+编辑 API 只接受尚未创建 child 的 `readyForInput`、`needsApproval` 或 `readyForApproval` draft，并先复核父 task/session/AgentTrace scope、decision digest；safe 草稿还必须复核 receipt handle 和 receipt 时效，approval-gated 草稿明确允许没有 receipt。编辑只替换 child proposal 的四个结构化文件参数，不改变父 Mission scope、review focus、source identity、round、receipt 或 expiry。入队仍只接受 `readyForApproval`、无 validation issue、当前 profile/allowlist、有效 receipt 和 lineage，随后生成全新 child task，actions 恰好为 `[manageFiles, runAgentLoop]`；approval-gated `needsApproval` 草稿不会入队。child 创建后，以及 `queued`、`approvedFrozen`、`sent`、`stale` 或 `blocked` 状态下，编辑器不可见或不可编辑。审批只冻结当时的 task/profile/lineage digest 和私有 envelope，不能再修改参数。
 
 compact iPhone 与 regular iPad/mac 复用同一个 `ClawContinuationDraftPresentationSummary`、`ClawMissionRunContinuationDraftView` 和 typed Store API。编辑器可显示当前用户正在复核的 `writePath`/`writeText`，但 UI/VoiceOver、普通 event、artifact metadata、auditLog、日志、JUnit、failure summary 和 manifest 不得显示 raw receipt、token、父 payload、Gateway 绝对路径或任意未过滤 metadata；用户正文不得复制到 auditLog 或 artifact metadata。raw receipt 仍只允许存在于 wire DTO、iOS 内存 vault、私有 frozen envelope 和 Gateway cache。
 
@@ -404,8 +404,9 @@ no draft
   -> 用户显式生成
 readyForInput | needsApproval | readyForApproval
   -> readyForInput: `manageFiles` 可编辑固定结构化参数；非法输入仍留在此状态
-  -> readyForInput + 合法 `manageFiles` 参数: readyForApproval
-  -> needsApproval: 当前版本无 queue/send 转换
+  -> readyForInput + 合法参数 + safe receipt: readyForApproval
+  -> readyForInput/needsApproval + 合法参数 + approval-gated decision: needsApproval
+  -> needsApproval: 可继续编辑，但当前版本无 queue/send 转换
   -> readyForApproval: 参数已完整，可继续
   -> 用户显式入队
 queued child / waitingForApproval
@@ -415,7 +416,7 @@ approvedFrozen
 sent / observing child session
 ```
 
-`readyForInput` 表示 typed 参数草稿不完整或未通过校验；v0.67 只有 `manageFiles` 提供受校验的参数编辑器，其他 selected kind 仍保持阻断。编辑器不自动入队、审批、冻结或发送；`needsApproval` 同样没有通往 queue/send 的转换。v0.65 的 no-approval decision 和 receipt 都不能替代 child approval。审批记录必须绑定 task digest、profile digest、lineage digest 和 receipt hash；参数、profile、lineage、receipt 或 task 内容变化会清除审批与 frozen envelope并回到待审批。发送不得读取会变化的全局展示 envelope，也不得按“最新任务”隐式选择目标。首次发送尝试后 iOS vault 立即清理 receipt；continuation transport 必须禁用普通任务使用的同-envelope 自动重连/重发。超时或网络结果不确定也不得复用 receipt，需要用户重新获取可信 offer。
+`readyForInput` 表示 typed 参数草稿不完整或未通过校验；v0.67 只有 `manageFiles` 提供受校验的参数编辑器，其他 selected kind 仍保持阻断。编辑器不自动入队、审批、冻结或发送；approval-gated `needsApproval` 只能继续编辑，不能通过参数编辑获得 receipt 或 queue/send 能力。v0.65 的 no-approval decision 和 receipt 都不能替代 child approval。审批记录必须绑定 task digest、profile digest、lineage digest 和 receipt hash；参数、profile、lineage、receipt 或 task 内容变化会清除审批与 frozen envelope并回到待审批。发送不得读取会变化的全局展示 envelope，也不得按“最新任务”隐式选择目标。首次发送尝试后 iOS vault 立即清理 receipt；continuation transport 必须禁用普通任务使用的同-envelope 自动重连/重发。超时或网络结果不确定也不得复用 receipt，需要用户重新获取可信 offer。
 
 ### Receipt Cache 与父 Context
 

@@ -1435,15 +1435,18 @@ final class ClawStore: ObservableObject {
             selectedKind: selectedKind
         )
         let state: ClawContinuationDraftState
-        var issues = proposal.issues
+        let parameterIssues = proposal.issues
+        var issues = parameterIssues
         if sourceRequiresApproval {
-            state = .needsApproval
             issues.append(.approvalRequired)
+        }
+        if parameterIssues.isEmpty == false {
+            state = .readyForInput
+        } else if sourceRequiresApproval {
+            state = .needsApproval
         } else if receiptEntry == nil {
             state = .stale
             issues.append(.missingReceipt)
-        } else if issues.isEmpty == false {
-            state = .readyForInput
         } else {
             state = .readyForApproval
         }
@@ -1473,20 +1476,24 @@ final class ClawStore: ObservableObject {
         guard var draft = continuationDraft,
               draft.childTaskID == nil,
               draft.sourceSelectedActionKind == .manageFiles,
-              draft.state == .readyForInput || draft.state == .readyForApproval else {
+              draft.state == .readyForInput || draft.state == .readyForApproval || draft.state == .needsApproval else {
             return false
         }
         guard validateContinuationSource(draft) else {
             invalidateContinuationAuthorization(reason: .sourceTraceChanged)
             return false
         }
-        guard let handle = draft.receiptHandle,
-              let receipt = continuationReceipts[handle] else {
+        if let handle = draft.receiptHandle {
+            guard let receipt = continuationReceipts[handle] else {
+                invalidateContinuationAuthorization(reason: .missingReceipt)
+                return false
+            }
+            guard receipt.offer.expiresAt > Date.now else {
+                invalidateContinuationAuthorization(reason: .receiptExpired)
+                return false
+            }
+        } else if draft.sourceSelectedActionRequiresApproval == false {
             invalidateContinuationAuthorization(reason: .missingReceipt)
-            return false
-        }
-        guard receipt.offer.expiresAt > Date.now else {
-            invalidateContinuationAuthorization(reason: .receiptExpired)
             return false
         }
 
@@ -1495,21 +1502,34 @@ final class ClawStore: ObservableObject {
             writeText: writeText
         )
         draft.proposedAction.toolArguments = arguments
-        draft.validationIssues = ClawContinuationActionArguments.validate(
+        let parameterIssues = ClawContinuationActionArguments.validate(
             kind: .manageFiles,
             arguments: arguments
         )
-        draft.state = draft.validationIssues.isEmpty ? .readyForApproval : .readyForInput
+        if draft.sourceSelectedActionRequiresApproval {
+            draft.validationIssues = Array(Set(parameterIssues + [.approvalRequired])).sorted { $0.rawValue < $1.rawValue }
+            draft.state = parameterIssues.isEmpty ? .needsApproval : .readyForInput
+        } else {
+            draft.validationIssues = parameterIssues
+            draft.state = parameterIssues.isEmpty ? .readyForApproval : .readyForInput
+        }
         draft.updatedAt = Date.now
         continuationDraft = draft
-        return draft.validationIssues.isEmpty
+        return parameterIssues.isEmpty
     }
 
     @discardableResult
     func queueContinuationDraft(id: UUID) -> UUID? {
         guard var draft = continuationDraft,
-              draft.id == id,
-              draft.state == .readyForApproval,
+              draft.id == id else {
+            return nil
+        }
+        // Approval-gated parent decisions have no receipt-backed dispatch path.
+        // Keep the editable draft visible instead of invalidating it as stale.
+        guard draft.sourceSelectedActionRequiresApproval == false else {
+            return nil
+        }
+        guard draft.state == .readyForApproval,
               draft.validationIssues.isEmpty,
               let handle = draft.receiptHandle,
               let receipt = continuationReceipts[handle],
@@ -2244,7 +2264,7 @@ final class ClawStore: ObservableObject {
             return .unavailable
         }
         let isEditable = draft.childTaskID == nil &&
-            (state == .readyForInput || state == .readyForApproval)
+            (state == .readyForInput || state == .readyForApproval || state == .needsApproval)
         guard isEditable else {
             return .unavailable
         }
@@ -2257,7 +2277,10 @@ final class ClawStore: ObservableObject {
             writePath: arguments["writePath"] ?? "",
             writeText: arguments["writeText"] ?? "",
             validationMessage: validationMessage,
-            isValid: validationMessage == nil && draft.validationIssues.isEmpty,
+            isValid: validationMessage == nil && ClawContinuationActionArguments.validate(
+                kind: .manageFiles,
+                arguments: arguments
+            ).isEmpty,
             isEditable: isEditable,
             isVisible: isEditable
         )
