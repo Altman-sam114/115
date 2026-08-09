@@ -51,6 +51,7 @@
 - 本轮仅进行 `git status`、`git diff --check`、文本/diff 复核和必要的 `plutil -lint`；未运行本地编译、build、XCTest、Swift LogicSmoke、Gateway fixture、direct/WebSocket smoke、`xcodebuild` 或 `node --check`。
 - 首次提交 `91edee2e30583231801b847e8c359e5c33033a53` 的 GitHub Actions run `31297226825` attempt `1` 失败：OpenStep project 中未加引号的 `TARGETED_DEVICE_FAMILY = 1,2;` 破坏 `plutil`/Xcode project parse，且 LogicSmoke 对非 retryable needsAttention 状态错误期待 retry title/icon。
 - 本修复轮次改为 `TARGETED_DEVICE_FAMILY = "1,2"`，并把同一非 retryable 命令的 primary action 期待改为 `查看处理要求` / `exclamationmark.magnifyingglass`；只做静态复核后提交并 push，新的云端 artifact 与 Agent C 复判待产生，不能将本地静态检查描述为业务通过。
+- 后续 run `31297519524` attempt `1` 暴露 `ClawMissionRunPanel` 的 SwiftUI memberwise initializer 不接受带默认值的 `showsPrimaryAction` 参数（`extra argument 'showsPrimaryAction'`）；本轮改为显式 `Bool` 参数并让 compact 入口传入 `true`，regular Dock 继续传入 `false`。仅做静态检查后提交，云端复验与 Agent C artifact 复判待产生。
 
 遗留事项：
 

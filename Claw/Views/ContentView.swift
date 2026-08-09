@@ -462,7 +462,7 @@ struct PhoneAgentCompactLayout: View {
             VStack(alignment: .leading, spacing: 16) {
                 PhoneAgentCommandPanel(examples: examples)
 
-                ClawMissionRunPanel(reviewFocus: $reviewFocus)
+                ClawMissionRunPanel(reviewFocus: $reviewFocus, showsPrimaryAction: true)
 
                 PhoneAgentPlanPanel()
 
@@ -684,7 +684,7 @@ struct ClawMissionRunPrimaryActionView: View {
 struct ClawMissionRunPanel: View {
     @EnvironmentObject private var store: ClawStore
     @Binding var reviewFocus: ClawMissionRunReviewFocus?
-    let showsPrimaryAction: Bool = true
+    let showsPrimaryAction: Bool
 
     var body: some View {
         let summary = store.missionRunSummary
