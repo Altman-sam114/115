@@ -22,6 +22,38 @@
 
 ## 历史记录
 
+### v0.68 / Gateway 普通任务统一 Dispatch Preflight
+
+日期：2026-08-09
+
+核心变更：
+
+- Gateway 普通首次 dispatch 在 replay cache、workspace、`gatewayConnected`、能力快照 artifact、action event、业务 artifact 和 handler 前增加统一 preflight；仅 `task.status=sent` 可进入普通执行流，缺失/未知及各非发送状态固定 fail closed。
+- allowlisted 敏感 Gateway action 必须满足 Gateway 敏感审批、审计开关、`auditRequired` 和 `userConfirmation`/`gatewayApproval` 合同；敏感 action 伪造 `automatic` 不再进入 handler。allowlist 未允许或显式 blocked action 保留既有逐 action skip。
+- preflight 错误为无 action identity、不可重试、无敏感回显的 envelope-level error，失败不创建 replay/workspace、不写 artifact、不发业务事件、不执行 handler；continuation 继续沿用 `readyToSend + receipt`、lineage 和单次消费合同。
+
+关键文件：
+
+- `Tools/claw-gateway-server.mjs`
+- `Tools/ClawGatewayEventFixture.swift`
+- `Tools/claw-gateway-direct-smoke.mjs`
+- `Tools/claw-gateway-smoke.mjs`
+- `README.md`
+- `Docs/claw-mobile-gateway-protocol.md`
+- `md/flow/flow.md`
+- `md/flow/flowchart.md`
+- `md/test/test.md`
+- `update_log.md`
+
+验证结果：
+
+- 按本轮规则只进行代码、文本和 diff 静态复核；未运行本地编译、build、XCTest、Swift LogicSmoke、Gateway fixture、direct/WebSocket smoke、`xcodebuild` 或 `node --check`。
+- 本轮需提交并 push `origin/main` 后由 GitHub Actions 生成最新 artifact；当前不预写 CI/run/artifact 通过结论，Agent C 必须按最新 commit/run/attempt 复判。
+
+遗留事项：
+
+- Gateway preflight 的完整云端静态检查、fixture、LogicSmoke、direct/WebSocket smoke、XCTest 和 Xcode build 结果待 Agent C 下载最新未加密 artifact 验收。
+
 ### v0.67 / Continuation Parameter Editor `manageFiles` 文件续接参数编辑
 
 日期：2026-08-09

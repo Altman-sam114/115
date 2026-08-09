@@ -68,6 +68,14 @@ Token 不写入 payload，只保留短 SHA-256 指纹，例如 `sha256:abc123`�
 - `sent`: 已发送给模拟事件流或 live gateway。
 - `blocked`: 包含平台禁止动作或网关白名单禁止动作。
 
+普通任务的首次 Gateway dispatch 只接受 `task.status=sent`；`waitingForApproval`、`queued`、`blocked`、`draft`、`readyToSend`、`approvedFrozen`、`complete` 以及缺失/未知状态都不能被 Gateway 当作已发送。Continuation child 不属于普通首次 dispatch，继续使用独立的 `readyToSend`、lineage、receipt 和单次消费合同。
+
+### Ordinary Dispatch Preflight
+
+基础 schema/token 校验后，普通任务必须先通过统一 `Dispatch Preflight`，顺序早于 replay cache、session workspace、`gatewayConnected`、能力快照 audit artifact、任何 action event、业务 artifact 和 handler。除状态外，allowlisted action 还必须通过既有 approval/allowlist 策略；敏感 Gateway action 必须保持 `requiresApprovalForSensitiveData=true`、`auditEnabled=true`、`auditRequired=true`，且 action approval 为 `userConfirmation` 或 `gatewayApproval`。客户端把 task/action 改成 `sent` 或把敏感 approval 伪造成 `automatic` 不能绕过 Gateway。
+
+普通 preflight 失败只返回固定的 envelope-level error：不绑定 action identity、`isRetryable=false`，不创建 replay record/workspace，不发送业务事件，不写 audit/business artifact，不调用 handler，也不尝试文件、网络、Shell、浏览器、桌面或草稿副作用。错误不得回显 task/action identity、status 原文、instruction、target、`toolArguments`、路径、URL、正文、token 或 receipt；allowlist 未允许/显式 blocked action 的既有逐 action `actionSkipped` 合同保持不变。
+
 ## Dispatch Mode
 
 当前手机端支持两种发送模式：
@@ -426,7 +434,7 @@ child preflight 必须在任何 `await`/副作用前完成 compare-and-consume�
 
 ### Preflight 与错误语义
 
-基础 schema/token 校验后，continuation preflight 必须先于 replay guard 和 `prepareSessionWorkspace`。它依次校验 contract/UUID/digest/round、receipt 状态及全部父绑定、当前 token/profile/policy、两个 action 的数量/顺序/唯一 ID、当前 envelope allowlist、固定 handler、action policy，以及各 kind 的结构化参数 key/type/length/enum/互斥/path 合同。未知 key、alias 冲突、缺少必填字段、超长值、绝对或逃逸路径全部 fail closed。
+基础 schema/token 校验后，continuation preflight 必须先于 replay guard 和 `prepareSessionWorkspace`。它依次校验 contract/UUID/digest/round、receipt 状态及全部父绑定、当前 token/profile/policy、两个 action 的数量/顺序/唯一 ID、当前 envelope allowlist、固定 handler、action policy，以及各 kind 的结构化参数 key/type/length/enum/互斥/path 合同。未知 key、alias 冲突、缺少必填字段、超长值、绝对或逃逸路径全部 fail closed；它不走普通任务的 `sent` 规则，也不重复消费 receipt。
 
 失败时 direct 返回固定不可重试错误；WebSocket 只返回无 action identity 的 envelope-level error。失败路径不得创建 child workspace 或 replay record，不得发送 `gatewayConnected`/action/session 业务流，不得写 audit/business artifact，不得调用 handler，也不得尝试文件、网络、Shell、浏览器、桌面或草稿副作用。错误不得回显 receipt、污染字段、`toolArguments`、URL/path、正文、父 payload 或 token。
 

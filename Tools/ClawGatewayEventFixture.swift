@@ -14,6 +14,20 @@ enum ClawGatewayEventFixture {
         "composeEmail"
     ]
 
+    private static let sensitiveGatewayActionKinds: Set<String> = [
+        "observeScreen",
+        "controlBrowser",
+        "operateDesktopApp",
+        "manageFiles",
+        "runShellCommand",
+        "extractData",
+        "readContacts",
+        "runAgentLoop",
+        "composeMessage",
+        "composeEmail",
+        "desktopHandoff"
+    ]
+
     static func main() throws {
         if CommandLine.arguments.contains("--help") {
             print("""
@@ -140,6 +154,24 @@ enum ClawGatewayEventFixture {
             approvalSummary: "fixture",
             auditRequired: true
         )
+        let invalidStatuses: [ClawTaskStatus] = [.waitingForApproval, .queued, .blocked, .readyToSend]
+        let statusFailures = invalidStatuses.map { status in
+            var invalid = envelope
+            invalid.task.status = status
+            return makeEvents(for: invalid, sessionID: UUID())
+        }
+        var forgedApproval = envelope
+        forgedApproval.gateway.allowedActionKinds = [.observeScreen]
+        forgedApproval.task.actions = [skippedAction]
+        let forgedApprovalFailure = makeEvents(for: forgedApproval, sessionID: UUID())
+        var statusObject = try JSONSerialization.jsonObject(with: JSONEncoder().encode(envelope)) as? [String: Any] ?? [:]
+        var statusTask = statusObject["task"] as? [String: Any] ?? [:]
+        statusTask.removeValue(forKey: "status")
+        statusObject["task"] = statusTask
+        let missingStatusRejected = (try? JSONDecoder().decode(ClawMobileEnvelope.self, from: JSONSerialization.data(withJSONObject: statusObject))) == nil
+        statusTask["status"] = "unknown"
+        statusObject["task"] = statusTask
+        let unknownStatusRejected = (try? JSONDecoder().decode(ClawMobileEnvelope.self, from: JSONSerialization.data(withJSONObject: statusObject))) == nil
         let events = makeEvents(for: envelope, sessionID: UUID())
         let failed = events.first {
             $0.actionID == unsupportedAction.id &&
@@ -231,6 +263,10 @@ enum ClawGatewayEventFixture {
             as: UTF8.self
         )
         guard
+            statusFailures.allSatisfy(dispatchPreflightFailureMatches),
+            dispatchPreflightFailureMatches(forgedApprovalFailure),
+            missingStatusRejected,
+            unknownStatusRejected,
             failed != nil,
             audit != nil,
             skipped != nil,
@@ -286,6 +322,9 @@ enum ClawGatewayEventFixture {
         for envelope: ClawMobileEnvelope,
         sessionID: UUID
     ) -> [ClawGatewayEvent] {
+        if let failure = dispatchPreflightFailure(for: envelope) {
+            return [failure]
+        }
         let task = envelope.task
         var sequence = 0
         var events: [ClawGatewayEvent] = [
@@ -381,6 +420,61 @@ enum ClawGatewayEventFixture {
         )
 
         return events
+    }
+
+    private static func dispatchPreflightFailure(for envelope: ClawMobileEnvelope) -> ClawGatewayEvent? {
+        if envelope.task.continuationLineage != nil {
+            return nil
+        }
+        guard envelope.task.status == .sent else {
+            return makeDispatchPreflightFailure(code: "dispatch_preflight_status_invalid")
+        }
+        let allowed = Set(envelope.gateway.allowedActionKinds.map(\.rawValue))
+        for action in envelope.task.actions {
+            guard allowed.contains(action.kind.rawValue), action.approval != .blocked else {
+                continue
+            }
+            let sensitive = action.handlesSensitiveData || sensitiveGatewayActionKinds.contains(action.kind.rawValue)
+            if action.approval == .automatic && sensitive == false {
+                continue
+            }
+            guard action.approval == .userConfirmation || action.approval == .gatewayApproval else {
+                return makeDispatchPreflightFailure(code: sensitive ? "dispatch_preflight_approval_required" : "dispatch_preflight_approval_invalid")
+            }
+            if sensitive && (
+                envelope.gateway.requiresApprovalForSensitiveData == false ||
+                envelope.gateway.auditEnabled == false ||
+                envelope.auditRequired == false
+            ) {
+                return makeDispatchPreflightFailure(code: "dispatch_preflight_approval_required")
+            }
+        }
+        return nil
+    }
+
+    private static func makeDispatchPreflightFailure(code: String) -> ClawGatewayEvent {
+        ClawGatewayEvent(
+            sessionID: UUID(),
+            taskID: UUID(),
+            sequence: 0,
+            kind: .actionFailed,
+            resultStatus: .failed,
+            summary: "gateway error: \(code)",
+            isRetryable: false
+        )
+    }
+
+    private static func dispatchPreflightFailureMatches(_ events: [ClawGatewayEvent]) -> Bool {
+        guard events.count == 1, let failure = events.first else {
+            return false
+        }
+        return failure.kind == .actionFailed &&
+            failure.actionID == nil &&
+            failure.actionKind == nil &&
+            failure.actionTitle == nil &&
+            failure.resultStatus == .failed &&
+            failure.isRetryable == false &&
+            failure.artifacts.isEmpty
     }
 
     private static func resultStatus(

@@ -271,6 +271,77 @@ assertAccessibilityTreeArtifact(dryRunAccessibilityArtifact, axTrees[0], {
   label: "dry-run accessibility tree",
 });
 
+const dispatchPreflightWorkspace = `${workspace}-dispatch-preflight-${crypto.randomUUID()}`;
+const dispatchPreflightStream = startEmitEventStream({
+  CLAW_GATEWAY_TOKEN: token,
+  CLAW_WORKSPACE: dispatchPreflightWorkspace,
+});
+const dispatchPreflightEnvelope = makeEnvelope(token);
+const invalidDispatchStatuses = [
+  undefined,
+  "unknown",
+  "waitingForApproval",
+  "queued",
+  "blocked",
+  "draft",
+  "readyToSend",
+  "approvedFrozen",
+  "complete",
+];
+for (const [index, status] of invalidDispatchStatuses.entries()) {
+  const invalidEnvelope = JSON.parse(JSON.stringify(dispatchPreflightEnvelope));
+  const marker = `dispatch-preflight-${index}-${crypto.randomUUID()}`;
+  if (status === undefined) {
+    delete invalidEnvelope.task.status;
+  } else {
+    invalidEnvelope.task.status = status;
+  }
+  invalidEnvelope.task.command = marker;
+  invalidEnvelope.task.actions[0].target = marker;
+  invalidEnvelope.task.actions[0].instruction = marker;
+  invalidEnvelope.task.actions[0].inputPreview = marker;
+  invalidEnvelope.task.actions[0].toolArguments.observationGoal = marker;
+  const failure = await dispatchPreflightStream.sendExpectFailure(invalidEnvelope);
+  assertDispatchPreflightFailure(
+    failure,
+    "dispatch_preflight_status_invalid",
+    [dispatchPreflightEnvelope.task.id, dispatchPreflightEnvelope.task.actions[0].id, marker],
+    `direct dispatch status ${status || "missing"}`,
+  );
+}
+const forgedApprovalEnvelope = JSON.parse(JSON.stringify(dispatchPreflightEnvelope));
+const forgedApprovalMarker = `dispatch-approval-${crypto.randomUUID()}`;
+forgedApprovalEnvelope.task.actions[0].approval = "automatic";
+forgedApprovalEnvelope.task.actions[0].target = forgedApprovalMarker;
+forgedApprovalEnvelope.task.actions[0].instruction = forgedApprovalMarker;
+forgedApprovalEnvelope.task.actions[0].inputPreview = forgedApprovalMarker;
+forgedApprovalEnvelope.task.actions[0].toolArguments.observationGoal = forgedApprovalMarker;
+const forgedApprovalFailure = await dispatchPreflightStream.sendExpectFailure(forgedApprovalEnvelope);
+assertDispatchPreflightFailure(
+  forgedApprovalFailure,
+  "dispatch_preflight_approval_required",
+  [dispatchPreflightEnvelope.task.id, dispatchPreflightEnvelope.task.actions[0].id, forgedApprovalMarker],
+  "direct forged sensitive approval",
+);
+const malformedActionEnvelope = JSON.parse(JSON.stringify(dispatchPreflightEnvelope));
+const malformedActionMarker = `dispatch-malformed-action-${crypto.randomUUID()}`;
+malformedActionEnvelope.task.actions[0].id = malformedActionMarker;
+malformedActionEnvelope.task.actions[0].title = malformedActionMarker;
+const malformedActionFailure = await dispatchPreflightStream.sendExpectFailure(malformedActionEnvelope);
+assertDispatchPreflightFailure(
+  malformedActionFailure,
+  "dispatch_preflight_contract_invalid",
+  [dispatchPreflightEnvelope.task.id, malformedActionMarker],
+  "direct malformed action contract",
+);
+expect(await sessionDirectoryCount(dispatchPreflightWorkspace) === 0, "direct dispatch preflight failures created a workspace");
+const validAfterPreflightFailures = await dispatchPreflightStream.send(dispatchPreflightEnvelope);
+expect(validAfterPreflightFailures.some((event) => event.kind === "gatewayConnected"), "valid sent task did not enter Gateway after preflight failures");
+expect(validAfterPreflightFailures.some((event) => event.kind === "actionStarted"), "valid sent task did not start an action after preflight failures");
+expect(validAfterPreflightFailures.some((event) => event.kind === "sessionCompleted"), "valid sent task did not complete after preflight failures");
+expect(await sessionDirectoryCount(dispatchPreflightWorkspace) === 1, "valid sent task did not create exactly one workspace after preflight failures");
+await dispatchPreflightStream.close();
+
 const emptyExtractionEvents = await runEmitEvents(
   {
     CLAW_GATEWAY_TOKEN: token,
@@ -1311,7 +1382,7 @@ function assertPrivateContinuationOffer(events, receipt, label) {
 function assertContinuationStreamFailure(events, code, receipts, label) {
   expect(events.length === 1, `${label} should emit one envelope failure`);
   const failure = events[0];
-  expect(failure.kind === "actionFailed" && failure.summary === `gateway error: ${code}`, `${label} error code mismatch`);
+  expect(failure.kind === "actionFailed" && failure.resultStatus === "failed" && failure.summary === `gateway error: ${code}`, `${label} error code mismatch`);
   expect(failure.actionID === undefined && failure.actionKind === undefined, `${label} failure should not bind an action`);
   expect(failure.isRetryable === false && (failure.artifacts || []).length === 0, `${label} failure should be side-effect free`);
   const serialized = JSON.stringify(events);
@@ -1319,6 +1390,19 @@ function assertContinuationStreamFailure(events, code, receipts, label) {
     expect(!serialized.includes(receipt), `${label} leaked receipt`);
   }
   expect(!events.some((event) => ["gatewayConnected", "actionStarted", "artifactStored", "sessionCompleted"].includes(event.kind)), `${label} emitted business events`);
+}
+
+function assertDispatchPreflightFailure(events, code, forbiddenValues, label) {
+  expect(events.length === 1, `${label} should emit one envelope failure`);
+  const failure = events[0];
+  expect(failure.kind === "actionFailed" && failure.summary === `gateway error: ${code}`, `${label} error code mismatch`);
+  expect(failure.actionID === undefined && failure.actionKind === undefined && failure.actionTitle === undefined, `${label} failure should not bind an action`);
+  expect(failure.isRetryable === false && (failure.artifacts || []).length === 0, `${label} failure should be non-retryable and side-effect free`);
+  expect(!events.some((event) => ["gatewayConnected", "actionStarted", "artifactStored", "sessionCompleted"].includes(event.kind)), `${label} emitted business events`);
+  const serialized = JSON.stringify(events);
+  for (const forbidden of forbiddenValues) {
+    expect(!serialized.includes(forbidden), `${label} leaked ${forbidden}`);
+  }
 }
 
 async function assertContinuationChildSuccess(parentEvents, childEvents, childEnvelope, consumedReceipt, label) {
@@ -2516,7 +2600,7 @@ function makeBrowserRedirectEnvelope(rawToken, fixture) {
       sourceDevice: "smoke",
       destinationGateway: "ws://127.0.0.1:18789",
       actions,
-      status: "readyToSend",
+      status: "sent",
       riskScore: 72,
       createdAt: isoNow(),
     },

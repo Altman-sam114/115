@@ -18,6 +18,7 @@ Claw 的当前主链路是：用户在 iPhone 输入电脑任务，App 生成可
   -> 模拟事件流或 WebSocket live Gateway
   -> ClawGatewayLiveRequest + ClawGatewayConnectionState 记录 preflight 和连接阶段
   -> URLSessionClawGatewayTransport 有界重连 + ping 可观测性
+  -> Gateway Dispatch Preflight：普通首次 dispatch 只接受 sent；敏感 approval/audit 合同 fail closed；continuation 走独立 readyToSend + receipt 分支
   -> Gateway process-local task replay guard 防止同一 task.id 重复执行 handler
   -> Gateway session-start capability snapshot auditLog + 安全 metadata
   -> schema action kind gate：未知 kind 固定拒绝，不生成任务 session、action-bound event 或 artifact；WebSocket 仅返回无 action identity 的 envelope error event

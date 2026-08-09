@@ -6,6 +6,8 @@ v0.63 的 Mission Run 展示先以当前 task 为根，只接收同 task 的 ses
 
 v0.66 的 continuation 不复用父 task/session/envelope/workspace。父 safe decision、Gateway receipt 和 child 用户审批是三个独立条件；receipt 只在当前 Gateway 进程内保留 10 分钟、最多 128 条并单次消费，任何失败都在 replay、workspace、event、artifact 和 handler 前停止。
 
+v0.68 的普通首次 dispatch 只允许 `sent` 任务进入 replay、workspace 和 action 流；状态/敏感 approval preflight 失败返回无 action identity 的不可重试 envelope error。continuation 仍单独使用 `readyToSend + receipt` 合同。
+
 ## 1. Claw 核心逻辑图
 
 读图说明：从左到右看。用户任务先进入 iPhone 控制台，经过规划、任务转换和 envelope 编码后，进入模拟事件流或桌面 Gateway。Gateway 产出事件和 artifact，手机端 reducer 把它们还原成 session，最后显示给用户审批或继续下一轮。
@@ -24,7 +26,9 @@ flowchart TD
   LIVE --> LREQ["ClawGatewayLiveRequest<br/>preflight、脱敏 endpoint、transport、token 指纹"]
   LREQ --> RETRY["bounded retry + ping observe<br/>attempt、reconnect、ping、transport error"]
   RETRY --> G["Tools/claw-gateway-server.mjs<br/>校验 token、schema、allowlist、workspace"]
-  G --> RPLAY{"task replay guard<br/>同一进程内 task.id 是否已接受"}
+  G --> PREF{"Dispatch Preflight<br/>普通 sent + 敏感 approval/audit 合同<br/>continuation lineage 分支"}
+  PREF -->|"普通/continuation 合同通过"| RPLAY{"task replay guard<br/>同一进程内 task.id 是否已接受"}
+  PREF -->|"状态或 approval 不合法"| PERR["固定 envelope error<br/>无 action identity、不可重试、无副作用"]
   RPLAY -->|"重复"| RAUD["task-replay-guard.json<br/>session-level auditLog"]
   RAUD --> RSKIP["actionSkipped<br/>不重新执行 handler、不写业务 artifact"]
   RSKIP --> EVT

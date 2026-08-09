@@ -61,6 +61,31 @@ const FIXED_ACTION_HANDLERS = Object.freeze({
   composeMessage: messageDraftAction,
   composeEmail: messageDraftAction,
 });
+const VALID_APPROVAL_LEVELS = new Set([
+  "automatic",
+  "userConfirmation",
+  "gatewayApproval",
+  "blocked",
+]);
+const SENSITIVE_GATEWAY_ACTION_KINDS = new Set([
+  "observeScreen",
+  "controlBrowser",
+  "operateDesktopApp",
+  "manageFiles",
+  "runShellCommand",
+  "extractData",
+  "readContacts",
+  "runAgentLoop",
+  "composeMessage",
+  "composeEmail",
+  "desktopHandoff",
+]);
+const DISPATCH_PREFLIGHT_ERROR_CODES = new Set([
+  "dispatch_preflight_status_invalid",
+  "dispatch_preflight_approval_invalid",
+  "dispatch_preflight_approval_required",
+  "dispatch_preflight_contract_invalid",
+]);
 
 class GatewayError extends Error {
   constructor(status, code) {
@@ -165,7 +190,12 @@ if (process.argv.includes("--emit-events")) {
   const input = JSON.parse(await readEnvelopeInput());
   const envelopes = Array.isArray(input) ? input : [input];
   for (const envelope of envelopes) {
-    const events = await makeGatewayEvents(envelope, options);
+    let events;
+    try {
+      events = await makeGatewayEvents(envelope, options);
+    } catch (error) {
+      events = [errorEvent(error)];
+    }
     for (const event of events) {
       console.log(JSON.stringify(event));
     }
@@ -417,13 +447,19 @@ function encodeFrame(payload, opcode) {
 
 async function makeGatewayEvents(envelope, config) {
   validateEnvelope(envelope, config);
+  const lineage = envelope.task?.lineage;
+  const hasContinuationLineage = lineage !== undefined && lineage !== null;
+  const lineageDigest = hasContinuationLineage
+    ? validateContinuationLineageShape(envelope)
+    : null;
+  if (!hasContinuationLineage) {
+    validateOrdinaryDispatchPreflight(envelope);
+  }
   const replayKey = taskReplayKey(envelope);
   const cache = config.taskReplayCache;
-  const lineage = envelope.task?.lineage;
   let continuationState = null;
 
-  if (lineage !== undefined && lineage !== null) {
-    const lineageDigest = validateContinuationLineageShape(envelope);
+  if (hasContinuationLineage) {
     const existingRecord = cache?.get(replayKey);
     if (existingRecord) {
       if (existingRecord.continuationLineageDigest !== lineageDigest) {
@@ -1404,6 +1440,53 @@ function validateEnvelope(envelope, config) {
     const expected = tokenFingerprint(config.token);
     if (envelope.gateway?.tokenFingerprint !== expected) {
       throw new GatewayError(401, "token_fingerprint_mismatch");
+    }
+  }
+}
+
+function validateOrdinaryDispatchPreflight(envelope) {
+  if (envelope.task.status !== "sent") {
+    throw new GatewayError(400, "dispatch_preflight_status_invalid");
+  }
+
+  const gateway = envelope.gateway;
+  const allowedActionKinds = new Set(
+    Array.isArray(gateway?.allowedActionKinds) ? gateway.allowedActionKinds : [],
+  );
+  for (const action of envelope.task.actions) {
+    if (
+      !isPlainObject(action) ||
+      !isUUID(action.id) ||
+      typeof action.kind !== "string" ||
+      typeof action.title !== "string" ||
+      typeof action.target !== "string" ||
+      typeof action.instruction !== "string" ||
+      typeof action.sourceSurface !== "string" ||
+      typeof action.handlesSensitiveData !== "boolean" ||
+      typeof action.inputPreview !== "string" ||
+      (action.toolArguments !== undefined && !isPlainObject(action.toolArguments))
+    ) {
+      throw new GatewayError(400, "dispatch_preflight_contract_invalid");
+    }
+    if (!VALID_APPROVAL_LEVELS.has(action.approval)) {
+      throw new GatewayError(400, "dispatch_preflight_approval_invalid");
+    }
+    const envelopeAllowed = allowedActionKinds.has(action.kind);
+    if (!envelopeAllowed || action.approval === "blocked") {
+      continue;
+    }
+
+    const sensitive = action.handlesSensitiveData === true || SENSITIVE_GATEWAY_ACTION_KINDS.has(action.kind);
+    if (
+      sensitive &&
+      (
+        gateway?.requiresApprovalForSensitiveData !== true ||
+        gateway?.auditEnabled !== true ||
+        envelope.auditRequired !== true ||
+        !["userConfirmation", "gatewayApproval"].includes(action.approval)
+      )
+    ) {
+      throw new GatewayError(400, "dispatch_preflight_approval_required");
     }
   }
 }
@@ -5214,13 +5297,17 @@ function statusText(status) {
 
 function errorEvent(error, forceFailClosed = false) {
   const code = error instanceof GatewayError ? error.code : "internal_error";
-  const failClosed = forceFailClosed || code === "unsupported_action_kind" || code.startsWith("continuation_");
+  const failClosed = forceFailClosed ||
+    code === "unsupported_action_kind" ||
+    code.startsWith("continuation_") ||
+    DISPATCH_PREFLIGHT_ERROR_CODES.has(code);
   return {
     id: crypto.randomUUID(),
     sessionID: crypto.randomUUID(),
     taskID: crypto.randomUUID(),
     sequence: 0,
     kind: "actionFailed",
+    resultStatus: "failed",
     summary: `gateway error: ${code}`,
     artifacts: [],
     isRetryable: !failClosed,

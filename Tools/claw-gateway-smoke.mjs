@@ -801,6 +801,124 @@ for (const blockedAction of ["operateDesktopApp", "composeMessage"]) {
   expect(!serializedAgentLoopPolicyTrace.includes(serializedAction), `websocket agent loop trace leaked ${blockedAction}`);
 }
 
+const dispatchPreflightPort = port + 8;
+const dispatchPreflightWorkspace = `.build/claw-gateway-websocket-dispatch-preflight-${crypto.randomUUID()}`;
+const dispatchPreflightServer = spawn(
+  process.execPath,
+  ["Tools/claw-gateway-server.mjs"],
+  {
+    env: {
+      ...process.env,
+      ...gatewayPolicyDefaults(),
+      CLAW_GATEWAY_HOST: host,
+      CLAW_GATEWAY_PORT: String(dispatchPreflightPort),
+      CLAW_GATEWAY_TOKEN: token,
+      CLAW_WORKSPACE: dispatchPreflightWorkspace,
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  },
+);
+let dispatchPreflightServerOutput = "";
+dispatchPreflightServer.stdout.on("data", (chunk) => {
+  dispatchPreflightServerOutput += chunk.toString("utf8");
+});
+dispatchPreflightServer.stderr.on("data", (chunk) => {
+  dispatchPreflightServerOutput += chunk.toString("utf8");
+});
+const dispatchPreflightEnvelope = makeEnvelope(token, dispatchPreflightPort);
+try {
+  await waitFor(
+    () => dispatchPreflightServerOutput.includes("Claw Gateway listening"),
+    3000,
+    () => dispatchPreflightServerOutput,
+  );
+  const invalidDispatchStatuses = [
+    undefined,
+    "unknown",
+    "waitingForApproval",
+    "queued",
+    "blocked",
+    "draft",
+    "readyToSend",
+    "approvedFrozen",
+    "complete",
+  ];
+  for (const [index, status] of invalidDispatchStatuses.entries()) {
+    const invalidEnvelope = JSON.parse(JSON.stringify(dispatchPreflightEnvelope));
+    const marker = `websocket-dispatch-preflight-${index}-${crypto.randomUUID()}`;
+    if (status === undefined) {
+      delete invalidEnvelope.task.status;
+    } else {
+      invalidEnvelope.task.status = status;
+    }
+    invalidEnvelope.task.command = marker;
+    invalidEnvelope.task.actions[0].target = marker;
+    invalidEnvelope.task.actions[0].instruction = marker;
+    invalidEnvelope.task.actions[0].inputPreview = marker;
+    invalidEnvelope.task.actions[0].toolArguments.observationGoal = marker;
+    const failure = await connectAndCollectEvents({
+      host,
+      port: dispatchPreflightPort,
+      token,
+      envelope: invalidEnvelope,
+    });
+    assertDispatchPreflightFailure(
+      failure,
+      "dispatch_preflight_status_invalid",
+      [dispatchPreflightEnvelope.task.id, dispatchPreflightEnvelope.task.actions[0].id, marker],
+      `websocket dispatch status ${status || "missing"}`,
+    );
+  }
+  const forgedApprovalEnvelope = JSON.parse(JSON.stringify(dispatchPreflightEnvelope));
+  const forgedApprovalMarker = `websocket-dispatch-approval-${crypto.randomUUID()}`;
+  forgedApprovalEnvelope.task.actions[0].approval = "automatic";
+  forgedApprovalEnvelope.task.actions[0].target = forgedApprovalMarker;
+  forgedApprovalEnvelope.task.actions[0].instruction = forgedApprovalMarker;
+  forgedApprovalEnvelope.task.actions[0].inputPreview = forgedApprovalMarker;
+  forgedApprovalEnvelope.task.actions[0].toolArguments.observationGoal = forgedApprovalMarker;
+  const forgedApprovalFailure = await connectAndCollectEvents({
+    host,
+    port: dispatchPreflightPort,
+    token,
+    envelope: forgedApprovalEnvelope,
+  });
+  assertDispatchPreflightFailure(
+    forgedApprovalFailure,
+    "dispatch_preflight_approval_required",
+    [dispatchPreflightEnvelope.task.id, dispatchPreflightEnvelope.task.actions[0].id, forgedApprovalMarker],
+    "websocket forged sensitive approval",
+  );
+  const malformedActionEnvelope = JSON.parse(JSON.stringify(dispatchPreflightEnvelope));
+  const malformedActionMarker = `websocket-malformed-action-${crypto.randomUUID()}`;
+  malformedActionEnvelope.task.actions[0].id = malformedActionMarker;
+  malformedActionEnvelope.task.actions[0].title = malformedActionMarker;
+  const malformedActionFailure = await connectAndCollectEvents({
+    host,
+    port: dispatchPreflightPort,
+    token,
+    envelope: malformedActionEnvelope,
+  });
+  assertDispatchPreflightFailure(
+    malformedActionFailure,
+    "dispatch_preflight_contract_invalid",
+    [dispatchPreflightEnvelope.task.id, malformedActionMarker],
+    "websocket malformed action contract",
+  );
+  expect(await sessionDirectoryCount(dispatchPreflightWorkspace) === 0, "websocket dispatch preflight failures created a workspace");
+  const validAfterPreflightFailures = await connectAndCollectEvents({
+    host,
+    port: dispatchPreflightPort,
+    token,
+    envelope: dispatchPreflightEnvelope,
+  });
+  expect(validAfterPreflightFailures.some((event) => event.kind === "gatewayConnected"), "websocket valid sent task did not enter Gateway after preflight failures");
+  expect(validAfterPreflightFailures.some((event) => event.kind === "actionStarted"), "websocket valid sent task did not start after preflight failures");
+  expect(validAfterPreflightFailures.some((event) => event.kind === "sessionCompleted"), "websocket valid sent task did not complete after preflight failures");
+  expect(await sessionDirectoryCount(dispatchPreflightWorkspace) === 1, "websocket valid sent task did not create exactly one workspace after preflight failures");
+} finally {
+  dispatchPreflightServer.kill();
+}
+
 const continuationPort = port + 7;
 const continuationWorkspace = `.build/claw-gateway-websocket-trusted-continuation-${crypto.randomUUID()}`;
 const continuationServer = spawn(
@@ -1012,7 +1130,7 @@ function makeContinuationParentEnvelope(rawToken, endpointPort) {
           },
         },
       ],
-      status: "readyToSend",
+      status: "sent",
       riskScore: 20,
       createdAt: isoNow(),
     },
@@ -1410,11 +1528,24 @@ async function assertContinuationChildSuccess(parentEvents, childEvents, childEn
 function assertContinuationEnvelopeFailure(events, code, receipt, label) {
   expect(events.length === 1, `${label} should emit one envelope failure`);
   const failure = events[0];
-  expect(failure.kind === "actionFailed" && failure.summary === `gateway error: ${code}`, `${label} error code mismatch`);
+  expect(failure.kind === "actionFailed" && failure.resultStatus === "failed" && failure.summary === `gateway error: ${code}`, `${label} error code mismatch`);
   expect(failure.actionID === undefined && failure.actionKind === undefined, `${label} failure should not bind an action`);
   expect(failure.isRetryable === false && (failure.artifacts || []).length === 0, `${label} failure should be side-effect free`);
   expect(!JSON.stringify(events).includes(receipt), `${label} leaked receipt`);
   expect(!events.some((event) => ["gatewayConnected", "actionStarted", "artifactStored", "sessionCompleted"].includes(event.kind)), `${label} emitted business events`);
+}
+
+function assertDispatchPreflightFailure(events, code, forbiddenValues, label) {
+  expect(events.length === 1, `${label} should emit one envelope failure`);
+  const failure = events[0];
+  expect(failure.kind === "actionFailed" && failure.summary === `gateway error: ${code}`, `${label} error code mismatch`);
+  expect(failure.actionID === undefined && failure.actionKind === undefined && failure.actionTitle === undefined, `${label} failure should not bind an action`);
+  expect(failure.isRetryable === false && (failure.artifacts || []).length === 0, `${label} failure should be non-retryable and side-effect free`);
+  expect(!events.some((event) => ["gatewayConnected", "actionStarted", "artifactStored", "sessionCompleted"].includes(event.kind)), `${label} emitted business events`);
+  const serialized = JSON.stringify(events);
+  for (const forbidden of forbiddenValues) {
+    expect(!serialized.includes(forbidden), `${label} leaked ${forbidden}`);
+  }
 }
 
 function workspaceRootFromEvents(events) {
