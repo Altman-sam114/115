@@ -474,6 +474,8 @@ final class ClawTests: XCTestCase {
 
         XCTAssertEqual(summary.phaseTitle, ClawAutonomousLoopPhase.idle.title)
         XCTAssertEqual(summary.primaryActionKind, .start)
+        XCTAssertEqual(summary.primaryActionTitle, "启动任务回合")
+        XCTAssertEqual(summary.primaryActionIcon, "play.fill")
         XCTAssertTrue(summary.isPrimaryActionEnabled)
         XCTAssertEqual(summary.progressCurrent, 0)
         XCTAssertEqual(summary.progressTotal, 3)
@@ -490,6 +492,9 @@ final class ClawTests: XCTestCase {
 
         XCTAssertEqual(summary.phaseTitle, ClawAutonomousLoopPhase.waitingForUserApproval.title)
         XCTAssertEqual(summary.primaryActionKind, .approveAndContinue)
+        XCTAssertEqual(summary.primaryActionTitle, "审批并继续")
+        XCTAssertEqual(summary.primaryActionIcon, "checkmark.seal.fill")
+        XCTAssertTrue(summary.isPrimaryActionEnabled)
         XCTAssertTrue(summary.requiresUserApproval)
         XCTAssertGreaterThan(summary.riskScore, 0)
         XCTAssertGreaterThan(summary.approvalCount, 0)
@@ -507,6 +512,9 @@ final class ClawTests: XCTestCase {
 
         XCTAssertEqual(summary.phaseTitle, ClawAutonomousLoopPhase.needsAttention.title)
         XCTAssertEqual(summary.primaryActionKind, .continueAfterReview)
+        XCTAssertEqual(summary.primaryActionTitle, "复核后重试")
+        XCTAssertEqual(summary.primaryActionIcon, "arrow.clockwise.circle.fill")
+        XCTAssertTrue(summary.isPrimaryActionEnabled)
         XCTAssertTrue(summary.requiresUserApproval)
         XCTAssertGreaterThan(summary.succeededCount, 0)
         XCTAssertGreaterThan(summary.artifactCount, 0)
@@ -3046,6 +3054,8 @@ final class ClawTests: XCTestCase {
 
         XCTAssertEqual(summary.phaseTitle, ClawAutonomousLoopPhase.completed.title)
         XCTAssertEqual(summary.primaryActionKind, .start)
+        XCTAssertEqual(summary.primaryActionTitle, "重新启动当前任务")
+        XCTAssertEqual(summary.primaryActionIcon, "play.circle.fill")
         XCTAssertTrue(summary.isPrimaryActionEnabled)
         XCTAssertEqual(summary.progressCurrent, 2)
         XCTAssertEqual(summary.retryableCount, 0)
@@ -3063,10 +3073,77 @@ final class ClawTests: XCTestCase {
 
         XCTAssertEqual(summary.phaseTitle, ClawAutonomousLoopPhase.blocked.title)
         XCTAssertEqual(summary.primaryActionKind, .inspectBlocked)
+        XCTAssertEqual(summary.primaryActionTitle, "修改任务或白名单")
+        XCTAssertEqual(summary.primaryActionIcon, "lock.trianglebadge.exclamationmark.fill")
         XCTAssertFalse(summary.isPrimaryActionEnabled)
         XCTAssertGreaterThan(summary.blockedCount, 0)
         XCTAssertTrue(summary.statusLine.contains("安全策略"))
         XCTAssertTrue(summary.stageTrack.contains { $0.isBlocked })
+
+        let beforeBlockedDispatch = store.autonomousLoop
+        ClawMissionRunPrimaryActionDispatcher.perform(
+            summary.primaryActionKind,
+            renderedSummary: summary,
+            in: store
+        )
+        XCTAssertEqual(store.autonomousLoop, beforeBlockedDispatch)
+    }
+
+    func testMissionRunPrimaryActionDispatcherIgnoresDisabledGatewayWait() {
+        let store = ClawStore(autoScanLocalArtifacts: false)
+        let beforeDispatch = store.autonomousLoop
+        let renderedSummary = store.missionRunSummary
+
+        ClawMissionRunPrimaryActionDispatcher.perform(
+            .waitForGateway,
+            renderedSummary: renderedSummary,
+            in: store
+        )
+
+        XCTAssertEqual(store.autonomousLoop, beforeDispatch)
+    }
+
+    func testMissionRunSummaryShowsDisabledGatewayWaitState() {
+        let store = ClawStore(autoScanLocalArtifacts: false)
+        store.gatewayDispatchMode = .liveGateway
+        store.setGateway(url: "ws://127.0.0.1:18789", token: "paired-token")
+        store.phoneAgentCommand = "打开浏览器搜索资料并发到 Slack"
+        store.startAutonomousComputerTakeover()
+        store.approveAndContinueAutonomousLoop()
+
+        let summary = store.missionRunSummary
+        let beforeDispatch = store.autonomousLoop
+
+        ClawMissionRunPrimaryActionDispatcher.perform(
+            summary.primaryActionKind,
+            renderedSummary: summary,
+            in: store
+        )
+
+        XCTAssertEqual(summary.primaryActionKind, .waitForGateway)
+        XCTAssertEqual(summary.primaryActionTitle, "等待桌面 Gateway 事件")
+        XCTAssertEqual(summary.primaryActionIcon, "hourglass")
+        XCTAssertFalse(summary.isPrimaryActionEnabled)
+        XCTAssertEqual(summary.taskID, summary.sessionTaskID)
+        XCTAssertNotNil(summary.sessionID)
+        XCTAssertEqual(store.autonomousLoop, beforeDispatch)
+    }
+
+    func testMissionRunPrimaryActionDispatcherRejectsStaleScopeSummary() {
+        let store = ClawStore(autoScanLocalArtifacts: false)
+        store.phoneAgentCommand = "打开浏览器搜索资料并发到 Slack"
+        store.startAutonomousComputerTakeover()
+        var staleSummary = store.missionRunSummary
+        staleSummary.missionScopeID = UUID()
+        let beforeDispatch = store.autonomousLoop
+
+        ClawMissionRunPrimaryActionDispatcher.perform(
+            staleSummary.primaryActionKind,
+            renderedSummary: staleSummary,
+            in: store
+        )
+
+        XCTAssertEqual(store.autonomousLoop, beforeDispatch)
     }
 
     func testAutonomousLoopApprovalDispatchesThroughGatewayEvents() {
@@ -3361,6 +3438,10 @@ final class ClawTests: XCTestCase {
             statusLine: "legacy",
             stageTrack: []
         )
+        XCTAssertEqual(summary.primaryActionTitle, "完成")
+        XCTAssertEqual(summary.primaryActionIcon, "checkmark.circle.fill")
+        XCTAssertEqual(summary.primaryActionKind, .waitForGateway)
+        XCTAssertFalse(summary.isPrimaryActionEnabled)
         XCTAssertEqual(summary.loopContinuationSummary.title, "Loop metadata 待同步")
         XCTAssertTrue(summary.loopContinuationSummary.hasMetadataGap)
         XCTAssertTrue(summary.loopContinuationSummary.requiresHumanAction)

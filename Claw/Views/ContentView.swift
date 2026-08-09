@@ -491,7 +491,7 @@ struct PhoneAgentWorkbenchLayout: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
                         PhoneAgentCommandPanel(examples: examples)
-                        ClawMissionRunPanel(reviewFocus: $reviewFocus)
+                        ClawMissionRunPanel(reviewFocus: $reviewFocus, showsPrimaryAction: false)
                     }
                     .padding(.vertical, 16)
                     .padding(.leading, 16)
@@ -626,9 +626,65 @@ struct PhoneAgentCommandPanel: View {
     }
 }
 
+@MainActor
+enum ClawMissionRunPrimaryActionDispatcher {
+    static func perform(
+        _ action: ClawMissionRunPrimaryActionKind,
+        renderedSummary: ClawMissionRunSummary,
+        in store: ClawStore
+    ) {
+        let currentSummary = store.missionRunSummary
+        guard action == renderedSummary.primaryActionKind,
+              renderedSummary.isPrimaryActionEnabled,
+              renderedSummary.command == currentSummary.command,
+              renderedSummary.taskID == currentSummary.taskID,
+              renderedSummary.sessionID == currentSummary.sessionID,
+              renderedSummary.sessionTaskID == currentSummary.sessionTaskID,
+              renderedSummary.missionScopeID == currentSummary.missionScopeID,
+              renderedSummary.phaseTitle == currentSummary.phaseTitle,
+              renderedSummary.phaseIcon == currentSummary.phaseIcon,
+              renderedSummary.primaryActionTitle == currentSummary.primaryActionTitle,
+              renderedSummary.primaryActionIcon == currentSummary.primaryActionIcon,
+              renderedSummary.primaryActionKind == currentSummary.primaryActionKind,
+              renderedSummary.isPrimaryActionEnabled == currentSummary.isPrimaryActionEnabled else {
+            return
+        }
+
+        switch action {
+        case .start:
+            store.startAutonomousComputerTakeover()
+        case .approveAndContinue:
+            store.approveAndContinueAutonomousLoop()
+        case .continueAfterReview:
+            store.continueAutonomousLoopAfterReview()
+        case .waitForGateway, .inspectBlocked:
+            return
+        }
+    }
+}
+
+struct ClawMissionRunPrimaryActionView: View {
+    let summary: ClawMissionRunSummary
+    let onAction: (ClawMissionRunPrimaryActionKind) -> Void
+
+    var body: some View {
+        Button(summary.primaryActionTitle, systemImage: summary.primaryActionIcon) {
+            onAction(summary.primaryActionKind)
+        }
+        .frame(maxWidth: .infinity, minHeight: 44)
+        .buttonStyle(PrimaryActionButtonStyle())
+        .disabled(summary.isPrimaryActionEnabled == false)
+        .opacity(summary.isPrimaryActionEnabled ? 1 : 0.55)
+        .accessibilityLabel(summary.primaryActionTitle)
+        .accessibilityHint("只执行当前 Mission 的既有审批流程，不会自动发送未审批任务")
+        .accessibilityInputLabels([summary.primaryActionTitle, "Mission 主动作"])
+    }
+}
+
 struct ClawMissionRunPanel: View {
     @EnvironmentObject private var store: ClawStore
     @Binding var reviewFocus: ClawMissionRunReviewFocus?
+    let showsPrimaryAction: Bool = true
 
     var body: some View {
         let summary = store.missionRunSummary
@@ -850,13 +906,15 @@ struct ClawMissionRunPanel: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Button(summary.primaryActionTitle, systemImage: summary.primaryActionIcon) {
-                performPrimaryAction(summary.primaryActionKind)
+            if showsPrimaryAction {
+                ClawMissionRunPrimaryActionView(summary: summary) { action in
+                    ClawMissionRunPrimaryActionDispatcher.perform(
+                        action,
+                        renderedSummary: summary,
+                        in: store
+                    )
+                }
             }
-            .frame(maxWidth: .infinity)
-            .buttonStyle(PrimaryActionButtonStyle())
-            .disabled(summary.isPrimaryActionEnabled == false)
-            .opacity(summary.isPrimaryActionEnabled ? 1 : 0.55)
         }
         .panelCard()
     }
@@ -893,19 +951,6 @@ struct ClawMissionRunPanel: View {
             return .orange
         }
         return .green
-    }
-
-    private func performPrimaryAction(_ action: ClawMissionRunPrimaryActionKind) {
-        switch action {
-        case .start:
-            store.startAutonomousComputerTakeover()
-        case .approveAndContinue:
-            store.approveAndContinueAutonomousLoop()
-        case .continueAfterReview:
-            store.continueAutonomousLoopAfterReview()
-        case .waitForGateway, .inspectBlocked:
-            break
-        }
     }
 
     private func performContinuationDraftAction(_ summary: ClawContinuationDraftPresentationSummary) {
@@ -978,6 +1023,14 @@ struct ClawMissionReviewDetailDockView: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            ClawMissionRunPrimaryActionView(summary: summary) { action in
+                ClawMissionRunPrimaryActionDispatcher.perform(
+                    action,
+                    renderedSummary: summary,
+                    in: store
+                )
+            }
 
             HStack(spacing: 8) {
                 PhoneAgentTag(

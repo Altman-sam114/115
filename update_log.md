@@ -22,6 +22,40 @@
 
 ## 历史记录
 
+### v0.69 / macOS-iPad Regular Workbench Primary Action
+
+日期：2026-08-09
+
+核心变更：
+
+- regular iPad/宽屏工作台的右侧 Review Detail Dock 就地复用 `missionRunSummary` 的 primary action 标题、SF Symbol、enabled 状态和既有 Store dispatcher；regular 左栏隐藏重复入口，compact iPhone 保持原单栏入口。
+- 共享 primary action view/dispatcher 接收渲染时的 Mission summary，并在执行前重新核对 command、task/session/sessionTask、mission scope、phase、primary title/icon/kind 和 enabled 状态；旧 summary、旧 scope、stale action、等待 Gateway 与阻断状态均 fail closed，不能绕过审批、workspace、allowlist、live preflight、continuation receipt 或冻结/发送闸门。
+- app 与 test target 的 `TARGETED_DEVICE_FAMILY` 仅从 `1` 扩展为 `1,2`，没有修改用户的 team/bundle/scheme 配置，也没有修改 xcuserdata；工程仍没有原生 macOS 或 Mac Catalyst target。
+- 补充 idle、审批、复核、完成、Gateway wait 和 blocked 的 presentation action 状态覆盖，以及 disabled/blocked dispatcher 无副作用断言。UI 继续只读 metadata-only 展示状态，不暴露 token、receipt、payload、路径、URL、正文或 UUID。
+
+关键文件：
+
+- `Claw/Views/ContentView.swift`
+- `ClawTests/ClawTests.swift`
+- `Tools/LogicSmoke.swift`
+- `Claw.xcodeproj/project.pbxproj`
+- `README.md`
+- `Docs/claw-mobile-gateway-protocol.md`
+- `md/flow/flow.md`
+- `md/flow/flowchart.md`
+- `md/test/test.md`
+- `update_log.md`
+
+验证结果：
+
+- 本轮仅进行 `git status`、`git diff --check`、文本/diff 复核和必要的 `plutil -lint`；未运行本地编译、build、XCTest、Swift LogicSmoke、Gateway fixture、direct/WebSocket smoke、`xcodebuild` 或 `node --check`。
+- commit/push 后的 GitHub Actions 云端 run、run attempt、未加密 artifact 和 Agent C 复判尚未产生；不得把本地静态检查描述为业务通过。
+
+遗留事项：
+
+- 需要 Agent C 下载最新 `origin/main` CI artifact，核对 manifest、JUnit/摘要、主日志、XCTest、LogicSmoke、fixture、direct/WebSocket smoke、Xcode build 和 target family 变更与 commit/run/attempt 完全匹配。
+- regular 布局语义不代表原生 macOS 应用；完整 macOS Accessibility/browser controller、跨重启多轮状态和持久 live Gateway pairing 仍待后续版本。
+
 ### v0.68 / Gateway 普通任务统一 Dispatch Preflight
 
 日期：2026-08-09

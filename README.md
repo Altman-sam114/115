@@ -12,6 +12,8 @@ v0.67 起，可信跨任务续接为选中的 `manageFiles` action 增加受限�
 
 v0.68 起，普通 Gateway 首次 dispatch 增加统一 `Dispatch Preflight`：基础 schema/token 校验后、replay cache、workspace、`gatewayConnected`、能力快照 audit artifact、action event 和 handler 之前，普通任务只接受 `task.status=sent`。缺失、未知、`waitingForApproval`、`queued`、`blocked`、`draft`、`readyToSend`、`approvedFrozen` 和 `complete` 均固定 fail closed；allowlist 未允许或显式 `blocked` 的 action 仍保留既有逐 action policy skip。allowlisted 敏感 Gateway action 必须同时满足 Gateway 敏感审批、审计开关、`auditRequired` 和 `userConfirmation`/`gatewayApproval` 合同，不能以 `automatic` 伪造发送。失败只返回无 action identity、不可重试、无敏感回显的 envelope error，不创建 workspace/replay record、不写 artifact、不执行 handler；带 lineage 的 continuation 仍独立使用 `readyToSend + receipt`、lineage 和单次消费合同。相关 Gateway、fixture、direct/WebSocket smoke 和文档只在 push 后由云端验证。
 
+v0.69 起，regular iPad/宽屏工作台的右侧 Review Detail Dock 就地显示当前 `ClawMissionRunSummary` 的 Mission primary action；regular 左栏隐藏重复入口，compact iPhone 继续保留单栏入口。共享 primary action view 与 fail-closed dispatcher 复用同一标题、SF Symbol、enabled 状态和既有 Store 审批/继续/复核后重试方法；等待 Gateway、阻断状态保持 disabled，不自动 queue/approve/freeze/send，也不读取或显示 token、receipt、payload、路径、URL、正文或 UUID。app/test target family 最小扩展为 `1,2` 以覆盖 iPad；工程仍没有原生 macOS 或 Mac Catalyst target，宽屏 mac 仅指 regular SwiftUI 布局语义。
+
 后续 Codex/Agent 接力开发必须先读 `AGENTS.md`。项目已建立“人工目标 -> Agent A 设计提示词 -> Agent B 在 main 上实现并推送 -> GitHub Actions 云端验证 -> Agent C 下载结果包复判 -> 人工复核 -> 下一轮”的迭代工作流，并准备支持未来由 Agent X 主控多轮调度 A/B/C。核心记忆和规范分布在 `AGENTS.md`、`update_log.md`、`md/test/test.md`、`md/flow/flow.md`、`md/flow/flowchart.md` 和 `md/prompt/`。
 
 ## 协作与云端验证

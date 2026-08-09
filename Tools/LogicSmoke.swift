@@ -229,6 +229,9 @@ enum LogicSmoke {
 
         let missionStore = ClawStore(autoScanLocalArtifacts: false)
         expect(missionStore.missionRunSummary.primaryActionKind == .start, "mission summary should start with a launch action")
+        expect(missionStore.missionRunSummary.primaryActionTitle == "启动任务回合", "idle primary action should expose launch title")
+        expect(missionStore.missionRunSummary.primaryActionIcon == "play.fill", "idle primary action should expose launch icon")
+        expect(missionStore.missionRunSummary.isPrimaryActionEnabled, "idle primary action should be enabled")
         expect(missionStore.missionRunSummary.reviewPriorityQueue.isEmpty, "idle mission summary should not invent review priorities")
         let idleReadiness = missionStore.missionRunSummary.reviewReadinessSummary
         expect(idleReadiness.totalPriorityCount == 0, "idle readiness should not count review priorities")
@@ -360,6 +363,9 @@ enum LogicSmoke {
         missionStore.startAutonomousComputerTakeover()
         var missionSummary = missionStore.missionRunSummary
         expect(missionSummary.primaryActionKind == .approveAndContinue, "mission summary should stop at approval gate")
+        expect(missionSummary.primaryActionTitle == "审批并继续", "approval primary action should expose approval title")
+        expect(missionSummary.primaryActionIcon == "checkmark.seal.fill", "approval primary action should expose approval icon")
+        expect(missionSummary.isPrimaryActionEnabled, "approval primary action should be enabled")
         expect(missionSummary.requiresUserApproval, "mission summary should surface approval requirements")
         expect(missionSummary.riskScore > 0, "mission summary should include task risk")
         let preSendApprovalQueue = missionSummary.approvalQueueSummary
@@ -508,6 +514,18 @@ enum LogicSmoke {
         missionStore.approveAndContinueAutonomousLoop()
         missionSummary = missionStore.missionRunSummary
         expect(missionSummary.primaryActionKind == .continueAfterReview, "mission summary should expose review action")
+        expect(missionSummary.primaryActionTitle == "复核后重试", "review primary action should expose retry title")
+        expect(missionSummary.primaryActionIcon == "arrow.clockwise.circle.fill", "review primary action should expose retry icon")
+        expect(missionSummary.isPrimaryActionEnabled, "review primary action should be enabled")
+        var waitingGatewaySummary = missionSummary
+        waitingGatewaySummary.primaryActionTitle = "等待桌面 Gateway 事件"
+        waitingGatewaySummary.primaryActionIcon = "hourglass"
+        waitingGatewaySummary.primaryActionKind = .waitForGateway
+        waitingGatewaySummary.isPrimaryActionEnabled = false
+        expect(waitingGatewaySummary.primaryActionKind == .waitForGateway, "gateway wait state should expose wait action kind")
+        expect(waitingGatewaySummary.primaryActionTitle == "等待桌面 Gateway 事件", "gateway wait state should expose wait title")
+        expect(waitingGatewaySummary.primaryActionIcon == "hourglass", "gateway wait state should expose wait icon")
+        expect(waitingGatewaySummary.isPrimaryActionEnabled == false, "gateway wait state should disable primary action")
         expect(missionSummary.artifactCount > 0, "mission summary should count gateway artifacts")
         expect(missionSummary.artifactKinds.contains(.browserTrace), "mission summary should summarize artifact kinds")
         expect(missionSummary.artifactKinds.contains(.auditLog), "mission summary should include session-level audit artifacts")
@@ -3384,6 +3402,15 @@ enum LogicSmoke {
         expect(retryMissionStore.missionRunSummary.retryableCount > 0, "mission summary should expose retryable failures")
         retryMissionStore.continueAutonomousLoopAfterReview()
         expect(retryMissionStore.missionRunSummary.phaseTitle == ClawAutonomousLoopPhase.completed.title, "mission summary should complete after retry")
+
+        let blockedMissionStore = ClawStore(autoScanLocalArtifacts: false)
+        blockedMissionStore.phoneAgentCommand = "读取微信新消息并自动回复客户"
+        blockedMissionStore.startAutonomousComputerTakeover()
+        let blockedMissionSummary = blockedMissionStore.missionRunSummary
+        expect(blockedMissionSummary.primaryActionKind == .inspectBlocked, "blocked mission should expose inspect action kind")
+        expect(blockedMissionSummary.primaryActionTitle == "修改任务或白名单", "blocked mission should expose inspect title")
+        expect(blockedMissionSummary.primaryActionIcon == "lock.trianglebadge.exclamationmark.fill", "blocked mission should expose inspect icon")
+        expect(blockedMissionSummary.isPrimaryActionEnabled == false, "blocked mission should disable primary action")
 
         store.setGateway(url: "ws://127.0.0.1:18789", token: "")
         store.gatewayDispatchMode = .liveGateway

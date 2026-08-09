@@ -8,6 +8,8 @@ v0.66 的 continuation 不复用父 task/session/envelope/workspace。父 safe d
 
 v0.68 的普通首次 dispatch 只允许 `sent` 任务进入 replay、workspace 和 action 流；状态/敏感 approval preflight 失败返回无 action identity 的不可重试 envelope error。continuation 仍单独使用 `readyToSend + receipt` 合同。
 
+v0.69 的 regular 工作台把同一 Mission primary action 放入右侧 Review Detail Dock；左栏隐藏重复按钮，compact 仍使用单栏入口。共享 view/dispatcher 传入渲染 summary，并在当前 command/task/session/sessionTask/mission scope/phase/action 全部匹配且 enabled 时调用既有 Store 闸门，等待 Gateway、阻断和 stale summary 均 fail closed；宽屏布局不等于原生 macOS target。
+
 ## 1. Claw 核心逻辑图
 
 读图说明：从左到右看。用户任务先进入 iPhone 控制台，经过规划、任务转换和 envelope 编码后，进入模拟事件流或桌面 Gateway。Gateway 产出事件和 artifact，手机端 reducer 把它们还原成 session，最后显示给用户审批或继续下一轮。
@@ -69,7 +71,7 @@ flowchart TD
   LHEALTH --> RUN["ClawMissionRunSummary<br/>派生目标、阶段、主动作、风险、证据、Approval Fast Lane、Mac Agent Control Snapshot、Operator Strip、Loop Continuation Brief、Mac Agent Readiness Board / Policy Diagnostics Board、Mac Gateway Action Preflight Matrix、Mac Agent Evidence Coverage Map、Mac Agent Next Step Deck、Mac Agent Run Timeline、Mac Agent Continuation Gate、Mac Agent Review Radar、Mac Agent Handoff Brief、Focus Context、Review Detail Dock、Review Trail、Approval Queue、Payload Safety Ledger、Artifact Evidence Index、Review Readiness Summary、Next Review Action、Review Priority Queue、Focused Priority Detail、Live health、Artifact metadata、File Change Safety / Policy Diagnostics、Shell Command Safety / Policy Diagnostics、提取完整性 / 来源策略诊断、Browser Control、Delivery Safety、Gateway 能力、Accessibility、Replay Guard 和 AgentTrace handoff 复核"]
   RREVIEW --> RUN
   SES --> RUN
-  RUN --> UI["SwiftUI Mission Run / iPad 多栏工作台<br/>展示计划、风险、事件、artifact、审批点、Approval Fast Lane 审批快车道、Mac Agent Control Snapshot 控制态势快照、Operator Strip、Loop 继续态势、Mac Agent Readiness Board 就绪看板、Mac Gateway Action Preflight Matrix 动作预检矩阵、Mac Agent Evidence Coverage Map 证据覆盖图、Mac Agent Next Step Deck 下一步候选卡组、Mac Agent Run Timeline 执行时间线、Mac Agent Continuation Gate 继续闸门、Mac Agent Review Radar 复核雷达、Mac Agent Handoff Brief 人工交接简报、Focus Context 聚焦上下文、Review Detail Dock、Review Trail 复核路径、Approval Queue 审批队列、Payload Safety Ledger 载荷安全账本、Artifact 证据索引、复核态势、下一步复核行动、复核优先队列、当前聚焦项和详细复核摘要"]
+  RUN --> UI["SwiftUI Mission Run / iPad 多栏工作台<br/>展示计划、风险、事件、artifact、审批点、Approval Fast Lane 审批快车道、Mac Agent Control Snapshot 控制态势快照、Operator Strip、Loop 继续态势、Mac Agent Readiness Board 就绪看板、Mac Gateway Action Preflight Matrix 动作预检矩阵、Mac Agent Evidence Coverage Map 证据覆盖图、Mac Agent Next Step Deck 下一步候选卡组、Mac Agent Run Timeline 执行时间线、Mac Agent Continuation Gate 继续闸门、Mac Agent Review Radar 复核雷达、Mac Agent Handoff Brief 人工交接简报、Focus Context 聚焦上下文、Review Detail Dock、Review Trail 复核路径、Approval Queue 审批队列、Payload Safety Ledger 载荷安全账本、Artifact 证据索引、复核态势、下一步复核行动、复核优先队列、当前聚焦项和详细复核摘要、regular Dock 共享 Mission primary action view/dispatcher"]
   UI --> LOOP{"用户审批或继续循环"}
   LOOP -->|"批准发送/重试"| M
   LOOP -->|"人工修改目标"| U
