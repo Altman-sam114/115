@@ -378,13 +378,33 @@ child task 的可选 lineage 是正式协议字段，不得塞入 `toolArguments
 
 root task 的 lineage 为 nil。child 必须满足 `childRound == parentRound + 1`；`parentRound` 只能在 `0...31`，`childRound` 只能在 `1...32`。selected kind 必须属于六种固定推荐 kind，并与 receipt 和第一个 child action 完全一致。parent decision digest 对下列 17 个字段按顺序用 `|` 连接后做 SHA-256：`nextActionPolicy`、`nextActionPolicyDiagnostic`、`requestedNextActionCount`、`effectiveNextActionCount`、`blockedNextActionCount`、`readinessCanContinue`、`selectedActionKind`、`selectedActionRequiresApproval`、`selectedActionAllowedByEnvelope`、`decisionPolicy`、`decisionReason`、`candidateCount`、`candidateOrdinal`、`fromCandidates`、`consistent`、`stopReason`、`handoffStatus`。布尔值固定为小写 `true/false`，安全无停止语义固定为 `none`；digest 不包含自然语言、payload、`toolArguments` 或 raw receipt。公开 envelope 固定把 receipt 写成 `omitted`；live transport 只能发送按 task ID 保存且通过 task/profile/lineage digest 复核的私有 frozen bytes。
 
+### v0.67 `manageFiles` Continuation Parameter Editor
+
+v0.67 只为选中 `manageFiles` 的 continuation draft 提供参数编辑入口，不扩展六种 action 的通用编辑器，也不修改 Gateway handler、receipt、lineage、TTL、审批或发送协议。编辑器使用 typed Store API，构造并校验固定的结构化参数：
+
+```json
+{
+  "operation": "writeText",
+  "workspaceOnly": "true",
+  "writePath": "notes/report.txt",
+  "writeText": "用户确认后的文件正文"
+}
+```
+
+`operation` 只能是 `writeText`，`workspaceOnly` 只能是 `true`；未知 key、alias 或额外字段均拒绝。`writePath` 必须是非空 workspace 相对路径，拒绝绝对路径、以 `~` 开头的路径和包含 `..` 路径段的路径；`writeText` 必须是非空正文。既有 `ClawContinuationActionArguments.validate` 仍是唯一结构化校验边界，并对参数 map 中每个字符串值执行不超过 4096 个 UTF-8 bytes 的限制。路径和正文不通过时保持 `readyForInput`，返回固定、不回显危险路径或正文的提示；合法输入清空 validation issue 并转为 `readyForApproval`。`readyForInput` 不能 queue、approve 或 send；本轮未选中 `manageFiles` 的其他 kind 仍没有通用编辑路径。
+
+编辑 API 只接受尚未创建 child 的 `readyForInput` 或 `readyForApproval` draft，并先复核父 task/session/AgentTrace scope、decision digest、receipt handle 和 receipt 时效。编辑只替换 child proposal 的四个结构化文件参数，不改变父 Mission scope、review focus、source identity、round、receipt 或 expiry。入队仍要求 `readyForApproval`、无 validation issue、当前 profile/allowlist 和 lineage 有效，随后生成全新 child task，actions 恰好为 `[manageFiles, runAgentLoop]`；child 创建后，以及 `queued`、`approvedFrozen`、`sent`、`stale` 或 `blocked` 状态下，编辑器不可见或不可编辑。审批只冻结当时的 task/profile/lineage digest 和私有 envelope，不能再修改参数。
+
+compact iPhone 与 regular iPad/mac 复用同一个 `ClawContinuationDraftPresentationSummary`、`ClawMissionRunContinuationDraftView` 和 typed Store API。编辑器可显示当前用户正在复核的 `writePath`/`writeText`，但 UI/VoiceOver、普通 event、artifact metadata、auditLog、日志、JUnit、failure summary 和 manifest 不得显示 raw receipt、token、父 payload、Gateway 绝对路径或任意未过滤 metadata；用户正文不得复制到 auditLog 或 artifact metadata。raw receipt 仍只允许存在于 wire DTO、iOS 内存 vault、私有 frozen envelope 和 Gateway cache。
+
 ### Draft、审批与发送状态机
 
 ```text
 no draft
   -> 用户显式生成
 readyForInput | needsApproval | readyForApproval
-  -> readyForInput: 当前版本阻断，等待未来参数编辑器
+  -> readyForInput: `manageFiles` 可编辑固定结构化参数；非法输入仍留在此状态
+  -> readyForInput + 合法 `manageFiles` 参数: readyForApproval
   -> needsApproval: 当前版本无 queue/send 转换
   -> readyForApproval: 参数已完整，可继续
   -> 用户显式入队
@@ -395,7 +415,7 @@ approvedFrozen
 sent / observing child session
 ```
 
-`readyForInput` 表示 typed 参数草稿不完整；v0.66 尚无参数编辑 API/UI，因此该状态保持阻断，不能 queue、approve 或 send，后续版本需先提供受校验的参数编辑器。`needsApproval` 同样没有通往 queue/send 的转换。v0.65 的 no-approval decision 和 receipt 都不能替代 child approval。审批记录必须绑定 task digest、profile digest、lineage digest 和 receipt hash；参数、profile、lineage、receipt 或 task 内容变化会清除审批与 frozen envelope并回到待审批。发送不得读取会变化的全局展示 envelope，也不得按“最新任务”隐式选择目标。首次发送尝试后 iOS vault 立即清理 receipt；continuation transport 必须禁用普通任务使用的同-envelope 自动重连/重发。超时或网络结果不确定也不得复用 receipt，需要用户重新获取可信 offer。
+`readyForInput` 表示 typed 参数草稿不完整或未通过校验；v0.67 只有 `manageFiles` 提供受校验的参数编辑器，其他 selected kind 仍保持阻断。编辑器不自动入队、审批、冻结或发送；`needsApproval` 同样没有通往 queue/send 的转换。v0.65 的 no-approval decision 和 receipt 都不能替代 child approval。审批记录必须绑定 task digest、profile digest、lineage digest 和 receipt hash；参数、profile、lineage、receipt 或 task 内容变化会清除审批与 frozen envelope并回到待审批。发送不得读取会变化的全局展示 envelope，也不得按“最新任务”隐式选择目标。首次发送尝试后 iOS vault 立即清理 receipt；continuation transport 必须禁用普通任务使用的同-envelope 自动重连/重发。超时或网络结果不确定也不得复用 receipt，需要用户重新获取可信 offer。
 
 ### Receipt Cache 与父 Context
 

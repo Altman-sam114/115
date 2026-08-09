@@ -2635,6 +2635,283 @@ enum LogicSmoke {
         } else {
             failures.append("ready loop agent trace review should be derived")
         }
+
+        let manageFilesRawReceipt = String(repeating: "r", count: 43)
+        let manageFilesRawToken = "continuation-test-secret"
+        func makeManageFilesContinuationSmoke() -> (
+            store: ClawStore,
+            parentTask: ClawMobileTask,
+            parentSession: ClawGatewaySession,
+            draft: ClawContinuationDraft
+        )? {
+            let store = ClawStore(autoScanLocalArtifacts: false)
+            store.setGateway(url: "ws://127.0.0.1:18789", token: manageFilesRawToken)
+            store.phoneAgentCommand = "整理文件并写入报告"
+            store.generatePhoneAgentPlan()
+            store.queueClawMobileTaskFromCurrentPlan()
+            store.approveLatestClawMobileTask()
+            store.simulateSendLatestClawMobileTask()
+
+            guard let parentTask = store.clawMobileTasks.first,
+                  let parentSession = store.clawGatewaySessions.first,
+                  let traceAction = parentTask.actions.first(where: { $0.kind == .runAgentLoop }) else {
+                return nil
+            }
+            let trace = ClawGatewayArtifact(
+                kind: .agentTrace,
+                title: "trusted-manage-files-continuation-trace.json",
+                reference: "file:///omitted/trusted-manage-files-continuation-trace.json",
+                isRedacted: true,
+                metadata: [
+                    "readinessScore": "100",
+                    "readinessCanContinue": "true",
+                    "satisfiedSignals": "browserTrace,accessibilityTree",
+                    "degradedSignals": "",
+                    "missingSignals": "",
+                    "selectedNextActionKind": "manageFiles",
+                    "selectedNextActionRequiresApproval": "false",
+                    "nextActionPolicy": "envelope-intersection",
+                    "nextActionPolicyDiagnostic": "allowed",
+                    "requestedNextActionCount": "2",
+                    "effectiveNextActionCount": "2",
+                    "blockedNextActionCount": "0",
+                    "selectedNextActionAllowedByEnvelope": "true",
+                    "selectedActionDecisionPolicy": "evidence-first-safe-v1",
+                    "selectedActionDecisionReason": "safe-without-approval",
+                    "selectedActionCandidateCount": "2",
+                    "selectedActionCandidateOrdinal": "1",
+                    "selectedActionFromCandidates": "true",
+                    "selectedActionDecisionConsistent": "true",
+                    "riskTags": "",
+                    "stopReason": "none",
+                    "handoffStatus": "ready-to-continue"
+                ]
+            )
+            let traceSequence = (store.gatewayEvents.map(\.sequence).max() ?? 0) + 1
+            store.ingestGatewayEvents([
+                ClawGatewayEvent(
+                    sessionID: parentSession.id,
+                    taskID: parentTask.id,
+                    sequence: traceSequence,
+                    kind: .artifactStored,
+                    actionID: traceAction.id,
+                    actionKind: traceAction.kind,
+                    actionTitle: traceAction.title,
+                    resultStatus: .succeeded,
+                    summary: "Stored trusted manageFiles continuation trace",
+                    artifacts: [trace]
+                )
+            ])
+            guard let review = ClawAgentTraceReviewSummary.latest(from: store.clawGatewaySessions.first),
+                  review.latestArtifactID == trace.id else {
+                return nil
+            }
+            let digest = review.continuationDecisionDigest(
+                taskID: parentTask.id,
+                sessionID: parentSession.id,
+                artifactID: trace.id,
+                round: 0
+            )
+            store.ingestGatewayWireEvents([
+                ClawGatewayWireEvent(
+                    event: ClawGatewayEvent(
+                        sessionID: parentSession.id,
+                        taskID: parentTask.id,
+                        sequence: traceSequence + 1,
+                        kind: .sessionCompleted,
+                        summary: "Gateway completed with a private manageFiles continuation offer"
+                    ),
+                    continuationOffer: ClawGatewayContinuationOffer(
+                        contract: ClawContinuationContract.receiptContract,
+                        receipt: manageFilesRawReceipt,
+                        expiresAt: Date.now.addingTimeInterval(300),
+                        parentTaskID: parentTask.id,
+                        parentSessionID: UUID(),
+                        parentAgentTraceArtifactID: trace.id,
+                        parentDecisionDigest: digest,
+                        parentRound: 0,
+                        selectedActionKind: .manageFiles
+                    )
+                )
+            ])
+            store.prepareContinuationDraft(sourceTaskID: parentTask.id, sourceSessionID: parentSession.id)
+            guard let draft = store.continuationDraft else {
+                return nil
+            }
+            return (store, parentTask, parentSession, draft)
+        }
+
+        if let manageFilesFixture = makeManageFilesContinuationSmoke() {
+            let fileStore = manageFilesFixture.store
+            let parentTask = manageFilesFixture.parentTask
+            let parentSession = manageFilesFixture.parentSession
+            let draft = manageFilesFixture.draft
+            let parentScope = fileStore.missionRunSummary.missionScopeID
+            let parentFocus = parentScope.map {
+                ClawMissionRunReviewFocus(scopeID: $0, reviewKind: "agent-trace")
+            }
+            let sourceDigest = draft.sourceDecisionDigest
+            let receiptHandle = draft.receiptHandle
+
+            expect(draft.sourceSelectedActionKind == .manageFiles, "manageFiles continuation should select file action")
+            expect(draft.state == .readyForInput, "manageFiles placeholder should require structured input")
+            expect(fileStore.missionRunSummary.continuationDraft.fileArguments.isVisible, "manageFiles editor summary should be visible")
+            expect(fileStore.missionRunSummary.continuationDraft.fileArguments.isEditable, "manageFiles editor should be editable before queue")
+            expect(
+                fileStore.missionRunSummary.continuationDraft.fileArguments.validationMessage == "请输入文件内容。",
+                "manageFiles editor should expose the fixed missing-content message"
+            )
+
+            var invalidOperation = ClawContinuationActionArguments.makeManageFilesArguments(
+                writePath: "notes/private-marker.txt",
+                writeText: "private-marker-body"
+            )
+            invalidOperation["operation"] = "delete-private-marker"
+            let operationMessage = ClawContinuationActionArguments.validationMessage(
+                kind: .manageFiles,
+                arguments: invalidOperation
+            )
+            expect(
+                ClawContinuationActionArguments.validate(kind: .manageFiles, arguments: invalidOperation).isEmpty == false,
+                "manageFiles editor should reject unsupported operation"
+            )
+            expect(operationMessage == "文件参数不符合固定写入策略。", "unsupported operation should use a fixed validation message")
+            expect(operationMessage?.contains("private-marker") == false, "operation validation should redact raw input")
+
+            var invalidWorkspaceScope = ClawContinuationActionArguments.makeManageFilesArguments(
+                writePath: "notes/private-marker.txt",
+                writeText: "private-marker-body"
+            )
+            invalidWorkspaceScope["workspaceOnly"] = "false"
+            let workspaceMessage = ClawContinuationActionArguments.validationMessage(
+                kind: .manageFiles,
+                arguments: invalidWorkspaceScope
+            )
+            expect(
+                ClawContinuationActionArguments.validate(kind: .manageFiles, arguments: invalidWorkspaceScope).isEmpty == false,
+                "manageFiles editor should reject non-workspace scope"
+            )
+            expect(workspaceMessage == "文件参数不符合固定写入策略。", "workspace scope should use a fixed validation message")
+            expect(workspaceMessage?.contains("private-marker") == false, "workspace validation should redact raw input")
+
+            expect(
+                fileStore.updateContinuationFileArguments(
+                    writePath: "../private-marker.txt",
+                    writeText: "private-marker-body"
+                ) == false,
+                "manageFiles editor should reject path escape"
+            )
+            expect(fileStore.continuationDraft?.state == .readyForInput, "invalid path should keep draft ready for input")
+            let invalidPathSummary = fileStore.missionRunSummary.continuationDraft.fileArguments
+            expect(
+                invalidPathSummary.validationMessage == "路径必须是 workspace 内的相对路径。",
+                "path escape should use a fixed validation message"
+            )
+            expect(invalidPathSummary.validationMessage?.contains("private-marker") == false, "path validation should redact raw input")
+            expect(invalidPathSummary.validationMessage?.contains("..") == false, "path validation should not echo traversal syntax")
+
+            let oversizedText = String(repeating: "x", count: 4_097)
+            expect(
+                fileStore.updateContinuationFileArguments(
+                    writePath: "notes/report.txt",
+                    writeText: oversizedText
+                ) == false,
+                "manageFiles editor should reject text over 4096 UTF-8 bytes"
+            )
+            expect(fileStore.continuationDraft?.state == .readyForInput, "oversized text should keep draft ready for input")
+            expect(
+                fileStore.missionRunSummary.continuationDraft.fileArguments.validationMessage == "文件参数长度超过限制。",
+                "oversized text should use a fixed validation message"
+            )
+            let oversizedPath = "a/" + String(repeating: "x", count: 4_095)
+            let oversizedPathArguments = ClawContinuationActionArguments.makeManageFilesArguments(
+                writePath: oversizedPath,
+                writeText: "body"
+            )
+            expect(
+                ClawContinuationActionArguments.validate(kind: .manageFiles, arguments: oversizedPathArguments).isEmpty == false,
+                "manageFiles editor should reject paths over 4096 UTF-8 bytes"
+            )
+            expect(
+                ClawContinuationActionArguments.validationMessage(kind: .manageFiles, arguments: oversizedPathArguments) == "文件参数长度超过限制。",
+                "oversized path should use the fixed length validation message"
+            )
+            let boundaryArguments = ClawContinuationActionArguments.makeManageFilesArguments(
+                writePath: "notes/report.txt",
+                writeText: String(repeating: "x", count: 4_096)
+            )
+            expect(
+                ClawContinuationActionArguments.validate(kind: .manageFiles, arguments: boundaryArguments).isEmpty,
+                "manageFiles editor should accept the 4096-byte boundary"
+            )
+
+            expect(
+                fileStore.updateContinuationFileArguments(
+                    writePath: "notes/report.txt",
+                    writeText: "approved body"
+                ),
+                "valid manageFiles arguments should promote the draft"
+            )
+            let validFileSummary = fileStore.missionRunSummary.continuationDraft.fileArguments
+            expect(fileStore.continuationDraft?.state == .readyForApproval, "valid file arguments should be ready for approval")
+            expect(validFileSummary.writePath == "notes/report.txt", "draft summary should expose the approved relative path")
+            expect(validFileSummary.writeText == "approved body", "draft summary should expose the approved body")
+            expect(validFileSummary.validationMessage == nil, "valid file arguments should have no validation message")
+            expect(validFileSummary.isValid, "valid file arguments should be marked valid")
+            expect(validFileSummary.isEditable, "valid file arguments should remain editable before queue")
+            expect(validFileSummary.isVisible, "valid file arguments should remain visible before queue")
+            expect(fileStore.missionRunSummary.taskID == parentTask.id, "editing should preserve the parent task scope")
+            expect(fileStore.missionRunSummary.sessionID == parentSession.id, "editing should preserve the parent session scope")
+            expect(fileStore.missionRunSummary.missionScopeID == parentScope, "editing should preserve the parent mission scope")
+            if let parentFocus {
+                expect(
+                    fileStore.missionRunSummary.activeReviewFocus(from: parentFocus) == "agent-trace",
+                    "editing should preserve the parent review focus"
+                )
+            } else {
+                failures.append("manageFiles continuation should expose parent review scope")
+            }
+            expect(fileStore.continuationDraft?.sourceDecisionDigest == sourceDigest, "editing should preserve the parent decision digest")
+            expect(fileStore.continuationDraft?.receiptHandle == receiptHandle, "editing should preserve the receipt handle")
+            expect(fileStore.lastClawMobileEnvelope.contains(manageFilesRawToken) == false, "editor flow should not expose the raw token")
+
+            if let draftID = fileStore.continuationDraft?.id,
+               let childTaskID = fileStore.queueContinuationDraft(id: draftID),
+               let childTask = fileStore.clawMobileTasks.first(where: { $0.id == childTaskID }) {
+                expect(childTask.actions.map(\.kind) == [.manageFiles, .runAgentLoop], "queued continuation should preserve action order")
+                expect(childTask.actions.first?.toolArguments["writePath"] == "notes/report.txt", "queued continuation should preserve writePath")
+                expect(childTask.actions.first?.toolArguments["writeText"] == "approved body", "queued continuation should preserve writeText")
+                expect(fileStore.continuationDraft?.state == .queued, "queued continuation should expose queued state")
+                expect(fileStore.missionRunSummary.continuationDraft.fileArguments.isEditable == false, "queued continuation should lock the file editor")
+                expect(fileStore.missionRunSummary.continuationDraft.fileArguments.isVisible == false, "queued continuation should hide editable file controls")
+                expect(fileStore.missionRunSummary.continuationDraft.fileArguments.writePath.isEmpty, "queued continuation should omit the relative path from the locked summary")
+                expect(fileStore.missionRunSummary.continuationDraft.fileArguments.writeText.isEmpty, "queued continuation should omit the file body from the locked summary")
+                expect(
+                    fileStore.updateContinuationFileArguments(writePath: "notes/late.txt", writeText: "late") == false,
+                    "queued continuation should reject file edits"
+                )
+                expect(fileStore.continuationDraft?.state == .queued, "rejected queued edit should preserve queued state")
+
+                fileStore.approveTask(id: childTaskID)
+                expect(fileStore.continuationDraft?.state == .approvedFrozen, "approved continuation should expose frozen state")
+                expect(fileStore.missionRunSummary.continuationDraft.fileArguments.isEditable == false, "approved continuation should keep the file editor locked")
+                expect(fileStore.missionRunSummary.continuationDraft.fileArguments.isVisible == false, "approved continuation should keep editable file controls hidden")
+                expect(
+                    fileStore.updateContinuationFileArguments(writePath: "notes/after-approval.txt", writeText: "blocked" ) == false,
+                    "approved frozen continuation should reject file edits"
+                )
+                expect(fileStore.continuationDraft?.state == .approvedFrozen, "rejected approved edit should preserve frozen state")
+                expect(fileStore.lastClawMobileEnvelope.contains(manageFilesRawReceipt) == false, "frozen envelope display should redact the raw receipt")
+                expect(fileStore.lastClawMobileEnvelope.contains(manageFilesRawToken) == false, "frozen envelope display should redact the raw token")
+                expect(fileStore.lastClawMobileEnvelope.contains("notes/report.txt") == false, "frozen envelope display should redact the relative path")
+                expect(fileStore.lastClawMobileEnvelope.contains("approved body") == false, "frozen envelope display should redact the file body")
+            } else {
+                failures.append("valid manageFiles continuation should queue a child task")
+            }
+        } else {
+            failures.append("manageFiles continuation smoke fixture should produce a readyForInput draft")
+        }
+
         let sensitiveAgentTrace = ClawGatewayArtifact(
             kind: .agentTrace,
             title: "agent-loop file:///private/tmp/trace.json",

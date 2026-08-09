@@ -1552,8 +1552,11 @@ struct ClawMissionRunLoopContinuationBriefView: View {
 }
 
 struct ClawMissionRunContinuationDraftView: View {
+    @EnvironmentObject private var store: ClawStore
     let summary: ClawContinuationDraftPresentationSummary
     let onAction: (ClawContinuationDraftPresentationSummary) -> Void
+    @State private var fileWritePath = ""
+    @State private var fileWriteText = ""
 
     var body: some View {
         if summary.isVisible {
@@ -1582,6 +1585,52 @@ struct ClawMissionRunContinuationDraftView: View {
                     PhoneAgentTag(text: selectedActionTitle, icon: "arrow.forward.circle.fill", tint: tint)
                 }
 
+                if summary.fileArguments.isVisible {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("文件参数", systemImage: "folder.badge.gearshape")
+                            .font(.footnote.bold())
+                            .foregroundStyle(tint)
+
+                        TextField("workspace 相对路径", text: $fileWritePath)
+                            .textFieldStyle(.roundedBorder)
+                            .disabled(summary.fileArguments.isEditable == false)
+                            .accessibilityLabel("workspace 相对路径")
+                            .accessibilityHint("只允许填写 workspace 内的相对路径")
+
+                        TextEditor(text: $fileWriteText)
+                            .frame(minHeight: 120, maxHeight: 180)
+                            .padding(6)
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 6)
+                                    .stroke(.secondary.opacity(0.25), lineWidth: 1)
+                            }
+                            .disabled(summary.fileArguments.isEditable == false)
+                            .accessibilityLabel("文件正文")
+                            .accessibilityHint("只更新结构化文件参数，不会自动加入队列、审批或发送")
+
+                        Button("应用文件参数", systemImage: "checkmark.circle") {
+                            _ = store.updateContinuationFileArguments(
+                                writePath: fileWritePath,
+                                writeText: fileWriteText
+                            )
+                        }
+                        .font(.footnote.bold())
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .buttonStyle(SecondaryActionButtonStyle())
+                        .disabled(summary.fileArguments.isEditable == false)
+                        .accessibilityHint("只校验并更新当前草稿，不会自动加入队列、审批或发送")
+
+                        if let validationMessage = summary.fileArguments.validationMessage {
+                            Text(validationMessage)
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .padding(8)
+                    .background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+                }
+
                 if let actionTitle = summary.actionTitle {
                     Button(actionTitle, systemImage: actionIcon) {
                         onAction(summary)
@@ -1603,7 +1652,24 @@ struct ClawMissionRunContinuationDraftView: View {
             }
             .accessibilityElement(children: .contain)
             .accessibilityLabel("可信多轮续接，\(summary.status)")
+            .onAppear {
+                syncFileEditor()
+            }
+            .onChange(of: summary.draftID) { _, _ in
+                syncFileEditor()
+            }
+            .onChange(of: summary.fileArguments) { _, _ in
+                syncFileEditor()
+            }
         }
+    }
+
+    private func syncFileEditor() {
+        guard summary.fileArguments.isVisible else {
+            return
+        }
+        fileWritePath = summary.fileArguments.writePath
+        fileWriteText = summary.fileArguments.writeText
     }
 
     private var tint: Color {

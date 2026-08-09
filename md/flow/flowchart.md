@@ -117,7 +117,7 @@ flowchart TD
 
 ## 3. v0.66 可信跨任务续接图
 
-读图说明：只有严格 safe 的父 AgentTrace 才可能签发 receipt。生成草稿、入队、审批和发送都是独立人工动作；approval 型建议没有派发路径。Gateway 必须先完成 continuation preflight 和原子消费，之后才能登记 replay、创建 workspace 或产生事件。
+读图说明：只有严格 safe 的父 AgentTrace 才可能签发 receipt。生成草稿、参数编辑、入队、审批和发送都是独立人工动作；v0.67 只为 `manageFiles` 提供固定结构化参数编辑器，approval 型建议没有派发路径。Gateway 必须先完成 continuation preflight 和原子消费，之后才能登记 replay、创建 workspace 或产生事件。
 
 ```mermaid
 flowchart TD
@@ -129,8 +129,13 @@ flowchart TD
   OFFER --> VAULT["transport 提取 raw receipt 到内存 vault<br/>公开 event / metadata / UI 不含原文"]
   VAULT --> CREATE["用户显式生成 draft<br/>父 Mission scope 与 focus 不变"]
   CREATE --> PARAM{"结构化参数完整且合法?"}
-  PARAM -->|否| INPUT["readyForInput 阻断<br/>v0.66 尚无参数编辑器<br/>不入队、不审批、不发送"]
-  PARAM -->|是| QUEUE["用户显式入队<br/>全新 child task + 两个全新 action"]
+  PARAM -->|否| INPUT["readyForInput<br/>仅 manageFiles 可编辑；其他 kind 仍阻断"]
+  PARAM -->|是| READY["readyForApproval<br/>参数已通过 validator"]
+  INPUT -->|selected=manageFiles| EDIT["typed 参数编辑器<br/>operation=writeText / workspaceOnly=true<br/>writePath + writeText<br/>相对 workspace path / 每字符串 <= 4096 UTF-8 bytes"]
+  EDIT -->|非法| INPUT
+  EDIT -->|合法| READY
+  INPUT -->|其他 kind| BLOCK["保持阻断<br/>不入队、不审批、不发送"]
+  READY --> QUEUE["用户显式入队<br/>全新 child task + 两个全新 action"]
   QUEUE --> APPROVE["用户按 task ID 审批<br/>绑定 task/profile/lineage digest 并冻结 raw envelope"]
   APPROVE --> SEND["用户按同一 task ID 显式发送"]
   SEND --> PREFLIGHT{"lineage / receipt / round / parent / digest<br/>token/profile/current policy/allowlist/handler/params 全部匹配?"}

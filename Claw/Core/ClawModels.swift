@@ -1081,7 +1081,16 @@ struct ClawMobileEnvelope: Equatable, Codable, Sendable {
     }
 
     var redactedForDisplay: ClawMobileEnvelope {
-        replacingContinuationReceipt(with: "omitted")
+        var updated = replacingContinuationReceipt(with: "omitted")
+        guard updated.task.continuationLineage != nil else {
+            return updated
+        }
+        updated.task.actions = updated.task.actions.map { action in
+            var redacted = action
+            redacted.toolArguments = action.toolArguments.mapValues { _ in "omitted" }
+            return redacted
+        }
+        return updated
     }
 }
 
@@ -1510,6 +1519,24 @@ enum ClawContinuationDraftActionKind: String, Codable, Sendable {
     case send
 }
 
+struct ClawContinuationFileArgumentsPresentationSummary: Equatable, Codable, Sendable {
+    var writePath: String
+    var writeText: String
+    var validationMessage: String?
+    var isValid: Bool
+    var isEditable: Bool
+    var isVisible: Bool
+
+    static let unavailable = ClawContinuationFileArgumentsPresentationSummary(
+        writePath: "",
+        writeText: "",
+        validationMessage: nil,
+        isValid: false,
+        isEditable: false,
+        isVisible: false
+    )
+}
+
 struct ClawContinuationDraftPresentationSummary: Equatable, Codable, Sendable {
     var title: String
     var status: String
@@ -1527,6 +1554,7 @@ struct ClawContinuationDraftPresentationSummary: Equatable, Codable, Sendable {
     var requiresHumanAction: Bool
     var hasMetadataGap: Bool
     var isVisible: Bool
+    var fileArguments: ClawContinuationFileArgumentsPresentationSummary = .unavailable
 
     static let unavailable = ClawContinuationDraftPresentationSummary(
         title: "可信续接待生成",

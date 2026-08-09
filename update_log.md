@@ -18,9 +18,45 @@
 - 当前核心闭环：用户自然语言任务 -> `PhoneAgentPlanner` -> `ClawMobileTask` -> `ClawMobileEnvelope` -> 模拟事件流或带有界重连/ping 可观测性和进程内 task replay guard 的 WebSocket Gateway -> `ClawGatewayEvent` -> session reducer -> Mission Run / Approval Fast Lane 审批快车道 / Control Snapshot 控制态势快照 / Operator Strip / Loop 继续态势 / Mac Agent Readiness Board 就绪看板 / Mac Gateway Action Preflight Matrix 动作预检矩阵 / Mac Agent Evidence Coverage Map 证据覆盖图 / Mac Agent Next Step Deck 下一步候选卡组 / Mac Agent Run Timeline 执行时间线 / Mac Agent Continuation Gate 继续闸门 / Mac Agent Review Radar 复核雷达 / Mac Agent Handoff Brief 人工交接简报 / Focus Context 聚焦上下文 / Review Detail Dock / Review Trail 复核路径 / Approval Queue 审批队列 / Payload Safety Ledger 载荷安全账本 / Artifact 证据索引 / 复核态势摘要 / 复核优先队列 / 复核聚焦详情 / Live Gateway 连接健康 / Artifact metadata 复核摘要 / 文件变更安全复核摘要 / Shell 命令安全复核摘要 / 提取完整性复核摘要 / 浏览器控制计划和策略诊断复核摘要 / 草稿最终提交安全和桌面策略诊断复核摘要 / Gateway 能力复核摘要 / Accessibility 信号质量复核摘要 / Replay Guard 复核摘要 / AgentTrace handoff 复核 UI / iPad 多栏工作台展示和审批。v0.66 工作区实现进一步加入父 safe decision -> 短时单次 receipt -> 显式 draft/queue/approve/freeze/send -> 全新 child selected action + `runAgentLoop` 的受限跨 task 续接；是否可验收仍以提交后最新 `origin/main` artifact 为准。
 - 当前 Gateway 能力：进程内 task replay guard、session-start 能力快照 `auditLog`、屏幕观察 dry-run/截图/窗口元数据/带 signal quality metadata 的受控 Accessibility 摘要策略、浏览器 HTML/URL trace、带 metadata-only 计划复核和 policy diagnostics 的浏览器打开/搜索计划、workspace 文件写入与 metadata-only 文件变更安全复核、Shell 仅结构化 `toolArguments` 来源、dry-run、裸 executable allowlist 执行、同名路径/顶层 alias/来源冲突阻断与 metadata-only Shell 命令安全复核、带 metadata-only 完整性复核的结构化提取、带 metadata-only 草稿/最终提交安全复核和桌面策略诊断的 messageDraft/桌面 App 审批闸门、带 readiness/checklist/risk/stop/handoff status、mac 证据质量分层、推荐动作 envelope 交集和安全 metadata 的 `runAgentLoop`/`agentTrace`。
 - 当前协作闭环：默认 `main` 直推，GitHub Actions 生成未加密 `ci-results` 结果包，Agent C 下载并核对 manifest/JUnit/日志后验收。
-- 当前主要遗留：v0.66 完整负向/action/六种 kind/UI 对称测试矩阵与最新云端 artifact 验收、`readyForInput` 参数编辑器、完整 macOS Accessibility bridge、Playwright/browser-use 兼容控制器、跨重启/跨进程多轮状态、live Gateway 后台保活/真实心跳协议/配对、完整 artifact 内容复核体验。
+- 当前主要遗留：v0.66 完整负向/action/六种 kind/UI 对称测试矩阵、v0.67 最新云端 artifact 验收与 `manageFiles` 编辑器完整 LogicSmoke/负向覆盖、完整 macOS Accessibility bridge、Playwright/browser-use 兼容控制器、跨重启/跨进程多轮状态、live Gateway 后台保活/真实心跳协议/配对、完整 artifact 内容复核体验。
 
 ## 历史记录
+
+### v0.67 / Continuation Parameter Editor `manageFiles` 文件续接参数编辑
+
+日期：2026-08-09
+
+核心变更：
+
+- 为选中的 `manageFiles` continuation draft 增加受限 typed 参数编辑：`operation` 固定为 `writeText`，`workspaceOnly` 固定为 `true`，只允许编辑 `writePath` 和 `writeText`。
+- 编辑 API 继续使用既有 continuation validator；路径必须是 workspace 内的相对路径，拒绝绝对路径、`~` 和 `..` 路径段；路径/正文等参数每个字符串值最多 4096 个 UTF-8 bytes，非法输入返回固定脱敏提示并保持 `readyForInput`，合法输入才进入 `readyForApproval`。
+- 编辑只发生在尚未入队的 draft，且不改变父 task/session/AgentTrace、decision digest、receipt handle/expiry、Mission scope 或 review focus。入队生成全新 child，actions 恰好为 `[manageFiles, runAgentLoop]`；入队、审批冻结、发送以及 stale/blocked 状态后均锁定编辑。
+- compact iPhone 与 regular iPad/mac 复用同一 continuation presentation summary、编辑视图和 typed API。raw receipt、token、父 payload、Gateway 绝对路径和未过滤 metadata 继续按 redaction 规则从 UI/VoiceOver、event、artifact metadata、日志和 CI 摘要中省略；用户正文不复制到 auditLog 或 artifact metadata。
+- 不修改 Gateway handler、continuation receipt/lineage/TTL/单次消费、审批或发送协议；v0.67 仍不提供其他 action kind 的通用参数编辑器。
+
+关键文件：
+
+- `Claw/Core/ClawModels.swift`
+- `Claw/Services/ClawStore.swift`
+- `Claw/Views/ContentView.swift`
+- `ClawTests/ClawTests.swift`
+- `README.md`
+- `Docs/claw-mobile-gateway-protocol.md`
+- `md/flow/flow.md`
+- `md/flow/flowchart.md`
+- `md/test/test.md`
+- `update_log.md`
+
+验证结果：
+
+- 本 sidecar 只允许文档非编译静态检查；未运行本地编译、build、XCTest、Swift LogicSmoke、Gateway fixture、direct/WebSocket smoke、`xcodebuild` 或 `node --check`。
+- v0.67 必须提交并 push 到 `origin/main` 后交给 GitHub Actions；Agent C 需要用仓库授权账号下载最新未加密 artifact，核对 manifest、JUnit/摘要、主日志、XCTest、LogicSmoke、fixture、direct/WebSocket smoke 和 Xcode build 与最新 commit/run/attempt 完全匹配后再判定。
+- 当前工作区 v0.67 云端 run、commit、run attempt、artifact 名称和 Agent C 复判结论尚未产生，不能预写通过结果。
+
+遗留事项：
+
+- 当前 v0.67 还需由实现 Agent 补齐/核对 `manageFiles` editor 的测试 helper、LogicSmoke 覆盖及完整云端负向矩阵，然后由 Agent C 复判；不能将本地文档检查视为业务验证。
+- receipt 仍不跨 Gateway 进程、重启、设备或 10 分钟；其他五种 continuation action 仍没有通用参数编辑器。
 
 ### v0.66 / Trusted Cross-Task Multi-Round Continuation 可信跨任务多轮续接
 

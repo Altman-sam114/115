@@ -1469,6 +1469,43 @@ final class ClawStore: ObservableObject {
     }
 
     @discardableResult
+    func updateContinuationFileArguments(writePath: String, writeText: String) -> Bool {
+        guard var draft = continuationDraft,
+              draft.childTaskID == nil,
+              draft.sourceSelectedActionKind == .manageFiles,
+              draft.state == .readyForInput || draft.state == .readyForApproval else {
+            return false
+        }
+        guard validateContinuationSource(draft) else {
+            invalidateContinuationAuthorization(reason: .sourceTraceChanged)
+            return false
+        }
+        guard let handle = draft.receiptHandle,
+              let receipt = continuationReceipts[handle] else {
+            invalidateContinuationAuthorization(reason: .missingReceipt)
+            return false
+        }
+        guard receipt.offer.expiresAt > Date.now else {
+            invalidateContinuationAuthorization(reason: .receiptExpired)
+            return false
+        }
+
+        let arguments = ClawContinuationActionArguments.makeManageFilesArguments(
+            writePath: writePath,
+            writeText: writeText
+        )
+        draft.proposedAction.toolArguments = arguments
+        draft.validationIssues = ClawContinuationActionArguments.validate(
+            kind: .manageFiles,
+            arguments: arguments
+        )
+        draft.state = draft.validationIssues.isEmpty ? .readyForApproval : .readyForInput
+        draft.updatedAt = Date.now
+        continuationDraft = draft
+        return draft.validationIssues.isEmpty
+    }
+
+    @discardableResult
     func queueContinuationDraft(id: UUID) -> UUID? {
         guard var draft = continuationDraft,
               draft.id == id,
@@ -1480,6 +1517,19 @@ final class ClawStore: ObservableObject {
               validateContinuationSource(draft),
               clawGatewayProfile.allowedActionKinds.contains(draft.sourceSelectedActionKind) else {
             invalidateContinuationAuthorization(reason: .sourceScopeMismatch)
+            return nil
+        }
+
+        guard draft.proposedAction.kind == draft.sourceSelectedActionKind,
+              draft.proposedAction.approval == .userConfirmation,
+              draft.proposedLoopAction.kind == .runAgentLoop,
+              draft.proposedLoopAction.approval == .userConfirmation,
+              ClawContinuationActionArguments.validate(
+                  kind: draft.proposedAction.kind,
+                  arguments: draft.proposedAction.toolArguments
+              ).isEmpty,
+              ClawContinuationActionArguments.validateLoop(draft.proposedLoopAction.toolArguments).isEmpty else {
+            invalidateContinuationAuthorization(reason: .invalidArguments)
             return nil
         }
 
@@ -2186,6 +2236,33 @@ final class ClawStore: ObservableObject {
         }
     }
 
+    private func continuationFileArgumentsPresentation(
+        draft: ClawContinuationDraft,
+        state: ClawContinuationDraftState
+    ) -> ClawContinuationFileArgumentsPresentationSummary {
+        guard draft.sourceSelectedActionKind == .manageFiles else {
+            return .unavailable
+        }
+        let isEditable = draft.childTaskID == nil &&
+            (state == .readyForInput || state == .readyForApproval)
+        guard isEditable else {
+            return .unavailable
+        }
+        let arguments = draft.proposedAction.toolArguments
+        let validationMessage = ClawContinuationActionArguments.validationMessage(
+            kind: .manageFiles,
+            arguments: arguments
+        )
+        return ClawContinuationFileArgumentsPresentationSummary(
+            writePath: arguments["writePath"] ?? "",
+            writeText: arguments["writeText"] ?? "",
+            validationMessage: validationMessage,
+            isValid: validationMessage == nil && draft.validationIssues.isEmpty,
+            isEditable: isEditable,
+            isVisible: isEditable
+        )
+    }
+
     private func continuationDraftPresentation(
         task: ClawMobileTask?,
         session: ClawGatewaySession?,
@@ -2220,6 +2297,7 @@ final class ClawStore: ObservableObject {
             case .readyForInput, .needsApproval, .stale, .sent, .blocked:
                 action = (nil, nil, false)
             }
+            let fileArguments = continuationFileArgumentsPresentation(draft: draft, state: state)
             let status: String
             let guidance: String
             switch state {
@@ -2264,7 +2342,8 @@ final class ClawStore: ObservableObject {
                 canPerformAction: action.2,
                 requiresHumanAction: state != .sent,
                 hasMetadataGap: draft.validationIssues.contains(.invalidDecision),
-                isVisible: true
+                isVisible: true,
+                fileArguments: fileArguments
             )
         }
 
@@ -2887,6 +2966,47 @@ enum ClawContinuationActionArguments {
             toolArguments: arguments
         )
         return Proposal(action: action, issues: validate(kind: kind, arguments: arguments))
+    }
+
+    static func makeManageFilesArguments(writePath: String, writeText: String) -> [String: String] {
+        [
+            "operation": "writeText",
+            "workspaceOnly": "true",
+            "writePath": writePath.trimmingCharacters(in: .whitespacesAndNewlines),
+            "writeText": writeText
+        ]
+    }
+
+    static func validationMessage(
+        kind: ClawMobileActionKind,
+        arguments: [String: String]
+    ) -> String? {
+        guard validate(kind: kind, arguments: arguments).isEmpty == false else {
+            return nil
+        }
+        guard kind == .manageFiles else {
+            return "续接参数需要重新复核。"
+        }
+        let allowedKeys: Set<String> = ["operation", "workspaceOnly", "writePath", "writeText"]
+        guard Set(arguments.keys).isSubset(of: allowedKeys) else {
+            return "文件参数包含不支持的字段。"
+        }
+        guard arguments["operation"] == "writeText", arguments["workspaceOnly"] == "true" else {
+            return "文件参数不符合固定写入策略。"
+        }
+        guard nonempty(arguments["writePath"]) else {
+            return "请输入 workspace 相对路径。"
+        }
+        guard isRelativeWorkspacePath(arguments["writePath"]) else {
+            return "路径必须是 workspace 内的相对路径。"
+        }
+        guard nonempty(arguments["writeText"]) else {
+            return "请输入文件内容。"
+        }
+        guard arguments.values.allSatisfy({ $0.utf8.count <= 4_096 }) else {
+            return "文件参数长度超过限制。"
+        }
+        return "文件参数需要重新复核。"
     }
 
     static func makeLoopAction(objective: String) -> ClawMobileAction {
