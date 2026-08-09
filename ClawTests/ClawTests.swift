@@ -342,9 +342,21 @@ final class ClawTests: XCTestCase {
     }
 
     func testClawMobileSensitiveAutomaticActionRequiresApproval() {
-        let plan = PhoneAgentPlanner.makePlan(
-            command: "把任务结果发给同事",
-            capabilities: ClawStore.defaultPhoneAgentCapabilities
+        let plan = PhoneAgentPlan(
+            command: "从授权联系人中确认同事信息",
+            summary: "Deterministic sensitive automatic action fixture",
+            steps: [
+                PhoneAgentStep(
+                    title: "读取联系人",
+                    instruction: "只读取用户已授权的联系人字段。",
+                    target: "Contacts",
+                    surface: .systemFramework,
+                    runMode: .automaticWithPermission,
+                    requiresUserConfirmation: false,
+                    isAllowedOnIOS: true,
+                    rationale: "联系人属于敏感数据，即使基础运行模式为 automatic 也必须升级审批。"
+                )
+            ]
         )
         var profile = ClawStore.defaultClawGatewayProfile
         profile.requiresApprovalForSensitiveData = true
@@ -356,7 +368,11 @@ final class ClawTests: XCTestCase {
             documents: ClawStore.defaultDocuments
         )
 
-        XCTAssertTrue(task.actions.contains { $0.kind == .readContacts && $0.approval == .userConfirmation })
+        XCTAssertTrue(task.actions.contains {
+            $0.kind == .readContacts &&
+                $0.handlesSensitiveData &&
+                $0.approval == .userConfirmation
+        })
         XCTAssertEqual(task.status, .waitingForApproval)
     }
 
@@ -394,7 +410,7 @@ final class ClawTests: XCTestCase {
         XCTAssertTrue(store.lastClawMobileEnvelope.contains("claw.computer.control.v1"))
 
         let data = try XCTUnwrap(store.lastClawMobileEnvelope.data(using: .utf8))
-        let envelope = try JSONDecoder().decode(ClawMobileEnvelope.self, from: data)
+        let envelope = try JSONDecoder.clawGateway.decode(ClawMobileEnvelope.self, from: data)
         XCTAssertEqual(envelope.gateway.endpoint, "ws://10.0.0.9:18789")
         XCTAssertNotEqual(envelope.gateway.tokenFingerprint, "super-secret-token")
         XCTAssertTrue(envelope.auditRequired)
@@ -553,10 +569,16 @@ final class ClawTests: XCTestCase {
     func testMissionRunSummaryDerivesBrowserControlReview() throws {
         let store = ClawStore(autoScanLocalArtifacts: false)
 
-        store.phoneAgentCommand = "在项目目录运行测试，失败时导出日志文件"
+        store.phoneAgentCommand = "打开浏览器搜索测试失败原因，整理并导出日志文件"
         store.startAutonomousComputerTakeover()
+        let task = try XCTUnwrap(store.clawMobileTasks.first)
+        XCTAssertTrue(task.actions.contains { $0.kind == .controlBrowser })
         store.approveAndContinueAutonomousLoop()
-        let review = try XCTUnwrap(store.missionRunSummary.gatewayBrowserControlReview)
+        let session = try XCTUnwrap(store.clawGatewaySessions.first { $0.taskID == task.id })
+        let missionSummary = store.missionRunSummary
+        XCTAssertEqual(missionSummary.taskID, task.id)
+        XCTAssertEqual(missionSummary.sessionID, session.id)
+        let review = try XCTUnwrap(missionSummary.gatewayBrowserControlReview)
 
         XCTAssertGreaterThanOrEqual(review.reviewCount, 2)
         XCTAssertTrue(review.hasMetadata)
@@ -591,7 +613,7 @@ final class ClawTests: XCTestCase {
         XCTAssertTrue(review.compactStatus.contains("diagnostic dry-run"))
         XCTAssertTrue(review.compactStatus.contains("network not-requested"))
 
-        let browserResult = try XCTUnwrap(store.clawGatewaySessions.first?.results.first { $0.actionKind == .controlBrowser })
+        let browserResult = try XCTUnwrap(session.results.first { $0.actionKind == .controlBrowser })
         let browserReview = try XCTUnwrap(ClawGatewayBrowserControlReviewSummary.latest(from: browserResult.artifacts))
         XCTAssertEqual(browserReview.mode, "browser-control-dry-run")
         XCTAssertEqual(browserReview.policyDiagnostic, "dry-run")
@@ -1077,9 +1099,9 @@ final class ClawTests: XCTestCase {
         XCTAssertTrue(policyBoard.items.contains { $0.id == "file" })
         XCTAssertTrue(policyBoard.items.contains { $0.id == "extraction" })
         XCTAssertTrue(policyBoard.items.contains { $0.id == "browser" })
-        let focusedPolicyBoard = summary.macAgentPolicyDiagnosticsBoard(focusedOn: "shell-safety")
-        XCTAssertEqual(focusedPolicyBoard.focusedReviewKind, "shell-safety")
-        XCTAssertTrue(focusedPolicyBoard.items.contains { $0.id == "shell" && $0.isFocused })
+        let focusedPolicyBoard = summary.macAgentPolicyDiagnosticsBoard(focusedOn: "delivery-safety")
+        XCTAssertEqual(focusedPolicyBoard.focusedReviewKind, "delivery-safety")
+        XCTAssertTrue(focusedPolicyBoard.items.contains { $0.id == "desktop" && $0.isFocused })
         XCTAssertTrue(macReadiness.isReviewable)
         XCTAssertEqual(macReadiness.items.map(\.id), ["connection", "capability", "observation", "loop", "human-gate"])
         XCTAssertGreaterThan(macReadiness.readyCount, 0)
@@ -1232,7 +1254,10 @@ final class ClawTests: XCTestCase {
         XCTAssertGreaterThan(approvalQueue.criticalOrHighCount, 0)
         XCTAssertEqual(approvalQueue.items.map(\.rank), approvalQueue.items.map(\.rank).sorted())
         XCTAssertTrue(approvalQueue.items.contains { $0.reviewKind == "delivery-safety" && $0.isActionable && $0.hasMetadata })
-        XCTAssertTrue(approvalQueue.items.contains { $0.reviewKind == "agent-trace" && $0.isActionable && $0.hasMetadata })
+        XCTAssertEqual(summary.agentTraceReview?.hasMetadata, true)
+        XCTAssertEqual(summary.agentTraceReview?.handoffStatus, "ready-to-continue")
+        XCTAssertEqual(summary.agentTraceReview?.selectedNextActionRequiresApproval, false)
+        XCTAssertFalse(approvalQueue.items.contains { $0.reviewKind == "agent-trace" })
         XCTAssertTrue(approvalQueue.items.contains { $0.reviewKind == "approval" && $0.isActionable == false })
         let focusedApprovalQueue = summary.approvalQueueSummary(focusedOn: "delivery-safety")
         XCTAssertEqual(focusedApprovalQueue.focusedReviewKind, "delivery-safety")
