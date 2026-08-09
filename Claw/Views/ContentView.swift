@@ -765,6 +765,8 @@ struct ClawMissionRunPanel: View {
 
             ClawMissionRunLiveGatewayHealthStripView(strip: liveGatewayHealthStrip)
 
+            ClawGatewayPairingResumeView()
+
             ClawMissionRunOperatorStripView(
                 strip: operatorStrip,
                 onFocusReviewKind: focusReviewKind
@@ -1054,6 +1056,8 @@ struct ClawMissionReviewDetailDockView: View {
             )
 
             ClawMissionRunLiveGatewayHealthStripView(strip: liveGatewayHealthStrip)
+
+            ClawGatewayPairingResumeView()
 
             if dock.isReviewable {
                 ClawMissionMacAgentReadinessBoardView(
@@ -4936,6 +4940,113 @@ struct ClawMissionRunLiveGatewayHealthStripView: View {
         case .danger: return .red
         case .info: return .blue
         case .neutral: return .secondary
+        }
+    }
+}
+
+struct ClawGatewayPairingResumeView: View {
+    @EnvironmentObject private var store: ClawStore
+
+    var body: some View {
+        let pairing = store.gatewayPairingDiagnosticsSummary
+        let resume = store.gatewayResumeIntentPresentationSummary
+
+        if pairing.isVisible {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Label("Gateway 配对诊断", systemImage: pairing.icon)
+                        .font(.subheadline.bold())
+                        .foregroundStyle(tint(for: pairing))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                    PhoneAgentTag(text: pairing.state.title, icon: pairing.icon, tint: tint(for: pairing))
+                }
+
+                Text(pairing.status)
+                    .font(.footnote.bold())
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(pairing.guidance)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 6) {
+                    PhoneAgentTag(text: pairing.endpoint, icon: "network", tint: .blue)
+                    PhoneAgentTag(text: pairing.tokenFingerprint, icon: "fingerprint", tint: .secondary)
+                    PhoneAgentTag(
+                        text: pairing.hasGatewayAck ? "当前 ack" : "未确认",
+                        icon: pairing.hasGatewayAck ? "checkmark.shield.fill" : "questionmark.shield",
+                        tint: pairing.hasGatewayAck ? .green : .orange
+                    )
+                }
+
+                if resume.isVisible {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: resume.icon)
+                            .foregroundStyle(resumeTint(resume))
+                            .frame(width: 24, height: 24)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(resume.title)
+                                .font(.footnote.bold())
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text(resume.guidance)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+
+                    if let actionTitle = resume.actionTitle {
+                        Button(actionTitle, systemImage: "person.crop.circle.badge.questionmark") {
+                            _ = store.prepareExplicitResumeIntent(for: resume)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .buttonStyle(SecondaryActionButtonStyle())
+                        .disabled(resume.canPrepare == false)
+                        .opacity(resume.canPrepare ? 1 : 0.55)
+                        .accessibilityLabel(actionTitle)
+                        .accessibilityHint("只记录当前 task 的恢复意图，不会自动发送、审批、重试或刷新 receipt")
+                        .accessibilityInputLabels([actionTitle, "恢复前复核"])
+                    }
+                }
+            }
+            .padding(10)
+            .background(tint(for: pairing).opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(tint(for: pairing).opacity(0.16), lineWidth: 1)
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Gateway 配对诊断，\(pairing.status)，\(resume.status)")
+        }
+    }
+
+    private func tint(for summary: ClawGatewayPairingDiagnosticsSummary) -> Color {
+        switch summary.state {
+        case .confirmed, .completed:
+            return .green
+        case .configuredUnconfirmed:
+            return .blue
+        case .failed, .stale, .mismatched:
+            return .red
+        case .fallbackSimulated, .endpointNotConfigured, .endpointInvalid, .tokenMissing:
+            return .orange
+        case .unavailable:
+            return .secondary
+        }
+    }
+
+    private func resumeTint(_ summary: ClawGatewayResumeIntentPresentationSummary) -> Color {
+        switch summary.state {
+        case .readyForExplicitResume:
+            return .green
+        case .reviewBeforeResume:
+            return .orange
+        case .stale, .blocked:
+            return .red
+        case .unavailable:
+            return .secondary
         }
     }
 }

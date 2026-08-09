@@ -10,6 +10,20 @@ v0.68 的普通首次 dispatch 只允许 `sent` 任务进入 replay、workspace 
 
 v0.69 的 regular 工作台把同一 Mission primary action 放入右侧 Review Detail Dock；左栏隐藏重复按钮，compact 仍使用单栏入口。共享 view/dispatcher 传入渲染 summary，并在当前 command/task/session/sessionTask/mission scope/phase/action 全部匹配且 enabled 时调用既有 Store 闸门，等待 Gateway、阻断和 stale summary 均 fail closed；宽屏布局不等于原生 macOS target。
 
+v0.70 的 Live Gateway 诊断与恢复意图路径如下；它只记录当前 scope 的人工意图，不产生新的网络或 Gateway 协议动作。
+
+```mermaid
+flowchart LR
+  D["既有 profile + live request + current task/session"] --> C{"endpoint/token/scope/profile 是否一致?"}
+  C -->|"否"| S["stale / mismatch / blocked\n无副作用"]
+  C -->|"是"| H{"Gateway ack / failed / fallback / completed?"}
+  H -->|"ack"| P["当前 live 已确认\n不等于后台配对"]
+  H -->|"failed + retryable"| R["用户显式记录 resume intent"]
+  H -->|"fallback / completed / 其他"| B["固定提示\n不自动恢复"]
+  R --> G["内存绑定 task/session/profile/revision\n仍走既有审批与 live send"]
+  G -->|"scope 变化"| S
+```
+
 ## 1. Claw 核心逻辑图
 
 读图说明：从左到右看。用户任务先进入 iPhone 控制台，经过规划、任务转换和 envelope 编码后，进入模拟事件流或桌面 Gateway。Gateway 产出事件和 artifact，手机端 reducer 把它们还原成 session，最后显示给用户审批或继续下一轮。

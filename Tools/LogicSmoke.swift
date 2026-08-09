@@ -23,6 +23,10 @@ enum LogicSmoke {
         expect(store.phoneAgentCapabilities.contains { $0.surface == .appIntents }, "phone agent should expose App Intents")
         expect(store.phoneAgentCapabilities.contains { $0.surface == .composeController }, "phone agent should include compose UI gates")
         expect(store.phoneAgentCapabilities.contains { $0.surface == .unavailable }, "phone agent should encode blocked iOS actions")
+        expect(store.gatewayPairingDiagnosticsSummary.state == .unavailable, "pairing diagnostics should be unavailable without a Mission")
+        expect(store.gatewayPairingDiagnosticsSummary.isVisible == false, "pairing diagnostics should stay hidden without a Mission")
+        expect(store.gatewayResumeIntentPresentationSummary.state == .unavailable, "resume intent should be unavailable without a Mission")
+        expect(store.prepareExplicitResumeIntent(for: store.gatewayResumeIntentPresentationSummary) == false, "resume intent should fail closed without a retryable live scope")
 
         let staged = LocalArtifactValidator.validate(
             manifest: store.model.artifactManifest,
@@ -71,6 +75,12 @@ enum LogicSmoke {
 
         store.queueClawMobileTaskFromCurrentPlan()
         expect(store.clawMobileTasks.isEmpty == false, "Claw mobile task should be queued")
+        let pairingAfterQueue = store.gatewayPairingDiagnosticsSummary
+        expect(pairingAfterQueue.canAttemptLive, "configured Gateway should expose canAttemptLive separately from acknowledgement")
+        expect(pairingAfterQueue.hasGatewayAck == false, "configured Gateway should not claim ack before live event")
+        expect(pairingAfterQueue.state == .configuredUnconfirmed, "configured Gateway should remain unconfirmed before live event")
+        let resumeAfterQueue = store.gatewayResumeIntentPresentationSummary
+        expect(store.prepareExplicitResumeIntent(for: resumeAfterQueue) == false, "non-failed task must not create resume intent")
         expect(store.clawMobileTasks[0].actions.contains { $0.kind == .controlBrowser }, "Claw task should include browser control")
         expect(
             store.clawMobileTasks[0].actions.contains {

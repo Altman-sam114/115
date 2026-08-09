@@ -14,6 +14,8 @@ v0.68 起，普通 Gateway 首次 dispatch 增加统一 `Dispatch Preflight`：�
 
 v0.69 起，regular iPad/宽屏工作台的右侧 Review Detail Dock 就地显示当前 `ClawMissionRunSummary` 的 Mission primary action；regular 左栏隐藏重复入口，compact iPhone 继续保留单栏入口。共享 primary action view 与 fail-closed dispatcher 复用同一标题、SF Symbol、enabled 状态和既有 Store 审批/继续/复核后重试方法；等待 Gateway、阻断状态保持 disabled，不自动 queue/approve/freeze/send，也不读取或显示 token、receipt、payload、路径、URL、正文或 UUID。app/test target family 最小扩展为 `1,2` 以覆盖 iPad；工程仍没有原生 macOS 或 Mac Catalyst target，宽屏 mac 仅指 regular SwiftUI 布局语义。
 
+v0.70 起，Mission Run 和 regular Review Detail Dock 复用同一 metadata-only Gateway 配对诊断与显式恢复意图视图。诊断分开显示本地 endpoint/token 是否可尝试 live、当前 task/session 是否收到匹配 Gateway ack、失败、模拟回退、完成和 stale/mismatch；token 只显示短指纹，不能把配置或 ping 当成持久配对证明。用户点击“记录恢复意图”只在内存记录绑定当前 task/session/request/profile/session revision/continuation 状态的人工意图，不发送网络、不自动重试、审批、queue/freeze/send、消费或刷新 receipt；scope 或配置变化会 fail closed。该切片不新增 Gateway handshake、协议字段、持久 secret、后台保活、静默恢复或原生 macOS/Mac Catalyst target。
+
 后续 Codex/Agent 接力开发必须先读 `AGENTS.md`。项目已建立“人工目标 -> Agent A 设计提示词 -> Agent B 在 main 上实现并推送 -> GitHub Actions 云端验证 -> Agent C 下载结果包复判 -> 人工复核 -> 下一轮”的迭代工作流，并准备支持未来由 Agent X 主控多轮调度 A/B/C。核心记忆和规范分布在 `AGENTS.md`、`update_log.md`、`md/test/test.md`、`md/flow/flow.md`、`md/flow/flowchart.md` 和 `md/prompt/`。
 
 ## 协作与云端验证

@@ -22,6 +22,20 @@
 
 ## 历史记录
 
+### v0.70 / Live Gateway 配对诊断与显式恢复意图
+
+日期：2026-08-09
+
+当前实现范围：
+
+- 在现有 Swift presentation/store 边界加入 metadata-only pairing diagnostics，区分 endpoint/token 配置、可尝试 live、当前 task/session Gateway ack、失败、模拟回退、完成和 stale/mismatch。
+- 在 compact Mission Run 与 regular iPad/宽屏 Review Detail Dock 复用同一配对诊断/恢复意图视图；用户点击后只记录绑定当前 scope/profile/session revision/continuation 状态的内存 intent，不触发网络、重试、审批、发送或 receipt 变化。
+- 未增加 Gateway handshake、schema/event/action/artifact 字段，未实现持久配对、后台保活、静默恢复、原生 macOS/Mac Catalyst target；旧 scope 和 profile/receipt 变化 fail closed。
+
+关键文件：`Claw/Core/ClawModels.swift`、`Claw/Services/ClawStore.swift`、`Claw/Views/ContentView.swift`、`ClawTests/ClawTests.swift`、`Tools/LogicSmoke.swift`、`README.md`、`Docs/claw-mobile-gateway-protocol.md`、`md/flow/flow.md`、`md/flow/flowchart.md`、`md/test/test.md`。
+
+验证状态：仅计划执行 `git diff --check`、文本/diff 复核和必要静态检查；未运行本地编译、XCTest、LogicSmoke、Gateway fixture/direct/WebSocket smoke、`node --check` 或 `xcodebuild`。commit/run/artifact 待 push 后由 GitHub Actions 和 Agent C 复判。
+
 ### v0.69 / macOS-iPad Regular Workbench Primary Action
 
 日期：2026-08-09

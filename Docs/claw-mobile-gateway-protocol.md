@@ -117,6 +117,8 @@ v0.23 起，`runShellCommand` 的既有 `commandOutput` artifact event 会附带
 
 v0.11 起，Gateway Session 面板在 Live request 附近展示连接健康摘要 / Mission Run Health Strip。该摘要只存在于手机端 presentation layer：不会写入 `ClawMobileEnvelope`，不会回传给 Gateway，不新增 `ClawGatewayEventKind`、action kind 或 artifact kind，也不读取 Gateway `file://` artifact payload。为了保持 live 状态可解释，手机端收到 `.gatewayConnected`、`.actionStarted`、`.artifactStored`、`.actionCompleted`、`.actionFailed`、`.approvalRequested` 和 `.actionSkipped` 等非终态 live 事件后保持 `streaming`，`.sessionCompleted`、`.fallbackUsed` 和 transport error 仍走终态或 fallback 路径。
 
+v0.70 的 Gateway 配对诊断仍是客户端 presentation-only 摘要，不是新的握手协议。`ClawGatewayPairingDiagnosticsSummary` 只从既有 profile、runtime token 状态、`ClawGatewayLiveRequest`、当前 task/session、连接状态和脱敏事件派生，明确区分 `canAttemptLive` 与匹配当前 task/session 的真实 ack；endpoint 只显示安全 display，token 只显示短指纹。`ClawGatewayResumeIntentPresentationSummary` 只允许用户记录短生命周期内存意图，并绑定当前 scope、profile digest、session revision 和 continuation authorization fingerprint；任何 stale/mismatch、receipt 状态变化或 profile 变化都会关闭入口。该切片不增加 `claw.computer.control.v1` 字段，不改变 WebSocket framing、transport/replay/receipt/approval 合同，不把 intent 当成 receipt，也不自动发送、审批、重试、刷新 receipt 或跨重启恢复。
+
 失败动作可以标记 `isRetryable`。手机端二次确认后，网关可重试失败动作并把新的 artifact 追加到对应 result。
 
 ## Mission Run Presentation Layer

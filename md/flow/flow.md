@@ -4,6 +4,8 @@
 
 Claw 的当前主链路是：用户在 iPhone 输入电脑任务，App 生成可审批的 Claw computer-control envelope，桌面 Gateway 在安全策略内执行或模拟执行，并把事件、artifact、审批点和失败信息回传给手机端。
 
+v0.70 在现有 Live Gateway Health 旁增加配对诊断和显式恢复意图 presentation。诊断先核对 endpoint、运行时 token、当前 task/session/request affinity，再区分可尝试 live、真实当前 Gateway ack、失败、模拟回退、完成和 stale/mismatch；配置或 token 指纹不等于持久配对。用户显式记录恢复意图后只改变内存 presentation 状态，不发送网络、不自动重试、不审批/queue/freeze/send、不消费或刷新 continuation receipt；task、session、profile、session revision 或 continuation 状态变化时旧意图 fail closed。compact iPhone 与 regular iPad/mac 复用同一 summary、Store API 和 view，宽屏布局不代表原生 macOS target。
+
 ## 1. 当前核心数据流
 
 ```text

@@ -17,6 +17,26 @@ final class ClawStore: ObservableObject {
         var offer: ClawGatewayContinuationOffer
     }
 
+    private struct ExplicitResumeIntent {
+        var taskID: UUID
+        var sessionID: UUID
+        var requestID: UUID
+        var profileDigest: String
+        var sessionUpdatedAt: Date
+        var continuationFingerprint: String
+        var createdAt: Date
+    }
+
+    private struct ExplicitResumeContext {
+        var taskID: UUID
+        var sessionID: UUID
+        var requestID: UUID
+        var profileDigest: String
+        var sessionUpdatedAt: Date
+        var continuationFingerprint: String
+        var bindingDigest: String
+    }
+
     @Published private(set) var model: LocalClawModel
     @Published private(set) var validation: ArtifactValidationResult
     @Published var selectedCategory: ClawCapabilityCategory?
@@ -50,6 +70,7 @@ final class ClawStore: ObservableObject {
     private var continuationReceipts: [String: ContinuationReceiptEntry]
     private var continuationApprovalRecords: [UUID: ClawContinuationApprovalRecord]
     private var frozenContinuationEnvelopes: [UUID: String]
+    private var explicitResumeIntent: ExplicitResumeIntent?
 
     init(
         model: LocalClawModel? = nil,
@@ -96,6 +117,7 @@ final class ClawStore: ObservableObject {
         self.continuationReceipts = [:]
         self.continuationApprovalRecords = [:]
         self.frozenContinuationEnvelopes = [:]
+        self.explicitResumeIntent = nil
         self.autonomousLoop = ClawAutonomousLoopState(
             phase: .idle,
             runMode: .simulatedEventStream,
@@ -156,6 +178,14 @@ final class ClawStore: ObservableObject {
             events: resolution.events,
             latestSession: resolution.session
         )
+    }
+
+    var gatewayPairingDiagnosticsSummary: ClawGatewayPairingDiagnosticsSummary {
+        makeGatewayPairingDiagnosticsSummary()
+    }
+
+    var gatewayResumeIntentPresentationSummary: ClawGatewayResumeIntentPresentationSummary {
+        makeGatewayResumeIntentPresentationSummary()
     }
 
     var autonomousLoopStatusText: String {
@@ -2433,6 +2463,279 @@ final class ClawStore: ObservableObject {
         }
         clawGatewaySessions[0] = ClawGatewaySimulator.retryFailures(in: clawGatewaySessions[0])
         lastGatewayEvent = ClawGatewaySimulator.eventSummary(for: clawGatewaySessions[0])
+    }
+
+    @discardableResult
+    func prepareExplicitResumeIntent(
+        for renderedSummary: ClawGatewayResumeIntentPresentationSummary
+    ) -> Bool {
+        let currentSummary = gatewayResumeIntentPresentationSummary
+        guard renderedSummary == currentSummary,
+              renderedSummary.state == .reviewBeforeResume,
+              renderedSummary.canPrepare,
+              let context = explicitResumeContext() else {
+            return false
+        }
+
+        explicitResumeIntent = ExplicitResumeIntent(
+            taskID: context.taskID,
+            sessionID: context.sessionID,
+            requestID: context.requestID,
+            profileDigest: context.profileDigest,
+            sessionUpdatedAt: context.sessionUpdatedAt,
+            continuationFingerprint: context.continuationFingerprint,
+            createdAt: Date()
+        )
+        return true
+    }
+
+    private func makeGatewayPairingDiagnosticsSummary() -> ClawGatewayPairingDiagnosticsSummary {
+        let resolution = missionRunResolution
+        guard let task = resolution.task else {
+            return .unavailable
+        }
+
+        let profileEndpoint = clawGatewayProfile.endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
+        let safeEndpoint = ClawGatewayLiveRequest.safeEndpointDisplay(profileEndpoint)
+        let profileTokenFingerprint = clawGatewayProfile.tokenFingerprint == "unset"
+            ? "unset"
+            : clawGatewayProfile.tokenFingerprint
+        let tokenConfigured = profileTokenFingerprint != "unset" &&
+            gatewayToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        let isWebSocket = profileEndpoint.hasPrefix("ws://") || profileEndpoint.hasPrefix("wss://")
+        let health = gatewayLiveHealthSummary
+        let request = lastGatewayLiveRequest
+        let requestMatchesTask = request?.taskID == task.id
+        let requestMatchesSession = request?.sessionID == nil || request?.sessionID == resolution.session?.id
+        let requestMatchesProfile = request == nil || (
+            request?.endpoint == profileEndpoint &&
+                request?.tokenFingerprint == clawGatewayProfile.tokenFingerprint
+        )
+        let connectionMatchesSession = gatewayConnectionSessionID == nil ||
+            gatewayConnectionSessionID == resolution.session?.id
+        let isCurrentScope = requestMatchesTask && requestMatchesSession &&
+            requestMatchesProfile && connectionMatchesSession
+        let hasStaleRequest = request != nil && isCurrentScope == false
+        let hasStaleConnection = gatewayConnectionSessionID != nil &&
+            gatewayConnectionSessionID != resolution.session?.id
+        let hasStaleScope = hasStaleRequest || hasStaleConnection
+        let hasSessionScope = resolution.session?.taskID == task.id
+        let hasLiveGatewayAck = health.hasGatewayAck &&
+            resolution.liveRequest != nil &&
+            resolution.connectionState != .simulated &&
+            resolution.connectionState != .fallbackSimulated &&
+            isCurrentScope &&
+            hasSessionScope
+        let configuredCanAttemptLive = profileEndpoint.isEmpty == false &&
+            isWebSocket &&
+            tokenConfigured
+
+        let state: ClawGatewayPairingDiagnosticsState
+        let status: String
+        let guidance: String
+        if profileEndpoint.isEmpty {
+            state = .endpointNotConfigured
+            status = "未配置桌面 Gateway endpoint。"
+            guidance = "先配置 ws:// 或 wss:// endpoint；本地 token 指纹不能单独证明已配对。"
+        } else if isWebSocket == false {
+            state = .endpointInvalid
+            status = "Gateway endpoint 不是 ws:// 或 wss://。"
+            guidance = "当前只允许 WebSocket endpoint；不会因为地址存在就尝试恢复。"
+        } else if tokenConfigured == false {
+            state = .tokenMissing
+            status = "endpoint 已配置，但缺少运行时 token。"
+            guidance = "只显示 token 指纹状态；运行时 token 缺失时不能发送或恢复。"
+        } else if hasStaleScope {
+            state = requestMatchesTask ? .stale : .mismatched
+            status = requestMatchesTask ? "旧 live request 与当前配置或 session 不一致。" : "live request 属于其他 task。"
+            guidance = "当前 Mission 不继承旧 Gateway 健康；请重新准备当前任务。"
+        } else if health.hasFallback || resolution.connectionState == .fallbackSimulated {
+            state = .fallbackSimulated
+            status = "Live Gateway 未确认，当前结果来自模拟回退。"
+            guidance = "模拟结果不能作为配对或恢复证明；需要用户重新复核当前任务。"
+        } else if health.hasError || resolution.connectionState == .failed {
+            state = .failed
+            status = "当前 task/session 的 Live Gateway 需要复核。"
+            guidance = "可以先记录显式恢复意图，但不会自动重试、发送或刷新 receipt。"
+        } else if health.isCompleted || resolution.connectionState == .completed {
+            state = .completed
+            status = "当前 task/session 已完成。"
+            guidance = "完成状态只支持查看证据；不会把已完成任务静默恢复。"
+        } else if hasLiveGatewayAck {
+            state = .confirmed
+            status = "已收到匹配当前 task/session 的 Gateway 连接事件。"
+            guidance = "这是当前 live session 的确认信号，不代表后台保活或自动恢复授权。"
+        } else if configuredCanAttemptLive {
+            state = .configuredUnconfirmed
+            status = "本地配置允许尝试 live，但尚无当前 Gateway 确认。"
+            guidance = "可尝试 live 与已真实确认是两个状态；不会以 token 指纹冒充配对。"
+        } else {
+            state = .unavailable
+            status = "当前 Gateway 尚未具备可尝试条件。"
+            guidance = "请先完成 endpoint、运行时 token 和当前 task/session 的安全 preflight。"
+        }
+
+        return ClawGatewayPairingDiagnosticsSummary(
+            state: state,
+            title: state.title,
+            status: status,
+            guidance: guidance,
+            icon: state.icon,
+            endpoint: safeEndpoint,
+            tokenFingerprint: profileTokenFingerprint,
+            canAttemptLive: configuredCanAttemptLive,
+            hasGatewayAck: hasLiveGatewayAck,
+            isCurrentScope: isCurrentScope,
+            isStale: state == .stale || state == .mismatched,
+            eventCount: resolution.events.count,
+            retryableCount: resolution.session?.retryableCount ?? 0,
+            requiresHumanAction: state != .confirmed,
+            isVisible: true
+        )
+    }
+
+    private func makeGatewayResumeIntentPresentationSummary() -> ClawGatewayResumeIntentPresentationSummary {
+        let pairing = gatewayPairingDiagnosticsSummary
+        guard let context = explicitResumeContext() else {
+            guard pairing.isVisible else {
+                return .unavailable
+            }
+            let state: ClawGatewayResumeIntentState = pairing.isStale ? .stale : .blocked
+            return ClawGatewayResumeIntentPresentationSummary(
+                state: state,
+                title: state.title,
+                status: pairing.isStale ? "当前恢复 scope 已失效。" : "当前 task/session 没有可安全恢复的 live 失败。",
+                guidance: pairing.isStale
+                    ? "任务、会话或 Gateway 配置已变化；旧恢复意图不能继续使用。"
+                    : "恢复意图不是重试按钮；需要当前 live failure、完整 scope 和既有审批闸门。",
+                icon: state.icon,
+                actionTitle: nil,
+                canPrepare: false,
+                requiresHumanAction: true,
+                isVisible: true,
+                bindingDigest: nil
+            )
+        }
+
+        if let intent = explicitResumeIntent {
+            let matches = intent.taskID == context.taskID &&
+                intent.sessionID == context.sessionID &&
+                intent.requestID == context.requestID &&
+                intent.profileDigest == context.profileDigest &&
+                intent.sessionUpdatedAt == context.sessionUpdatedAt &&
+                intent.continuationFingerprint == context.continuationFingerprint
+            let isFresh = Date().timeIntervalSince(intent.createdAt) <= 300
+            if matches && isFresh {
+                return ClawGatewayResumeIntentPresentationSummary(
+                    state: .readyForExplicitResume,
+                    title: ClawGatewayResumeIntentState.readyForExplicitResume.title,
+                    status: "已记录当前 task/session 的恢复意图。",
+                    guidance: "这只是内存中的人工意图；仍需用户按既有审批和 live send 闸门继续，不会自动发送。",
+                    icon: ClawGatewayResumeIntentState.readyForExplicitResume.icon,
+                    actionTitle: nil,
+                    canPrepare: false,
+                    requiresHumanAction: true,
+                    isVisible: true,
+                    bindingDigest: context.bindingDigest
+                )
+            }
+
+            return ClawGatewayResumeIntentPresentationSummary(
+                state: .stale,
+                title: ClawGatewayResumeIntentState.stale.title,
+                status: "旧恢复意图与当前 task/session 或 Gateway 配置不一致。",
+                guidance: "旧意图不会触发网络或重试；请重新复核当前 Mission。",
+                icon: ClawGatewayResumeIntentState.stale.icon,
+                actionTitle: nil,
+                canPrepare: false,
+                requiresHumanAction: true,
+                isVisible: true,
+                bindingDigest: context.bindingDigest
+            )
+        }
+
+        return ClawGatewayResumeIntentPresentationSummary(
+            state: .reviewBeforeResume,
+            title: ClawGatewayResumeIntentState.reviewBeforeResume.title,
+            status: "当前 live 失败或可重试结果需要人工确认。",
+            guidance: "点击只记录当前 scope 的恢复意图，不会自动重试、发送、审批、消费或刷新 receipt。",
+            icon: ClawGatewayResumeIntentState.reviewBeforeResume.icon,
+            actionTitle: "记录恢复意图",
+            canPrepare: true,
+            requiresHumanAction: true,
+            isVisible: true,
+            bindingDigest: context.bindingDigest
+        )
+    }
+
+    private func explicitResumeContext() -> ExplicitResumeContext? {
+        let resolution = missionRunResolution
+        guard let task = resolution.task,
+              let session = resolution.session,
+              session.taskID == task.id,
+              let request = resolution.liveRequest,
+              request.taskID == task.id,
+              request.sessionID == session.id,
+              request.endpoint == clawGatewayProfile.endpoint,
+              request.tokenFingerprint == clawGatewayProfile.tokenFingerprint,
+              task.continuationLineage == nil,
+              task.status == .sent,
+              session.status == .needsAttention,
+              resolution.connectionState == .failed || gatewayLiveHealthSummary.hasError,
+              gatewayLiveHealthSummary.hasFallback == false,
+              session.retryableCount > 0 || gatewayLiveHealthSummary.hasError else {
+            return nil
+        }
+
+        let profileDigest = liveGatewayProfileDigest()
+        let continuationFingerprint = continuationAuthorizationFingerprint()
+        let bindingDigest = ClawContinuationContract.sha256([
+            task.id.uuidString,
+            session.id.uuidString,
+            request.id.uuidString,
+            profileDigest,
+            String(session.updatedAt.timeIntervalSinceReferenceDate),
+            continuationFingerprint,
+            resolution.connectionState.rawValue
+        ].joined(separator: "|"))
+        return ExplicitResumeContext(
+            taskID: task.id,
+            sessionID: session.id,
+            requestID: request.id,
+            profileDigest: profileDigest,
+            sessionUpdatedAt: session.updatedAt,
+            continuationFingerprint: continuationFingerprint,
+            bindingDigest: bindingDigest
+        )
+    }
+
+    private func liveGatewayProfileDigest() -> String {
+        ClawContinuationContract.sha256([
+            clawGatewayProfile.endpoint,
+            clawGatewayProfile.tokenFingerprint,
+            ClawMobileBridge.tokenFingerprint(for: gatewayToken),
+            clawGatewayProfile.deviceName,
+            clawGatewayProfile.securityMode.rawValue,
+            clawGatewayProfile.allowedActionKinds.map(\.rawValue).joined(separator: ","),
+            String(clawGatewayProfile.requiresApprovalForSensitiveData),
+            String(clawGatewayProfile.auditEnabled)
+        ].joined(separator: "|"))
+    }
+
+    private func continuationAuthorizationFingerprint() -> String {
+        guard let draft = continuationDraft else {
+            return "none"
+        }
+        let receiptHandleDigest = draft.receiptHandle.map { ClawContinuationContract.sha256($0) } ?? "none"
+        let receiptPresent = draft.receiptHandle.map { continuationReceipts[$0] != nil } ?? false
+        return ClawContinuationContract.sha256([
+            draft.id.uuidString,
+            draft.state.rawValue,
+            draft.childTaskID?.uuidString ?? "none",
+            receiptHandleDigest,
+            String(draft.receiptExpiresAt?.timeIntervalSinceReferenceDate ?? 0),
+            String(receiptPresent)
+        ].joined(separator: "|"))
     }
 
     private func updateAutonomousLoopAfterTaskQueued() {

@@ -9008,6 +9008,169 @@ struct ClawGatewayLiveHealthSummary: Equatable, Codable, Sendable {
     }
 }
 
+enum ClawGatewayPairingDiagnosticsState: String, CaseIterable, Codable, Sendable {
+    case unavailable
+    case endpointNotConfigured
+    case endpointInvalid
+    case tokenMissing
+    case configuredUnconfirmed
+    case confirmed
+    case failed
+    case fallbackSimulated
+    case completed
+    case stale
+    case mismatched
+
+    var title: String {
+        switch self {
+        case .unavailable:
+            return "暂无当前 Mission"
+        case .endpointNotConfigured:
+            return "未配置 Gateway"
+        case .endpointInvalid:
+            return "Gateway 地址不合法"
+        case .tokenMissing:
+            return "缺少运行时 token"
+        case .configuredUnconfirmed:
+            return "已配置，尚未确认"
+        case .confirmed:
+            return "当前 Gateway 已确认"
+        case .failed:
+            return "Live Gateway 失败"
+        case .fallbackSimulated:
+            return "已回退模拟"
+        case .completed:
+            return "当前会话已完成"
+        case .stale:
+            return "旧 Gateway 状态已过期"
+        case .mismatched:
+            return "Gateway scope 不匹配"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .unavailable:
+            return "questionmark.circle"
+        case .endpointNotConfigured, .tokenMissing:
+            return "exclamationmark.triangle.fill"
+        case .endpointInvalid, .mismatched, .stale:
+            return "arrow.triangle.2.circlepath"
+        case .configuredUnconfirmed:
+            return "bolt.horizontal.circle"
+        case .confirmed:
+            return "checkmark.shield.fill"
+        case .failed:
+            return "waveform.path.ecg.rectangle.fill"
+        case .fallbackSimulated:
+            return "arrow.uturn.backward.circle.fill"
+        case .completed:
+            return "checkmark.circle.fill"
+        }
+    }
+}
+
+struct ClawGatewayPairingDiagnosticsSummary: Equatable, Codable, Sendable {
+    var state: ClawGatewayPairingDiagnosticsState
+    var title: String
+    var status: String
+    var guidance: String
+    var icon: String
+    var endpoint: String
+    var tokenFingerprint: String
+    var canAttemptLive: Bool
+    var hasGatewayAck: Bool
+    var isCurrentScope: Bool
+    var isStale: Bool
+    var eventCount: Int
+    var retryableCount: Int
+    var requiresHumanAction: Bool
+    var isVisible: Bool
+
+    static let unavailable = ClawGatewayPairingDiagnosticsSummary(
+        state: .unavailable,
+        title: ClawGatewayPairingDiagnosticsState.unavailable.title,
+        status: "暂无当前 Mission",
+        guidance: "先由手机端生成任务；配置 token 也不等于 Gateway 已完成配对。",
+        icon: ClawGatewayPairingDiagnosticsState.unavailable.icon,
+        endpoint: "未配置",
+        tokenFingerprint: "unset",
+        canAttemptLive: false,
+        hasGatewayAck: false,
+        isCurrentScope: false,
+        isStale: false,
+        eventCount: 0,
+        retryableCount: 0,
+        requiresHumanAction: true,
+        isVisible: false
+    )
+}
+
+enum ClawGatewayResumeIntentState: String, CaseIterable, Codable, Sendable {
+    case unavailable
+    case reviewBeforeResume
+    case readyForExplicitResume
+    case stale
+    case blocked
+
+    var title: String {
+        switch self {
+        case .unavailable:
+            return "暂无恢复入口"
+        case .reviewBeforeResume:
+            return "恢复前需要人工复核"
+        case .readyForExplicitResume:
+            return "已记录恢复意图"
+        case .stale:
+            return "恢复意图已过期"
+        case .blocked:
+            return "恢复已阻断"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .unavailable:
+            return "arrow.uturn.left.circle"
+        case .reviewBeforeResume:
+            return "person.crop.circle.badge.questionmark"
+        case .readyForExplicitResume:
+            return "checkmark.circle.fill"
+        case .stale:
+            return "clock.badge.exclamationmark.fill"
+        case .blocked:
+            return "nosign"
+        }
+    }
+}
+
+struct ClawGatewayResumeIntentPresentationSummary: Equatable, Codable, Sendable {
+    var state: ClawGatewayResumeIntentState
+    var title: String
+    var status: String
+    var guidance: String
+    var icon: String
+    var actionTitle: String?
+    var canPrepare: Bool
+    var requiresHumanAction: Bool
+    var isVisible: Bool
+    // Opaque comparison value for a rendered-button stale guard; never shown.
+    var bindingDigest: String?
+
+    static let unavailable = ClawGatewayResumeIntentPresentationSummary(
+        state: .unavailable,
+        title: ClawGatewayResumeIntentState.unavailable.title,
+        status: "暂无恢复入口",
+        guidance: "只有当前 task/session 的 live 失败或可复核结果才会显示人工恢复入口。",
+        icon: ClawGatewayResumeIntentState.unavailable.icon,
+        actionTitle: nil,
+        canPrepare: false,
+        requiresHumanAction: true,
+        isVisible: false,
+        bindingDigest: nil
+    )
+}
+
 
 extension ClawGatewayLiveHealthSummary {
     func asMissionRunHealthStrip() -> ClawMissionRunLiveGatewayHealthStrip {
