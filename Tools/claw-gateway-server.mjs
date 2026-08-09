@@ -194,6 +194,9 @@ if (process.argv.includes("--emit-events")) {
     try {
       events = await makeGatewayEvents(envelope, options);
     } catch (error) {
+      if (!(error instanceof GatewayError) || !DISPATCH_PREFLIGHT_ERROR_CODES.has(error.code)) {
+        throw error;
+      }
       events = [errorEvent(error)];
     }
     for (const event of events) {
