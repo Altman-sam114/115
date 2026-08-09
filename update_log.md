@@ -48,11 +48,13 @@
 验证结果：
 
 - 按本轮规则只进行代码、文本和 diff 静态复核；未运行本地编译、build、XCTest、Swift LogicSmoke、Gateway fixture、direct/WebSocket smoke、`xcodebuild` 或 `node --check`。
-- 本轮需提交并 push `origin/main` 后由 GitHub Actions 生成最新 artifact；当前不预写 CI/run/artifact 通过结论，Agent C 必须按最新 commit/run/attempt 复判。
+- 初始提交 `c8fc1d004b22f4aabe777a8ed990c4b780f7efaf` 的 run `31295276252` attempt `1` 暴露 direct smoke 兼容性问题：`--emit-events` 捕获 preflight 后改变了既有 runtime/unknown-action 非零退出合同；Agent C 判定不通过，其他检查通过。
+- 修复提交 `81c6a16c200725f2ab964d5448d9886e551a6cdd` 的 GitHub Actions run `31295620742` attempt `1` 已通过；Agent C 下载并核对 artifact `claw-ci-v0.2-main-81c6a16c2007-run31295620742-attempt1`，manifest 与 `main` commit/run/attempt 完全匹配。git diff、plutil、node-check、Swift LogicSmoke、Swift Gateway fixture、Gateway direct smoke（353 events）、Gateway WebSocket smoke（135 events）、Xcode build、XCTest（75 tests，0 failures）、artifact packaging/fail gate 全部 success。
 
 遗留事项：
 
-- Gateway preflight 的完整云端静态检查、fixture、LogicSmoke、direct/WebSocket smoke、XCTest 和 Xcode build 结果待 Agent C 下载最新未加密 artifact 验收。
+- 普通 dispatch preflight 仍是客户端 envelope 合同加 Gateway 进程内策略检查，不提供跨进程/跨设备的密码学审批证明；Gateway handler、allowlist、workspace 和审批闸门仍必须持续 fail closed。
+- iPad/mac regular workbench 主动作就地化、原生 macOS target、完整 Accessibility/browser controller、跨重启多轮状态和持久 live Gateway pairing 仍待后续版本。
 
 ### v0.67 / Continuation Parameter Editor `manageFiles` 文件续接参数编辑
 
