@@ -246,7 +246,7 @@ enum LogicSmoke {
         expect(idleSmartRail.kind == .primaryMission, "idle Smart Rail should reuse the primary Mission action")
         expect(idleSmartRail.title == "启动任务回合", "idle Smart Rail should reuse the primary title")
         expect(idleSmartRail.icon == "play.fill", "idle Smart Rail should reuse the primary icon")
-        expect(idleSmartRail.guidance.contains("自动发送") == false, "Smart Rail guidance should state that sending is not automatic")
+        expect(idleSmartRail.guidance.contains("不会自动发送"), "Smart Rail guidance should state that sending is not automatic")
         expect(missionStore.missionRunSummary.reviewPriorityQueue.isEmpty, "idle mission summary should not invent review priorities")
         let idleReadiness = missionStore.missionRunSummary.reviewReadinessSummary
         expect(idleReadiness.totalPriorityCount == 0, "idle readiness should not count review priorities")
