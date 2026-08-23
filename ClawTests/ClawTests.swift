@@ -296,7 +296,7 @@ final class ClawTests: XCTestCase {
             XCTAssertEqual(recorder.closeCount, 1)
             XCTAssertEqual(recorder.bodyBytes, [0])
             XCTAssertEqual(recorder.applicationMessageCount, 0)
-            XCTAssertTrue(store.gatewayTransportProbeSummary.guidance.contains("自动重试") == false)
+            XCTAssertTrue(store.gatewayTransportProbeSummary.guidance.contains("不会自动重试"))
         }
     }
 
@@ -464,7 +464,7 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(store.continuationReceiptCountForTesting, 1)
         XCTAssertEqual(store.frozenContinuationEnvelopeCountForTesting, 1)
         XCTAssertEqual(store.continuationApprovalRecordCountForTesting, 1)
-        XCTAssertTrue(store.gatewayTransportProbeSummary.guidance.contains("不代表"))
+        XCTAssertTrue(store.gatewayTransportProbeSummary.guidance.contains("不等于"))
     }
 
     func testTransportProbePresentationContractIsSharedAndAccessible() {
