@@ -2669,10 +2669,19 @@ final class ClawTests: XCTestCase {
         ])
 
         XCTAssertEqual(store.missionRunSummary.continuationDraft.actionKind, .prepare)
+        let prepareRail = store.missionRunSmartOperatorActionSummary
+        XCTAssertEqual(prepareRail.kind, .prepareContinuation)
+        XCTAssertEqual(prepareRail.title, "生成下一步草稿")
+        XCTAssertTrue(prepareRail.isEnabled)
+        XCTAssertFalse(prepareRail.guidance.contains(rawReceipt))
         store.prepareContinuationDraft(sourceTaskID: parentTask.id, sourceSessionID: localSession.id)
         let draft = try XCTUnwrap(store.continuationDraft)
         XCTAssertEqual(draft.state, .readyForApproval)
         XCTAssertEqual(draft.sourceSessionID, localSession.id)
+        let queueRail = store.missionRunSmartOperatorActionSummary
+        XCTAssertEqual(queueRail.kind, .continueContinuationDraft)
+        XCTAssertEqual(queueRail.continuationActionKind, .queue)
+        XCTAssertEqual(queueRail.title, "加入任务队列")
         let sourceDigest = draft.sourceDecisionDigest
         let receiptHandle = draft.receiptHandle
         let receiptExpiry = draft.receiptExpiresAt
@@ -2721,6 +2730,10 @@ final class ClawTests: XCTestCase {
 
         let childTaskID = try XCTUnwrap(store.queueContinuationDraft(id: draft.id))
         let childTask = try XCTUnwrap(store.clawMobileTasks.first(where: { $0.id == childTaskID }))
+        let approveRail = store.missionRunSmartOperatorActionSummary
+        XCTAssertEqual(approveRail.kind, .continueContinuationDraft)
+        XCTAssertEqual(approveRail.continuationActionKind, .approve)
+        XCTAssertEqual(approveRail.title, "审批新任务")
         XCTAssertNotEqual(childTask.id, parentTask.id)
         XCTAssertEqual(childTask.status, .waitingForApproval)
         XCTAssertEqual(childTask.continuationLineage?.parentSessionID, gatewaySessionID)
@@ -2741,6 +2754,10 @@ final class ClawTests: XCTestCase {
         store.approveTask(id: childTaskID)
         XCTAssertEqual(store.clawMobileTasks.first(where: { $0.id == childTaskID })?.status, .readyToSend)
         XCTAssertEqual(store.continuationDraft?.state, .approvedFrozen)
+        let sendRail = store.missionRunSmartOperatorActionSummary
+        XCTAssertEqual(sendRail.kind, .continueContinuationDraft)
+        XCTAssertEqual(sendRail.continuationActionKind, .send)
+        XCTAssertEqual(sendRail.title, "发送新任务")
         XCTAssertFalse(store.updateContinuationExtractionArguments(
             extractionGoal: "frozen edit",
             outputPath: "reports/frozen.json"
@@ -3332,6 +3349,22 @@ final class ClawTests: XCTestCase {
         )
 
         XCTAssertEqual(store.autonomousLoop, beforeDispatch)
+    }
+
+    func testSmartOperatorRailUsesPrimaryActionAndRejectsStaleRender() {
+        let store = ClawStore(autoScanLocalArtifacts: false)
+        store.phoneAgentCommand = "打开浏览器搜索资料 Authorization: Bearer rail-secret file:///private/tmp/rail.json"
+
+        let rendered = store.missionRunSmartOperatorActionSummary
+        XCTAssertEqual(rendered.kind, .primaryMission)
+        XCTAssertEqual(rendered.title, "启动任务回合")
+        XCTAssertFalse([rendered.title, rendered.status, rendered.guidance].joined(separator: " ").contains("rail-secret"))
+        XCTAssertFalse([rendered.title, rendered.status, rendered.guidance].joined(separator: " ").contains("file://"))
+
+        store.startAutonomousComputerTakeover()
+        let beforeStaleDispatch = store.autonomousLoop
+        XCTAssertNil(ClawMissionRunSmartOperatorActionDispatcher.perform(rendered, in: store))
+        XCTAssertEqual(store.autonomousLoop, beforeStaleDispatch)
     }
 
     func testAutonomousLoopApprovalDispatchesThroughGatewayEvents() {

@@ -6,6 +6,8 @@ Claw 的当前主链路是：用户在 iPhone 输入电脑任务，App 生成可
 
 v0.70 在现有 Live Gateway Health 旁增加配对诊断和显式恢复意图 presentation。诊断先核对 endpoint、运行时 token、当前 task/session/request affinity，再区分可尝试 live、真实当前 Gateway ack、失败、模拟回退、完成和 stale/mismatch；配置或 token 指纹不等于持久配对。用户显式记录恢复意图后只改变内存 presentation 状态，不发送网络、不自动重试、不审批/queue/freeze/send、不消费或刷新 continuation receipt；task、session、profile、session revision 或 continuation 状态变化时旧意图 fail closed。compact iPhone 与 regular iPad/mac 复用同一 summary、Store API 和 view，宽屏布局不代表原生 macOS target。
 
+v0.72 在同一 presentation 边界增加 Smart Operator Action Rail。`missionRunSmartOperatorActionSummary` 从当前 continuation draft、Mission primary、resume intent 和 next review metadata 按固定优先级选择唯一候选；compact Mission Run 与 regular Review Detail Dock 复用同一 summary、view 和 dispatcher。Rail 只分派既有 Store/primary/focus 入口，不能自动执行、审批、发送、重试或消费 receipt；render-time stale guard 比较 opaque command digest、task/session/Mission scope、phase/primary、continuation safe state、resume binding 和 review kind，任何变化都 fail closed。focusReview 只更新当前 scoped focus，不改变任务状态；本轮不增加 Gateway action 或协议字段。
+
 ## 1. 当前核心数据流
 
 ```text

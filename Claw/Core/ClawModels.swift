@@ -1504,7 +1504,7 @@ struct ClawAutonomousLoopState: Identifiable, Equatable, Codable, Sendable {
     }
 }
 
-enum ClawMissionRunPrimaryActionKind: String, Codable, Sendable {
+enum ClawMissionRunPrimaryActionKind: String, Codable, Equatable, Sendable {
     case start
     case approveAndContinue
     case continueAfterReview
@@ -1512,7 +1512,7 @@ enum ClawMissionRunPrimaryActionKind: String, Codable, Sendable {
     case inspectBlocked
 }
 
-enum ClawContinuationDraftActionKind: String, Codable, Sendable {
+enum ClawContinuationDraftActionKind: String, Codable, Equatable, Sendable {
     case prepare
     case queue
     case approve
@@ -1593,6 +1593,104 @@ struct ClawContinuationDraftPresentationSummary: Equatable, Codable, Sendable {
         hasMetadataGap: false,
         isVisible: false,
         extractionArguments: .unavailable
+    )
+}
+
+enum ClawMissionRunSmartOperatorActionKind: String, Codable, Equatable, Sendable {
+    case none
+    case primaryMission
+    case prepareContinuation
+    case continueContinuationDraft
+    case prepareResumeIntent
+    case focusReview
+
+    var title: String {
+        switch self {
+        case .none:
+            return "无安全下一步"
+        case .primaryMission:
+            return "Mission 主动作"
+        case .prepareContinuation:
+            return "生成续接草稿"
+        case .continueContinuationDraft:
+            return "继续续接草稿"
+        case .prepareResumeIntent:
+            return "记录恢复意图"
+        case .focusReview:
+            return "查看复核"
+        }
+    }
+}
+
+struct ClawMissionRunSmartOperatorActionSummary: Equatable, Codable, Sendable {
+    var kind: ClawMissionRunSmartOperatorActionKind
+    var title: String
+    var status: String
+    var guidance: String
+    var icon: String
+    var tone: ClawMissionRunOperatorLaneTone
+    var isEnabled: Bool
+    var requiresHumanAction: Bool
+    var isVisible: Bool
+
+    // These values are only for a render-time stale guard and are never shown.
+    var commandDigest: String?
+    var profileBindingDigest: String?
+    var phaseTitle: String
+    var phaseIcon: String
+    var primaryActionKind: ClawMissionRunPrimaryActionKind
+    var primaryActionTitle: String
+    var primaryActionIcon: String
+    var isPrimaryActionEnabled: Bool
+    var taskID: UUID?
+    var sessionID: UUID?
+    var sessionTaskID: UUID?
+    var missionScopeID: UUID?
+    var continuationState: ClawContinuationDraftState?
+    var continuationActionKind: ClawContinuationDraftActionKind?
+    var continuationSourceTaskID: UUID?
+    var continuationSourceSessionID: UUID?
+    var continuationDraftID: UUID?
+    var continuationChildTaskID: UUID?
+    var continuationBindingDigest: String?
+    var resumeBindingDigest: String?
+    var reviewKind: String?
+    var reviewScopeID: UUID?
+    var reviewCanFocus: Bool
+
+    static let unavailable = ClawMissionRunSmartOperatorActionSummary(
+        kind: .none,
+        title: "无安全下一步",
+        status: "当前没有可执行入口",
+        guidance: "等待当前状态或补齐人工复核；不会自动执行 Gateway、审批、发送或重试。",
+        icon: "pause.circle",
+        tone: .neutral,
+        isEnabled: false,
+        requiresHumanAction: false,
+        isVisible: true,
+        commandDigest: nil,
+        profileBindingDigest: nil,
+        phaseTitle: ClawAutonomousLoopPhase.idle.title,
+        phaseIcon: ClawAutonomousLoopPhase.idle.icon,
+        primaryActionKind: .waitForGateway,
+        primaryActionTitle: "",
+        primaryActionIcon: "",
+        isPrimaryActionEnabled: false,
+        taskID: nil,
+        sessionID: nil,
+        sessionTaskID: nil,
+        missionScopeID: nil,
+        continuationState: nil,
+        continuationActionKind: nil,
+        continuationSourceTaskID: nil,
+        continuationSourceSessionID: nil,
+        continuationDraftID: nil,
+        continuationChildTaskID: nil,
+        continuationBindingDigest: nil,
+        resumeBindingDigest: nil,
+        reviewKind: nil,
+        reviewScopeID: nil,
+        reviewCanFocus: false
     )
 }
 

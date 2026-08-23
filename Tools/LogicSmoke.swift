@@ -242,6 +242,11 @@ enum LogicSmoke {
         expect(missionStore.missionRunSummary.primaryActionTitle == "启动任务回合", "idle primary action should expose launch title")
         expect(missionStore.missionRunSummary.primaryActionIcon == "play.fill", "idle primary action should expose launch icon")
         expect(missionStore.missionRunSummary.isPrimaryActionEnabled, "idle primary action should be enabled")
+        let idleSmartRail = missionStore.missionRunSmartOperatorActionSummary
+        expect(idleSmartRail.kind == .primaryMission, "idle Smart Rail should reuse the primary Mission action")
+        expect(idleSmartRail.title == "启动任务回合", "idle Smart Rail should reuse the primary title")
+        expect(idleSmartRail.icon == "play.fill", "idle Smart Rail should reuse the primary icon")
+        expect(idleSmartRail.guidance.contains("自动发送") == false, "Smart Rail guidance should state that sending is not automatic")
         expect(missionStore.missionRunSummary.reviewPriorityQueue.isEmpty, "idle mission summary should not invent review priorities")
         let idleReadiness = missionStore.missionRunSummary.reviewReadinessSummary
         expect(idleReadiness.totalPriorityCount == 0, "idle readiness should not count review priorities")
@@ -376,6 +381,10 @@ enum LogicSmoke {
         expect(missionSummary.primaryActionTitle == "审批并继续", "approval primary action should expose approval title")
         expect(missionSummary.primaryActionIcon == "checkmark.seal.fill", "approval primary action should expose approval icon")
         expect(missionSummary.isPrimaryActionEnabled, "approval primary action should be enabled")
+        let approvalSmartRail = missionStore.missionRunSmartOperatorActionSummary
+        expect(approvalSmartRail.kind == .primaryMission, "approval Smart Rail should keep primary priority")
+        expect(approvalSmartRail.title == missionSummary.primaryActionTitle, "approval Smart Rail should reuse primary title")
+        expect(approvalSmartRail.primaryActionKind == missionSummary.primaryActionKind, "Smart Rail should bind the current primary kind")
         expect(missionSummary.requiresUserApproval, "mission summary should surface approval requirements")
         expect(missionSummary.riskScore > 0, "mission summary should include task risk")
         let preSendApprovalQueue = missionSummary.approvalQueueSummary

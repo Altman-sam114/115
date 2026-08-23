@@ -462,7 +462,7 @@ struct PhoneAgentCompactLayout: View {
             VStack(alignment: .leading, spacing: 16) {
                 PhoneAgentCommandPanel(examples: examples)
 
-                ClawMissionRunPanel(reviewFocus: $reviewFocus, showsPrimaryAction: true)
+                ClawMissionRunPanel(reviewFocus: $reviewFocus)
 
                 PhoneAgentPlanPanel()
 
@@ -491,7 +491,7 @@ struct PhoneAgentWorkbenchLayout: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
                         PhoneAgentCommandPanel(examples: examples)
-                        ClawMissionRunPanel(reviewFocus: $reviewFocus, showsPrimaryAction: false)
+                        ClawMissionRunPanel(reviewFocus: $reviewFocus)
                     }
                     .padding(.vertical, 16)
                     .padding(.leading, 16)
@@ -681,10 +681,161 @@ struct ClawMissionRunPrimaryActionView: View {
     }
 }
 
+@MainActor
+enum ClawMissionRunSmartOperatorActionDispatcher {
+    @discardableResult
+    static func perform(
+        _ renderedSummary: ClawMissionRunSmartOperatorActionSummary,
+        in store: ClawStore
+    ) -> ClawMissionRunReviewFocus? {
+        let currentSummary = store.missionRunSmartOperatorActionSummary
+        guard renderedSummary == currentSummary,
+              renderedSummary.isEnabled,
+              renderedSummary.kind != .none else {
+            return nil
+        }
+
+        let mission = store.missionRunSummary
+        switch renderedSummary.kind {
+        case .primaryMission:
+            ClawMissionRunPrimaryActionDispatcher.perform(
+                mission.primaryActionKind,
+                renderedSummary: mission,
+                in: store
+            )
+        case .prepareContinuation:
+            guard renderedSummary.continuationActionKind == .prepare,
+                  let sourceTaskID = mission.continuationDraft.sourceTaskID,
+                  let sourceSessionID = mission.continuationDraft.sourceSessionID else {
+                return nil
+            }
+            store.prepareContinuationDraft(
+                sourceTaskID: sourceTaskID,
+                sourceSessionID: sourceSessionID
+            )
+        case .continueContinuationDraft:
+            let draft = mission.continuationDraft
+            guard draft.draftID == renderedSummary.continuationDraftID,
+                  draft.actionKind == renderedSummary.continuationActionKind,
+                  draft.canPerformAction,
+                  let actionKind = draft.actionKind else {
+                return nil
+            }
+            switch actionKind {
+            case .prepare:
+                return nil
+            case .queue:
+                guard let draftID = draft.draftID else { return nil }
+                _ = store.queueContinuationDraft(id: draftID)
+            case .approve:
+                guard let childTaskID = draft.childTaskID else { return nil }
+                store.approveTask(id: childTaskID)
+            case .send:
+                guard let childTaskID = draft.childTaskID else { return nil }
+                Task {
+                    await store.sendTaskOverLiveGateway(id: childTaskID)
+                }
+            }
+        case .prepareResumeIntent:
+            let resume = store.gatewayResumeIntentPresentationSummary
+            guard resume.state == .reviewBeforeResume,
+                  resume.canPrepare,
+                  resume.bindingDigest == renderedSummary.resumeBindingDigest else {
+                return nil
+            }
+            _ = store.prepareExplicitResumeIntent(for: resume)
+        case .focusReview:
+            guard let reviewKind = renderedSummary.reviewKind,
+                  renderedSummary.reviewCanFocus,
+                  let scopeID = renderedSummary.reviewScopeID,
+                  mission.missionScopeID == scopeID,
+                  mission.activeReviewFocus(from: reviewKind) != nil else {
+                return nil
+            }
+            return ClawMissionRunReviewFocus(scopeID: scopeID, reviewKind: reviewKind)
+        case .none:
+            return nil
+        }
+        return nil
+    }
+}
+
+struct ClawMissionRunSmartOperatorActionRailView: View {
+    let summary: ClawMissionRunSmartOperatorActionSummary
+    let onAction: (ClawMissionRunSmartOperatorActionSummary) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Label("Smart Operator 下一步", systemImage: summary.icon)
+                    .font(.subheadline.bold())
+                    .foregroundStyle(tint)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                PhoneAgentTag(text: summary.kind.title, icon: summary.icon, tint: tint)
+            }
+
+            Text(summary.status)
+                .font(.footnote.bold())
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(summary.guidance)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if summary.isEnabled {
+                actionButton
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Smart Operator 下一步，\(summary.status)")
+    }
+
+    @ViewBuilder
+    private var actionButton: some View {
+        if summary.kind == .primaryMission {
+            Button(summary.title, systemImage: summary.icon) {
+                onAction(summary)
+            }
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .buttonStyle(PrimaryActionButtonStyle())
+            .accessibilityLabel(summary.title)
+            .accessibilityHint(accessibilityHint)
+            .accessibilityInputLabels([summary.title, "Smart Operator 下一步"])
+        } else {
+            Button(summary.title, systemImage: summary.icon) {
+                onAction(summary)
+            }
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .buttonStyle(SecondaryActionButtonStyle())
+            .accessibilityLabel(summary.title)
+            .accessibilityHint(accessibilityHint)
+            .accessibilityInputLabels([summary.title, "Smart Operator 下一步"])
+        }
+    }
+
+    private var tint: Color {
+        switch summary.tone {
+        case .success: return .green
+        case .warning: return .orange
+        case .danger: return .red
+        case .info: return .blue
+        case .neutral: return .secondary
+        }
+    }
+
+    private var accessibilityHint: String {
+        if summary.kind == .focusReview {
+            return "只聚焦当前复核，不改变任务状态；不会自动执行 Gateway、审批、发送或重试"
+        }
+        return "只调用当前既有入口，不会自动执行 Gateway、审批、发送或重试；仍需用户按既有流程确认"
+    }
+}
+
 struct ClawMissionRunPanel: View {
     @EnvironmentObject private var store: ClawStore
     @Binding var reviewFocus: ClawMissionRunReviewFocus?
-    let showsPrimaryAction: Bool
 
     var body: some View {
         let summary = store.missionRunSummary
@@ -765,7 +916,15 @@ struct ClawMissionRunPanel: View {
 
             ClawMissionRunLiveGatewayHealthStripView(strip: liveGatewayHealthStrip)
 
-            ClawGatewayPairingResumeView()
+            ClawMissionRunSmartOperatorActionRailView(
+                summary: store.missionRunSmartOperatorActionSummary
+            ) { action in
+                if let focus = ClawMissionRunSmartOperatorActionDispatcher.perform(action, in: store) {
+                    reviewFocus = focus
+                }
+            }
+
+            ClawGatewayPairingResumeView(showsResumeAction: false)
 
             ClawMissionRunOperatorStripView(
                 strip: operatorStrip,
@@ -779,7 +938,8 @@ struct ClawMissionRunPanel: View {
 
             ClawMissionRunContinuationDraftView(
                 summary: summary.continuationDraft,
-                onAction: performContinuationDraftAction
+                onAction: performContinuationDraftAction,
+                showsAction: false
             )
 
             ClawMissionMacAgentReadinessBoardView(
@@ -908,15 +1068,6 @@ struct ClawMissionRunPanel: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if showsPrimaryAction {
-                ClawMissionRunPrimaryActionView(summary: summary) { action in
-                    ClawMissionRunPrimaryActionDispatcher.perform(
-                        action,
-                        renderedSummary: summary,
-                        in: store
-                    )
-                }
-            }
         }
         .panelCard()
     }
@@ -1026,12 +1177,12 @@ struct ClawMissionReviewDetailDockView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            ClawMissionRunPrimaryActionView(summary: summary) { action in
-                ClawMissionRunPrimaryActionDispatcher.perform(
-                    action,
-                    renderedSummary: summary,
-                    in: store
-                )
+            ClawMissionRunSmartOperatorActionRailView(
+                summary: store.missionRunSmartOperatorActionSummary
+            ) { action in
+                if let focus = ClawMissionRunSmartOperatorActionDispatcher.perform(action, in: store) {
+                    reviewFocus = focus
+                }
             }
 
             HStack(spacing: 8) {
@@ -1057,7 +1208,7 @@ struct ClawMissionReviewDetailDockView: View {
 
             ClawMissionRunLiveGatewayHealthStripView(strip: liveGatewayHealthStrip)
 
-            ClawGatewayPairingResumeView()
+            ClawGatewayPairingResumeView(showsResumeAction: false)
 
             if dock.isReviewable {
                 ClawMissionMacAgentReadinessBoardView(
@@ -1097,7 +1248,8 @@ struct ClawMissionReviewDetailDockView: View {
 
                 ClawMissionRunContinuationDraftView(
                     summary: summary.continuationDraft,
-                    onAction: performContinuationDraftAction
+                    onAction: performContinuationDraftAction,
+                    showsAction: false
                 )
 
                 ClawMissionMacAgentReviewRadarView(
@@ -1612,6 +1764,7 @@ struct ClawMissionRunContinuationDraftView: View {
     @EnvironmentObject private var store: ClawStore
     let summary: ClawContinuationDraftPresentationSummary
     let onAction: (ClawContinuationDraftPresentationSummary) -> Void
+    var showsAction: Bool = true
     @State private var fileWritePath = ""
     @State private var fileWriteText = ""
     @State private var extractionGoal = ""
@@ -1732,7 +1885,7 @@ struct ClawMissionRunContinuationDraftView: View {
                     .background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
                 }
 
-                if let actionTitle = summary.actionTitle {
+                if showsAction, let actionTitle = summary.actionTitle {
                     Button(actionTitle, systemImage: actionIcon) {
                         onAction(summary)
                     }
@@ -5006,6 +5159,7 @@ struct ClawMissionRunLiveGatewayHealthStripView: View {
 
 struct ClawGatewayPairingResumeView: View {
     @EnvironmentObject private var store: ClawStore
+    var showsResumeAction: Bool = true
 
     var body: some View {
         let pairing = store.gatewayPairingDiagnosticsSummary
@@ -5057,7 +5211,7 @@ struct ClawGatewayPairingResumeView: View {
                         }
                     }
 
-                    if let actionTitle = resume.actionTitle {
+                    if showsResumeAction, let actionTitle = resume.actionTitle {
                         Button(actionTitle, systemImage: "person.crop.circle.badge.questionmark") {
                             _ = store.prepareExplicitResumeIntent(for: resume)
                         }

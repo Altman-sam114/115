@@ -16,6 +16,8 @@ v0.69 起，regular iPad/宽屏工作台的右侧 Review Detail Dock 就地显�
 
 v0.70 起，Mission Run 和 regular Review Detail Dock 复用同一 metadata-only Gateway 配对诊断与显式恢复意图视图。诊断分开显示本地 endpoint/token 是否可尝试 live、当前 task/session 是否收到匹配 Gateway ack、失败、模拟回退、完成和 stale/mismatch；token 只显示短指纹，不能把配置或 ping 当成持久配对证明。用户点击“记录恢复意图”只在内存记录绑定当前 task/session/request/profile/session revision/continuation 状态的人工意图，不发送网络、不自动重试、审批、queue/freeze/send、消费或刷新 receipt；scope 或配置变化会 fail closed。该切片不新增 Gateway handshake、协议字段、持久 secret、后台保活、静默恢复或原生 macOS/Mac Catalyst target。
 
+v0.72 起，compact iPhone Mission Run 与 regular iPad/宽屏 Review Detail Dock 共享 Smart Operator Action Rail 的 summary、view 和 stale-safe dispatcher。Rail 只按固定优先级从既有 continuation draft、Mission primary action、resume intent 和 review focus metadata 中选择一个用户显式入口：不会自动执行 Gateway、queue、approve、freeze、send、retry 或刷新 receipt；continuation、普通 Mission action、恢复意图和 focusReview 继续复用既有 Store/审批闸门。渲染时会核对当前 command digest、task/session/Mission scope、phase/primary、continuation 安全摘要、resume binding digest 和 review kind；变化后 fail closed。标题、guidance、VoiceOver hint 只展示固定脱敏文案，控件最小 44pt；本轮不新增 action、event、artifact、schema、WebSocket 字段，也不新增原生 macOS/Mac Catalyst target。v0.72 提交后待 GitHub Actions 和 Agent C 最新 artifact 验收。
+
 后续 Codex/Agent 接力开发必须先读 `AGENTS.md`。项目已建立“人工目标 -> Agent A 设计提示词 -> Agent B 在 main 上实现并推送 -> GitHub Actions 云端验证 -> Agent C 下载结果包复判 -> 人工复核 -> 下一轮”的迭代工作流，并准备支持未来由 Agent X 主控多轮调度 A/B/C。核心记忆和规范分布在 `AGENTS.md`、`update_log.md`、`md/test/test.md`、`md/flow/flow.md`、`md/flow/flowchart.md` 和 `md/prompt/`。
 
 ## 协作与云端验证

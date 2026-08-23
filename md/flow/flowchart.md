@@ -12,6 +12,26 @@ v0.69 的 regular 工作台把同一 Mission primary action 放入右侧 Review 
 
 v0.70 的 Live Gateway 诊断与恢复意图路径如下；它只记录当前 scope 的人工意图，不产生新的网络或 Gateway 协议动作。
 
+v0.72 的 Smart Operator Action Rail 只汇总既有 metadata，不是自动执行器。compact Mission Run 与 regular Review Detail Dock 使用同一个 summary、view 和 dispatcher；优先级固定，渲染快照变化则关闭入口。
+
+```mermaid
+flowchart LR
+  M["当前 Mission metadata"] --> C["continuation draft"]
+  M --> P["primary action"]
+  M --> R["resume intent"]
+  M --> F["next review / priority"]
+  C --> Q{"固定优先级"}
+  P --> Q
+  R --> Q
+  F --> Q
+  Q -->|"唯一候选"| Rail["共享 Smart Operator Rail"]
+  Q -->|"无候选 / stale / scope mismatch"| None["disabled / none\n无副作用"]
+  Rail --> D{"用户显式点击"}
+  D --> Existing["既有 Store / primary / scoped focus 闸门"]
+  Existing -->|"focusReview"| Focus["只更新 focus\n不改变任务状态"]
+  Existing -->|"其他动作"| Gate["仍需既有审批/receipt/send 流程"]
+```
+
 ```mermaid
 flowchart LR
   D["既有 profile + live request + current task/session"] --> C{"endpoint/token/scope/profile 是否一致?"}

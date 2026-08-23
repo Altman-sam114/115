@@ -121,6 +121,8 @@ v0.70 的 Gateway 配对诊断仍是客户端 presentation-only 摘要，不是�
 
 v0.71 的 `extractData` continuation editor 仍是客户端 presentation/store 能力，不增加 action、artifact、event、schema 字段或 WebSocket framing。编辑器只提交 exact key set：`extractionGoal`、`outputPath`、`schema`、`sourcePriority`、`validateCompleteness`；只有前两个字段可编辑，后面三项固定为 `title:string,source:string,summary:string,confidence:number`、`browserTrace,accessibilityTree,commandOutput,fileDiff,screenObservation` 和 `true`。客户端要求 goal/path 各不超过 500 UTF-8 bytes、schema 不超过 1000 UTF-8 bytes，并拒绝空值、NUL、绝对路径、`~`、反斜杠归一化后的路径逃逸和 `..` path segment；Gateway continuation preflight 仍对 exact keys、有界文本、source-priority allowlist、completeness 和 workspace 相对路径再次校验。非法编辑只返回固定脱敏提示并保持 `readyForInput`；safe-without-approval + 有效 receipt 才能进入 `readyForApproval`，approval-gated 仍是 `needsApproval` 且不创建 receipt 或派发路径。queue、approve/freeze、send、stale 或 profile/scope/trace/receipt 变化后编辑入口关闭；不会自动 queue、approve、send、retry 或刷新 receipt，也不读取提取 artifact payload。
 
+v0.72 的 Smart Operator Action Rail 是客户端 metadata-only presentation，不改变 `claw.computer.control.v1` envelope、action、event、artifact、schema 或 WebSocket framing。`ClawMissionRunSmartOperatorActionSummary` 只保存固定 action kind、脱敏 title/status/guidance、opaque command/scope/binding 值和既有 continuation/resume/review metadata；固定优先级为 continuation ready action、prepare continuation、enabled Mission primary、resume intent、focusReview，缺少安全候选时返回 disabled/none。compact 与 regular 复用同一 summary/view/dispatcher，渲染快照过期或 scope/profile/receipt/review 不匹配时拒绝调用。Rail 不直接访问 Gateway transport、不构造 envelope、不消费 receipt，不代表已配对或已授权；点击仍走既有 queue/approval/freeze/send、primary dispatch、resume intent 或 scoped focus 闸门。
+
 失败动作可以标记 `isRetryable`。手机端二次确认后，网关可重试失败动作并把新的 artifact 追加到对应 result。
 
 ## Mission Run Presentation Layer

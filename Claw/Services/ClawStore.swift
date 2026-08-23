@@ -288,6 +288,162 @@ final class ClawStore: ObservableObject {
         )
     }
 
+    var missionRunSmartOperatorActionSummary: ClawMissionRunSmartOperatorActionSummary {
+        let mission = missionRunSummary
+        let continuation = mission.continuationDraft
+        let resume = gatewayResumeIntentPresentationSummary
+        let nextReview = mission.nextReviewAction
+        let continuationBindingDigest = continuationAuthorizationFingerprint()
+
+        func makeSummary(
+            kind: ClawMissionRunSmartOperatorActionKind,
+            title: String,
+            status: String,
+            guidance: String,
+            icon: String,
+            tone: ClawMissionRunOperatorLaneTone,
+            isEnabled: Bool,
+            requiresHumanAction: Bool,
+            continuationActionKind: ClawContinuationDraftActionKind? = nil,
+            reviewKind: String? = nil,
+            reviewCanFocus: Bool = false
+        ) -> ClawMissionRunSmartOperatorActionSummary {
+            ClawMissionRunSmartOperatorActionSummary(
+                kind: kind,
+                title: title,
+                status: status,
+                guidance: guidance,
+                icon: icon,
+                tone: tone,
+                isEnabled: isEnabled,
+                requiresHumanAction: requiresHumanAction,
+                isVisible: true,
+                commandDigest: ClawContinuationContract.sha256(mission.command),
+                profileBindingDigest: liveGatewayProfileDigest(),
+                phaseTitle: mission.phaseTitle,
+                phaseIcon: mission.phaseIcon,
+                primaryActionKind: mission.primaryActionKind,
+                primaryActionTitle: mission.primaryActionTitle,
+                primaryActionIcon: mission.primaryActionIcon,
+                isPrimaryActionEnabled: mission.isPrimaryActionEnabled,
+                taskID: mission.taskID,
+                sessionID: mission.sessionID,
+                sessionTaskID: mission.sessionTaskID,
+                missionScopeID: mission.missionScopeID,
+                continuationState: continuation.state,
+                continuationActionKind: continuationActionKind,
+                continuationSourceTaskID: continuation.sourceTaskID,
+                continuationSourceSessionID: continuation.sourceSessionID,
+                continuationDraftID: continuation.draftID,
+                continuationChildTaskID: continuation.childTaskID,
+                continuationBindingDigest: continuationBindingDigest,
+                resumeBindingDigest: resume.bindingDigest,
+                reviewKind: reviewKind,
+                reviewScopeID: mission.missionScopeID,
+                reviewCanFocus: reviewCanFocus
+            )
+        }
+
+        let hasCurrentContinuationScope = continuation.sourceTaskID == mission.taskID &&
+            continuation.sourceSessionID == mission.sessionID
+        let hasContinuationDraftAction: Bool = {
+            guard continuation.isVisible,
+                  continuation.canPerformAction,
+                  let actionKind = continuation.actionKind else {
+                return false
+            }
+            if actionKind == .prepare {
+                return continuation.draftID == nil &&
+                    continuation.state == nil &&
+                    hasCurrentContinuationScope
+            }
+            guard continuation.draftID != nil else {
+                return false
+            }
+            switch actionKind {
+            case .prepare:
+                return false
+            case .queue:
+                return continuation.state == .readyForApproval
+            case .approve:
+                return continuation.state == .queued && continuation.childTaskID != nil
+            case .send:
+                return continuation.state == .approvedFrozen && continuation.childTaskID != nil
+            }
+        }()
+
+        if hasContinuationDraftAction, let actionKind = continuation.actionKind {
+            let isPrepare = actionKind == .prepare
+            return makeSummary(
+                kind: isPrepare ? .prepareContinuation : .continueContinuationDraft,
+                title: continuation.actionTitle ?? (isPrepare ? "生成下一步草稿" : "继续续接草稿"),
+                status: continuation.status,
+                guidance: continuation.guidance,
+                icon: isPrepare ? "doc.badge.plus" : "arrow.triangle.branch",
+                tone: isPrepare ? .info : .warning,
+                isEnabled: true,
+                requiresHumanAction: true,
+                continuationActionKind: actionKind
+            )
+        }
+
+        if mission.isPrimaryActionEnabled {
+            return makeSummary(
+                kind: .primaryMission,
+                title: mission.primaryActionTitle,
+                status: mission.phaseTitle,
+                guidance: "只执行当前 Mission 的既有人工入口；仍需用户按现有流程确认，不会自动发送或重试。",
+                icon: mission.primaryActionIcon,
+                tone: mission.requiresUserApproval ? .warning : .info,
+                isEnabled: true,
+                requiresHumanAction: true
+            )
+        }
+
+        if resume.state == .reviewBeforeResume,
+           resume.canPrepare,
+           resume.bindingDigest != nil {
+            return makeSummary(
+                kind: .prepareResumeIntent,
+                title: resume.actionTitle ?? "记录恢复意图",
+                status: resume.status,
+                guidance: "只记录当前 scope 的恢复意图，不会自动执行 Gateway、审批、发送、重试或刷新 receipt。",
+                icon: resume.icon,
+                tone: .warning,
+                isEnabled: true,
+                requiresHumanAction: true
+            )
+        }
+
+        if nextReview.isReviewable,
+           let reviewKind = nextReview.reviewKind,
+           mission.activeReviewFocus(from: reviewKind) != nil {
+            return makeSummary(
+                kind: .focusReview,
+                title: nextReview.primaryButtonTitle ?? "查看复核",
+                status: nextReview.status,
+                guidance: "只聚焦当前复核项，不改变任务状态，不执行 Gateway、审批、发送或重试。",
+                icon: "scope",
+                tone: .info,
+                isEnabled: true,
+                requiresHumanAction: false,
+                reviewKind: reviewKind,
+                reviewCanFocus: true
+            )
+        }
+
+        return makeSummary(
+            kind: .none,
+            title: "无安全下一步",
+            status: mission.phaseTitle,
+            guidance: "当前没有可执行的安全入口；等待状态更新或补齐人工复核，不会自动执行 Gateway、审批、发送或重试。",
+            icon: "pause.circle",
+            tone: .neutral,
+            isEnabled: false,
+            requiresHumanAction: false
+        )
+    }
+
     private var missionRunResolution: MissionRunResolution {
         let latestTask = clawMobileTasks.first
         let task = autonomousLoop.taskID.flatMap { taskID in
