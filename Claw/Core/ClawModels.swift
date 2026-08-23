@@ -2443,6 +2443,21 @@ enum ClawGatewayReadinessSchemaError: Error, Equatable, Sendable {
     }
 }
 
+private struct ClawGatewayReadinessAnyCodingKey: CodingKey {
+    let stringValue: String
+    let intValue: Int?
+
+    init?(stringValue: String) {
+        self.stringValue = stringValue
+        intValue = nil
+    }
+
+    init?(intValue: Int) {
+        stringValue = String(intValue)
+        self.intValue = intValue
+    }
+}
+
 private func readinessStrictKeys<K: CodingKey>(
     _ decoder: Decoder,
     keyType: K.Type,
@@ -2450,7 +2465,13 @@ private func readinessStrictKeys<K: CodingKey>(
 ) throws {
     let actual: Set<String>
     do {
-        actual = Set(try decoder.container(keyedBy: keyType).allKeys.map(\.stringValue))
+        _ = keyType
+        actual = Set(
+            try decoder
+                .container(keyedBy: ClawGatewayReadinessAnyCodingKey.self)
+                .allKeys
+                .map(\.stringValue)
+        )
     } catch {
         throw ClawGatewayReadinessSchemaError.malformed
     }

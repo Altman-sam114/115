@@ -406,6 +406,7 @@ final class ClawStore: ObservableObject {
     private var gatewayTransportProbeReviewFocus: ClawMissionRunReviewFocus?
     private var gatewayReadinessGeneration: Int
     private var gatewayReadinessReviewFocus: ClawMissionRunReviewFocus?
+    private var gatewayReadinessTransportTask: Task<ClawGatewayReadinessTransportResult, Error>?
     private var gatewayReadinessStateBindingDigest: String?
     private var missionRunCheckpoint: ClawMissionRunCheckpoint?
     private var lastMissionRunCheckpointAttempt: ClawMissionRunCheckpoint?
@@ -464,6 +465,7 @@ final class ClawStore: ObservableObject {
         self.gatewayReadinessState = .unavailable
         self.gatewayReadinessGeneration = 0
         self.gatewayReadinessReviewFocus = nil
+        self.gatewayReadinessTransportTask = nil
         self.gatewayReadinessStateBindingDigest = nil
         self.missionRunCheckpoint = nil
         self.lastMissionRunCheckpointAttempt = nil
@@ -553,6 +555,7 @@ final class ClawStore: ObservableObject {
         guard gatewayReadinessReviewFocus != reviewFocus else {
             return
         }
+        cancelGatewayReadinessTransport()
         gatewayReadinessReviewFocus = reviewFocus
         gatewayReadinessGeneration &+= 1
     }
@@ -796,11 +799,26 @@ final class ClawStore: ObservableObject {
             canRequest: false
         )
 
-        do {
-            let result = try await transport.requestReadiness(
+        let transportTask = Task<ClawGatewayReadinessTransportResult, Error> {
+            try await transport.requestReadiness(
                 request: request,
                 timeoutNanoseconds: timeoutNanoseconds
             )
+        }
+        gatewayReadinessTransportTask = transportTask
+        defer {
+            if generation == gatewayReadinessGeneration {
+                gatewayReadinessTransportTask = nil
+            }
+        }
+
+        do {
+            let result = try await withTaskCancellationHandler(operation: {
+                await Task.yield()
+                try await transportTask.value
+            }, onCancel: {
+                transportTask.cancel()
+            })
             guard Task.isCancelled == false,
                   generation == gatewayReadinessGeneration,
                   let currentContext = gatewayReadinessContext(for: effectiveReviewFocus),
@@ -955,6 +973,7 @@ final class ClawStore: ObservableObject {
     }
 
     private func resetGatewayReadinessState() {
+        cancelGatewayReadinessTransport()
         gatewayReadinessGeneration &+= 1
         gatewayReadinessStateBindingDigest = nil
         guard let context = gatewayReadinessContext(for: gatewayReadinessReviewFocus) else {
@@ -980,6 +999,11 @@ final class ClawStore: ObservableObject {
             guidance: "用户点击后只读取固定脱敏状态；不发送任务、不创建 session/event/artifact、不执行电脑动作。",
             canRequest: true
         )
+    }
+
+    private func cancelGatewayReadinessTransport() {
+        gatewayReadinessTransportTask?.cancel()
+        gatewayReadinessTransportTask = nil
     }
 
     private func currentGatewayTransportProbeSummary(
