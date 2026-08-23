@@ -3445,10 +3445,11 @@ enum ClawContinuationActionArguments {
             guard nonempty(arguments["extractionGoal"]) else {
                 return "请输入提取目标。"
             }
-            guard nonempty(arguments["outputPath"]) else {
+            guard let outputPath = arguments["outputPath"],
+                  outputPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
                 return "请输入 workspace 相对输出路径。"
             }
-            guard isSafeExtractDataWorkspacePath(arguments["outputPath"]) else {
+            guard isSafeExtractDataWorkspacePath(outputPath) else {
                 return "输出路径必须是 workspace 内的相对路径。"
             }
             guard bounded(arguments["extractionGoal"], 500),
