@@ -296,7 +296,8 @@ final class ClawTests: XCTestCase {
             XCTAssertEqual(recorder.closeCount, 1)
             XCTAssertEqual(recorder.bodyBytes, [0])
             XCTAssertEqual(recorder.applicationMessageCount, 0)
-            XCTAssertTrue(store.gatewayTransportProbeSummary.guidance.contains("不会自动重试"))
+            XCTAssertTrue(store.gatewayTransportProbeSummary.guidance.contains("不会发送"))
+            XCTAssertTrue(store.gatewayTransportProbeSummary.guidance.contains("自动重试"))
         }
     }
 
