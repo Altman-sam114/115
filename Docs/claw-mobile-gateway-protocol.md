@@ -125,6 +125,8 @@ v0.72 的 Smart Operator Action Rail 是客户端 metadata-only presentation，�
 
 v0.73 的 Live Gateway transport probe 是客户端局部、用户显式的一次性探测，不是新的 pairing/heartbeat protocol。合法 `ws://`/`wss://` endpoint 和运行时 token 通过现有安全 header 构造独立 WebSocket；socket 建立后只调用一次 WebSocket control-frame ping，在有界 timeout 内返回并关闭 socket。probe 不发送 JSON application message 或 `ClawMobileEnvelope`，不进入 `validateEnvelope`、session、workspace、replay guard、action handler、event、artifact 或模拟 fallback。`ClawGatewayTransportProbeSummary` 只保存固定状态、safe endpoint display、有限延迟、固定脱敏诊断和 opaque binding；成功仅表示 `transportReachable`，不表示 paired、authorized、Gateway ack、桌面权限、receipt 有效或任务成功。compact iPhone 与 regular iPad/宽屏 Dock 复用同一 summary/view/Store dispatcher；重复点击、非法配置、timeout、取消、profile/task/session/continuation/generation 变化均 fail closed，不能后台保活、自动重试或静默配对。本轮不新增 `claw.computer.control.v1` 字段、action/event/artifact kind 或 WebSocket application framing。
 
+v0.73 追加修复把 probe binding 扩展到 task/session/sessionTask/Mission scope、endpoint/token fingerprint/profile digest、live request/session revision、continuation draft/receipt/lineage/source/decision、review focus 和 generation；旧异步结果只返回 stale/丢弃，不覆盖当前 summary。fake transport 与云端 XCTest/LogicSmoke 必须记录并断言一次 call、一次 ping、零 application body、一次 close 及所有失败/取消路径；探测前后既有 live health、连接状态、session/event/artifact、任务、envelope、approval/frozen、receipt、review focus 和 Smart Rail 必须保持不变。共享 view 的动作文案、SF Symbol、44pt 和 VoiceOver hint 固定，仍不构成 pairing、authorization 或任务执行信号。
+
 失败动作可以标记 `isRetryable`。手机端二次确认后，网关可重试失败动作并把新的 artifact 追加到对应 result。
 
 ## Mission Run Presentation Layer

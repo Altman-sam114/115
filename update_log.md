@@ -52,6 +52,19 @@
 
 未实现：后台保活、定时 heartbeat、自动重连/重试、静默配对、真实 pairing protocol、新 envelope/action/event/artifact/schema 字段、原生 macOS/Mac Catalyst target、Accessibility bridge 和 Gateway server 改动。已保留用户 Xcode 配置改动、旧 v0.70 prompt 及其他无关工作区文件。
 
+### v0.73 追加修复 / Agent C 退回项
+
+日期：2026-08-23
+
+核心变更：
+
+- 按 Agent C 结论补齐 model/store/transport fake/UI/XCTest/LogicSmoke 的失败、取消、timeout、重复/in-flight、redaction、no-side-effect 和 stale binding 矩阵；binding 覆盖 task/session/sessionTask/Mission scope、endpoint、token fingerprint/profile digest、request/session revision、continuation draft/receipt/lineage/source/decision、review focus 和 generation。
+- 修正 probe dispatcher 不再隐式改写 review focus；compact iPhone 与 regular iPad/宽屏继续使用同一 summary/view/dispatcher，固定 title/icon/enabled、44pt 和 VoiceOver hint。
+
+验证状态：本轮仅计划执行允许的 `git status`、`git diff --check/stat`、`rg` 和 diff 复核；未运行本地编译、XCTest、LogicSmoke、Gateway fixture/direct/WebSocket smoke、`node --check` 或 `xcodebuild`。修复 commit、push 后的最新 GitHub Actions run、attempt、artifact 和 Agent C 复判仍待产生，不预写云端通过。
+
+遗留事项：不修改 Gateway server、fixture、direct/WebSocket smoke、workflow 或工程配置；继续保留用户 Xcode 配置和旧未跟踪 v0.70 prompt。
+
 ### v0.72 / Mac-iPad Smart Operator Action Rail
 
 日期：2026-08-23

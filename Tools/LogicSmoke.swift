@@ -75,6 +75,28 @@ enum LogicSmoke {
 
         store.queueClawMobileTaskFromCurrentPlan()
         expect(store.clawMobileTasks.isEmpty == false, "Claw mobile task should be queued")
+
+        for (endpoint, token) in [
+            ("", "probe-token"),
+            ("http://gateway.example.test", "probe-token"),
+            ("ws://gateway.example.test", ""),
+            ("ws://gateway.example.test", "   ")
+        ] {
+            let invalidStore = ClawStore(autoScanLocalArtifacts: false)
+            invalidStore.setGateway(url: endpoint, token: token)
+            invalidStore.generatePhoneAgentPlan()
+            invalidStore.queueClawMobileTaskFromCurrentPlan()
+            let invalidTransport = ProbeSmokeTransport()
+            let invalidResult = await invalidStore.probeLiveGatewayTransport(transport: invalidTransport)
+            expect(invalidResult == false, "invalid probe configuration should fail closed")
+            expect(invalidStore.gatewayTransportProbeSummary.state == .notConfigured, "invalid probe configuration should be not configured")
+            expect(invalidTransport.callCount == 0, "invalid probe configuration should not call transport")
+            expect(invalidTransport.pingCount == 0, "invalid probe configuration should not ping")
+            expect(invalidTransport.applicationMessageCount == 0, "invalid probe configuration should not send application message")
+            expect(invalidTransport.bodyBytes.isEmpty, "invalid probe configuration should not create body")
+            expect(invalidTransport.closeCount == 0, "invalid probe configuration should not close a socket")
+        }
+
         let probeStoreWithoutMission = ClawStore(autoScanLocalArtifacts: false)
         let unavailableProbe = ProbeSmokeTransport()
         let unavailableProbeResult = await probeStoreWithoutMission.probeLiveGatewayTransport(transport: unavailableProbe)
@@ -82,22 +104,65 @@ enum LogicSmoke {
         expect(probeStoreWithoutMission.gatewayTransportProbeSummary.state == .unavailable, "transport probe should be unavailable without a Mission")
         expect(unavailableProbe.callCount == 0, "unavailable transport probe should not open a socket")
 
+        let probeReviewFocus = store.missionRunSummary.missionScopeID.map {
+            ClawMissionRunReviewFocus(scopeID: $0, reviewKind: "delivery-safety")
+        }
+        store.updateGatewayTransportProbeReviewFocus(probeReviewFocus)
         let probeEventsBefore = store.gatewayEvents
         let probeTaskStatusBefore = store.clawMobileTasks[0].status
+        let probeConnectionStateBefore = store.gatewayConnectionState
+        let probeHealthBefore = store.gatewayLiveHealthSummary
+        let probeSessionsBefore = store.clawGatewaySessions
+        let probeArtifactsBefore = store.clawGatewaySessions.flatMap(\.allArtifacts)
+        let probeEnvelopeBefore = store.lastClawMobileEnvelope
+        let probeSmartRailBefore = store.missionRunSmartOperatorActionSummary
+        let probeContinuationBefore = store.continuationDraft
+        let probeFingerprintBefore = store.continuationAuthorizationFingerprintForTesting
+        let probeReceiptCountBefore = store.continuationReceiptCountForTesting
+        let probeFrozenCountBefore = store.frozenContinuationEnvelopeCountForTesting
+        let probeApprovalCountBefore = store.continuationApprovalRecordCountForTesting
         let probeTransport = ProbeSmokeTransport()
-        let probeResult = await store.probeLiveGatewayTransport(transport: probeTransport)
+        let probeResult = await store.probeLiveGatewayTransport(
+            transport: probeTransport,
+            reviewFocus: probeReviewFocus
+        )
         expect(probeResult, "explicit transport probe should report a successful control ping")
-        expect(store.gatewayTransportProbeSummary.state == .transportReachable, "successful probe should expose transport reachable")
-        expect(store.gatewayTransportProbeSummary.pingCount == 1, "successful probe should record one ping")
+        expect(store.gatewayTransportProbeSummary(for: probeReviewFocus).state == .transportReachable, "successful probe should expose transport reachable")
+        expect(store.gatewayTransportProbeSummary(for: probeReviewFocus).pingCount == 1, "successful probe should record one ping")
         expect(probeTransport.callCount == 1, "successful probe should call transport once")
         expect(probeTransport.pingCount == 1, "successful probe should send one ping")
         expect(probeTransport.applicationMessageCount == 0, "probe should not send an application message")
+        expect(probeTransport.applicationMessageBodies.isEmpty, "probe should not record application body")
+        expect(probeTransport.bodyBytes == [0], "probe should carry no envelope body")
         expect(probeTransport.closeCount == 1, "probe should close its socket once")
-        expect(probeTransport.lastBodyBytes == 0, "probe request should carry no envelope body")
         expect(store.gatewayEvents == probeEventsBefore, "probe should not create Gateway events")
         expect(store.clawMobileTasks[0].status == probeTaskStatusBefore, "probe should not change task status")
+        expect(store.gatewayConnectionState == probeConnectionStateBefore, "probe should not change gateway connection state")
+        expect(store.gatewayLiveHealthSummary == probeHealthBefore, "probe should not change existing live health")
+        expect(store.clawGatewaySessions == probeSessionsBefore, "probe should not change sessions")
+        expect(store.clawGatewaySessions.flatMap(\.allArtifacts) == probeArtifactsBefore, "probe should not change artifacts")
+        expect(store.lastClawMobileEnvelope == probeEnvelopeBefore, "probe should not change envelope")
+        expect(store.missionRunSmartOperatorActionSummary == probeSmartRailBefore, "probe should not change Smart Rail")
+        expect(store.continuationDraft == probeContinuationBefore, "probe should not change continuation draft")
+        expect(store.continuationAuthorizationFingerprintForTesting == probeFingerprintBefore, "probe should not change continuation binding")
+        expect(store.continuationReceiptCountForTesting == probeReceiptCountBefore, "probe should not change receipt vault")
+        expect(store.frozenContinuationEnvelopeCountForTesting == probeFrozenCountBefore, "probe should not change frozen envelope")
+        expect(store.continuationApprovalRecordCountForTesting == probeApprovalCountBefore, "probe should not change approval record")
+        expect(store.gatewayTransportProbeReviewFocusForTesting == probeReviewFocus, "probe should not change review focus")
         expect(store.lastGatewayLiveRequest == nil, "probe should not create a live task request")
-        expect(store.gatewayTransportProbeSummary.guidance.contains("配对") == true, "probe guidance should distinguish reachability from pairing")
+        expect(store.gatewayTransportProbeSummary(for: probeReviewFocus).guidance.contains("配对") == true, "probe guidance should distinguish reachability from pairing")
+
+        let wssStore = ClawStore(autoScanLocalArtifacts: false)
+        wssStore.setGateway(url: "wss://gateway.example.test/v1?marker=private-marker", token: "probe-secret")
+        wssStore.generatePhoneAgentPlan()
+        wssStore.queueClawMobileTaskFromCurrentPlan()
+        let wssTransport = ProbeSmokeTransport()
+        let wssResult = await wssStore.probeLiveGatewayTransport(transport: wssTransport)
+        expect(wssResult, "wss probe should succeed")
+        expect(wssTransport.callCount == 1 && wssTransport.pingCount == 1, "wss probe should call and ping once")
+        expect(wssTransport.applicationMessageCount == 0 && wssTransport.bodyBytes == [0], "wss probe should not send envelope")
+        expect(wssTransport.closeCount == 1, "wss probe should close once")
+        expect(wssStore.gatewayTransportProbeSummary.endpoint.contains("?") == false, "wss summary should redact query")
 
         let failedProbeStore = ClawStore(autoScanLocalArtifacts: false)
         failedProbeStore.setGateway(url: "wss://gateway.example.test/v1?marker=private-marker", token: "probe-secret")
@@ -112,6 +177,7 @@ enum LogicSmoke {
         expect(failedProbeStore.gatewayTransportProbeSummary.state == .failed, "timeout probe should expose failed state")
         expect(failedProbeStore.gatewayTransportProbeSummary.diagnostic == "probe_timeout", "timeout probe should expose fixed diagnostic")
         expect(failedProbeTransport.callCount == 1 && failedProbeTransport.closeCount == 1, "failed probe should close exactly once")
+        expect(failedProbeTransport.bodyBytes == [0], "failed probe should carry no envelope body")
         let failedProbeVisible = [
             failedProbeStore.gatewayTransportProbeSummary.status,
             failedProbeStore.gatewayTransportProbeSummary.guidance,
@@ -119,6 +185,113 @@ enum LogicSmoke {
         ].joined(separator: " ")
         expect(failedProbeVisible.contains("probe-secret") == false, "probe failure must not expose token")
         expect(failedProbeVisible.contains("private-marker") == false, "probe failure must not expose URL query")
+        expect(failedProbeVisible.contains("Authorization") == false, "probe failure must not expose authorization")
+        expect(failedProbeVisible.contains("Bearer") == false, "probe failure must not expose bearer token")
+        expect(failedProbeVisible.contains("file://") == false, "probe failure must not expose file reference")
+
+        for (outcome, diagnostic) in [
+            (ProbeSmokeTransport.Outcome.connectionFailure, "probe_connection_failed"),
+            (ProbeSmokeTransport.Outcome.pingFailure, "probe_ping_failed")
+        ] {
+            let failureStore = ClawStore(autoScanLocalArtifacts: false)
+            failureStore.setGateway(url: "ws://gateway.example.test", token: "probe-secret")
+            failureStore.generatePhoneAgentPlan()
+            failureStore.queueClawMobileTaskFromCurrentPlan()
+            let failureTransport = ProbeSmokeTransport(outcome: outcome)
+            let failureResult = await failureStore.probeLiveGatewayTransport(transport: failureTransport)
+            expect(failureResult == false, "probe failure should fail closed")
+            expect(failureStore.gatewayTransportProbeSummary.diagnostic == diagnostic, "probe failure should use fixed diagnostic")
+            expect(failureTransport.callCount == 1 && failureTransport.closeCount == 1, "probe failure should close once without retry")
+            expect(failureTransport.bodyBytes == [0], "probe failure should not carry body")
+        }
+
+        let cancellationStore = ClawStore(autoScanLocalArtifacts: false)
+        cancellationStore.setGateway(url: "ws://gateway.example.test", token: "probe-secret")
+        cancellationStore.generatePhoneAgentPlan()
+        cancellationStore.queueClawMobileTaskFromCurrentPlan()
+        let cancellationTransport = ProbeSmokeTransport(outcome: .waitForRelease)
+        let cancellationTask = Task {
+            await cancellationStore.probeLiveGatewayTransport(transport: cancellationTransport)
+        }
+        for _ in 0..<100 {
+            if cancellationTransport.callCount > 0 { break }
+            await Task.yield()
+        }
+        cancellationTask.cancel()
+        let cancellationResult = await cancellationTask.value
+        expect(cancellationResult == false, "cancelled probe should fail closed")
+        expect(cancellationStore.gatewayTransportProbeSummary.diagnostic == "probe_cancelled", "cancelled probe should use fixed diagnostic")
+        expect(cancellationTransport.callCount == 1 && cancellationTransport.closeCount == 1, "cancelled probe should close once")
+        expect(cancellationTransport.bodyBytes == [0] && cancellationTransport.applicationMessageCount == 0, "cancelled probe should not send envelope")
+
+        let duplicateStore = ClawStore(autoScanLocalArtifacts: false)
+        duplicateStore.setGateway(url: "ws://gateway.example.test", token: "probe-secret")
+        duplicateStore.generatePhoneAgentPlan()
+        duplicateStore.queueClawMobileTaskFromCurrentPlan()
+        let duplicateTransport = ProbeSmokeTransport(outcome: .waitForRelease)
+        let firstProbe = Task {
+            await duplicateStore.probeLiveGatewayTransport(transport: duplicateTransport)
+        }
+        for _ in 0..<100 {
+            if duplicateTransport.callCount > 0 { break }
+            await Task.yield()
+        }
+        let duplicateResult = await duplicateStore.probeLiveGatewayTransport(transport: duplicateTransport)
+        expect(duplicateResult == false, "duplicate in-flight probe should fail closed")
+        expect(duplicateTransport.callCount == 1, "duplicate in-flight probe should not retry")
+        firstProbe.cancel()
+        _ = await firstProbe.value
+        expect(duplicateTransport.closeCount == 1, "duplicate in-flight probe should close one socket")
+
+        let staleStore = ClawStore(autoScanLocalArtifacts: false)
+        staleStore.setGateway(url: "ws://gateway.example.test", token: "probe-secret")
+        staleStore.generatePhoneAgentPlan()
+        staleStore.queueClawMobileTaskFromCurrentPlan()
+        let staleScope = staleStore.missionRunSummary.missionScopeID.map {
+            ClawMissionRunReviewFocus(scopeID: $0, reviewKind: "delivery-safety")
+        }
+        staleStore.updateGatewayTransportProbeReviewFocus(staleScope)
+        let staleTransport = ProbeSmokeTransport(outcome: .waitForRelease)
+        let staleProbe = Task {
+            await staleStore.probeLiveGatewayTransport(transport: staleTransport, reviewFocus: staleScope)
+        }
+        for _ in 0..<100 {
+            if staleTransport.callCount > 0 { break }
+            await Task.yield()
+        }
+        staleStore.setGateway(url: "wss://new-gateway.example.test", token: "new-probe-secret")
+        staleTransport.release()
+        let staleResult = await staleProbe.value
+        expect(staleResult == false, "stale probe result should be discarded")
+        expect(staleStore.gatewayTransportProbeSummary.state != .transportReachable, "stale probe must not overwrite new scope")
+        expect(staleTransport.callCount == 1 && staleTransport.pingCount == 1 && staleTransport.closeCount == 1, "stale probe should have one bounded transport call")
+
+        let mismatchStore = ClawStore(autoScanLocalArtifacts: false)
+        mismatchStore.setGateway(url: "ws://gateway.example.test", token: "probe-secret")
+        mismatchStore.generatePhoneAgentPlan()
+        mismatchStore.queueClawMobileTaskFromCurrentPlan()
+        if let mismatchScope = mismatchStore.missionRunSummary.missionScopeID {
+            let oldFocus = ClawMissionRunReviewFocus(scopeID: mismatchScope, reviewKind: "agent-trace")
+            let currentFocus = ClawMissionRunReviewFocus(scopeID: mismatchScope, reviewKind: "delivery-safety")
+            mismatchStore.updateGatewayTransportProbeReviewFocus(oldFocus)
+            mismatchStore.updateGatewayTransportProbeReviewFocus(currentFocus)
+            let mismatchTransport = ProbeSmokeTransport()
+            let mismatchResult = await mismatchStore.probeLiveGatewayTransport(
+                transport: mismatchTransport,
+                reviewFocus: oldFocus
+            )
+            expect(mismatchResult == false, "old review focus should fail closed")
+            expect(mismatchTransport.callCount == 0, "old review focus should not open a socket")
+        } else {
+            failures.append("probe mismatch scope should exist")
+        }
+
+        expect(ClawGatewayTransportProbePresentationContract.sharedHealthStripView == "ClawMissionRunLiveGatewayHealthStripView", "compact and regular probe view should be shared")
+        expect(ClawGatewayTransportProbePresentationContract.minimumHitArea >= 44, "probe control should have a 44pt hit area")
+        expect(ClawGatewayTransportProbePresentationContract.actionTitle == "检查 Live Gateway transport", "probe title should be fixed")
+        expect(ClawGatewayTransportProbePresentationContract.actionIcon == "waveform.path.ecg", "probe icon should be fixed")
+        expect(ClawGatewayTransportProbePresentationContract.voiceOverHint.contains("不发送任务"), "probe VoiceOver hint should state no task send")
+        expect(ClawGatewayTransportProbePresentationContract.voiceOverHint.contains("不自动重试"), "probe VoiceOver hint should state no retry")
 
         let pairingAfterQueue = store.gatewayPairingDiagnosticsSummary
         expect(pairingAfterQueue.canAttemptLive, "configured Gateway should expose canAttemptLive separately from acknowledgement")
@@ -4085,20 +4258,34 @@ enum LogicSmoke {
 }
 
 private final class ProbeSmokeTransport: @unchecked Sendable, ClawGatewayProbeTransport {
-    enum Outcome {
+    enum Outcome: Equatable {
         case success
+        case connectionFailure
+        case pingFailure
         case timeout
+        case waitForRelease
     }
 
     let outcome: Outcome
+    private let releaseStream: AsyncStream<Void>
+    private var releaseContinuation: AsyncStream<Void>.Continuation?
     private(set) var callCount = 0
     private(set) var pingCount = 0
     private(set) var applicationMessageCount = 0
+    private(set) var applicationMessageBodies: [String] = []
+    private(set) var bodyBytes: [Int] = []
     private(set) var closeCount = 0
     private(set) var lastBodyBytes: Int?
 
     init(outcome: Outcome = .success) {
         self.outcome = outcome
+        var continuation: AsyncStream<Void>.Continuation?
+        self.releaseStream = AsyncStream { continuation = $0 }
+        self.releaseContinuation = continuation
+    }
+
+    func release() {
+        releaseContinuation?.yield(())
     }
 
     func probeTransport(
@@ -4107,15 +4294,38 @@ private final class ProbeSmokeTransport: @unchecked Sendable, ClawGatewayProbeTr
     ) async throws -> ClawGatewayTransportProbeResult {
         callCount += 1
         lastBodyBytes = request.bodyBytes
+        bodyBytes.append(request.bodyBytes)
         defer {
             closeCount += 1
+        }
+        if outcome == .waitForRelease {
+            try await withTaskCancellationHandler(operation: {
+                var iterator = releaseStream.makeAsyncIterator()
+                _ = await iterator.next()
+                try Task.checkCancellation()
+            }, onCancel: {
+                releaseContinuation?.yield(())
+            })
         }
         switch outcome {
         case .success:
             pingCount += 1
             return ClawGatewayTransportProbeResult()
+        case .connectionFailure:
+            throw ClawGatewayTransportProbeError.connectionFailed
+        case .pingFailure:
+            pingCount += 1
+            throw ClawGatewayTransportProbeError.pingFailed
         case .timeout:
             throw ClawGatewayTransportProbeError.timedOut
+        case .waitForRelease:
+            pingCount += 1
+            return ClawGatewayTransportProbeResult(
+                pingCount: 1,
+                didSendApplicationMessage: false,
+                didCloseSocket: true,
+                latencyMilliseconds: 1
+            )
         }
     }
 }

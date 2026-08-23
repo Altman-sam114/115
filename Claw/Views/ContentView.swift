@@ -914,7 +914,10 @@ struct ClawMissionRunPanel: View {
                 onFocusReviewKind: focusReviewKind
             )
 
-            ClawMissionRunLiveGatewayHealthStripView(strip: liveGatewayHealthStrip)
+            ClawMissionRunLiveGatewayHealthStripView(
+                strip: liveGatewayHealthStrip,
+                reviewFocus: reviewFocus
+            )
 
             ClawMissionRunSmartOperatorActionRailView(
                 summary: store.missionRunSmartOperatorActionSummary
@@ -1206,7 +1209,10 @@ struct ClawMissionReviewDetailDockView: View {
                 onFocusReviewKind: focusReviewKind
             )
 
-            ClawMissionRunLiveGatewayHealthStripView(strip: liveGatewayHealthStrip)
+            ClawMissionRunLiveGatewayHealthStripView(
+                strip: liveGatewayHealthStrip,
+                reviewFocus: reviewFocus
+            )
 
             ClawGatewayPairingResumeView(showsResumeAction: false)
 
@@ -5097,6 +5103,7 @@ struct ClawGatewayLiveRequestCard: View {
 struct ClawMissionRunLiveGatewayHealthStripView: View {
     @EnvironmentObject private var store: ClawStore
     let strip: ClawMissionRunLiveGatewayHealthStrip
+    let reviewFocus: ClawMissionRunReviewFocus?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -5119,7 +5126,7 @@ struct ClawMissionRunLiveGatewayHealthStripView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            let probe = store.gatewayTransportProbeSummary
+            let probe = store.gatewayTransportProbeSummary(for: reviewFocus)
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Label(probe.title, systemImage: probe.icon)
@@ -5140,17 +5147,23 @@ struct ClawMissionRunLiveGatewayHealthStripView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Button("检查 Live Gateway transport", systemImage: "waveform.path.ecg") {
+                Button(
+                    ClawGatewayTransportProbePresentationContract.actionTitle,
+                    systemImage: ClawGatewayTransportProbePresentationContract.actionIcon
+                ) {
                     Task {
-                        _ = await store.probeLiveGatewayTransport()
+                        _ = await store.probeLiveGatewayTransport(reviewFocus: reviewFocus)
                     }
                 }
-                .frame(maxWidth: .infinity, minHeight: 44)
+                .frame(
+                    maxWidth: .infinity,
+                    minHeight: CGFloat(ClawGatewayTransportProbePresentationContract.minimumHitArea)
+                )
                 .buttonStyle(SecondaryActionButtonStyle())
                 .disabled(probe.canProbe == false || probe.isInFlight)
                 .opacity(probe.canProbe && probe.isInFlight == false ? 1 : 0.55)
-                .accessibilityLabel("检查 Live Gateway transport")
-                .accessibilityHint("只检查 transport，不发送任务、不执行电脑动作、不自动配对、不自动审批、不自动发送、不自动重试")
+                .accessibilityLabel(ClawGatewayTransportProbePresentationContract.actionTitle)
+                .accessibilityHint(ClawGatewayTransportProbePresentationContract.voiceOverHint)
             }
             .padding(.top, 4)
             .accessibilityElement(children: .contain)
@@ -5180,8 +5193,14 @@ struct ClawMissionRunLiveGatewayHealthStripView: View {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(tint.opacity(0.16), lineWidth: 1)
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
         .accessibilityLabel("Mission Run Live Gateway 健康条，\(strip.status)")
+        .onAppear {
+            store.updateGatewayTransportProbeReviewFocus(reviewFocus)
+        }
+        .onChange(of: reviewFocus) { _, newValue in
+            store.updateGatewayTransportProbeReviewFocus(newValue)
+        }
     }
 
     private var tint: Color {

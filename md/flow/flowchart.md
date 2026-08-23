@@ -16,6 +16,8 @@ v0.72 的 Smart Operator Action Rail 只汇总既有 metadata，不是自动执�
 
 v0.73 的 transport probe 是一次用户点击触发的局部探测，不是后台心跳。它只发送一次 control-frame ping，成功表示 transport reachable，不表示配对、授权或任务成功；compact/regular 共享同一 summary/view/dispatcher，旧 scope 或 generation 结果丢弃。
 
+追加修复：共享 view 先绑定当前 review focus，再由同一个 Store dispatcher 读取 summary；focus、generation、task/session/request revision、profile/token fingerprint 或 continuation authorization 变化时，旧 socket 的结果只关闭并丢弃，不改变既有 live health、session/event/artifact、任务、receipt、approval 或 Smart Rail。
+
 ```mermaid
 flowchart LR
   M["当前 Mission metadata"] --> C["continuation draft"]

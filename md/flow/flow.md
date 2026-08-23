@@ -10,6 +10,8 @@ v0.72 在同一 presentation 边界增加 Smart Operator Action Rail。`missionR
 
 v0.73 在同一 health strip 增加用户显式的 Live Gateway transport probe。当前 Mission 和合法 ws/wss + runtime token 通过现有 profile/header preflight 后，Store 只打开独立 socket、发送一次 control-frame ping，并在有界 timeout、失败或取消后关闭；compact iPhone 与 regular iPad/宽屏 Dock 复用同一 probe summary/view/API。成功只表示 transport reachable，不表示配对、授权、Gateway ack 或任务成功；probe 与既有 live health、session、events、artifacts、fallback、approval、receipt、review focus 和 Smart Rail 分离。task/session/profile/continuation/generation stale guard、重复点击和非法配置均 fail closed，不进入 Gateway application message 或后台保活。
 
+v0.73 追加修复将 request/session revision、token fingerprint/profile digest、continuation draft/receipt/lineage/source/decision 和 review focus 纳入同一 opaque binding。UI 在共享 health strip 的 `onAppear/onChange` 同步 focus，probe dispatcher 只消费 scope、不隐式改写 focus；旧异步结果在 generation 或任一 scope 变化后丢弃。所有 transport fake 只记录控制帧探测事实，probe 前后既有状态快照不变。
+
 ## 1. 当前核心数据流
 
 ```text

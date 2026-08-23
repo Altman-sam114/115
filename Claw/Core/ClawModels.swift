@@ -1907,6 +1907,14 @@ struct ClawGatewayTransportProbeSummary: Equatable, Codable, Sendable {
     }
 }
 
+enum ClawGatewayTransportProbePresentationContract {
+    static let actionTitle = "检查 Live Gateway transport"
+    static let actionIcon = "waveform.path.ecg"
+    static let minimumHitArea = 44
+    static let voiceOverHint = "只检查 transport，不发送任务、不执行电脑动作、不自动配对、不自动审批、不自动发送、不自动重试"
+    static let sharedHealthStripView = "ClawMissionRunLiveGatewayHealthStripView"
+}
+
 struct ClawMissionRunApprovalFastLaneSummary: Equatable, Codable, Sendable {
     var title: String
     var status: String

@@ -164,6 +164,8 @@ v0.71 为 `extractData` continuation 增加与 `manageFiles` 对称的 typed edi
 
 v0.73 增加用户显式、单次、有界的 Live Gateway transport probe。compact iPhone Mission Run 与 regular iPad/宽屏 Review Detail Dock 共享同一 health strip、summary 和 Store API；合法 `ws://`/`wss://` 配置下只打开独立 WebSocket、发送一次 control-frame ping 并关闭 socket，不发送 JSON envelope/application message，不进入 Gateway session/action/event/artifact，也不触发模拟 fallback、审批、发送或 receipt。`transportReachable` 只表示 transport 可达，不表示已配对、已授权、已收到 Gateway ack、可执行电脑动作或任务成功。probe 使用局部 metadata-only summary、固定脱敏诊断和 task/session/profile/continuation/generation stale guard；不实现后台保活、自动重试、配对协议或原生 macOS target。
 
+Agent C 退回后的 v0.73 追加修复补齐了缺失/非法配置零调用、connect/ping/timeout/cancel 固定诊断、fake call/ping/application/body/close 计数、重复/in-flight 和完整 scope binding stale 矩阵，以及 probe 前后 live health、session/event/artifact、任务、envelope、approval/frozen、receipt、review focus 和 Smart Rail 快照不变断言。UI 仍只保留一套共享 view/summary/dispatcher、固定 title/icon、44pt 和 transport-only VoiceOver hint；本轮 commit/push 后仍待 Agent C 以最新云端 artifact 复判，不把静态检查写成业务通过。
+
 ## 运行
 
 打开 `Claw.xcodeproj`，选择 `Claw` scheme，在 iPhone 模拟器或真机运行。默认协作验证不在本机跑命令行编译、XCTest 或 smoke；命令行 build、真实 iPhone Simulator XCTest、Swift logic smoke、Gateway smoke 和 `node --check` 统一由 GitHub Actions workflow 执行。结果包始终保留 `xctest.log`（包含 simulator discovery 错误）；XCTest 成功时必须同时包含 `ClawTests.xcresult`，否则 packaging 失败。结果包还包含 manifest、JUnit、`xcodebuild.log` 和各 smoke 日志，并由 Agent C 下载复判。

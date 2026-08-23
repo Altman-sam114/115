@@ -84,6 +84,8 @@ ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci-results.yml"); put
 
 云端 XCTest/LogicSmoke 必须覆盖：无 Mission、缺失/非法 endpoint、缺失 token 的 `unavailable`/`notConfigured` 与零 transport call；合法 ws/wss 的用户显式一次 probe、恰好一次 ping、无 application message、无 envelope body、一次 close；connect/ping failure、timeout、cancel 的固定失败诊断和 close；重复点击/in-flight 的单 call；task/session/sessionTask/Mission/profile/token fingerprint/endpoint/continuation/generation 变化后的 stale 丢弃；probe 与 task health、session、events、artifact、fallback、approval、receipt、review focus 和 Smart Rail 无副作用。fake transport 必须记录 call/ping/application-message/envelope/close 计数，并在云端断言 compact iPhone 与 regular iPad/宽屏复用同一 summary/view/dispatcher、44pt 控件和固定 VoiceOver hint。
 
+Agent C 退回修复还必须逐项断言 request/session revision、continuation draft 的 source/decision/action binding、receipt presence/expiry、lineage 与 review focus generation；真实 `Task.cancel()` 必须得到固定 `probe_cancelled`、恰好一次 close 且无 retry。probe 成功/失败前后的 `gatewayConnectionState`、既有 `gatewayLiveHealthSummary`（含 attempt/reconnect/ping）、session、events、artifact、task status、envelope、approval/frozen、receipt vault、continuation、fallback、review focus 和 Smart Rail/selection 快照必须相等。
+
 probe 成功只允许解释为 transport reachable，不得写成 paired、authorized、Gateway ack、桌面权限或任务成功。summary、UI/accessibility、日志和测试输出不得出现 raw token、Authorization/Bearer、完整 URL/query、UUID、receipt、`file://`、workspace/path、正文、命令、marker 或 `toolArguments`。本轮不修改 Gateway server、fixture、direct/WebSocket smoke 或 workflow；这些仍由最新 `origin/main` 云端回归证明 probe 没有 JSON application message、session、event、artifact 或 handler 副作用。本地只执行非编译静态检查，不运行 `swiftc`、XCTest、LogicSmoke、Gateway smoke、`node --check` 或 `xcodebuild`。
 
 ### Swift 核心逻辑改动

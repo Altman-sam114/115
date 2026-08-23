@@ -79,6 +79,7 @@ final class ClawStore: ObservableObject {
     private var frozenContinuationEnvelopes: [UUID: String]
     private var explicitResumeIntent: ExplicitResumeIntent?
     private var gatewayTransportProbeGeneration: Int
+    private var gatewayTransportProbeReviewFocus: ClawMissionRunReviewFocus?
 
     init(
         model: LocalClawModel? = nil,
@@ -128,6 +129,7 @@ final class ClawStore: ObservableObject {
         self.explicitResumeIntent = nil
         self.gatewayTransportProbeState = .unavailable
         self.gatewayTransportProbeGeneration = 0
+        self.gatewayTransportProbeReviewFocus = nil
         self.autonomousLoop = ClawAutonomousLoopState(
             phase: .idle,
             runMode: .simulatedEventStream,
@@ -181,7 +183,45 @@ final class ClawStore: ObservableObject {
     }
 
     var gatewayTransportProbeSummary: ClawGatewayTransportProbeSummary {
-        currentGatewayTransportProbeSummary()
+        currentGatewayTransportProbeSummary(for: gatewayTransportProbeReviewFocus)
+    }
+
+    func gatewayTransportProbeSummary(
+        for reviewFocus: ClawMissionRunReviewFocus?
+    ) -> ClawGatewayTransportProbeSummary {
+        currentGatewayTransportProbeSummary(for: reviewFocus)
+    }
+
+    func updateGatewayTransportProbeReviewFocus(_ reviewFocus: ClawMissionRunReviewFocus?) {
+        guard gatewayTransportProbeReviewFocus != reviewFocus else {
+            return
+        }
+        gatewayTransportProbeReviewFocus = reviewFocus
+        gatewayTransportProbeGeneration &+= 1
+    }
+
+    var continuationAuthorizationFingerprintForTesting: String {
+        continuationAuthorizationFingerprint()
+    }
+
+    var continuationReceiptCountForTesting: Int {
+        continuationReceipts.count
+    }
+
+    var frozenContinuationEnvelopeCountForTesting: Int {
+        frozenContinuationEnvelopes.count
+    }
+
+    var continuationApprovalRecordCountForTesting: Int {
+        continuationApprovalRecords.count
+    }
+
+    var gatewayTransportProbeReviewFocusForTesting: ClawMissionRunReviewFocus? {
+        gatewayTransportProbeReviewFocus
+    }
+
+    var gatewayTransportProbeGenerationForTesting: Int {
+        gatewayTransportProbeGeneration
     }
 
     var gatewayLiveHealthSummary: ClawGatewayLiveHealthSummary {
@@ -205,15 +245,20 @@ final class ClawStore: ObservableObject {
     @discardableResult
     func probeLiveGatewayTransport<T: ClawGatewayProbeTransport>(
         transport: T = URLSessionClawGatewayTransport(),
-        timeoutNanoseconds: UInt64 = 3_000_000_000
+        timeoutNanoseconds: UInt64 = 3_000_000_000,
+        reviewFocus: ClawMissionRunReviewFocus? = nil
     ) async -> Bool {
-        guard let context = gatewayTransportProbeContext(),
+        guard reviewFocus == nil || reviewFocus == gatewayTransportProbeReviewFocus else {
+            return false
+        }
+        let effectiveReviewFocus = reviewFocus ?? gatewayTransportProbeReviewFocus
+        guard let context = gatewayTransportProbeContext(for: effectiveReviewFocus),
               context.request.canAttemptLive else {
-            resetGatewayTransportProbeState()
+            resetGatewayTransportProbeState(for: effectiveReviewFocus)
             return false
         }
 
-        let current = currentGatewayTransportProbeSummary()
+        let current = currentGatewayTransportProbeSummary(for: effectiveReviewFocus)
         guard current.bindingDigest == context.bindingDigest,
               current.state != .probing,
               current.state != .stale else {
@@ -238,7 +283,7 @@ final class ClawStore: ObservableObject {
             )
             guard Task.isCancelled == false,
                   generation == gatewayTransportProbeGeneration,
-                  let currentContext = gatewayTransportProbeContext(),
+                  let currentContext = gatewayTransportProbeContext(for: effectiveReviewFocus),
                   currentContext.bindingDigest == context.bindingDigest else {
                 return false
             }
@@ -271,7 +316,7 @@ final class ClawStore: ObservableObject {
             return true
         } catch {
             guard generation == gatewayTransportProbeGeneration,
-                  let currentContext = gatewayTransportProbeContext(),
+                  let currentContext = gatewayTransportProbeContext(for: effectiveReviewFocus),
                   currentContext.bindingDigest == context.bindingDigest else {
                 return false
             }
@@ -296,8 +341,10 @@ final class ClawStore: ObservableObject {
         }
     }
 
-    private func currentGatewayTransportProbeSummary() -> ClawGatewayTransportProbeSummary {
-        guard let context = gatewayTransportProbeContext() else {
+    private func currentGatewayTransportProbeSummary(
+        for reviewFocus: ClawMissionRunReviewFocus?
+    ) -> ClawGatewayTransportProbeSummary {
+        guard let context = gatewayTransportProbeContext(for: reviewFocus) else {
             return .unavailable
         }
         guard context.request.canAttemptLive else {
@@ -334,7 +381,9 @@ final class ClawStore: ObservableObject {
         return gatewayTransportProbeState
     }
 
-    private func gatewayTransportProbeContext() -> GatewayTransportProbeContext? {
+    private func gatewayTransportProbeContext(
+        for reviewFocus: ClawMissionRunReviewFocus?
+    ) -> GatewayTransportProbeContext? {
         let resolution = missionRunResolution
         guard let task = resolution.task else {
             return nil
@@ -349,16 +398,36 @@ final class ClawStore: ObservableObject {
         if task.status == .blocked {
             request.canAttemptLive = false
         }
+        request.canAttemptLive = request.canAttemptLive && isValidProbeEndpoint(request.endpoint)
         let digestParts = [
             task.id.uuidString,
             task.status.rawValue,
+            ClawContinuationContract.sha256(task.command),
+            (sessionScopeID(task: task, session: resolution.session)?.uuidString ?? "none"),
             resolution.session?.id.uuidString ?? "none",
             resolution.session?.taskID.uuidString ?? "none",
+            resolution.session?.status.rawValue ?? "none",
             String(resolution.session?.updatedAt.timeIntervalSinceReferenceDate ?? 0),
             resolution.liveRequest?.id.uuidString ?? "none",
             resolution.liveRequest?.sessionID?.uuidString ?? "none",
+            String(resolution.liveRequest?.createdAt.timeIntervalSinceReferenceDate ?? 0),
+            ClawContinuationContract.sha256(resolution.liveRequest?.endpoint ?? "none"),
+            resolution.liveRequest?.taskID.uuidString ?? "none",
+            resolution.liveRequest?.requestPath ?? "none",
+            resolution.liveRequest?.transport ?? "none",
+            String(resolution.liveRequest?.bodyBytes ?? 0),
+            String(task.createdAt.timeIntervalSinceReferenceDate),
+            String(resolution.events.count),
+            String(resolution.events.map(\.sequence).max() ?? 0),
             liveGatewayProfileDigest(),
-            continuationAuthorizationFingerprint()
+            continuationAuthorizationFingerprint(),
+            reviewFocusBindingDigest(reviewFocus),
+            String(resolution.session?.createdAt.timeIntervalSinceReferenceDate ?? 0),
+            autonomousLoop.phase.rawValue,
+            String(autonomousLoop.iteration),
+            String(autonomousLoop.requiresUserApproval),
+            autonomousLoop.taskID?.uuidString ?? "none",
+            autonomousLoop.sessionID?.uuidString ?? "none"
         ]
         return GatewayTransportProbeContext(
             request: request,
@@ -367,9 +436,36 @@ final class ClawStore: ObservableObject {
         )
     }
 
-    private func resetGatewayTransportProbeState() {
+    private func sessionScopeID(task: ClawMobileTask, session: ClawGatewaySession?) -> UUID? {
+        session?.id ?? task.id
+    }
+
+    private func reviewFocusBindingDigest(_ reviewFocus: ClawMissionRunReviewFocus?) -> String {
+        guard let reviewFocus else {
+            return "none"
+        }
+        return ClawContinuationContract.sha256(
+            "\(reviewFocus.scopeID.uuidString)|\(ClawContinuationContract.sha256(reviewFocus.reviewKind))"
+        )
+    }
+
+    private func isValidProbeEndpoint(_ endpoint: String) -> Bool {
+        guard let components = URLComponents(string: endpoint),
+              let scheme = components.scheme?.lowercased(),
+              scheme == "ws" || scheme == "wss",
+              components.host?.isEmpty == false,
+              components.user == nil,
+              components.password == nil else {
+            return false
+        }
+        return true
+    }
+
+    private func resetGatewayTransportProbeState(
+        for reviewFocus: ClawMissionRunReviewFocus? = nil
+    ) {
         gatewayTransportProbeGeneration &+= 1
-        guard let context = gatewayTransportProbeContext() else {
+        guard let context = gatewayTransportProbeContext(for: reviewFocus ?? gatewayTransportProbeReviewFocus) else {
             gatewayTransportProbeState = .unavailable
             return
         }
@@ -3199,19 +3295,67 @@ final class ClawStore: ObservableObject {
     }
 
     private func continuationAuthorizationFingerprint() -> String {
-        guard let draft = continuationDraft else {
-            return "none"
+        var parts = ["draft=none", "lineage=none"]
+        if let draft = continuationDraft {
+            let receiptHandleDigest = draft.receiptHandle.map { ClawContinuationContract.sha256($0) } ?? "none"
+            let receiptPresent = draft.receiptHandle.map { continuationReceipts[$0] != nil } ?? false
+            parts = [
+                "draft",
+                draft.id.uuidString,
+                draft.sourceTaskID.uuidString,
+                draft.sourceSessionID.uuidString,
+                draft.sourceAgentTraceArtifactID.uuidString,
+                ClawContinuationContract.sha256(draft.sourceDecisionDigest),
+                ClawContinuationContract.sha256(draft.sourceDecisionPolicy),
+                ClawContinuationContract.sha256(draft.sourceDecisionReason),
+                draft.sourceSelectedActionKind.rawValue,
+                String(draft.sourceSelectedActionRequiresApproval),
+                String(draft.sourceRound),
+                ClawContinuationContract.sha256(continuationActionBindingDigest(draft.proposedAction)),
+                ClawContinuationContract.sha256(continuationActionBindingDigest(draft.proposedLoopAction)),
+                draft.state.rawValue,
+                draft.childTaskID?.uuidString ?? "none",
+                receiptHandleDigest,
+                String(draft.receiptExpiresAt?.timeIntervalSinceReferenceDate ?? 0),
+                String(receiptPresent),
+                draft.validationIssues.map(\.rawValue).sorted().joined(separator: ",")
+            ]
         }
-        let receiptHandleDigest = draft.receiptHandle.map { ClawContinuationContract.sha256($0) } ?? "none"
-        let receiptPresent = draft.receiptHandle.map { continuationReceipts[$0] != nil } ?? false
-        return ClawContinuationContract.sha256([
-            draft.id.uuidString,
-            draft.state.rawValue,
-            draft.childTaskID?.uuidString ?? "none",
-            receiptHandleDigest,
-            String(draft.receiptExpiresAt?.timeIntervalSinceReferenceDate ?? 0),
-            String(receiptPresent)
-        ].joined(separator: "|"))
+        if let lineage = missionRunResolution.task?.continuationLineage {
+            parts += [
+                "lineage",
+                lineage.contract,
+                lineage.parentTaskID.uuidString,
+                lineage.parentSessionID.uuidString,
+                lineage.parentAgentTraceArtifactID.uuidString,
+                ClawContinuationContract.sha256(lineage.parentDecisionDigest),
+                String(lineage.parentRound),
+                String(lineage.childRound),
+                lineage.selectedActionKind.rawValue,
+                ClawContinuationContract.sha256(lineage.decisionPolicy),
+                ClawContinuationContract.sha256(lineage.decisionReason),
+                ClawContinuationContract.sha256(lineage.receipt)
+            ]
+        }
+        return ClawContinuationContract.sha256(parts.joined(separator: "|"))
+    }
+
+    private func continuationActionBindingDigest(_ action: ClawMobileAction) -> String {
+        let argumentDigest = action.toolArguments.keys.sorted().map { key in
+            "\(ClawContinuationContract.sha256(key))=\(ClawContinuationContract.sha256(action.toolArguments[key] ?? ""))"
+        }.joined(separator: ",")
+        return [
+            action.id.uuidString,
+            action.kind.rawValue,
+            ClawContinuationContract.sha256(action.title),
+            ClawContinuationContract.sha256(action.target),
+            ClawContinuationContract.sha256(action.instruction),
+            action.approval.rawValue,
+            action.sourceSurface.rawValue,
+            String(action.handlesSensitiveData),
+            ClawContinuationContract.sha256(action.inputPreview),
+            argumentDigest
+        ].joined(separator: "|")
     }
 
     private func updateAutonomousLoopAfterTaskQueued() {
