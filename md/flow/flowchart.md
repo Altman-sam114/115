@@ -18,6 +18,8 @@ v0.73 的 transport probe 是一次用户点击触发的局部探测，不是后
 
 追加修复：共享 view 先绑定当前 review focus，再由同一个 Store dispatcher 读取 summary；focus、generation、task/session/request revision、profile/token fingerprint 或 continuation authorization 变化时，旧 socket 的结果只关闭并丢弃，不改变既有 live health、session/event/artifact、任务、receipt、approval 或 Smart Rail。
 
+v0.74 的 checkpoint 是手机端本地、只读、metadata-only 交接边界。它只保存最新一份严格白名单 JSON；恢复、损坏、写入失败和清除都不进入 Gateway 执行流。
+
 ```mermaid
 flowchart LR
   M["当前 Mission metadata"] --> C["continuation draft"]
@@ -34,6 +36,20 @@ flowchart LR
   D --> Existing["既有 Store / primary / scoped focus 闸门"]
   Existing -->|"focusReview"| Focus["只更新 focus\n不改变任务状态"]
   Existing -->|"其他动作"| Gate["仍需既有审批/receipt/send 流程"]
+```
+
+```mermaid
+flowchart LR
+  Boundary["任务/审批/有效 Gateway 状态变化"] --> Project["白名单 projector\nphase/status/counts/flags/time\n无 ID、command、payload、token、receipt"]
+  Project --> Store["ClawMissionRunCheckpointStore\nno-op / in-memory / Application Support file"]
+  Store -->|saved| Latest["最新一份 last-checkpoint.json\n原子替换 / 小于 32 KiB"]
+  Store -->|writeFailed / unavailable| SaveFailure["固定脱敏状态\n当前任务继续\n无 Gateway 副作用"]
+  Latest --> Restart["App restart"]
+  Restart -->|valid current schema| Handoff["restored 只读交接摘要\n仅供本机回顾"]
+  Restart -->|invalid / unknown / oversized| Invalid["invalid\n忽略历史，不回填当前 Mission"]
+  Handoff -. 不恢复 .-> Execution["task/session/event/artifact\napproval/receipt/review focus/Smart Rail\n保持空内存默认"]
+  Clear["用户点击清除"] -->|local clear only| Store
+  Clear -. 不改变 .-> Current["当前 task/session/Gateway/审批\n保持不变"]
 ```
 
 ```mermaid

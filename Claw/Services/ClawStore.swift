@@ -1,6 +1,191 @@
 import CryptoKit
 import Foundation
 
+enum ClawMissionRunCheckpointLoadResult: Equatable, Sendable {
+    case none
+    case loaded(ClawMissionRunCheckpoint)
+    case invalid
+    case unavailable
+}
+
+enum ClawMissionRunCheckpointWriteResult: Equatable, Sendable {
+    case saved
+    case writeFailed
+    case unavailable
+}
+
+enum ClawMissionRunCheckpointClearResult: Equatable, Sendable {
+    case cleared
+    case failed
+    case unavailable
+}
+
+protocol ClawMissionRunCheckpointStore: Sendable {
+    func load() -> ClawMissionRunCheckpointLoadResult
+    func save(_ checkpoint: ClawMissionRunCheckpoint) -> ClawMissionRunCheckpointWriteResult
+    func clear() -> ClawMissionRunCheckpointClearResult
+}
+
+struct ClawNoopMissionRunCheckpointStore: ClawMissionRunCheckpointStore {
+    func load() -> ClawMissionRunCheckpointLoadResult {
+        .none
+    }
+
+    func save(_ checkpoint: ClawMissionRunCheckpoint) -> ClawMissionRunCheckpointWriteResult {
+        .unavailable
+    }
+
+    func clear() -> ClawMissionRunCheckpointClearResult {
+        .cleared
+    }
+}
+
+struct ClawMissionRunCheckpointFileStore: ClawMissionRunCheckpointStore {
+    let directoryURL: URL?
+
+    init(directoryURL: URL? = nil) {
+        if let directoryURL {
+            self.directoryURL = directoryURL
+        } else {
+            self.directoryURL = FileManager.default.urls(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask
+            ).first?.appendingPathComponent("ClawMissionRun", isDirectory: true)
+        }
+    }
+
+    private var checkpointURL: URL? {
+        directoryURL?.appendingPathComponent("last-checkpoint.json", isDirectory: false)
+    }
+
+    func load() -> ClawMissionRunCheckpointLoadResult {
+        guard let checkpointURL else {
+            return .unavailable
+        }
+        let fileManager = FileManager.default
+        guard fileManager.fileExists(atPath: checkpointURL.path) else {
+            return .none
+        }
+        do {
+            let data = try Data(contentsOf: checkpointURL, options: [.mappedIfSafe])
+            return .loaded(try ClawMissionRunCheckpoint.decode(from: data))
+        } catch let error as ClawMissionRunCheckpointError {
+            switch error {
+            case .invalidVersion, .invalidValue, .malformed, .oversized:
+                return .invalid
+            }
+        } catch {
+            return .unavailable
+        }
+    }
+
+    func save(_ checkpoint: ClawMissionRunCheckpoint) -> ClawMissionRunCheckpointWriteResult {
+        guard let directoryURL, let checkpointURL else {
+            return .unavailable
+        }
+        let fileManager = FileManager.default
+        let data: Data
+        do {
+            data = try checkpoint.encodedData()
+            try fileManager.createDirectory(
+                at: directoryURL,
+                withIntermediateDirectories: true
+            )
+            try data.write(to: checkpointURL, options: [.atomic])
+            #if os(iOS)
+            try? fileManager.setAttributes(
+                [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+                ofItemAtPath: directoryURL.path
+            )
+            try? fileManager.setAttributes(
+                [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+                ofItemAtPath: checkpointURL.path
+            )
+            #endif
+            return .saved
+        } catch {
+            return .writeFailed
+        }
+    }
+
+    func clear() -> ClawMissionRunCheckpointClearResult {
+        guard let checkpointURL else {
+            return .unavailable
+        }
+        let fileManager = FileManager.default
+        guard fileManager.fileExists(atPath: checkpointURL.path) else {
+            return .cleared
+        }
+        do {
+            try fileManager.removeItem(at: checkpointURL)
+            return .cleared
+        } catch {
+            return .failed
+        }
+    }
+}
+
+final class ClawInMemoryMissionRunCheckpointStore: @unchecked Sendable, ClawMissionRunCheckpointStore {
+    private(set) var loadCount = 0
+    private(set) var saveCount = 0
+    private(set) var clearCount = 0
+    private(set) var storedCheckpoint: ClawMissionRunCheckpoint?
+    var failLoad = false
+    var failSave = false
+    var failClear = false
+    var loadResultOverride: ClawMissionRunCheckpointLoadResult?
+    var saveResultOverride: ClawMissionRunCheckpointWriteResult?
+    var clearResultOverride: ClawMissionRunCheckpointClearResult?
+
+    init(checkpoint: ClawMissionRunCheckpoint? = nil) {
+        storedCheckpoint = checkpoint
+    }
+
+    func load() -> ClawMissionRunCheckpointLoadResult {
+        loadCount += 1
+        if let loadResultOverride {
+            return loadResultOverride
+        }
+        if failLoad {
+            return .unavailable
+        }
+        guard let storedCheckpoint else {
+            return .none
+        }
+        return .loaded(storedCheckpoint)
+    }
+
+    func save(_ checkpoint: ClawMissionRunCheckpoint) -> ClawMissionRunCheckpointWriteResult {
+        saveCount += 1
+        if let saveResultOverride {
+            if saveResultOverride == .saved {
+                storedCheckpoint = checkpoint
+            }
+            return saveResultOverride
+        }
+        guard failSave == false else {
+            return .writeFailed
+        }
+        storedCheckpoint = checkpoint
+        return .saved
+    }
+
+    func clear() -> ClawMissionRunCheckpointClearResult {
+        clearCount += 1
+        if let clearResultOverride {
+            if clearResultOverride == .cleared {
+                storedCheckpoint = nil
+            }
+            return clearResultOverride
+        }
+        guard failClear == false else {
+            return .failed
+        }
+        storedCheckpoint = nil
+        return .cleared
+    }
+}
+
 @MainActor
 final class ClawStore: ObservableObject {
     private struct MissionRunResolution {
@@ -71,8 +256,10 @@ final class ClawStore: ObservableObject {
     @Published private(set) var autonomousLoop: ClawAutonomousLoopState
     @Published private(set) var continuationDraft: ClawContinuationDraft?
     @Published private(set) var gatewayTransportProbeState: ClawGatewayTransportProbeSummary
+    @Published private(set) var missionRunCheckpointPresentationSummary: ClawMissionRunCheckpointPresentationSummary
 
     private let artifactDirectoryURL: URL
+    private let missionRunCheckpointStore: any ClawMissionRunCheckpointStore
     private var gatewayConnectionSessionID: UUID?
     private var continuationReceipts: [String: ContinuationReceiptEntry]
     private var continuationApprovalRecords: [UUID: ClawContinuationApprovalRecord]
@@ -80,17 +267,21 @@ final class ClawStore: ObservableObject {
     private var explicitResumeIntent: ExplicitResumeIntent?
     private var gatewayTransportProbeGeneration: Int
     private var gatewayTransportProbeReviewFocus: ClawMissionRunReviewFocus?
+    private var missionRunCheckpoint: ClawMissionRunCheckpoint?
+    private var lastMissionRunCheckpointAttempt: ClawMissionRunCheckpoint?
 
     init(
         model: LocalClawModel? = nil,
         artifactDirectoryURL: URL = ModelArtifactStore.defaultDirectoryURL(),
-        autoScanLocalArtifacts: Bool = true
+        autoScanLocalArtifacts: Bool = true,
+        checkpointStore: any ClawMissionRunCheckpointStore = ClawNoopMissionRunCheckpointStore()
     ) {
         let resolvedModel = model ?? ClawStore.defaultModel
         let capabilities = ClawStore.defaultPhoneAgentCapabilities
         let starterCommand = "接管我的电脑，打开浏览器搜索竞品信息，整理成表格后发到 Slack"
         self.model = resolvedModel
         self.artifactDirectoryURL = artifactDirectoryURL
+        self.missionRunCheckpointStore = checkpointStore
         self.validation = LocalArtifactValidator.validate(
             manifest: resolvedModel.artifactManifest,
             presentFiles: []
@@ -130,6 +321,9 @@ final class ClawStore: ObservableObject {
         self.gatewayTransportProbeState = .unavailable
         self.gatewayTransportProbeGeneration = 0
         self.gatewayTransportProbeReviewFocus = nil
+        self.missionRunCheckpoint = nil
+        self.lastMissionRunCheckpointAttempt = nil
+        self.missionRunCheckpointPresentationSummary = .none
         self.autonomousLoop = ClawAutonomousLoopState(
             phase: .idle,
             runMode: .simulatedEventStream,
@@ -144,6 +338,7 @@ final class ClawStore: ObservableObject {
         if autoScanLocalArtifacts {
             scanLocalArtifacts()
         }
+        loadMissionRunCheckpoint()
     }
 
     var visibleSkills: [ClawSkill] {
@@ -222,6 +417,31 @@ final class ClawStore: ObservableObject {
 
     var gatewayTransportProbeGenerationForTesting: Int {
         gatewayTransportProbeGeneration
+    }
+
+    var missionRunCheckpointForTesting: ClawMissionRunCheckpoint? {
+        missionRunCheckpoint
+    }
+
+    func clearLastMissionRunCheckpoint() {
+        switch missionRunCheckpointStore.clear() {
+        case .cleared:
+            missionRunCheckpoint = nil
+            lastMissionRunCheckpointAttempt = nil
+            missionRunCheckpointPresentationSummary = .none
+        case .failed:
+            missionRunCheckpointPresentationSummary = .make(
+                state: .writeFailed,
+                checkpoint: missionRunCheckpoint,
+                canClear: true
+            )
+        case .unavailable:
+            missionRunCheckpointPresentationSummary = .make(
+                state: .unavailable,
+                checkpoint: missionRunCheckpoint,
+                canClear: missionRunCheckpoint != nil
+            )
+        }
     }
 
     var gatewayLiveHealthSummary: ClawGatewayLiveHealthSummary {
@@ -488,6 +708,106 @@ final class ClawStore: ObservableObject {
             status: "Live Gateway transport 探测待用户触发。",
             guidance: "点击后只发送一次 control-frame ping；可达不等于已配对、已授权或任务成功。"
         )
+    }
+
+    private func loadMissionRunCheckpoint() {
+        switch missionRunCheckpointStore.load() {
+        case .none:
+            missionRunCheckpoint = nil
+            missionRunCheckpointPresentationSummary = .none
+        case .loaded(let checkpoint):
+            missionRunCheckpoint = checkpoint
+            lastMissionRunCheckpointAttempt = checkpoint
+            missionRunCheckpointPresentationSummary = .make(
+                state: .restored,
+                checkpoint: checkpoint,
+                canClear: true
+            )
+        case .invalid:
+            missionRunCheckpoint = nil
+            lastMissionRunCheckpointAttempt = nil
+            missionRunCheckpointPresentationSummary = .make(
+                state: .invalid,
+                checkpoint: nil,
+                canClear: true
+            )
+        case .unavailable:
+            missionRunCheckpoint = nil
+            lastMissionRunCheckpointAttempt = nil
+            missionRunCheckpointPresentationSummary = .make(
+                state: .unavailable,
+                checkpoint: nil,
+                canClear: false
+            )
+        }
+    }
+
+    private func persistMissionRunCheckpointIfNeeded() {
+        let resolution = missionRunResolution
+        let summary = missionRunSummary
+        let health = gatewayLiveHealthSummary
+        let readiness = summary.reviewReadinessSummary
+        let phase = missionRunPhase(task: resolution.task, session: resolution.session)
+        guard let checkpoint = try? ClawMissionRunCheckpoint(
+            phase: phase,
+            taskStatus: resolution.task?.status,
+            sessionStatus: resolution.session?.status,
+            connectionState: health.connectionState,
+            riskScore: summary.riskScore,
+            approvalCount: summary.approvalCount,
+            blockedCount: summary.blockedCount,
+            succeededCount: summary.succeededCount,
+            failedCount: summary.failedCount,
+            retryableCount: summary.retryableCount,
+            artifactCount: summary.artifactCount,
+            priorityCount: readiness.totalPriorityCount,
+            actionablePriorityCount: readiness.actionablePriorityCount,
+            criticalOrHighCount: readiness.criticalOrHighCount,
+            metadataPendingCount: readiness.metadataPendingCount,
+            requiresUserApproval: summary.requiresUserApproval,
+            hasGatewayAck: health.hasGatewayAck,
+            hasFallback: health.hasFallback,
+            hasError: health.hasError,
+            isCompleted: health.isCompleted,
+            transportAttemptCount: health.transportAttemptCount,
+            reconnectCount: health.reconnectCount,
+            lastPingSucceeded: health.lastPingSucceeded
+        ) else {
+            missionRunCheckpointPresentationSummary = .make(
+                state: .invalid,
+                checkpoint: missionRunCheckpoint,
+                canClear: missionRunCheckpoint != nil
+            )
+            return
+        }
+
+        if let lastAttempt = lastMissionRunCheckpointAttempt,
+           lastAttempt.hasSameMetadata(as: checkpoint) {
+            return
+        }
+        lastMissionRunCheckpointAttempt = checkpoint
+
+        switch missionRunCheckpointStore.save(checkpoint) {
+        case .saved:
+            missionRunCheckpoint = checkpoint
+            missionRunCheckpointPresentationSummary = .make(
+                state: .saved,
+                checkpoint: checkpoint,
+                canClear: true
+            )
+        case .writeFailed:
+            missionRunCheckpointPresentationSummary = .make(
+                state: .writeFailed,
+                checkpoint: checkpoint,
+                canClear: true
+            )
+        case .unavailable:
+            missionRunCheckpointPresentationSummary = .make(
+                state: .unavailable,
+                checkpoint: checkpoint,
+                canClear: missionRunCheckpoint != nil
+            )
+        }
     }
 
     var autonomousLoopStatusText: String {
@@ -1868,6 +2188,7 @@ final class ClawStore: ObservableObject {
         clawMobileTasks.insert(task, at: 0)
         lastClawMobileEnvelope = ClawMobileBridge.makeEnvelopeString(task: task, profile: clawGatewayProfile)
         resetGatewayTransportProbeState()
+        persistMissionRunCheckpointIfNeeded()
     }
 
     func ingestGatewayWireEvents(_ wireEvents: [ClawGatewayWireEvent]) {
@@ -1959,6 +2280,7 @@ final class ClawStore: ObservableObject {
             state: state,
             validationIssues: Array(Set(issues)).sorted { $0.rawValue < $1.rawValue }
         )
+        persistMissionRunCheckpointIfNeeded()
     }
 
     @discardableResult
@@ -2005,6 +2327,7 @@ final class ClawStore: ObservableObject {
         }
         draft.updatedAt = Date.now
         continuationDraft = draft
+        persistMissionRunCheckpointIfNeeded()
         return parameterIssues.isEmpty
     }
 
@@ -2047,6 +2370,7 @@ final class ClawStore: ObservableObject {
         }
         draft.updatedAt = Date.now
         continuationDraft = draft
+        persistMissionRunCheckpointIfNeeded()
         return parameterIssues.isEmpty
     }
 
@@ -2123,6 +2447,7 @@ final class ClawStore: ObservableObject {
             profile: clawGatewayProfile,
             redactingContinuationReceipt: true
         )
+        persistMissionRunCheckpointIfNeeded()
         return childTask.id
     }
 
@@ -2133,6 +2458,7 @@ final class ClawStore: ObservableObject {
         let task = clawMobileTasks[index]
         guard task.blockedCount == 0 else {
             clawMobileTasks[index].status = .blocked
+            persistMissionRunCheckpointIfNeeded()
             return
         }
         guard let lineage = task.continuationLineage else {
@@ -2141,6 +2467,7 @@ final class ClawStore: ObservableObject {
                 task: clawMobileTasks[index],
                 profile: clawGatewayProfile
             )
+            persistMissionRunCheckpointIfNeeded()
             return
         }
         if task.status == .readyToSend, validateContinuationApproval(for: task) {
@@ -2189,6 +2516,7 @@ final class ClawStore: ObservableObject {
             draft.updatedAt = Date()
             continuationDraft = draft
         }
+        persistMissionRunCheckpointIfNeeded()
     }
 
     func approveLatestClawMobileTask() {
@@ -2413,6 +2741,7 @@ final class ClawStore: ObservableObject {
             draft.updatedAt = Date()
             continuationDraft = draft
         }
+        persistMissionRunCheckpointIfNeeded()
     }
 
     private func markContinuationTransportSucceeded(taskID: UUID) {
@@ -2422,6 +2751,7 @@ final class ClawStore: ObservableObject {
         draft.state = .sent
         draft.updatedAt = Date()
         continuationDraft = draft
+        persistMissionRunCheckpointIfNeeded()
     }
 
     private func beginGatewaySession(
@@ -2605,6 +2935,11 @@ final class ClawStore: ObservableObject {
             if event.sessionID == gatewayConnectionSessionID {
                 lastGatewayEvent = ClawGatewayEventStream.eventSummary(for: eventSession, latestEvent: event)
             }
+        }
+
+        let currentTaskID = clawMobileTasks.first?.id
+        if acceptedEvents.contains(where: { $0.taskID == currentTaskID }) {
+            persistMissionRunCheckpointIfNeeded()
         }
     }
 
@@ -2824,6 +3159,7 @@ final class ClawStore: ObservableObject {
            clawMobileTasks[index].status != .sent {
             clawMobileTasks[index].status = .waitingForApproval
         }
+        persistMissionRunCheckpointIfNeeded()
     }
 
     private func continuationFileArgumentsPresentation(
@@ -3035,6 +3371,7 @@ final class ClawStore: ObservableObject {
         }
         clawGatewaySessions[0] = ClawGatewaySimulator.retryFailures(in: clawGatewaySessions[0])
         lastGatewayEvent = ClawGatewaySimulator.eventSummary(for: clawGatewaySessions[0])
+        persistMissionRunCheckpointIfNeeded()
     }
 
     @discardableResult
@@ -3509,6 +3846,7 @@ final class ClawStore: ObservableObject {
         approvalRequired: \(autonomousLoop.requiresUserApproval)
         gateway: \(gatewayConnectionText)
         """
+        persistMissionRunCheckpointIfNeeded()
     }
 
     private func applyValidation(_ result: ArtifactValidationResult) {

@@ -1,4 +1,5 @@
 import XCTest
+import Foundation
 @testable import Claw
 
 @MainActor
@@ -5423,6 +5424,234 @@ final class ClawTests: XCTestCase {
         store.approveLatestClawMobileTask()
         XCTAssertEqual(store.clawMobileTasks[0].status, .blocked)
     }
+
+    func testMissionRunCheckpointIsStrictMetadataOnlyAndRestoresReadOnly() throws {
+        let checkpoint = try makeTestMissionRunCheckpoint()
+        let data = try checkpoint.encodedData()
+        let decoded = try ClawMissionRunCheckpoint.decode(from: data)
+        XCTAssertEqual(decoded, checkpoint)
+
+        let json = String(decoding: data, as: UTF8.self)
+        for forbidden in [
+            "command", "instruction", "toolArguments", "Authorization", "Bearer",
+            "file://", "workspace", "receipt", "lineage", "UUID", "path"
+        ] {
+            XCTAssertFalse(json.localizedCaseInsensitiveContains(forbidden), "checkpoint leaked \(forbidden)")
+        }
+
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        object["unexpected"] = true
+        let unknownFieldData = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        XCTAssertThrowsError(try ClawMissionRunCheckpoint.decode(from: unknownFieldData))
+
+        object.removeValue(forKey: "unexpected")
+        object["schemaVersion"] = ClawMissionRunCheckpoint.currentSchemaVersion + 1
+        let futureData = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        XCTAssertThrowsError(try ClawMissionRunCheckpoint.decode(from: futureData))
+
+        object["schemaVersion"] = ClawMissionRunCheckpoint.currentSchemaVersion
+        object["phase"] = "future_phase"
+        let unknownEnumData = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        XCTAssertThrowsError(try ClawMissionRunCheckpoint.decode(from: unknownEnumData))
+
+        object["phase"] = checkpoint.phase.rawValue
+        object["riskScore"] = 101
+        let outOfRangeRiskData = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        XCTAssertThrowsError(try ClawMissionRunCheckpoint.decode(from: outOfRangeRiskData))
+
+        object["riskScore"] = checkpoint.riskScore
+        object["approvalCount"] = -1
+        let negativeCountData = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        XCTAssertThrowsError(try ClawMissionRunCheckpoint.decode(from: negativeCountData))
+
+        let oversizedData = Data(repeating: 0x20, count: ClawMissionRunCheckpoint.maxEncodedBytes + 1)
+        XCTAssertThrowsError(try ClawMissionRunCheckpoint.decode(from: oversizedData))
+
+        let checkpointStore = ClawInMemoryMissionRunCheckpointStore(checkpoint: checkpoint)
+        let restoredStore = ClawStore(
+            autoScanLocalArtifacts: false,
+            checkpointStore: checkpointStore
+        )
+        XCTAssertEqual(checkpointStore.loadCount, 1)
+        XCTAssertEqual(restoredStore.missionRunCheckpointPresentationSummary.state, .restored)
+        XCTAssertTrue(restoredStore.clawMobileTasks.isEmpty)
+        XCTAssertTrue(restoredStore.clawGatewaySessions.isEmpty)
+        XCTAssertTrue(restoredStore.gatewayEvents.isEmpty)
+        XCTAssertNil(restoredStore.lastGatewayLiveRequest)
+        XCTAssertNil(restoredStore.continuationDraft)
+        XCTAssertEqual(restoredStore.continuationReceiptCountForTesting, 0)
+        XCTAssertEqual(restoredStore.frozenContinuationEnvelopeCountForTesting, 0)
+        XCTAssertEqual(restoredStore.continuationApprovalRecordCountForTesting, 0)
+
+        let freshStore = ClawStore(autoScanLocalArtifacts: false)
+        XCTAssertEqual(restoredStore.missionRunSummary, freshStore.missionRunSummary)
+        XCTAssertEqual(
+            restoredStore.missionRunSmartOperatorActionSummary,
+            freshStore.missionRunSmartOperatorActionSummary
+        )
+        restoredStore.approveLatestClawMobileTask()
+        restoredStore.sendLatestClawMobileTask()
+        XCTAssertTrue(restoredStore.clawMobileTasks.isEmpty)
+        XCTAssertTrue(restoredStore.gatewayEvents.isEmpty)
+    }
+
+    func testMissionRunCheckpointSavesAtStateBoundariesAndClearHasNoMissionSideEffects() throws {
+        let checkpointStore = ClawInMemoryMissionRunCheckpointStore()
+        let store = ClawStore(
+            autoScanLocalArtifacts: false,
+            checkpointStore: checkpointStore
+        )
+        let initialSaveCount = checkpointStore.saveCount
+        _ = store.missionRunSummary
+        XCTAssertEqual(checkpointStore.saveCount, initialSaveCount)
+
+        store.phoneAgentCommand = "打开浏览器整理安全摘要"
+        store.generatePhoneAgentPlan()
+        store.queueClawMobileTaskFromCurrentPlan()
+        XCTAssertGreaterThan(checkpointStore.saveCount, initialSaveCount)
+        XCTAssertEqual(store.missionRunCheckpointPresentationSummary.state, .saved)
+
+        let saveCountAfterQueue = checkpointStore.saveCount
+        let summaryBeforeClear = store.missionRunSummary
+        let healthBeforeClear = store.gatewayLiveHealthSummary
+        let taskBeforeClear = store.clawMobileTasks
+        let eventBeforeClear = store.gatewayEvents
+        let envelopeBeforeClear = store.lastClawMobileEnvelope
+
+        _ = store.missionRunSummary
+        XCTAssertEqual(checkpointStore.saveCount, saveCountAfterQueue)
+        store.clearLastMissionRunCheckpoint()
+
+        XCTAssertEqual(checkpointStore.clearCount, 1)
+        XCTAssertEqual(store.missionRunCheckpointPresentationSummary.state, .none)
+        XCTAssertNil(store.missionRunCheckpointForTesting)
+        XCTAssertEqual(store.missionRunSummary, summaryBeforeClear)
+        XCTAssertEqual(store.gatewayLiveHealthSummary, healthBeforeClear)
+        XCTAssertEqual(store.clawMobileTasks, taskBeforeClear)
+        XCTAssertEqual(store.gatewayEvents, eventBeforeClear)
+        XCTAssertEqual(store.lastClawMobileEnvelope, envelopeBeforeClear)
+
+        let failedStore = ClawInMemoryMissionRunCheckpointStore()
+        failedStore.failSave = true
+        let storeWithFailedSave = ClawStore(
+            autoScanLocalArtifacts: false,
+            checkpointStore: failedStore
+        )
+        storeWithFailedSave.generatePhoneAgentPlan()
+        storeWithFailedSave.queueClawMobileTaskFromCurrentPlan()
+        XCTAssertEqual(
+            storeWithFailedSave.missionRunCheckpointPresentationSummary.state,
+            .writeFailed
+        )
+        XCTAssertFalse(storeWithFailedSave.clawMobileTasks.isEmpty)
+        XCTAssertTrue(storeWithFailedSave.gatewayEvents.isEmpty)
+        XCTAssertTrue(storeWithFailedSave.clawGatewaySessions.isEmpty)
+
+        let loadFailureStore = ClawInMemoryMissionRunCheckpointStore()
+        loadFailureStore.failLoad = true
+        let storeWithFailedLoad = ClawStore(
+            autoScanLocalArtifacts: false,
+            checkpointStore: loadFailureStore
+        )
+        XCTAssertEqual(
+            storeWithFailedLoad.missionRunCheckpointPresentationSummary.state,
+            .unavailable
+        )
+
+        let clearFailureCheckpoint = try makeTestMissionRunCheckpoint()
+        let clearFailureStore = ClawInMemoryMissionRunCheckpointStore(checkpoint: clearFailureCheckpoint)
+        clearFailureStore.failClear = true
+        let storeWithFailedClear = ClawStore(
+            autoScanLocalArtifacts: false,
+            checkpointStore: clearFailureStore
+        )
+        let summaryBeforeFailedClear = storeWithFailedClear.missionRunSummary
+        storeWithFailedClear.clearLastMissionRunCheckpoint()
+        XCTAssertEqual(
+            storeWithFailedClear.missionRunCheckpointPresentationSummary.state,
+            .writeFailed
+        )
+        XCTAssertEqual(clearFailureStore.storedCheckpoint, clearFailureCheckpoint)
+        XCTAssertEqual(storeWithFailedClear.missionRunSummary, summaryBeforeFailedClear)
+    }
+
+    func testMissionRunCheckpointFileStoreAndSharedPresentationContract() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("claw-checkpoint-test-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let checkpoint = try makeTestMissionRunCheckpoint()
+        let fileStore = ClawMissionRunCheckpointFileStore(directoryURL: directory)
+        XCTAssertEqual(fileStore.load(), .none)
+        XCTAssertEqual(fileStore.save(checkpoint), .saved)
+        XCTAssertEqual(fileStore.load(), .loaded(checkpoint))
+
+        let reopenedFileStore = ClawMissionRunCheckpointFileStore(directoryURL: directory)
+        XCTAssertEqual(reopenedFileStore.load(), .loaded(checkpoint))
+        let newerCheckpoint = try makeTestMissionRunCheckpoint(
+            savedAt: checkpoint.savedAt.addingTimeInterval(1)
+        )
+        XCTAssertEqual(reopenedFileStore.save(newerCheckpoint), .saved)
+        XCTAssertEqual(
+            ClawMissionRunCheckpointFileStore(directoryURL: directory).load(),
+            .loaded(newerCheckpoint)
+        )
+        XCTAssertEqual(
+            try FileManager.default.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: nil
+            ).map(\.lastPathComponent),
+            ["last-checkpoint.json"]
+        )
+        XCTAssertEqual(reopenedFileStore.clear(), .cleared)
+        XCTAssertEqual(reopenedFileStore.load(), .none)
+
+        XCTAssertEqual(
+            ClawMissionRunCheckpointPresentationContract.sharedView,
+            "ClawMissionRunCheckpointView"
+        )
+        XCTAssertGreaterThanOrEqual(
+            ClawMissionRunCheckpointPresentationContract.minimumHitArea,
+            44
+        )
+        XCTAssertTrue(
+            ClawMissionRunCheckpointPresentationContract.clearVoiceOverHint.contains("只清理本机")
+        )
+        XCTAssertTrue(
+            ClawMissionRunCheckpointPresentationContract.clearVoiceOverHint.contains("不影响")
+        )
+    }
+}
+
+private func makeTestMissionRunCheckpoint(
+    savedAt: Date = Date(timeIntervalSince1970: 1_700_000_000)
+) throws -> ClawMissionRunCheckpoint {
+    try ClawMissionRunCheckpoint(
+        savedAt: savedAt,
+        phase: .needsAttention,
+        taskStatus: .sent,
+        sessionStatus: .needsAttention,
+        connectionState: .failed,
+        riskScore: 72,
+        approvalCount: 2,
+        blockedCount: 1,
+        succeededCount: 3,
+        failedCount: 1,
+        retryableCount: 1,
+        artifactCount: 4,
+        priorityCount: 2,
+        actionablePriorityCount: 1,
+        criticalOrHighCount: 1,
+        metadataPendingCount: 1,
+        requiresUserApproval: true,
+        hasGatewayAck: true,
+        hasFallback: false,
+        hasError: true,
+        isCompleted: false,
+        transportAttemptCount: 2,
+        reconnectCount: 1,
+        lastPingSucceeded: false
+    )
 }
 
 private struct ProbeSideEffectSnapshot: Equatable {

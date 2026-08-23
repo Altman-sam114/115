@@ -88,6 +88,20 @@ Agent C 退回修复还必须逐项断言 request/session revision、continuatio
 
 probe 成功只允许解释为 transport reachable，不得写成 paired、authorized、Gateway ack、桌面权限或任务成功。summary、UI/accessibility、日志和测试输出不得出现 raw token、Authorization/Bearer、完整 URL/query、UUID、receipt、`file://`、workspace/path、正文、命令、marker 或 `toolArguments`。本轮不修改 Gateway server、fixture、direct/WebSocket smoke 或 workflow；这些仍由最新 `origin/main` 云端回归证明 probe 没有 JSON application message、session、event、artifact 或 handler 副作用。本地只执行非编译静态检查，不运行 `swiftc`、XCTest、LogicSmoke、Gateway smoke、`node --check` 或 `xcodebuild`。
 
+### v0.74 跨重启 Mission 交接快照
+
+云端 XCTest/LogicSmoke 必须覆盖：
+
+- `ClawMissionRunCheckpoint` 合法 Codable round trip、固定 schema version、严格白名单未知字段拒绝、未知/未来版本拒绝、损坏/类型错误/未知枚举/负数或超界计数/超过 32 KiB 统一 invalid 或 unavailable；序列化数据不得出现 command、instruction、toolArguments、Authorization/Bearer、token/fingerprint、URL/query、UUID、file://、workspace/path、artifact reference/payload、receipt/lineage 或测试 marker。
+- disabled/no-op store 不读写真实用户目录；in-memory fake 记录 load/save/clear 次数、保存副本并可分别注入 load/save/clear failure；Application Support file store 固定 `ClawMissionRun/last-checkpoint.json`、latest-only、原子写入、可重新打开读取，不写 Gateway workspace/artifact 或用户输入路径。
+- fresh Store 的 current Mission、task/session/event/artifact/live request/connection、approval/frozen、continuation receipt、review focus 和 Smart Rail 与基线一致；第二个 Store 只得到 `restored` handoff summary，历史 snapshot 不回填 `missionRunSummary` 或 `missionRunResolution`，不能 approve/send/retry/continue 旧 Mission。
+- queue、approval/freeze、有效 Gateway session/event/completion/failure/fallback、受控 retry 和 continuation state boundary 能保存最新快照；重复/无效/旧 scope event 不重复保存。`missionRunSummary` getter、SwiftUI render/onAppear、review focus、Smart Rail dispatcher 和 v0.73 probe success/failure/timeout/cancel/stale 不得保存或写入 probe 结果。
+- save/load/clear failure 不阻断当前任务、不改变 Gateway connection、fallback、approval、receipt、event 或 artifact，不自动重试；clear 只清本机快照，清除前后的 current Mission、Gateway、审批、receipt、review focus 和 Smart Rail 完全相等。
+- compact iPhone Mission Run 与 regular iPad/宽屏 Review Detail Dock 必须复用同一个 `ClawMissionRunCheckpointView`、summary 和 Store API；restored/saved/none/invalid/writeFailed/unavailable 状态文案固定脱敏，clear icon 控件至少 44pt，VoiceOver 明确只清本机且不恢复发送；动态文本不溢出且不能出现“恢复任务/继续执行/发送上次任务”入口。
+- 最新 Gateway fixture、direct/WebSocket smoke、Xcode build、iPhone Simulator XCTest 和既有 v0.70/v0.72/v0.73 回归仍必须通过；本轮不修改 Gateway server、fixture、smoke、workflow 或 Xcode project。checkpoint 不得进入 envelope、Gateway session/event/artifact、日志或云端输出。
+
+本地只执行 `git status`、`git diff --check`、文本/diff 复核及必要的 YAML/plist 静态检查；不得运行 `swiftc`、XCTest、LogicSmoke、Gateway fixture/direct/WebSocket smoke、`node --check` 或 `xcodebuild`。最终验收只接受最新 `origin/main` 的 CI artifact 和 Agent C manifest/JUnit/日志/结果包复判。
+
 ### Swift 核心逻辑改动
 
 触发条件：

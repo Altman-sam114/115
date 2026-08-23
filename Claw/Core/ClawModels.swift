@@ -1798,6 +1798,516 @@ struct ClawMissionRunLiveGatewayHealthStrip: Equatable, Codable, Sendable {
     var isReviewable: Bool
 }
 
+enum ClawMissionRunCheckpointState: String, Codable, Equatable, Sendable {
+    case none
+    case restored
+    case saved
+    case invalid
+    case writeFailed
+    case unavailable
+
+    var title: String {
+        switch self {
+        case .none:
+            return "暂无历史快照"
+        case .restored:
+            return "已载入历史快照"
+        case .saved:
+            return "已保存本机快照"
+        case .invalid:
+            return "历史快照已忽略"
+        case .writeFailed:
+            return "本机快照未保存"
+        case .unavailable:
+            return "本机快照不可用"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .none:
+            return "clock.arrow.circlepath"
+        case .restored:
+            return "arrow.down.doc.fill"
+        case .saved:
+            return "checkmark.circle.fill"
+        case .invalid:
+            return "exclamationmark.triangle.fill"
+        case .writeFailed, .unavailable:
+            return "externaldrive.badge.exclamationmark"
+        }
+    }
+}
+
+enum ClawMissionRunCheckpointError: Error, Equatable, Sendable {
+    case invalidVersion
+    case invalidValue
+    case malformed
+    case oversized
+
+    var diagnostic: String {
+        switch self {
+        case .invalidVersion:
+            return "checkpoint_invalid_version"
+        case .invalidValue:
+            return "checkpoint_invalid_value"
+        case .malformed:
+            return "checkpoint_invalid_data"
+        case .oversized:
+            return "checkpoint_too_large"
+        }
+    }
+}
+
+struct ClawMissionRunCheckpoint: Codable, Equatable, Sendable {
+    static let currentSchemaVersion = 1
+    static let maxEncodedBytes = 32 * 1024
+    private static let boundedCountRange = 0...10_000
+
+    let schemaVersion: Int
+    let savedAt: Date
+    let phase: ClawAutonomousLoopPhase
+    let taskStatus: ClawTaskStatus?
+    let sessionStatus: ClawGatewaySessionStatus?
+    let connectionState: ClawGatewayConnectionState
+    let riskScore: Int
+    let approvalCount: Int
+    let blockedCount: Int
+    let succeededCount: Int
+    let failedCount: Int
+    let retryableCount: Int
+    let artifactCount: Int
+    let priorityCount: Int
+    let actionablePriorityCount: Int
+    let criticalOrHighCount: Int
+    let metadataPendingCount: Int
+    let requiresUserApproval: Bool
+    let hasGatewayAck: Bool
+    let hasFallback: Bool
+    let hasError: Bool
+    let isCompleted: Bool
+    let transportAttemptCount: Int
+    let reconnectCount: Int
+    let lastPingSucceeded: Bool?
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case schemaVersion
+        case savedAt
+        case phase
+        case taskStatus
+        case sessionStatus
+        case connectionState
+        case riskScore
+        case approvalCount
+        case blockedCount
+        case succeededCount
+        case failedCount
+        case retryableCount
+        case artifactCount
+        case priorityCount
+        case actionablePriorityCount
+        case criticalOrHighCount
+        case metadataPendingCount
+        case requiresUserApproval
+        case hasGatewayAck
+        case hasFallback
+        case hasError
+        case isCompleted
+        case transportAttemptCount
+        case reconnectCount
+        case lastPingSucceeded
+    }
+
+    private struct AnyCodingKey: CodingKey {
+        let stringValue: String
+        let intValue: Int?
+
+        init?(stringValue: String) {
+            self.stringValue = stringValue
+            self.intValue = nil
+        }
+
+        init?(intValue: Int) {
+            self.stringValue = String(intValue)
+            self.intValue = intValue
+        }
+    }
+
+    init(
+        schemaVersion: Int = ClawMissionRunCheckpoint.currentSchemaVersion,
+        savedAt: Date = Date(),
+        phase: ClawAutonomousLoopPhase,
+        taskStatus: ClawTaskStatus?,
+        sessionStatus: ClawGatewaySessionStatus?,
+        connectionState: ClawGatewayConnectionState,
+        riskScore: Int,
+        approvalCount: Int,
+        blockedCount: Int,
+        succeededCount: Int,
+        failedCount: Int,
+        retryableCount: Int,
+        artifactCount: Int,
+        priorityCount: Int,
+        actionablePriorityCount: Int,
+        criticalOrHighCount: Int,
+        metadataPendingCount: Int,
+        requiresUserApproval: Bool,
+        hasGatewayAck: Bool,
+        hasFallback: Bool,
+        hasError: Bool,
+        isCompleted: Bool,
+        transportAttemptCount: Int,
+        reconnectCount: Int,
+        lastPingSucceeded: Bool?
+    ) throws {
+        self.schemaVersion = schemaVersion
+        self.savedAt = savedAt
+        self.phase = phase
+        self.taskStatus = taskStatus
+        self.sessionStatus = sessionStatus
+        self.connectionState = connectionState
+        self.riskScore = riskScore
+        self.approvalCount = approvalCount
+        self.blockedCount = blockedCount
+        self.succeededCount = succeededCount
+        self.failedCount = failedCount
+        self.retryableCount = retryableCount
+        self.artifactCount = artifactCount
+        self.priorityCount = priorityCount
+        self.actionablePriorityCount = actionablePriorityCount
+        self.criticalOrHighCount = criticalOrHighCount
+        self.metadataPendingCount = metadataPendingCount
+        self.requiresUserApproval = requiresUserApproval
+        self.hasGatewayAck = hasGatewayAck
+        self.hasFallback = hasFallback
+        self.hasError = hasError
+        self.isCompleted = isCompleted
+        self.transportAttemptCount = transportAttemptCount
+        self.reconnectCount = reconnectCount
+        self.lastPingSucceeded = lastPingSucceeded
+        try validate()
+    }
+
+    init(from decoder: Decoder) throws {
+        let actualKeys: Set<String>
+        do {
+            actualKeys = Set(try decoder.container(keyedBy: AnyCodingKey.self).allKeys.map(\.stringValue))
+        } catch {
+            throw ClawMissionRunCheckpointError.malformed
+        }
+        let expectedKeys = Set(CodingKeys.allCases.map(\.stringValue))
+        guard actualKeys == expectedKeys else {
+            throw ClawMissionRunCheckpointError.malformed
+        }
+
+        let container: KeyedDecodingContainer<CodingKeys>
+        do {
+            container = try decoder.container(keyedBy: CodingKeys.self)
+        } catch {
+            throw ClawMissionRunCheckpointError.malformed
+        }
+
+        do {
+            schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+            savedAt = try container.decode(Date.self, forKey: .savedAt)
+            phase = try container.decode(ClawAutonomousLoopPhase.self, forKey: .phase)
+            taskStatus = try container.decodeIfPresent(ClawTaskStatus.self, forKey: .taskStatus)
+            sessionStatus = try container.decodeIfPresent(ClawGatewaySessionStatus.self, forKey: .sessionStatus)
+            connectionState = try container.decode(ClawGatewayConnectionState.self, forKey: .connectionState)
+            riskScore = try container.decode(Int.self, forKey: .riskScore)
+            approvalCount = try container.decode(Int.self, forKey: .approvalCount)
+            blockedCount = try container.decode(Int.self, forKey: .blockedCount)
+            succeededCount = try container.decode(Int.self, forKey: .succeededCount)
+            failedCount = try container.decode(Int.self, forKey: .failedCount)
+            retryableCount = try container.decode(Int.self, forKey: .retryableCount)
+            artifactCount = try container.decode(Int.self, forKey: .artifactCount)
+            priorityCount = try container.decode(Int.self, forKey: .priorityCount)
+            actionablePriorityCount = try container.decode(Int.self, forKey: .actionablePriorityCount)
+            criticalOrHighCount = try container.decode(Int.self, forKey: .criticalOrHighCount)
+            metadataPendingCount = try container.decode(Int.self, forKey: .metadataPendingCount)
+            requiresUserApproval = try container.decode(Bool.self, forKey: .requiresUserApproval)
+            hasGatewayAck = try container.decode(Bool.self, forKey: .hasGatewayAck)
+            hasFallback = try container.decode(Bool.self, forKey: .hasFallback)
+            hasError = try container.decode(Bool.self, forKey: .hasError)
+            isCompleted = try container.decode(Bool.self, forKey: .isCompleted)
+            transportAttemptCount = try container.decode(Int.self, forKey: .transportAttemptCount)
+            reconnectCount = try container.decode(Int.self, forKey: .reconnectCount)
+            lastPingSucceeded = try container.decodeIfPresent(Bool.self, forKey: .lastPingSucceeded)
+        } catch {
+            throw ClawMissionRunCheckpointError.malformed
+        }
+        try validate()
+    }
+
+    func encode(to encoder: Encoder) throws {
+        try validate()
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(schemaVersion, forKey: .schemaVersion)
+        try container.encode(savedAt, forKey: .savedAt)
+        try container.encode(phase, forKey: .phase)
+        if let taskStatus {
+            try container.encode(taskStatus, forKey: .taskStatus)
+        } else {
+            try container.encodeNil(forKey: .taskStatus)
+        }
+        if let sessionStatus {
+            try container.encode(sessionStatus, forKey: .sessionStatus)
+        } else {
+            try container.encodeNil(forKey: .sessionStatus)
+        }
+        try container.encode(connectionState, forKey: .connectionState)
+        try container.encode(riskScore, forKey: .riskScore)
+        try container.encode(approvalCount, forKey: .approvalCount)
+        try container.encode(blockedCount, forKey: .blockedCount)
+        try container.encode(succeededCount, forKey: .succeededCount)
+        try container.encode(failedCount, forKey: .failedCount)
+        try container.encode(retryableCount, forKey: .retryableCount)
+        try container.encode(artifactCount, forKey: .artifactCount)
+        try container.encode(priorityCount, forKey: .priorityCount)
+        try container.encode(actionablePriorityCount, forKey: .actionablePriorityCount)
+        try container.encode(criticalOrHighCount, forKey: .criticalOrHighCount)
+        try container.encode(metadataPendingCount, forKey: .metadataPendingCount)
+        try container.encode(requiresUserApproval, forKey: .requiresUserApproval)
+        try container.encode(hasGatewayAck, forKey: .hasGatewayAck)
+        try container.encode(hasFallback, forKey: .hasFallback)
+        try container.encode(hasError, forKey: .hasError)
+        try container.encode(isCompleted, forKey: .isCompleted)
+        try container.encode(transportAttemptCount, forKey: .transportAttemptCount)
+        try container.encode(reconnectCount, forKey: .reconnectCount)
+        if let lastPingSucceeded {
+            try container.encode(lastPingSucceeded, forKey: .lastPingSucceeded)
+        } else {
+            try container.encodeNil(forKey: .lastPingSucceeded)
+        }
+    }
+
+    func encodedData() throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.sortedKeys]
+        let data: Data
+        do {
+            data = try encoder.encode(self)
+        } catch let error as ClawMissionRunCheckpointError {
+            throw error
+        } catch {
+            throw ClawMissionRunCheckpointError.malformed
+        }
+        guard data.count <= Self.maxEncodedBytes else {
+            throw ClawMissionRunCheckpointError.oversized
+        }
+        return data
+    }
+
+    static func decode(from data: Data) throws -> ClawMissionRunCheckpoint {
+        guard data.count <= maxEncodedBytes else {
+            throw ClawMissionRunCheckpointError.oversized
+        }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        do {
+            return try decoder.decode(ClawMissionRunCheckpoint.self, from: data)
+        } catch let error as ClawMissionRunCheckpointError {
+            throw error
+        } catch {
+            throw ClawMissionRunCheckpointError.malformed
+        }
+    }
+
+    func hasSameMetadata(as other: ClawMissionRunCheckpoint) -> Bool {
+        schemaVersion == other.schemaVersion &&
+        phase == other.phase &&
+        taskStatus == other.taskStatus &&
+        sessionStatus == other.sessionStatus &&
+        connectionState == other.connectionState &&
+        riskScore == other.riskScore &&
+        approvalCount == other.approvalCount &&
+        blockedCount == other.blockedCount &&
+        succeededCount == other.succeededCount &&
+        failedCount == other.failedCount &&
+        retryableCount == other.retryableCount &&
+        artifactCount == other.artifactCount &&
+        priorityCount == other.priorityCount &&
+        actionablePriorityCount == other.actionablePriorityCount &&
+        criticalOrHighCount == other.criticalOrHighCount &&
+        metadataPendingCount == other.metadataPendingCount &&
+        requiresUserApproval == other.requiresUserApproval &&
+        hasGatewayAck == other.hasGatewayAck &&
+        hasFallback == other.hasFallback &&
+        hasError == other.hasError &&
+        isCompleted == other.isCompleted &&
+        transportAttemptCount == other.transportAttemptCount &&
+        reconnectCount == other.reconnectCount &&
+        lastPingSucceeded == other.lastPingSucceeded
+    }
+
+    private func validate() throws {
+        guard schemaVersion == Self.currentSchemaVersion else {
+            throw ClawMissionRunCheckpointError.invalidVersion
+        }
+        guard savedAt.timeIntervalSinceReferenceDate.isFinite,
+              (0...100).contains(riskScore),
+              Self.boundedCountRange.contains(approvalCount),
+              Self.boundedCountRange.contains(blockedCount),
+              Self.boundedCountRange.contains(succeededCount),
+              Self.boundedCountRange.contains(failedCount),
+              Self.boundedCountRange.contains(retryableCount),
+              Self.boundedCountRange.contains(artifactCount),
+              Self.boundedCountRange.contains(priorityCount),
+              Self.boundedCountRange.contains(actionablePriorityCount),
+              Self.boundedCountRange.contains(criticalOrHighCount),
+              Self.boundedCountRange.contains(metadataPendingCount),
+              Self.boundedCountRange.contains(transportAttemptCount),
+              Self.boundedCountRange.contains(reconnectCount) else {
+            throw ClawMissionRunCheckpointError.invalidValue
+        }
+    }
+}
+
+struct ClawMissionRunCheckpointPresentationSummary: Equatable, Sendable {
+    var state: ClawMissionRunCheckpointState
+    var title: String
+    var status: String
+    var guidance: String
+    var icon: String
+    var phase: ClawAutonomousLoopPhase
+    var taskStatus: ClawTaskStatus?
+    var sessionStatus: ClawGatewaySessionStatus?
+    var connectionState: ClawGatewayConnectionState
+    var riskScore: Int
+    var approvalCount: Int
+    var blockedCount: Int
+    var succeededCount: Int
+    var failedCount: Int
+    var retryableCount: Int
+    var artifactCount: Int
+    var priorityCount: Int
+    var actionablePriorityCount: Int
+    var criticalOrHighCount: Int
+    var metadataPendingCount: Int
+    var requiresUserApproval: Bool
+    var hasGatewayAck: Bool
+    var hasFallback: Bool
+    var hasError: Bool
+    var isCompleted: Bool
+    var transportAttemptCount: Int
+    var reconnectCount: Int
+    var lastPingSucceeded: Bool?
+    var savedAt: Date?
+    var canClear: Bool
+    var isVisible: Bool
+
+    static let none = make(state: .none, checkpoint: nil)
+
+    static func make(
+        state: ClawMissionRunCheckpointState,
+        checkpoint: ClawMissionRunCheckpoint?,
+        canClear: Bool? = nil
+    ) -> ClawMissionRunCheckpointPresentationSummary {
+        let resolvedCanClear = canClear ?? (checkpoint != nil || state == .invalid || state == .writeFailed)
+        guard let checkpoint else {
+            return ClawMissionRunCheckpointPresentationSummary(
+                state: state,
+                title: "上次 Mission 交接摘要",
+                status: state == .none ? "暂无本机历史快照" : state.title,
+                guidance: guidance(for: state),
+                icon: state.icon,
+                phase: .idle,
+                taskStatus: nil,
+                sessionStatus: nil,
+                connectionState: .idle,
+                riskScore: 0,
+                approvalCount: 0,
+                blockedCount: 0,
+                succeededCount: 0,
+                failedCount: 0,
+                retryableCount: 0,
+                artifactCount: 0,
+                priorityCount: 0,
+                actionablePriorityCount: 0,
+                criticalOrHighCount: 0,
+                metadataPendingCount: 0,
+                requiresUserApproval: false,
+                hasGatewayAck: false,
+                hasFallback: false,
+                hasError: false,
+                isCompleted: false,
+                transportAttemptCount: 0,
+                reconnectCount: 0,
+                lastPingSucceeded: nil,
+                savedAt: nil,
+                canClear: resolvedCanClear,
+                isVisible: true
+            )
+        }
+        let sessionTitle = checkpoint.sessionStatus?.title ?? "无 Gateway 会话"
+        let status = state == .saved
+            ? "已保存本机快照 · \(checkpoint.phase.title) · \(sessionTitle)"
+            : state == .restored
+                ? "已载入历史快照 · \(checkpoint.phase.title) · \(sessionTitle)"
+                : state.title
+        return ClawMissionRunCheckpointPresentationSummary(
+            state: state,
+            title: "上次 Mission 交接摘要",
+            status: status,
+            guidance: guidance(for: state),
+            icon: state.icon,
+            phase: checkpoint.phase,
+            taskStatus: checkpoint.taskStatus,
+            sessionStatus: checkpoint.sessionStatus,
+            connectionState: checkpoint.connectionState,
+            riskScore: checkpoint.riskScore,
+            approvalCount: checkpoint.approvalCount,
+            blockedCount: checkpoint.blockedCount,
+            succeededCount: checkpoint.succeededCount,
+            failedCount: checkpoint.failedCount,
+            retryableCount: checkpoint.retryableCount,
+            artifactCount: checkpoint.artifactCount,
+            priorityCount: checkpoint.priorityCount,
+            actionablePriorityCount: checkpoint.actionablePriorityCount,
+            criticalOrHighCount: checkpoint.criticalOrHighCount,
+            metadataPendingCount: checkpoint.metadataPendingCount,
+            requiresUserApproval: checkpoint.requiresUserApproval,
+            hasGatewayAck: checkpoint.hasGatewayAck,
+            hasFallback: checkpoint.hasFallback,
+            hasError: checkpoint.hasError,
+            isCompleted: checkpoint.isCompleted,
+            transportAttemptCount: checkpoint.transportAttemptCount,
+            reconnectCount: checkpoint.reconnectCount,
+            lastPingSucceeded: checkpoint.lastPingSucceeded,
+            savedAt: checkpoint.savedAt,
+            canClear: resolvedCanClear,
+            isVisible: true
+        )
+    }
+
+    private static func guidance(for state: ClawMissionRunCheckpointState) -> String {
+        switch state {
+        case .none:
+            return "当前 Mission 从内存状态开始；不会恢复旧任务、审批、Gateway session、receipt 或 artifact。"
+        case .restored:
+            return "这是重启前的 metadata-only 快照，仅供本机回顾；旧任务、审批、Gateway session、receipt 和 artifact 不会恢复。"
+        case .saved:
+            return "这是当前运行的 metadata-only 快照，仅供本机回顾；不会恢复发送、审批、Gateway session、receipt 或 artifact。"
+        case .invalid:
+            return "历史快照版本或内容无效，已安全忽略；不会恢复旧任务、审批、Gateway session、receipt 或 artifact。"
+        case .writeFailed:
+            return "当前 Mission 继续运行；本机快照写入失败，不会自动重试，也不影响 Gateway、审批或任务。"
+        case .unavailable:
+            return "本机交接快照存储不可用；当前 Mission 继续运行，不会恢复旧任务、审批、Gateway session、receipt 或 artifact。"
+        }
+    }
+}
+
+enum ClawMissionRunCheckpointPresentationContract {
+    static let sharedView = "ClawMissionRunCheckpointView"
+    static let minimumHitArea: Double = 44
+    static let clearTitle = "清除交接摘要"
+    static let clearIcon = "trash"
+    static let clearVoiceOverHint = "只清理本机历史摘要；不影响当前 Mission、Gateway、审批、receipt 或 Smart Rail。"
+    static let historicalLabel = "仅供本机回顾，不能恢复发送"
+}
+
 enum ClawGatewayTransportProbeState: String, CaseIterable, Codable, Sendable {
     case unavailable
     case notConfigured

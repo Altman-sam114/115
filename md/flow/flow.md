@@ -12,6 +12,8 @@ v0.73 在同一 health strip 增加用户显式的 Live Gateway transport probe�
 
 v0.73 追加修复将 request/session revision、token fingerprint/profile digest、continuation draft/receipt/lineage/source/decision 和 review focus 纳入同一 opaque binding。UI 在共享 health strip 的 `onAppear/onChange` 同步 focus，probe dispatcher 只消费 scope、不隐式改写 focus；旧异步结果在 generation 或任一 scope 变化后丢弃。所有 transport fake 只记录控制帧探测事实，probe 前后既有状态快照不变。
 
+v0.74 在同一手机端 presentation 边界增加版本化 `metadata-only Mission Run checkpoint`。状态变化边界从当前安全 summary/Live health 白名单计数 best-effort 保存最新一份本机快照；App 重启时只载入独立的只读交接 summary。历史 checkpoint 不回填 `missionRunResolution`、`missionRunSummary`、task/session/event/artifact/live request/connection、审批、continuation receipt、review focus 或 Smart Operator Rail；compact iPhone 与 regular iPad/宽屏 Dock 复用同一 checkpoint view、summary 和 clear API。未知字段/版本、损坏、超限或存储失败均 fail closed，clear 只清理本机 Application Support 文件，不产生 Gateway 副作用。
+
 ## 1. 当前核心数据流
 
 ```text
@@ -27,6 +29,7 @@ v0.73 追加修复将 request/session revision、token fingerprint/profile diges
   -> ClawGatewayLiveRequest + ClawGatewayConnectionState 记录 preflight 和连接阶段
   -> URLSessionClawGatewayTransport 有界重连 + 任务 ping 可观测性
   -> 用户显式 Live transport probe：安全 preflight -> 独立 WebSocket -> 一次 control-frame ping/pong -> 局部 metadata-only summary/stale guard；不发送 envelope，不创建 session/event/artifact
+  -> 任务/审批/有效事件/完成/重试等状态边界 -> 严格白名单 metadata-only Mission Run checkpoint -> Application Support 最新单文件；App restart 只恢复只读历史 handoff，不恢复执行上下文
   -> Gateway Dispatch Preflight：普通首次 dispatch 只接受 sent；敏感 approval/audit 合同 fail closed；continuation 走独立 readyToSend + receipt 分支
   -> Gateway process-local task replay guard 防止同一 task.id 重复执行 handler
   -> Gateway session-start capability snapshot auditLog + 安全 metadata
@@ -313,6 +316,9 @@ child task/action/session ID 全部新建，actions 必须恰好是 selected act
 - `ClawGatewayEvent`：Gateway 推送事件。
 - `ClawGatewaySession`：手机端会话视图模型，区分 action results 和 session-level artifacts。
 - `ClawGatewayLiveHealthSummary`：手机端从 `ClawGatewayLiveRequest`、`ClawGatewayConnectionState`、最新 session 和事件流派生的连接健康摘要；只展示脱敏 endpoint、transport、request path、短 token 指纹、preflight、事件数量、最新事件、attempt、reconnect、ping、脱敏 transport error、fallback/error/completed 和 session 状态，不写入 envelope，不新增协议字段，不做后台保活。
+- `ClawMissionRunCheckpoint`：手机端本地 persistence 的严格白名单版本化 metadata-only 快照，只包含 phase/status、有限计数、固定布尔值、保存时间和任务 Live health 的有限 transport 观察；不包含任何 task/session/request/mission UUID、command、payload、token、URL/path、receipt、lineage、review focus 或 Smart Rail binding。
+- `ClawMissionRunCheckpointStore`：可注入的 no-op、in-memory fake 和 Application Support file store；生产只保留 `last-checkpoint.json`，原子替换并在 iOS 可用时设置文件保护。load/save/clear 失败只映射固定内部状态，不把底层错误或路径显示给用户。
+- `ClawMissionRunCheckpointPresentationSummary`：只读历史交接展示摘要。`restored` 仅代表本机载入合法历史 metadata，不能被解释为当前 Gateway ack、paired、authorized、可发送或可继续；`ClawMissionRunCheckpointView` 在 compact 与 regular Dock 共享，clear 只调用本机 Store API。
 - `ClawAutonomousLoopState`：自治循环状态。
 - `ClawGatewayArtifactMetadataReviewSummary`：手机端从 Gateway artifact event metadata 派生通用 metadata 复核摘要，只展示 metadata 覆盖率、脱敏计数、最近带 metadata 的 artifact、安全键值和 safety flags，不读取 Gateway `file://` 内容。
 - `ClawGatewayFileChangeSafetyReviewSummary`：手机端从 `manageFiles` 的 `fileDiff`、路径阻断或写入失败 artifact metadata 派生文件变更安全复核摘要，只展示 workspace policy、写入尝试/成功、路径逃逸阻断、变更计数、path/content/diff 省略状态和 safety flags，不读取 Gateway `file://` 内容，不展示 raw path、workspace/sessionWorkspace、文件名/目录名、文件内容、diff、patch、token、header 或 `toolArguments`。

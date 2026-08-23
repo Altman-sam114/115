@@ -27,6 +27,68 @@ enum LogicSmoke {
         expect(store.gatewayPairingDiagnosticsSummary.isVisible == false, "pairing diagnostics should stay hidden without a Mission")
         expect(store.gatewayResumeIntentPresentationSummary.state == .unavailable, "resume intent should be unavailable without a Mission")
         expect(store.prepareExplicitResumeIntent(for: store.gatewayResumeIntentPresentationSummary) == false, "resume intent should fail closed without a retryable live scope")
+        expect(store.missionRunCheckpointPresentationSummary.state == .none, "default Store should use a disabled checkpoint store")
+        expect(ClawMissionRunCheckpointPresentationContract.sharedView == "ClawMissionRunCheckpointView", "checkpoint view contract should be shared")
+        expect(ClawMissionRunCheckpointPresentationContract.minimumHitArea >= 44, "checkpoint clear control should have a 44pt hit area")
+        expect(ClawMissionRunCheckpointPresentationContract.clearVoiceOverHint.contains("只清理本机"), "checkpoint clear hint should be local-only")
+        expect(ClawMissionRunCheckpointPresentationContract.historicalLabel.contains("不能恢复发送"), "checkpoint label should deny send recovery")
+
+        if let checkpoint = try? ClawMissionRunCheckpoint(
+            phase: .completed,
+            taskStatus: .sent,
+            sessionStatus: .completed,
+            connectionState: .completed,
+            riskScore: 24,
+            approvalCount: 1,
+            blockedCount: 0,
+            succeededCount: 2,
+            failedCount: 0,
+            retryableCount: 0,
+            artifactCount: 2,
+            priorityCount: 0,
+            actionablePriorityCount: 0,
+            criticalOrHighCount: 0,
+            metadataPendingCount: 0,
+            requiresUserApproval: false,
+            hasGatewayAck: true,
+            hasFallback: false,
+            hasError: false,
+            isCompleted: true,
+            transportAttemptCount: 1,
+            reconnectCount: 0,
+            lastPingSucceeded: true
+        ) {
+            let checkpointStore = ClawInMemoryMissionRunCheckpointStore(checkpoint: checkpoint)
+            let restoredStore = ClawStore(
+                autoScanLocalArtifacts: false,
+                checkpointStore: checkpointStore
+            )
+            expect(restoredStore.missionRunCheckpointPresentationSummary.state == .restored, "valid checkpoint should restore presentation only")
+            expect(restoredStore.clawMobileTasks.isEmpty, "checkpoint restore must not restore tasks")
+            expect(restoredStore.clawGatewaySessions.isEmpty, "checkpoint restore must not restore sessions")
+            expect(restoredStore.gatewayEvents.isEmpty, "checkpoint restore must not restore events")
+            expect(restoredStore.lastGatewayLiveRequest == nil, "checkpoint restore must not restore live request")
+            expect(restoredStore.continuationDraft == nil, "checkpoint restore must not restore continuation draft")
+
+            let boundaryStore = ClawInMemoryMissionRunCheckpointStore()
+            let boundaryClawStore = ClawStore(
+                autoScanLocalArtifacts: false,
+                checkpointStore: boundaryStore
+            )
+            boundaryClawStore.generatePhoneAgentPlan()
+            boundaryClawStore.queueClawMobileTaskFromCurrentPlan()
+            let savedCount = boundaryStore.saveCount
+            expect(savedCount > 0, "queue boundary should save a checkpoint")
+            _ = boundaryClawStore.missionRunSummary
+            expect(boundaryStore.saveCount == savedCount, "summary getter must not save a checkpoint")
+            let beforeClear = boundaryClawStore.missionRunSummary
+            boundaryClawStore.clearLastMissionRunCheckpoint()
+            expect(boundaryClawStore.missionRunCheckpointPresentationSummary.state == .none, "clear should remove only local checkpoint presentation")
+            expect(boundaryClawStore.missionRunSummary == beforeClear, "clear must not change current Mission")
+            expect(boundaryClawStore.clawMobileTasks.isEmpty == false, "clear must not remove current task")
+        } else {
+            failures.append("checkpoint fixture should be constructible")
+        }
 
         let staged = LocalArtifactValidator.validate(
             manifest: store.model.artifactManifest,

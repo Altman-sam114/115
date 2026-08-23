@@ -23,6 +23,36 @@
 
 ## 历史记录
 
+### v0.74 / 跨重启 Mission Run 安全交接快照
+
+日期：2026-08-23
+
+实现范围：
+
+- 增加严格白名单、版本化 `ClawMissionRunCheckpoint`，只保存 phase/status、有限计数、固定布尔值、保存时间和既有任务 Live health 的有限 transport 观察；未知字段/版本、非法值、损坏或超限数据 fail closed，不保存 command、ID、payload、token、URL/path、receipt、lineage、审批、review focus 或 Smart Rail binding。
+- 增加可注入的 no-op、in-memory fake 和 Application Support file store。生产只写固定的最新 `ClawMissionRun/last-checkpoint.json`，使用结构化 JSON、原子替换和可用时的 iOS 文件保护；读写清理失败只呈现固定脱敏状态。
+- 在任务/审批/有效 Gateway 状态/完成/失败/回退/重试/continuation 边界 best-effort 保存；App 重启只恢复只读 metadata-only handoff summary，不恢复 task、session、event、artifact、live request、审批、receipt、review focus 或 Smart Rail。clear 只清本机快照。
+- compact iPhone Mission Run 与 regular iPad/宽屏 Review Detail Dock 复用同一 checkpoint view、summary 和 Store clear API；补充 model/store/lifecycle/no-side-effect/redaction/UI 合同测试和 README、协议、flow、flowchart、test 文档。
+
+关键文件：
+
+- `Claw/Core/ClawModels.swift`
+- `Claw/Services/ClawStore.swift`
+- `Claw/App/ClawApp.swift`
+- `Claw/Views/ContentView.swift`
+- `ClawTests/ClawTests.swift`
+- `Tools/LogicSmoke.swift`
+- `README.md`
+- `Docs/claw-mobile-gateway-protocol.md`
+- `md/flow/flow.md`
+- `md/flow/flowchart.md`
+- `md/test/test.md`
+- `update_log.md`
+
+验证状态：本轮实现后只执行允许的非编译静态检查；本地未运行编译、XCTest、LogicSmoke、Gateway fixture/direct/WebSocket smoke、`node --check` 或 `xcodebuild`。commit、GitHub Actions run、artifact 和 Agent C 复判待 push 后产生，不能预写通过结论。
+
+明确未实现：持久 pairing、后台保活、自动重连/重试、跨重启可执行任务/session/event/artifact/receipt/continuation 恢复、Gateway/protocol/action/event/artifact 改动、原生 macOS/Mac Catalyst target、Accessibility bridge 或浏览器控制器。
+
 ### v0.73 / 显式 Live Gateway transport probe
 
 日期：2026-08-23

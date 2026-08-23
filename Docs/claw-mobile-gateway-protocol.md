@@ -127,6 +127,10 @@ v0.73 的 Live Gateway transport probe 是客户端局部、用户显式的一�
 
 v0.73 追加修复把 probe binding 扩展到 task/session/sessionTask/Mission scope、endpoint/token fingerprint/profile digest、live request/session revision、continuation draft/receipt/lineage/source/decision、review focus 和 generation；旧异步结果只返回 stale/丢弃，不覆盖当前 summary。fake transport 与云端 XCTest/LogicSmoke 必须记录并断言一次 call、一次 ping、零 application body、一次 close 及所有失败/取消路径；探测前后既有 live health、连接状态、session/event/artifact、任务、envelope、approval/frozen、receipt、review focus 和 Smart Rail 必须保持不变。共享 view 的动作文案、SF Symbol、44pt 和 VoiceOver hint 固定，仍不构成 pairing、authorization 或任务执行信号。
 
+v0.74 的 Mission Run checkpoint 是手机端本地 presentation persistence，不是 Gateway 协议。`ClawMissionRunCheckpoint` 只使用版本化严格白名单：固定 phase/status、有限计数、固定布尔值、保存时间和来自既有任务 Live health 的有限 transport 观察；未知 schema、字段、枚举、数值或超过 32 KiB 的数据 fail closed。生产实现只在 Application Support 的固定 `ClawMissionRun/last-checkpoint.json` 保存最新一份 JSON，测试默认使用 no-op 或 in-memory store，并通过原子替换写入。checkpoint 不进入 `claw.computer.control.v1`、不构造 WebSocket application message、不创建 Gateway session/event/artifact、不保存 token、header、endpoint、URL/path、UUID、command、payload、receipt、lineage、approval、review focus 或 Smart Rail binding。
+
+App 重启只把合法 checkpoint 载入为只读的 metadata-only handoff summary；当前 task、session、event、artifact、live request、connection、审批、frozen envelope、continuation receipt、review focus 和 Smart Operator Rail 仍从空内存状态开始，`ClawMissionRunSummary` 与 `missionRunResolution` 不回填历史数据。compact iPhone Mission Run 与 regular iPad/宽屏 Review Detail Dock 复用同一 `ClawMissionRunCheckpointView`、summary 和 Store API。状态变化边界可 best-effort 更新最新快照；summary getter、focus、Smart Rail 和 v0.73 probe 不保存。清除按钮只清理本机快照，保存/读取/清理失败只显示固定脱敏状态，不阻断当前任务、不触发重试、fallback、审批或 Gateway 动作。该能力不是 pairing、授权、后台保活、任务恢复或 macOS 控制器。
+
 失败动作可以标记 `isRetryable`。手机端二次确认后，网关可重试失败动作并把新的 artifact 追加到对应 result。
 
 ## Mission Run Presentation Layer

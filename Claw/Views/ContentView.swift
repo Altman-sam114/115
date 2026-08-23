@@ -5169,6 +5169,10 @@ struct ClawMissionRunLiveGatewayHealthStripView: View {
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Live Gateway transport 探测，\(probe.status)")
 
+            ClawMissionRunCheckpointView(
+                summary: store.missionRunCheckpointPresentationSummary
+            )
+
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     ForEach(Array(strip.checklist.enumerated()), id: \.offset) { _, item in
@@ -5226,6 +5230,108 @@ struct ClawMissionRunLiveGatewayHealthStripView: View {
         case .unavailable:
             return .secondary
         }
+    }
+}
+
+struct ClawMissionRunCheckpointView: View {
+    @EnvironmentObject private var store: ClawStore
+    let summary: ClawMissionRunCheckpointPresentationSummary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Divider()
+
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Label(summary.title, systemImage: summary.icon)
+                    .font(.footnote.bold())
+                    .foregroundStyle(tint)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Spacer(minLength: 0)
+
+                Text(summary.state.title)
+                    .font(.caption.bold())
+                    .foregroundStyle(tint)
+                    .multilineTextAlignment(.trailing)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if summary.canClear {
+                    Button {
+                        store.clearLastMissionRunCheckpoint()
+                    } label: {
+                        Image(systemName: ClawMissionRunCheckpointPresentationContract.clearIcon)
+                            .frame(
+                                minWidth: CGFloat(ClawMissionRunCheckpointPresentationContract.minimumHitArea),
+                                minHeight: CGFloat(ClawMissionRunCheckpointPresentationContract.minimumHitArea)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel(ClawMissionRunCheckpointPresentationContract.clearTitle)
+                    .accessibilityHint(ClawMissionRunCheckpointPresentationContract.clearVoiceOverHint)
+                }
+            }
+
+            Text(summary.status)
+                .font(.caption.bold())
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(ClawMissionRunCheckpointPresentationContract.historicalLabel)
+                .font(.caption2.bold())
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    checkpointTag(summary.phase.title, icon: summary.phase.icon)
+                    if let sessionStatus = summary.sessionStatus {
+                        checkpointTag(sessionStatus.title, icon: "waveform.path.ecg.rectangle")
+                    }
+                    checkpointTag("成功 \(summary.succeededCount)", icon: "checkmark.circle.fill")
+                    checkpointTag("失败 \(summary.failedCount)", icon: "xmark.circle.fill")
+                    checkpointTag("待复核 \(summary.priorityCount)", icon: "scope")
+                    checkpointTag("证据 \(summary.artifactCount)", icon: "paperclip")
+                    if summary.hasGatewayAck {
+                        checkpointTag("历史 Gateway ack", icon: "checkmark.shield")
+                    }
+                    if let ping = summary.lastPingSucceeded {
+                        checkpointTag(ping ? "历史 ping ok" : "历史 ping failed", icon: "waveform.path.ecg")
+                    }
+                }
+            }
+
+            if let savedAt = summary.savedAt {
+                Text("保存时间：\(savedAt.formatted(date: .abbreviated, time: .shortened))")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Text(summary.guidance)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(summary.title)，\(summary.status)")
+    }
+
+    private var tint: Color {
+        switch summary.state {
+        case .saved, .restored:
+            return .blue
+        case .invalid, .writeFailed, .unavailable:
+            return .orange
+        case .none:
+            return .secondary
+        }
+    }
+
+    private func checkpointTag(_ text: String, icon: String) -> some View {
+        Label(text, systemImage: icon)
+            .font(.caption2.bold())
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
 
