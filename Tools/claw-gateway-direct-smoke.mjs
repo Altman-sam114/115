@@ -3651,11 +3651,20 @@ function assertReadinessError(result, code, label) {
 function encodeClientFrame(text) {
   const payload = Buffer.from(text, "utf8");
   const mask = crypto.randomBytes(4);
-  if (payload.length >= 126) {
+  const length = payload.length;
+  let header;
+  if (length < 126) {
+    header = Buffer.from([0x81, 0x80 | length]);
+  } else if (length < 65536) {
+    header = Buffer.alloc(4);
+    header[0] = 0x81;
+    header[1] = 0x80 | 126;
+    header.writeUInt16BE(length, 2);
+  } else {
     throw new Error("readiness smoke payload too large");
   }
   const masked = Buffer.from(payload.map((byte, index) => byte ^ mask[index % 4]));
-  return Buffer.concat([Buffer.from([0x81, 0x80 | payload.length]), mask, masked]);
+  return Buffer.concat([header, mask, masked]);
 }
 
 function parseServerFrame(buffer) {

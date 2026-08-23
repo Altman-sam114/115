@@ -132,7 +132,8 @@ enum LogicSmoke {
         }
         readinessStore.setGateway(url: "ws://new-gateway.example.test", token: "new-readiness-secret")
         staleFake.release()
-        expect(await staleReadinessTask.value == false, "stale readiness response should be discarded")
+        let staleReadinessResult = await staleReadinessTask.value
+        expect(staleReadinessResult == false, "stale readiness response should be discarded")
         expect(readinessStore.gatewayReadinessSummary.state != .attested, "stale readiness response must not overwrite current profile")
         expect(staleFake.closeCount == 1, "stale readiness transport should close once")
 

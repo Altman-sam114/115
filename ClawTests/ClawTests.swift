@@ -5493,9 +5493,8 @@ final class ClawTests: XCTestCase {
         let fake = ClawGatewayReadinessTransportFake()
 
         XCTAssertEqual(store.gatewayReadinessSummary.state, .ready)
-        XCTAssertTrue(
-            await store.requestGatewayReadiness(transport: fake)
-        )
+        let readinessResult = await store.requestGatewayReadiness(transport: fake)
+        XCTAssertTrue(readinessResult)
         XCTAssertEqual(store.gatewayReadinessSummary.state, .attested)
         XCTAssertEqual(fake.callCount, 1)
         XCTAssertEqual(fake.requestBodyCount, 1)
@@ -5529,7 +5528,8 @@ final class ClawTests: XCTestCase {
         for _ in 0..<100 where duplicateFake.callCount == 0 {
             await Task.yield()
         }
-        XCTAssertFalse(await store.requestGatewayReadiness(transport: duplicateFake))
+        let duplicateResult = await store.requestGatewayReadiness(transport: duplicateFake)
+        XCTAssertFalse(duplicateResult)
         XCTAssertEqual(duplicateFake.callCount, 1)
         first.cancel()
         _ = await first.value
@@ -5544,7 +5544,8 @@ final class ClawTests: XCTestCase {
         }
         store.setGateway(url: "ws://new-gateway.example.test", token: "new-readiness-secret")
         staleFake.release()
-        XCTAssertFalse(await staleTask.value)
+        let staleResult = await staleTask.value
+        XCTAssertFalse(staleResult)
         XCTAssertNotEqual(store.gatewayReadinessSummary.state, .attested)
         XCTAssertEqual(staleFake.callCount, 1)
         XCTAssertEqual(staleFake.closeCount, 1)
