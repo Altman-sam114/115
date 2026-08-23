@@ -170,6 +170,8 @@ v0.74 增加最新一份**版本化 metadata-only 本机 Mission Run 交接快�
 
 v0.75 增加独立的 `claw.gateway.readiness.v1` 只读 control plane。用户点击共享 health strip 中的“读取 Gateway readiness”后，独立 WebSocket 只发送严格三字段 request（`controlPlane`、`kind`、`requestNonce`），服务端只返回固定 schema 的一条 response/error 并关闭；它不使用 `claw.computer.control.v1` envelope，不进入 task/session/workspace/replay/event/artifact/handler pipeline。运行时 token 只放在 `Authorization: Bearer` header；`tokenHeader` 只表示本次 header 被接受或不要求，不表示 pairing、authorization、trusted 或电脑可控。response 的 capability/policy/assessment 都是固定脱敏枚举，effects 五项永远为 `false`，不返回 allowlist、workspace/path、host/app、nonce 以外的 payload、URL 或 token。compact iPhone 与 regular iPad/宽屏 Dock 复用同一 readiness summary/view/API、44pt 控件和 VoiceOver 安全边界；没有后台保活、自动重连/重试、审批、发送、真实 macOS target、Accessibility bridge 或浏览器 controller。
 
+v0.76 增加 AgentTrace 证据交接包。它只从现有 `agentTrace` 的已校验 metadata 派生固定五行：证据覆盖、下一步决策、人工闸门、交接状态和安全边界；selected action、候选数量、满足/降级/缺失计数和 handoff 状态均通过 typed allowlist 映射，未知或矛盾值 fail closed。compact iPhone Mission Run 与 regular iPad/宽屏 Review Detail Dock 复用同一 `ClawAgentTraceHandoffPackSummary`、projector、view 和 focus dispatcher；按钮只聚焦 AgentTrace 详情，至少 44pt，VoiceOver 明确不自动继续、不审批、不发送、不执行电脑动作。交接包不读取 Gateway `file://` payload，不显示 command、instruction、URL/path、UUID、token、header、receipt、toolArguments 或风险原文，也不新增 Gateway action/event/artifact/protocol、权限或后台循环。
+
 ## 运行
 
 打开 `Claw.xcodeproj`，选择 `Claw` scheme，在 iPhone 模拟器或真机运行。默认协作验证不在本机跑命令行编译、XCTest 或 smoke；命令行 build、真实 iPhone Simulator XCTest、Swift logic smoke、Gateway smoke 和 `node --check` 统一由 GitHub Actions workflow 执行。结果包始终保留 `xctest.log`（包含 simulator discovery 错误）；XCTest 成功时必须同时包含 `ClawTests.xcresult`，否则 packaging 失败。结果包还包含 manifest、JUnit、`xcodebuild.log` 和各 smoke 日志，并由 Agent C 下载复判。

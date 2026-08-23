@@ -266,6 +266,10 @@ Gateway readiness 分支必须在普通 `makeGatewayEvents`/dispatch pipeline �
 
 compact iPhone Mission Run 与 regular iPad/宽屏 Review Detail Dock 必须复用同一个 readiness summary/view/API、固定 title/icon/enabled 三元组和至少 44pt 控件；VoiceOver 要明确只读 capability/policy、无 task/session/event/artifact/电脑动作副作用，header 不等于 pairing/authorization，且无自动重连、审批、发送或重试。`body`、`onAppear`、`onChange`、getter 和 checkpoint load 不得隐式联网。所有业务测试只在最新 `origin/main` GitHub Actions artifact 执行，本地只做静态检查。
 
+### v0.76 AgentTrace 证据交接包
+云端 XCTest/LogicSmoke 必须覆盖新的 `ClawAgentTraceHandoffPackSummary`：idle/no trace 固定五行且无 focus/continue；完整 trace 的 satisfied/degraded/missing 计数、typed selected action、candidate count/ordinal、handoff 状态和人工闸门与既有 `ClawAgentTraceReviewSummary` 一致；waiting-for-approval、needs-evidence、blocked、complete 和 degraded/missing 均不得误报可继续。unknown signal/action、未知 policy/reason/status、计数或序位越界、envelope false、decision inconsistent、风险冲突和 stale task/session/focus 必须 fail closed。
+测试必须逐项检查 summary、五行 item、VoiceOver/accessibility 文案和 Codable 数据不包含 raw command/instruction/objective、`toolArguments`、artifact reference/payload、`file://`、workspace/path、URL/query、网页/文件/命令正文、stdout/stderr、截图、UUID、receipt/lineage、token、Authorization/Bearer 或 marker。compact iPhone 与 regular iPad/mac 必须复用同一 summary/projector/view/focus dispatcher；focus 前后 task/session/event/envelope/approval/frozen/receipt/continuation/readiness/checkpoint/Smart Rail 完全相等，按钮至少 44pt 且只聚焦 AgentTrace，不联网、不审批、不发送、不重试、不创建 child。
+本轮不修改 Gateway server、fixture、direct/WebSocket smoke 或 protocol schema；最新 `origin/main` 的云端 artifact 仍必须回归 Swift logic smoke、XCTest、Xcode build、fixture、Gateway direct/WebSocket、v0.73 probe、v0.74 checkpoint 和 v0.75 readiness 合同。Agent C 必须下载本轮 manifest/JUnit/摘要/主日志/关键结果文件复判；本地禁止编译、XCTest、LogicSmoke、Gateway smoke、fixture、`node --check` 和 `xcodebuild`。
 ## 静态检查
 
 ```sh

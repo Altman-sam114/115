@@ -2687,6 +2687,65 @@ final class ClawTests: XCTestCase {
         XCTAssertTrue(continuation.isReviewable)
     }
 
+    func testAgentTraceHandoffPackIsFixedTypedScopedAndRedacted() throws {
+        let idleStore = ClawStore(autoScanLocalArtifacts: false)
+        let idlePack = idleStore.missionRunSummary.agentTraceHandoffPack()
+        XCTAssertFalse(idlePack.isReviewable)
+        XCTAssertEqual(idlePack.items.map(\.id), ["evidence", "decision", "approval", "handoff", "safety"])
+        XCTAssertFalse(idlePack.canContinueLoop)
+        XCTAssertFalse(idlePack.items.contains { $0.canFocusReview })
+
+        let store = ClawStore(autoScanLocalArtifacts: false)
+        store.phoneAgentCommand = "打开浏览器搜索资料并发到 Slack Authorization: Bearer raw-token file:///private/tmp/trace.json"
+        store.startAutonomousComputerTakeover()
+        store.approveAndContinueAutonomousLoop()
+        let summary = store.missionRunSummary
+        let pack = summary.agentTraceHandoffPack()
+
+        XCTAssertTrue(pack.isReviewable)
+        XCTAssertEqual(pack.items.map(\.id), ["evidence", "decision", "approval", "handoff", "safety"])
+        XCTAssertEqual(pack.items.map(\.rank), [1, 2, 3, 4, 5])
+        XCTAssertEqual(pack.selectedActionTitle, "提取数据")
+        XCTAssertEqual(pack.selectedActionKind, "extractData")
+        XCTAssertEqual(pack.handoffStatus, "ready-to-continue")
+        XCTAssertEqual(pack.satisfiedSignalCount, 3)
+        XCTAssertEqual(pack.degradedSignalCount, 2)
+        XCTAssertEqual(pack.missingSignalCount, 1)
+        XCTAssertFalse(pack.canContinueLoop)
+        XCTAssertTrue(pack.requiresHumanAction)
+        XCTAssertTrue(pack.hasMetadataGap)
+        XCTAssertEqual(pack.items.first?.title, "证据覆盖")
+        XCTAssertEqual(pack.items.last?.title, "安全边界")
+
+        let focused = summary.agentTraceHandoffPack(focusedOn: "agent-trace")
+        XCTAssertEqual(focused.focusedReviewKind, "agent-trace")
+        XCTAssertTrue(focused.items.allSatisfy { $0.isFocused })
+        let stale = summary.agentTraceHandoffPack(focusedOn: "unknown-review-kind")
+        XCTAssertNil(stale.focusedReviewKind)
+        XCTAssertTrue(stale.hasStaleFocus)
+        XCTAssertTrue(stale.items.allSatisfy { $0.isFocused == false })
+
+        let visible = [
+            pack.title,
+            pack.status,
+            pack.guidance,
+            pack.selectedActionTitle ?? "",
+            pack.handoffStatus ?? "",
+            pack.stopReason ?? "",
+            pack.items.map { "\($0.title) \($0.status) \($0.guidance)" }.joined(separator: " ")
+        ].joined(separator: " ")
+        XCTAssertFalse(visible.contains("Authorization"))
+        XCTAssertFalse(visible.contains("Bearer"))
+        XCTAssertFalse(visible.contains("raw-token"))
+        XCTAssertFalse(visible.contains("file://"))
+        XCTAssertTrue(ClawAgentTraceHandoffPackPresentationContract.minimumHitArea >= 44)
+        XCTAssertTrue(ClawAgentTraceHandoffPackPresentationContract.voiceOverHint.contains("不自动继续"))
+
+        let encoded = try JSONEncoder().encode(pack)
+        let decoded = try JSONDecoder().decode(ClawAgentTraceHandoffPackSummary.self, from: encoded)
+        XCTAssertEqual(decoded, pack)
+    }
+
     func testMissionRunLoopContinuationCanBeReadyToContinue() throws {
         let artifact = ClawGatewayArtifact(
             kind: .agentTrace,

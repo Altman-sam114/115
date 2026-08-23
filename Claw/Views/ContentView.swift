@@ -856,6 +856,7 @@ struct ClawMissionRunPanel: View {
         let continuationGate = summary.macAgentContinuationGate(focusedOn: activeFocusedReviewKind)
         let reviewRadar = summary.macAgentReviewRadar(focusedOn: activeFocusedReviewKind)
         let handoffBrief = summary.macAgentHandoffBrief(focusedOn: activeFocusedReviewKind)
+        let agentTraceHandoffPack = summary.agentTraceHandoffPack(focusedOn: activeFocusedReviewKind)
         let focusContext = summary.focusContextSummary(focusedOn: reviewFocus)
         let evidenceTrail = summary.evidenceTrailSummary(focusedOn: activeFocusedReviewKind)
         let approvalQueue = summary.approvalQueueSummary(focusedOn: activeFocusedReviewKind)
@@ -987,6 +988,11 @@ struct ClawMissionRunPanel: View {
 
             ClawMissionMacAgentHandoffBriefView(
                 brief: handoffBrief,
+                onFocusReviewKind: focusReviewKind
+            )
+
+            ClawMissionAgentTraceHandoffPackView(
+                pack: agentTraceHandoffPack,
                 onFocusReviewKind: focusReviewKind
             )
 
@@ -1152,6 +1158,7 @@ struct ClawMissionReviewDetailDockView: View {
         let continuationGate = summary.macAgentContinuationGate(focusedOn: activeFocusedReviewKind)
         let reviewRadar = summary.macAgentReviewRadar(focusedOn: activeFocusedReviewKind)
         let handoffBrief = summary.macAgentHandoffBrief(focusedOn: activeFocusedReviewKind)
+        let agentTraceHandoffPack = summary.agentTraceHandoffPack(focusedOn: activeFocusedReviewKind)
         let approvalQueue = summary.approvalQueueSummary(focusedOn: activeFocusedReviewKind)
         let approvalFastLane = summary.approvalFastLane(focusedOn: activeFocusedReviewKind)
         let payloadSafetyLedger = summary.payloadSafetyLedger(focusedOn: activeFocusedReviewKind)
@@ -1265,6 +1272,11 @@ struct ClawMissionReviewDetailDockView: View {
 
                 ClawMissionMacAgentHandoffBriefView(
                     brief: handoffBrief,
+                    onFocusReviewKind: focusReviewKind
+                )
+
+                ClawMissionAgentTraceHandoffPackView(
+                    pack: agentTraceHandoffPack,
                     onFocusReviewKind: focusReviewKind
                 )
 
@@ -4353,6 +4365,162 @@ struct ClawMissionMacAgentReviewRadarSectorRow: View {
             return .orange
         case .danger:
             return .red
+        }
+    }
+}
+
+struct ClawMissionAgentTraceHandoffPackView: View {
+    let pack: ClawAgentTraceHandoffPackSummary
+    let onFocusReviewKind: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Label(pack.title, systemImage: pack.icon)
+                    .font(.subheadline.bold())
+                    .foregroundStyle(tint)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Spacer(minLength: 0)
+
+                if let focusedReviewTitle = pack.focusedReviewTitle {
+                    PhoneAgentTag(text: focusedReviewTitle, icon: "scope", tint: tint)
+                }
+            }
+
+            Text(pack.status)
+                .font(.footnote.bold())
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(pack.guidance)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 92), spacing: 8)], alignment: .leading, spacing: 6) {
+                Label("\(pack.satisfiedSignalCount) 满足", systemImage: "checkmark.circle.fill")
+                Label("\(pack.degradedSignalCount) 降级", systemImage: "exclamationmark.triangle.fill")
+                Label("\(pack.missingSignalCount) 缺失", systemImage: "questionmark.circle.fill")
+                if let selectedActionTitle = pack.selectedActionTitle {
+                    Label(selectedActionTitle, systemImage: ClawAgentTraceHandoffPackPresentationContract.actionIcon)
+                }
+            }
+            .font(.caption.bold())
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(pack.items) { item in
+                    ClawMissionAgentTraceHandoffPackItemRow(
+                        item: item,
+                        onFocusReviewKind: onFocusReviewKind
+                    )
+                }
+            }
+        }
+        .padding(10)
+        .background(tint.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(tint.opacity(0.16), lineWidth: 1)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("AgentTrace 证据交接，\(pack.status)，\(pack.satisfiedSignalCount) 项证据满足，\(pack.degradedSignalCount) 项降级，\(pack.missingSignalCount) 项缺失")
+    }
+
+    private var tint: Color {
+        if pack.isReviewable == false { return .secondary }
+        if pack.hasStaleFocus { return .orange }
+        if pack.requiresHumanAction { return .orange }
+        if pack.canContinueLoop { return .green }
+        if pack.hasMetadataGap { return .blue }
+        return .purple
+    }
+}
+
+struct ClawMissionAgentTraceHandoffPackItemRow: View {
+    let item: ClawAgentTraceHandoffPackItem
+    let onFocusReviewKind: (String) -> Void
+
+    var body: some View {
+        Group {
+            if item.canFocusReview, let reviewKind = item.reviewKind {
+                Button {
+                    onFocusReviewKind(reviewKind)
+                } label: {
+                    rowContent
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint(ClawAgentTraceHandoffPackPresentationContract.voiceOverHint)
+                .accessibilityInputLabels(["聚焦 AgentTrace 交接", "查看 AgentTrace 交接"])
+            } else {
+                rowContent
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(item.title)，\(item.status)，\(item.guidance)")
+    }
+
+    private var rowContent: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: item.isFocused ? "scope" : item.icon)
+                .font(.caption.bold())
+                .frame(width: 28, height: 28)
+                .background(tint.opacity(item.isFocused ? 0.22 : 0.12), in: Circle())
+                .foregroundStyle(tint)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(item.title)
+                    .font(.footnote.bold())
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(item.status)
+                    .font(.caption.bold())
+                    .foregroundStyle(tint)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(item.guidance)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 88), spacing: 6)], alignment: .leading, spacing: 5) {
+                    PhoneAgentTag(text: item.isReady ? "已满足" : "待复核", icon: item.isReady ? "checkmark.circle.fill" : "clock", tint: item.isReady ? .green : .secondary)
+                    if item.requiresHumanAction {
+                        PhoneAgentTag(text: "人工", icon: "hand.raised.fill", tint: .orange)
+                    }
+                    if item.hasMetadataGap {
+                        PhoneAgentTag(text: "metadata", icon: "doc.badge.clock", tint: .blue)
+                    }
+                    if item.canContinueLoop {
+                        PhoneAgentTag(text: "显式入口", icon: "arrow.forward.circle.fill", tint: .green)
+                    }
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, minHeight: CGFloat(ClawAgentTraceHandoffPackPresentationContract.minimumHitArea), alignment: .leading)
+        .padding(.vertical, 4)
+        .padding(.horizontal, 6)
+        .background(tint.opacity(item.isFocused ? 0.08 : 0), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            if item.isFocused {
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(tint.opacity(0.45), lineWidth: 1)
+            }
+        }
+    }
+
+    private var tint: Color {
+        switch item.tone {
+        case .neutral: return .secondary
+        case .info: return .blue
+        case .success: return .green
+        case .warning: return .orange
+        case .danger: return .red
         }
     }
 }

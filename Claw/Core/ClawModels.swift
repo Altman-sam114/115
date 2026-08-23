@@ -5446,6 +5446,59 @@ struct ClawAgentTraceReviewSummary: Equatable, Codable, Sendable {
     }
 }
 
+struct ClawAgentTraceHandoffPackItem: Identifiable, Equatable, Codable, Sendable {
+    var id: String
+    var rank: Int
+    var title: String
+    var status: String
+    var guidance: String
+    var icon: String
+    var tone: ClawMissionRunOperatorLaneTone
+    var reviewKind: String?
+    var canFocusReview: Bool
+    var isFocused: Bool
+    var isReady: Bool
+    var requiresHumanAction: Bool
+    var hasMetadataGap: Bool
+    var canContinueLoop: Bool
+}
+
+struct ClawAgentTraceHandoffPackSummary: Equatable, Codable, Sendable {
+    var title: String
+    var status: String
+    var guidance: String
+    var icon: String
+    var evidenceScore: Int?
+    var satisfiedSignalCount: Int
+    var degradedSignalCount: Int
+    var missingSignalCount: Int
+    var candidateCount: Int?
+    var candidateOrdinal: Int?
+    var selectedActionTitle: String?
+    var selectedActionKind: String?
+    var handoffStatus: String?
+    var stopReason: String?
+    var focusedReviewKind: String?
+    var focusedReviewTitle: String?
+    var primaryReviewKind: String?
+    var primaryReviewTitle: String?
+    var canFocusPrimaryReview: Bool
+    var canContinueLoop: Bool
+    var requiresHumanAction: Bool
+    var hasMetadataGap: Bool
+    var hasStaleFocus: Bool
+    var isReviewable: Bool
+    var items: [ClawAgentTraceHandoffPackItem]
+}
+
+enum ClawAgentTraceHandoffPackPresentationContract {
+    static let sharedView = "ClawMissionAgentTraceHandoffPackView"
+    static let actionTitle = "聚焦 AgentTrace 交接"
+    static let actionIcon = "point.topleft.down.curvedto.point.bottomright.up"
+    static let minimumHitArea = 44
+    static let voiceOverHint = "只复核 AgentTrace 的脱敏证据交接，不自动继续、不审批、不发送、不执行电脑动作"
+}
+
 enum ClawContinuationEligibility: Equatable, Sendable {
     case invalid
     case needsApproval(ClawMobileActionKind)
@@ -11030,5 +11083,316 @@ struct ModelArtifactStore {
             directoryURL: destinationDirectoryURL,
             fileManager: fileManager
         )
+    }
+}
+
+extension ClawMissionRunSummary {
+    func agentTraceHandoffPack(focusedOn requestedReviewKind: String? = nil) -> ClawAgentTraceHandoffPackSummary {
+        let activeKind = activeReviewFocus(from: requestedReviewKind)
+        let focusedKind = activeKind == "agent-trace" ? activeKind : nil
+        let hasStaleFocus = requestedReviewKind != nil && focusedKind == nil
+        let reviewTitle = Self.title(forDetailReviewKind: "agent-trace")
+
+        guard let review = agentTraceReview else {
+            return ClawAgentTraceHandoffPackSummary(
+                title: "AgentTrace 证据交接",
+                status: "等待 AgentTrace metadata",
+                guidance: "发送任务并收到脱敏 AgentTrace metadata 后，这里会按证据、决策、审批、交接和安全五行汇总；当前不产生任何动作。",
+                icon: ClawAgentTraceHandoffPackPresentationContract.actionIcon,
+                evidenceScore: nil,
+                satisfiedSignalCount: 0,
+                degradedSignalCount: 0,
+                missingSignalCount: 0,
+                candidateCount: nil,
+                candidateOrdinal: nil,
+                selectedActionTitle: nil,
+                selectedActionKind: nil,
+                handoffStatus: nil,
+                stopReason: nil,
+                focusedReviewKind: nil,
+                focusedReviewTitle: nil,
+                primaryReviewKind: nil,
+                primaryReviewTitle: nil,
+                canFocusPrimaryReview: false,
+                canContinueLoop: false,
+                requiresHumanAction: false,
+                hasMetadataGap: false,
+                hasStaleFocus: hasStaleFocus,
+                isReviewable: false,
+                items: Self.emptyItems()
+            )
+        }
+
+        let satisfiedCount = Self.boundedTraceCount(review.satisfiedSignals.count)
+        let degradedCount = Self.boundedTraceCount(review.degradedSignals.count)
+        let missingCount = Self.boundedTraceCount(review.missingSignals.count)
+        let hasMetadataGap = review.hasMetadata == false || degradedCount > 0 || missingCount > 0
+        let selectedActionKind = review.selectedNextActionKind
+        let selectedActionTitle: String? = {
+            guard let selectedActionKind else { return nil }
+            if selectedActionKind == "none" { return "无需下一步" }
+            return ClawMobileActionKind(rawValue: selectedActionKind)?.title
+        }()
+        let decisionIsReady = review.hasMetadata && review.requiresNextActionPolicyReview == false
+        let selectedRequiresApproval = review.selectedNextActionRequiresApproval == true
+        let handoffStatus = ClawAgentTraceReviewSummary.allowedHandoffStatus(review.handoffStatus)
+        let stopReason = Self.safeTraceStopReason(review.stopReason)
+        let canContinueLoop: Bool = {
+            guard hasMetadataGap == false,
+                  review.riskTags.isEmpty,
+                  handoffStatus == "ready-to-continue",
+                  case .ready(_) = review.continuationEligibility else {
+                return false
+            }
+            return true
+        }()
+        let requiresHumanAction = hasMetadataGap ||
+            review.requiresNextActionPolicyReview ||
+            selectedRequiresApproval ||
+            review.needsHandoffReview ||
+            review.riskTags.isEmpty == false
+
+        let evidenceItem = ClawAgentTraceHandoffPackItem(
+            id: "evidence",
+            rank: 1,
+            title: "证据覆盖",
+            status: Self.traceEvidenceStatus(review: review, hasMetadataGap: hasMetadataGap),
+            guidance: Self.traceEvidenceGuidance(review: review, satisfiedCount: satisfiedCount, degradedCount: degradedCount, missingCount: missingCount),
+            icon: "checklist.checked",
+            tone: Self.traceEvidenceTone(review: review, hasMetadataGap: hasMetadataGap),
+            reviewKind: "agent-trace",
+            canFocusReview: true,
+            isFocused: focusedKind == "agent-trace",
+            isReady: review.hasMetadata && degradedCount == 0 && missingCount == 0,
+            requiresHumanAction: hasMetadataGap,
+            hasMetadataGap: hasMetadataGap,
+            canContinueLoop: canContinueLoop
+        )
+        let decisionItem = ClawAgentTraceHandoffPackItem(
+            id: "decision",
+            rank: 2,
+            title: "下一步决策",
+            status: decisionIsReady ? "决策已校验" : "决策待复核",
+            guidance: Self.decisionGuidance(review: review, selectedActionTitle: selectedActionTitle),
+            icon: "arrow.triangle.branch",
+            tone: decisionIsReady ? .success : .warning,
+            reviewKind: "agent-trace",
+            canFocusReview: true,
+            isFocused: focusedKind == "agent-trace",
+            isReady: decisionIsReady,
+            requiresHumanAction: decisionIsReady == false,
+            hasMetadataGap: review.hasMetadata == false,
+            canContinueLoop: canContinueLoop
+        )
+        let approvalItem = ClawAgentTraceHandoffPackItem(
+            id: "approval",
+            rank: 3,
+            title: "人工闸门",
+            status: Self.approvalStatus(review: review, selectedRequiresApproval: selectedRequiresApproval),
+            guidance: Self.approvalGuidance(review: review, selectedRequiresApproval: selectedRequiresApproval),
+            icon: selectedRequiresApproval ? "hand.raised.fill" : "checkmark.seal.fill",
+            tone: selectedRequiresApproval ? .warning : (decisionIsReady ? .success : .warning),
+            reviewKind: "agent-trace",
+            canFocusReview: true,
+            isFocused: focusedKind == "agent-trace",
+            isReady: selectedRequiresApproval == false && decisionIsReady,
+            requiresHumanAction: selectedRequiresApproval || decisionIsReady == false,
+            hasMetadataGap: review.hasMetadata == false,
+            canContinueLoop: canContinueLoop
+        )
+        let handoffItem = ClawAgentTraceHandoffPackItem(
+            id: "handoff",
+            rank: 4,
+            title: "交接状态",
+            status: Self.traceHandoffStatusLabel(handoffStatus),
+            guidance: Self.traceHandoffGuidance(handoffStatus: handoffStatus, stopReason: stopReason),
+            icon: "arrowshape.turn.up.right.fill",
+            tone: Self.traceHandoffTone(handoffStatus),
+            reviewKind: "agent-trace",
+            canFocusReview: true,
+            isFocused: focusedKind == "agent-trace",
+            isReady: handoffStatus == "ready-to-continue" || handoffStatus == "complete",
+            requiresHumanAction: handoffStatus != "ready-to-continue" && handoffStatus != "complete",
+            hasMetadataGap: handoffStatus == nil,
+            canContinueLoop: canContinueLoop
+        )
+        let safetyItem = ClawAgentTraceHandoffPackItem(
+            id: "safety",
+            rank: 5,
+            title: "安全边界",
+            status: review.riskTags.isEmpty && hasMetadataGap == false ? "安全边界已满足" : "安全边界待复核",
+            guidance: review.riskTags.isEmpty && hasMetadataGap == false
+                ? "未显示原始风险值；当前摘要仍只允许用户查看，不自动执行。"
+                : "存在风险或证据缺口；保持人工复核，不提供自动继续入口。",
+            icon: review.riskTags.isEmpty && hasMetadataGap == false ? "shield.checkered" : "exclamationmark.shield.fill",
+            tone: review.riskTags.isEmpty && hasMetadataGap == false ? .success : .warning,
+            reviewKind: "agent-trace",
+            canFocusReview: true,
+            isFocused: focusedKind == "agent-trace",
+            isReady: review.riskTags.isEmpty && hasMetadataGap == false,
+            requiresHumanAction: review.riskTags.isEmpty == false || hasMetadataGap,
+            hasMetadataGap: hasMetadataGap,
+            canContinueLoop: canContinueLoop
+        )
+        let items = [evidenceItem, decisionItem, approvalItem, handoffItem, safetyItem]
+        let status: String
+        let guidance: String
+        if canContinueLoop {
+            status = "交接可继续 · 需用户显式触发"
+            guidance = "证据和决策 metadata 已满足安全合同；本摘要只说明条件，不会自动创建、审批或发送下一轮。"
+        } else if requiresHumanAction {
+            status = "需人工复核后交接"
+            guidance = "先查看五行摘要和 AgentTrace 详情；任何下一步都必须沿现有审批、allowlist 和显式操作路径进行。"
+        } else if handoffStatus == "complete" {
+            status = "交接已完成"
+            guidance = "当前 AgentTrace 已结束；摘要只用于回顾，不提供新的执行入口。"
+        } else {
+            status = "交接摘要已生成"
+            guidance = "这是固定脱敏的 metadata-only 摘要，不是 Gateway 授权或自动安全裁决。"
+        }
+
+        return ClawAgentTraceHandoffPackSummary(
+            title: "AgentTrace 证据交接",
+            status: status,
+            guidance: guidance,
+            icon: ClawAgentTraceHandoffPackPresentationContract.actionIcon,
+            evidenceScore: review.readinessScore.flatMap { (0...100).contains($0) ? $0 : nil },
+            satisfiedSignalCount: satisfiedCount,
+            degradedSignalCount: degradedCount,
+            missingSignalCount: missingCount,
+            candidateCount: review.selectedActionCandidateCount,
+            candidateOrdinal: review.selectedActionCandidateOrdinal,
+            selectedActionTitle: selectedActionTitle,
+            selectedActionKind: selectedActionKind,
+            handoffStatus: handoffStatus,
+            stopReason: stopReason,
+            focusedReviewKind: focusedKind,
+            focusedReviewTitle: focusedKind == nil ? nil : reviewTitle,
+            primaryReviewKind: "agent-trace",
+            primaryReviewTitle: reviewTitle,
+            canFocusPrimaryReview: true,
+            canContinueLoop: canContinueLoop,
+            requiresHumanAction: requiresHumanAction,
+            hasMetadataGap: hasMetadataGap,
+            hasStaleFocus: hasStaleFocus,
+            isReviewable: true,
+            items: items
+        )
+    }
+
+    private static func boundedTraceCount(_ count: Int) -> Int {
+        min(max(count, 0), 7)
+    }
+
+    private static func safeTraceStopReason(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let allowed = ["none", "insufficient-evidence", "approval-required", "final-submit", "destructive", "external", "policy-blocked", "complete"]
+        return allowed.contains(value) ? value : nil
+    }
+
+    private static func emptyItems() -> [ClawAgentTraceHandoffPackItem] {
+        [
+            ("evidence", "证据覆盖", "等待 metadata", "等待 AgentTrace metadata 后再判断证据质量。", "checklist.checked"),
+            ("decision", "下一步决策", "待复核", "没有经过校验的 selected action，不推断下一步。", "arrow.triangle.branch"),
+            ("approval", "人工闸门", "待复核", "当前没有可交接的审批结论。", "checkmark.seal.fill"),
+            ("handoff", "交接状态", "待生成", "收到固定 handoff metadata 后再显示状态。", "arrowshape.turn.up.right.fill"),
+            ("safety", "安全边界", "待复核", "没有可执行入口，也不会自动继续。", "shield.checkered")
+        ].enumerated().map { offset, value in
+            ClawAgentTraceHandoffPackItem(
+                id: value.0,
+                rank: offset + 1,
+                title: value.1,
+                status: value.2,
+                guidance: value.3,
+                icon: value.4,
+                tone: .info,
+                reviewKind: nil,
+                canFocusReview: false,
+                isFocused: false,
+                isReady: false,
+                requiresHumanAction: false,
+                hasMetadataGap: true,
+                canContinueLoop: false
+            )
+        }
+    }
+
+    private static func traceEvidenceStatus(review: ClawAgentTraceReviewSummary, hasMetadataGap: Bool) -> String {
+        if review.hasMetadata == false { return "metadata 待同步" }
+        if review.missingSignals.isEmpty == false { return "证据缺口" }
+        if review.degradedSignals.isEmpty == false { return "证据降级" }
+        return hasMetadataGap ? "证据待复核" : "证据完整"
+    }
+
+    private static func traceEvidenceGuidance(review: ClawAgentTraceReviewSummary, satisfiedCount: Int, degradedCount: Int, missingCount: Int) -> String {
+        if review.hasMetadata == false { return "只显示固定等待状态，不把 artifact 数量当作证据充分。" }
+        return "满足 \(satisfiedCount) 项 · 降级 \(degradedCount) 项 · 缺失 \(missingCount) 项；原始内容保持省略。"
+    }
+
+    private static func traceEvidenceTone(review: ClawAgentTraceReviewSummary, hasMetadataGap: Bool) -> ClawMissionRunOperatorLaneTone {
+        if review.hasMetadata == false || hasMetadataGap { return .warning }
+        return .success
+    }
+
+    private static func decisionGuidance(review: ClawAgentTraceReviewSummary, selectedActionTitle: String?) -> String {
+        guard review.hasMetadata, review.requiresNextActionPolicyReview == false else {
+            return "selected action 或固定决策字段缺失/矛盾，保持人工复核。"
+        }
+        if let selectedActionTitle {
+            return "已按固定证据优先策略和 envelope 交集校验：\(selectedActionTitle)。"
+        }
+        return "已校验当前决策，但没有可显示的下一步 action。"
+    }
+
+    private static func approvalStatus(review: ClawAgentTraceReviewSummary, selectedRequiresApproval: Bool) -> String {
+        if selectedRequiresApproval { return "等待人工审批" }
+        if review.requiresNextActionPolicyReview { return "审批状态待复核" }
+        return "无需审批"
+    }
+
+    private static func approvalGuidance(review: ClawAgentTraceReviewSummary, selectedRequiresApproval: Bool) -> String {
+        if selectedRequiresApproval { return "只提示现有审批闸门；本摘要不会批准、冻结或发送任务。" }
+        if review.requiresNextActionPolicyReview { return "先修复决策 metadata 一致性，再判断人工闸门。" }
+        return "没有新增审批结论；任何后续 action 仍需用户显式触发。"
+    }
+
+    private static func traceHandoffStatusLabel(_ value: String?) -> String {
+        switch value {
+        case "ready-to-continue": return "可交接"
+        case "waiting-for-approval": return "等待审批"
+        case "final-submit-review": return "最终提交待复核"
+        case "needs-evidence": return "需要证据"
+        case "blocked": return "已阻断"
+        case "complete": return "已完成"
+        default: return "状态待同步"
+        }
+    }
+
+    private static func traceHandoffGuidance(handoffStatus: String?, stopReason: String?) -> String {
+        let stopText: String
+        switch stopReason {
+        case "none": stopText = "无停止原因"
+        case "insufficient-evidence": stopText = "证据不足"
+        case "approval-required": stopText = "需要审批"
+        case "final-submit": stopText = "最终提交复核"
+        case "destructive": stopText = "破坏性动作闸门"
+        case "external": stopText = "外部网络闸门"
+        case "policy-blocked": stopText = "策略阻断"
+        case "complete": stopText = "回合完成"
+        default: stopText = "停止原因待同步"
+        }
+        if handoffStatus == "ready-to-continue" {
+            return "\(stopText)；只允许用户沿既有显式路径继续。"
+        }
+        return "\(stopText)；不提供自动继续入口。"
+    }
+
+    private static func traceHandoffTone(_ value: String?) -> ClawMissionRunOperatorLaneTone {
+        switch value {
+        case "ready-to-continue", "complete": return .success
+        case "waiting-for-approval", "final-submit-review", "needs-evidence": return .warning
+        case "blocked": return .danger
+        default: return .info
+        }
     }
 }

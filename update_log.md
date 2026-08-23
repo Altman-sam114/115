@@ -23,6 +23,18 @@
 
 ## 历史记录
 
+### v0.76 / AgentTrace 证据交接包
+日期：2026-08-24
+实现范围：
+ - 在 `Claw/Core/ClawModels.swift` 增加严格 typed 的 `ClawAgentTraceHandoffPackSummary`/item/PresentationContract，从已有 AgentTrace review metadata 派生固定五行证据、决策、审批、交接和安全摘要；未知/矛盾/越界状态 fail closed，不把 handoffSummary、风险原文或 artifact payload 带入展示。
+ - 在 `Claw/Views/ContentView.swift` 把同一个 handoff pack projector/view 接入 compact iPhone Mission Run 和 regular iPad/mac Review Detail Dock；focus 只改变 AgentTrace detail scope，控件至少 44pt，VoiceOver 明确不自动继续、不审批、不发送、不执行电脑动作。
+ - 增加 XCTest、LogicSmoke 和 README、协议、flow、flowchart、test 文档，明确本轮不修改 Gateway server、action/event/artifact/protocol、权限、后台循环或真实 macOS controller。
+关键文件：
+ - `Claw/Core/ClawModels.swift`、`Claw/Views/ContentView.swift`、`ClawTests/ClawTests.swift`、`Tools/LogicSmoke.swift`
+ - `README.md`、`Docs/claw-mobile-gateway-protocol.md`、`md/flow/flow.md`、`md/flow/flowchart.md`、`md/test/test.md`、`update_log.md`
+ - `md/prompt/v0（核心智能能力）/v0.76（AgentTrace证据交接包）.md`
+验证状态：本地仅执行 `git diff --check`、文本搜索和 diff 范围复核；未运行本地编译、XCTest、LogicSmoke、Gateway fixture/direct/WebSocket smoke、`node --check` 或 `xcodebuild`。提交并 push 后必须由最新 GitHub Actions artifact 与 Agent C 复判覆盖本轮 Swift、UI、LogicSmoke、XCTest、Gateway 回归、manifest/JUnit/日志和敏感信息合同。
+遗留事项：等待 Agent B/main push 后的最新云端 run；Agent C 必须确认 artifact 与最新 commit/run/attempt 精确匹配后，才能宣布 v0.76 通过。
 ### v0.75 / 受控 Gateway Readiness Attestation
 
 日期：2026-08-23

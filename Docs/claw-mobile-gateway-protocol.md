@@ -537,6 +537,12 @@ readiness 是与 `claw.computer.control.v1` 完全分离的用户显式、单次
 
 Gateway readiness handler 只读取进程内固定 capability/policy projector，且位于普通 envelope route 之前；它不调用 `validateEnvelope`、dispatch preflight、`makeGatewayEvents`、workspace/replay/session/event/artifact/auditLog/receipt writer 或任何 handler、Shell、浏览器、桌面动作。成功不会创建 task、session、workspace、replay record、event、artifact、receipt 或 checkpoint。它不是密码学 attestation、pairing、授权、信任建立、后台 heartbeat 或 macOS 控制器。
 
+### v0.76 AgentTrace 证据交接包
+
+手机端从既有 `agentTrace` metadata 派生 `ClawAgentTraceHandoffPackSummary`，固定按证据、决策、审批、交接、安全五行展示。它只消费 `ClawAgentTraceReviewSummary` 已通过 allowlist 的 readiness/decision/handoff 字段，不打开 artifact reference，不读取 `file://` payload，也不把自然语言、原始 risk tag 或 handoffSummary 当作授权依据。unknown signal/action、候选计数或序位越界、policy/approval/envelope/handoff 矛盾和 stale focus 均进入待复核状态，不报告可继续。
+
+该交接包是 presentation-only：compact iPhone Mission Run 与 regular iPad/mac Review Detail Dock 复用同一 projector/view/dispatcher；聚焦按钮只改变当前 `agent-trace` detail focus，至少 44pt，不调用 Gateway、不审批、不 queue/freeze/send、不重试、不创建 child，也不写 checkpoint、envelope 或 Smart Rail。可继续只表示现有 metadata 满足固定安全合同且仍需用户显式沿既有路径触发，不代表 Gateway readiness、pairing、authorization 或执行成功。
+
 ## 安全边界
 
 - iOS 端不能静默读取其他 App 收件箱，也不能控制桌面屏幕。

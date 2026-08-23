@@ -250,6 +250,19 @@ flowchart TD
 
 raw receipt 只允许存在于 wire DTO、iOS 内存 vault、私有 frozen envelope 和 Gateway receipt cache。child 不能复用父 task/action/session ID、父 envelope、父 workspace 或父 `file://` reference；handler 失败也不会恢复已消费 receipt。本轮不支持 Shell continuation、自动审批/发送、自动重试 receipt、无人值守循环或跨进程/跨重启续接。
 
+## 3.1 v0.76 AgentTrace 证据交接包
+
+```mermaid
+flowchart LR
+  TRACE["现有 agentTrace metadata"] --> PARSE["ClawAgentTraceReviewSummary\n严格 allowlist 与 fail closed"]
+  PARSE --> PACK["ClawAgentTraceHandoffPackSummary\n证据 / 决策 / 审批 / 交接 / 安全"]
+  PACK --> IPHONE["compact iPhone Mission Run\n共享 summary + view"]
+  PACK --> IPAD["regular iPad/mac Review Detail Dock\n共享 summary + view"]
+  IPHONE --> FOCUS["用户显式聚焦 agent-trace detail"]
+  IPAD --> FOCUS
+  FOCUS -. 不发送/不审批/不重试/不联网 .-> SAFE["当前 task/session scope 保持不变"]
+```
+
 ## 4. Agent X 主控循环与云端验证流程图
 
 读图说明：未来人工可用 `agentx:` 给出总目标 X。Agent X 只做主控调度，把总目标拆成小轮次；每轮仍必须经过 Agent A 写提示词、Agent B 在 `main` 上实现并 push、GitHub Actions 生成未加密结果包、Agent C 下载 artifact 复判。Agent X 只能基于 Agent C 结论决定继续、退回、暂停或完成，不能跳过云端 artifact 验收。
