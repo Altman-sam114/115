@@ -48,7 +48,7 @@
 - `update_log.md`
 - `md/prompt/v0（核心智能能力）/v0.73（显式LiveGateway心跳探测）.md`
 
-验证状态：仅进行本地非编译静态检查；未运行本地编译、XCTest、LogicSmoke、Gateway fixture/direct/WebSocket smoke、`node --check` 或 `xcodebuild`。本轮 commit、GitHub Actions run、attempt、artifact 和 Agent C 复判待 `origin/main` push 后产生；不能以本地静态检查预写云端通过。
+验证状态：初始实现 commit `668dcaa9e28d5a70cc65268bc88768d9fc7a58c3` 对应 run `32632990567`、attempt `1` 的 CI 全部通过，但 Agent C 发现验收矩阵缺口并退回补齐。最终修复 commit `11b8d7e6122549498bdfc35c96c7d2a810421825` 对应 run `32637596878`、attempt `1`、workflow `Claw CI Results`；artifact `claw-ci-v0.2-main-11b8d7e61225-run32637596878-attempt1` 未加密且 manifest 完全匹配，JUnit 10 checks/0 failures、XCTest 94 tests/0 failures、LogicSmoke、Gateway fixture/direct/WebSocket smoke、Xcode build、结果包和 fail gate 全部通过，Agent C 已下载并复判。期间未运行本地编译、XCTest、LogicSmoke、Gateway fixture/direct/WebSocket smoke、`node --check` 或 `xcodebuild`；仅执行允许的非编译静态检查。
 
 未实现：后台保活、定时 heartbeat、自动重连/重试、静默配对、真实 pairing protocol、新 envelope/action/event/artifact/schema 字段、原生 macOS/Mac Catalyst target、Accessibility bridge 和 Gateway server 改动。已保留用户 Xcode 配置改动、旧 v0.70 prompt 及其他无关工作区文件。
 
@@ -61,7 +61,7 @@
 - 按 Agent C 结论补齐 model/store/transport fake/UI/XCTest/LogicSmoke 的失败、取消、timeout、重复/in-flight、redaction、no-side-effect 和 stale binding 矩阵；binding 覆盖 task/session/sessionTask/Mission scope、endpoint、token fingerprint/profile digest、request/session revision、continuation draft/receipt/lineage/source/decision、review focus 和 generation。
 - 修正 probe dispatcher 不再隐式改写 review focus；compact iPhone 与 regular iPad/宽屏继续使用同一 summary/view/dispatcher，固定 title/icon/enabled、44pt 和 VoiceOver hint。
 
-验证状态：本轮仅计划执行允许的 `git status`、`git diff --check/stat`、`rg` 和 diff 复核；未运行本地编译、XCTest、LogicSmoke、Gateway fixture/direct/WebSocket smoke、`node --check` 或 `xcodebuild`。修复 commit、push 后的最新 GitHub Actions run、attempt、artifact 和 Agent C 复判仍待产生，不预写云端通过。
+验证状态：本轮仅执行允许的 `git status`、`git diff --check/stat`、`rg` 和 diff 复核；未运行本地编译、XCTest、LogicSmoke、Gateway fixture/direct/WebSocket smoke、`node --check` 或 `xcodebuild`。修复 commit `11b8d7e6122549498bdfc35c96c7d2a810421825` 已 push 到 `origin/main`，对应 run `32637596878`、attempt `1`、artifact `claw-ci-v0.2-main-11b8d7e61225-run32637596878-attempt1`；Agent C 已按 manifest、JUnit、XCTest、LogicSmoke、Gateway 日志、Xcode result bundle 和 fail gate 复判通过。
 
 遗留事项：不修改 Gateway server、fixture、direct/WebSocket smoke、workflow 或工程配置；继续保留用户 Xcode 配置和旧未跟踪 v0.70 prompt。
 
