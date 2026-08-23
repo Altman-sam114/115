@@ -168,6 +168,8 @@ Agent C 退回后的 v0.73 追加修复补齐了缺失/非法配置零调用、c
 
 v0.74 增加最新一份**版本化 metadata-only 本机 Mission Run 交接快照**。生产 App 把严格白名单的 phase/status/计数/固定布尔值/有限 transport 观察写入 Application Support 单文件；XCTest/LogicSmoke 默认使用 disabled 或 in-memory store。App 重启后只载入只读的“上次 Mission 交接摘要”，不会恢复 task、session、event、artifact、receipt、审批、review focus、Smart Operator Rail 或任何可执行 binding；当前 Mission 仍从空内存状态开始。compact iPhone 与 regular iPad/宽屏 Review Detail Dock 复用同一 summary/view/API，清除按钮只清理本机快照并明确不恢复发送。checkpoint 不进入 `claw.computer.control.v1`、不经过 Gateway、不代表 pairing/授权/当前连接，也不实现后台保活、自动保存重试、原生 macOS 或桌面控制器。
 
+v0.75 增加独立的 `claw.gateway.readiness.v1` 只读 control plane。用户点击共享 health strip 中的“读取 Gateway readiness”后，独立 WebSocket 只发送严格三字段 request（`controlPlane`、`kind`、`requestNonce`），服务端只返回固定 schema 的一条 response/error 并关闭；它不使用 `claw.computer.control.v1` envelope，不进入 task/session/workspace/replay/event/artifact/handler pipeline。运行时 token 只放在 `Authorization: Bearer` header；`tokenHeader` 只表示本次 header 被接受或不要求，不表示 pairing、authorization、trusted 或电脑可控。response 的 capability/policy/assessment 都是固定脱敏枚举，effects 五项永远为 `false`，不返回 allowlist、workspace/path、host/app、nonce 以外的 payload、URL 或 token。compact iPhone 与 regular iPad/宽屏 Dock 复用同一 readiness summary/view/API、44pt 控件和 VoiceOver 安全边界；没有后台保活、自动重连/重试、审批、发送、真实 macOS target、Accessibility bridge 或浏览器 controller。
+
 ## 运行
 
 打开 `Claw.xcodeproj`，选择 `Claw` scheme，在 iPhone 模拟器或真机运行。默认协作验证不在本机跑命令行编译、XCTest 或 smoke；命令行 build、真实 iPhone Simulator XCTest、Swift logic smoke、Gateway smoke 和 `node --check` 统一由 GitHub Actions workflow 执行。结果包始终保留 `xctest.log`（包含 simulator discovery 错误）；XCTest 成功时必须同时包含 `ClawTests.xcresult`，否则 packaging 失败。结果包还包含 manifest、JUnit、`xcodebuild.log` 和各 smoke 日志，并由 Agent C 下载复判。

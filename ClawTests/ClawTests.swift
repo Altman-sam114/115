@@ -5425,6 +5425,131 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(store.clawMobileTasks[0].status, .blocked)
     }
 
+    func testGatewayReadinessWireSchemaIsStrictAndRedacted() throws {
+        let request = try ClawGatewayReadinessRequest(requestNonce: "test_nonce_123456")
+        let requestData = try request.encodedData()
+        let requestObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: requestData) as? [String: Any]
+        )
+        XCTAssertEqual(Set(requestObject.keys), ["controlPlane", "kind", "requestNonce"])
+        XCTAssertFalse(String(data: requestData, encoding: .utf8)?.contains("Authorization") == true)
+
+        let response = ClawGatewayReadinessResponse.defaultResponse(requestNonce: request.requestNonce)
+        let responseData = try response.encodedData()
+        let decoded = try JSONDecoder.clawGateway.decode(
+            ClawGatewayReadinessResponse.self,
+            from: responseData
+        )
+        XCTAssertEqual(decoded, response)
+        XCTAssertTrue(decoded.effects.taskAccepted == false)
+        XCTAssertTrue(decoded.effects.sessionCreated == false)
+        XCTAssertEqual(decoded.redaction.rawToken, .omitted)
+        XCTAssertEqual(decoded.redaction.requestPayload, .fixedOnly)
+
+        var unknownField = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: responseData) as? [String: Any]
+        )
+        unknownField["unexpected"] = "marker"
+        let unknownFieldData = try JSONSerialization.data(withJSONObject: unknownField)
+        XCTAssertThrowsError(
+            try JSONDecoder.clawGateway.decode(
+                ClawGatewayReadinessResponse.self,
+                from: unknownFieldData
+            )
+        )
+
+        var effectViolation = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: responseData) as? [String: Any]
+        )
+        var effects = try XCTUnwrap(effectViolation["effects"] as? [String: Any])
+        effects["taskAccepted"] = true
+        effectViolation["effects"] = effects
+        let effectViolationData = try JSONSerialization.data(withJSONObject: effectViolation)
+        XCTAssertThrowsError(
+            try JSONDecoder.clawGateway.decode(
+                ClawGatewayReadinessResponse.self,
+                from: effectViolationData
+            )
+        )
+    }
+
+    func testGatewayReadinessStoreIsIndependentBoundedAndStaleSafe() async throws {
+        let checkpointStore = ClawInMemoryMissionRunCheckpointStore()
+        let store = ClawStore(
+            autoScanLocalArtifacts: false,
+            checkpointStore: checkpointStore
+        )
+        store.setGateway(
+            url: "wss://gateway.example.test/v1?private-marker=hidden",
+            token: "readiness-secret"
+        )
+        store.generatePhoneAgentPlan()
+        store.queueClawMobileTaskFromCurrentPlan()
+        let beforeEvents = store.gatewayEvents
+        let beforeSessions = store.clawGatewaySessions
+        let beforeLiveRequest = store.lastGatewayLiveRequest
+        let beforeHealth = store.gatewayLiveHealthSummary
+        let beforeCheckpointSaveCount = checkpointStore.saveCount
+        let fake = ClawGatewayReadinessTransportFake()
+
+        XCTAssertEqual(store.gatewayReadinessSummary.state, .ready)
+        XCTAssertTrue(
+            await store.requestGatewayReadiness(transport: fake)
+        )
+        XCTAssertEqual(store.gatewayReadinessSummary.state, .attested)
+        XCTAssertEqual(fake.callCount, 1)
+        XCTAssertEqual(fake.requestBodyCount, 1)
+        XCTAssertEqual(fake.responseCount, 1)
+        XCTAssertEqual(fake.closeCount, 1)
+        XCTAssertEqual(fake.headerNames.first, ["Authorization", "X-Claw-Control-Plane", "X-Claw-Device"])
+        XCTAssertTrue(fake.authorizationHeaderPresent.first == true)
+        XCTAssertEqual(store.gatewayEvents, beforeEvents)
+        XCTAssertEqual(store.clawGatewaySessions, beforeSessions)
+        XCTAssertEqual(store.lastGatewayLiveRequest, beforeLiveRequest)
+        XCTAssertEqual(store.gatewayLiveHealthSummary, beforeHealth)
+        XCTAssertEqual(checkpointStore.saveCount, beforeCheckpointSaveCount)
+
+        let visible = [
+            store.gatewayReadinessSummary.title,
+            store.gatewayReadinessSummary.status,
+            store.gatewayReadinessSummary.guidance,
+            store.gatewayReadinessSummary.diagnostic ?? ""
+        ].joined(separator: " ")
+        XCTAssertFalse(visible.contains("readiness-secret"))
+        XCTAssertFalse(visible.contains("Authorization"))
+        XCTAssertFalse(visible.contains("private-marker"))
+        XCTAssertTrue(ClawGatewayReadinessPresentationContract.minimumHitArea >= 44)
+        XCTAssertTrue(ClawGatewayReadinessPresentationContract.voiceOverHint.contains("不发送任务"))
+        XCTAssertTrue(ClawGatewayReadinessPresentationContract.voiceOverHint.contains("不代表 pairing"))
+
+        let duplicateFake = ClawGatewayReadinessTransportFake(outcome: .waitForRelease)
+        let first = Task {
+            await store.requestGatewayReadiness(transport: duplicateFake)
+        }
+        for _ in 0..<100 where duplicateFake.callCount == 0 {
+            await Task.yield()
+        }
+        XCTAssertFalse(await store.requestGatewayReadiness(transport: duplicateFake))
+        XCTAssertEqual(duplicateFake.callCount, 1)
+        first.cancel()
+        _ = await first.value
+        XCTAssertEqual(duplicateFake.closeCount, 1)
+
+        let staleFake = ClawGatewayReadinessTransportFake(outcome: .waitForRelease)
+        let staleTask = Task {
+            await store.requestGatewayReadiness(transport: staleFake)
+        }
+        for _ in 0..<100 where staleFake.callCount == 0 {
+            await Task.yield()
+        }
+        store.setGateway(url: "ws://new-gateway.example.test", token: "new-readiness-secret")
+        staleFake.release()
+        XCTAssertFalse(await staleTask.value)
+        XCTAssertNotEqual(store.gatewayReadinessSummary.state, .attested)
+        XCTAssertEqual(staleFake.callCount, 1)
+        XCTAssertEqual(staleFake.closeCount, 1)
+    }
+
     func testMissionRunCheckpointIsStrictMetadataOnlyAndRestoresReadOnly() throws {
         let checkpoint = try makeTestMissionRunCheckpoint()
         let data = try checkpoint.encodedData()

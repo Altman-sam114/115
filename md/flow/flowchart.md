@@ -54,6 +54,22 @@ flowchart LR
 
 ```mermaid
 flowchart LR
+  ReadinessClick["用户点击 readiness"] --> Request["固定 request body\ncontrolPlane + kind + requestNonce"]
+  Request --> Headers["Authorization header（仅本次）\nX-Claw-Control-Plane"]
+  Headers --> Socket["独立 WebSocket\n一次 request"]
+  Socket --> Gateway{"Gateway readiness route\n普通 task pipeline 之前"}
+  Gateway -->|"严格 schema 通过"| Projector["只读 capability/policy projector"]
+  Projector --> Response["固定 response\nsame nonce + effects=false"]
+  Gateway -->|"未知字段/错误 nonce/额外 message"| Error["固定 readiness error\n不回显输入"]
+  Response --> Close["一次 response 后 close"]
+  Error --> Close
+  Projector -. 不调用 .-> NoTask["无 task/session/workspace/replay\n无 event/artifact/handler"]
+  Response --> Summary["独立 metadata-only summary"]
+  Summary --> Shared["compact iPhone + regular iPad/宽屏\n共享 view/summary/API"]
+```
+
+```mermaid
+flowchart LR
   Mission["当前 Mission + profile"] --> Preflight{"ws/wss + runtime token + scope?"}
   Preflight -->|否| Disabled["notConfigured / unavailable\n无 socket"]
   Preflight -->|是| Ready["ready\n等待用户点击"]

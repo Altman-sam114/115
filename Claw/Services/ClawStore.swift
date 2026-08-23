@@ -186,6 +186,134 @@ final class ClawInMemoryMissionRunCheckpointStore: @unchecked Sendable, ClawMiss
     }
 }
 
+enum ClawGatewayReadinessTransportError: Error, LocalizedError, Equatable, Sendable {
+    case invalidConfiguration
+    case connectionFailed
+    case timedOut
+    case cancelled
+    case invalidResponse
+    case nonceMismatch
+    case contractViolation
+    case serverRejected
+
+    var diagnostic: String {
+        switch self {
+        case .invalidConfiguration:
+            return "readiness_not_configured"
+        case .connectionFailed:
+            return "readiness_connection_failed"
+        case .timedOut:
+            return "readiness_timeout"
+        case .cancelled:
+            return "readiness_cancelled"
+        case .invalidResponse:
+            return "readiness_invalid_response"
+        case .nonceMismatch:
+            return "readiness_nonce_mismatch"
+        case .contractViolation:
+            return "readiness_contract_failed"
+        case .serverRejected:
+            return "readiness_rejected"
+        }
+    }
+
+    var errorDescription: String? {
+        diagnostic
+    }
+}
+
+protocol ClawGatewayReadinessTransport: Sendable {
+    func requestReadiness(
+        request: ClawGatewayReadinessTransportRequest,
+        timeoutNanoseconds: UInt64
+    ) async throws -> ClawGatewayReadinessTransportResult
+}
+
+final class ClawGatewayReadinessTransportFake: @unchecked Sendable, ClawGatewayReadinessTransport {
+    enum Outcome: Equatable, Sendable {
+        case success
+        case connectionFailed
+        case timedOut
+        case cancelled
+        case invalidResponse
+        case waitForRelease
+    }
+
+    let outcome: Outcome
+    let response: ClawGatewayReadinessResponse?
+    private let releaseStream: AsyncStream<Void>
+    private var releaseContinuation: AsyncStream<Void>.Continuation?
+    private(set) var callCount = 0
+    private(set) var requestBodyCount = 0
+    private(set) var responseCount = 0
+    private(set) var closeCount = 0
+    private(set) var timeoutCount = 0
+    private(set) var cancelCount = 0
+    private(set) var requestBodies: [String] = []
+    private(set) var headerNames: [[String]] = []
+    private(set) var authorizationHeaderPresent: [Bool] = []
+
+    init(
+        outcome: Outcome = .success,
+        response: ClawGatewayReadinessResponse? = nil
+    ) {
+        self.outcome = outcome
+        self.response = response
+        var continuation: AsyncStream<Void>.Continuation?
+        self.releaseStream = AsyncStream { continuation = $0 }
+        self.releaseContinuation = continuation
+    }
+
+    func release() {
+        releaseContinuation?.yield(())
+    }
+
+    func requestReadiness(
+        request: ClawGatewayReadinessTransportRequest,
+        timeoutNanoseconds: UInt64
+    ) async throws -> ClawGatewayReadinessTransportResult {
+        callCount += 1
+        requestBodyCount += 1
+        requestBodies.append(String(data: try request.body.encodedData(), encoding: .utf8) ?? "")
+        headerNames.append(request.headers.keys.sorted())
+        authorizationHeaderPresent.append(request.authorizationHeaderPresent)
+        defer {
+            closeCount += 1
+        }
+
+        if outcome == .waitForRelease {
+            await withTaskCancellationHandler(operation: {
+                var iterator = releaseStream.makeAsyncIterator()
+                _ = await iterator.next()
+            }, onCancel: {
+                releaseContinuation?.yield(())
+            })
+            if Task.isCancelled {
+                cancelCount += 1
+                throw ClawGatewayReadinessTransportError.cancelled
+            }
+        }
+
+        switch outcome {
+        case .success, .waitForRelease:
+            let response = response ?? .defaultResponse(requestNonce: request.body.requestNonce)
+            responseCount += 1
+            return ClawGatewayReadinessTransportResult(response: response)
+        case .connectionFailed:
+            throw ClawGatewayReadinessTransportError.connectionFailed
+        case .timedOut:
+            timeoutCount += 1
+            throw ClawGatewayReadinessTransportError.timedOut
+        case .cancelled:
+            cancelCount += 1
+            throw ClawGatewayReadinessTransportError.cancelled
+        case .invalidResponse:
+            responseCount += 1
+            throw ClawGatewayReadinessTransportError.invalidResponse
+        }
+    }
+}
+
 @MainActor
 final class ClawStore: ObservableObject {
     private struct MissionRunResolution {
@@ -228,6 +356,14 @@ final class ClawStore: ObservableObject {
         var endpoint: String
     }
 
+    private struct GatewayReadinessContext {
+        var endpoint: String
+        var safeEndpointDisplay: String
+        var token: String
+        var deviceName: String
+        var bindingDigest: String
+    }
+
     @Published private(set) var model: LocalClawModel
     @Published private(set) var validation: ArtifactValidationResult
     @Published var selectedCategory: ClawCapabilityCategory?
@@ -256,6 +392,7 @@ final class ClawStore: ObservableObject {
     @Published private(set) var autonomousLoop: ClawAutonomousLoopState
     @Published private(set) var continuationDraft: ClawContinuationDraft?
     @Published private(set) var gatewayTransportProbeState: ClawGatewayTransportProbeSummary
+    @Published private(set) var gatewayReadinessState: ClawGatewayReadinessSummary
     @Published private(set) var missionRunCheckpointPresentationSummary: ClawMissionRunCheckpointPresentationSummary
 
     private let artifactDirectoryURL: URL
@@ -267,6 +404,9 @@ final class ClawStore: ObservableObject {
     private var explicitResumeIntent: ExplicitResumeIntent?
     private var gatewayTransportProbeGeneration: Int
     private var gatewayTransportProbeReviewFocus: ClawMissionRunReviewFocus?
+    private var gatewayReadinessGeneration: Int
+    private var gatewayReadinessReviewFocus: ClawMissionRunReviewFocus?
+    private var gatewayReadinessStateBindingDigest: String?
     private var missionRunCheckpoint: ClawMissionRunCheckpoint?
     private var lastMissionRunCheckpointAttempt: ClawMissionRunCheckpoint?
 
@@ -321,6 +461,10 @@ final class ClawStore: ObservableObject {
         self.gatewayTransportProbeState = .unavailable
         self.gatewayTransportProbeGeneration = 0
         self.gatewayTransportProbeReviewFocus = nil
+        self.gatewayReadinessState = .unavailable
+        self.gatewayReadinessGeneration = 0
+        self.gatewayReadinessReviewFocus = nil
+        self.gatewayReadinessStateBindingDigest = nil
         self.missionRunCheckpoint = nil
         self.lastMissionRunCheckpointAttempt = nil
         self.missionRunCheckpointPresentationSummary = .none
@@ -395,6 +539,24 @@ final class ClawStore: ObservableObject {
         gatewayTransportProbeGeneration &+= 1
     }
 
+    var gatewayReadinessSummary: ClawGatewayReadinessSummary {
+        currentGatewayReadinessSummary(for: gatewayReadinessReviewFocus)
+    }
+
+    func gatewayReadinessSummary(
+        for reviewFocus: ClawMissionRunReviewFocus?
+    ) -> ClawGatewayReadinessSummary {
+        currentGatewayReadinessSummary(for: reviewFocus)
+    }
+
+    func updateGatewayReadinessReviewFocus(_ reviewFocus: ClawMissionRunReviewFocus?) {
+        guard gatewayReadinessReviewFocus != reviewFocus else {
+            return
+        }
+        gatewayReadinessReviewFocus = reviewFocus
+        gatewayReadinessGeneration &+= 1
+    }
+
     var continuationAuthorizationFingerprintForTesting: String {
         continuationAuthorizationFingerprint()
     }
@@ -417,6 +579,14 @@ final class ClawStore: ObservableObject {
 
     var gatewayTransportProbeGenerationForTesting: Int {
         gatewayTransportProbeGeneration
+    }
+
+    var gatewayReadinessReviewFocusForTesting: ClawMissionRunReviewFocus? {
+        gatewayReadinessReviewFocus
+    }
+
+    var gatewayReadinessGenerationForTesting: Int {
+        gatewayReadinessGeneration
     }
 
     var missionRunCheckpointForTesting: ClawMissionRunCheckpoint? {
@@ -559,6 +729,257 @@ final class ClawStore: ObservableObject {
             )
             return false
         }
+    }
+
+    @discardableResult
+    func requestGatewayReadiness<T: ClawGatewayReadinessTransport>(
+        transport: T = URLSessionClawGatewayTransport(),
+        timeoutNanoseconds: UInt64 = 3_000_000_000,
+        reviewFocus: ClawMissionRunReviewFocus? = nil
+    ) async -> Bool {
+        guard reviewFocus == nil || reviewFocus == gatewayReadinessReviewFocus else {
+            return false
+        }
+        let effectiveReviewFocus = reviewFocus ?? gatewayReadinessReviewFocus
+        guard let context = gatewayReadinessContext(for: effectiveReviewFocus) else {
+            gatewayReadinessState = .unavailable
+            gatewayReadinessStateBindingDigest = nil
+            return false
+        }
+        let current = currentGatewayReadinessSummary(for: effectiveReviewFocus)
+        guard current.state != .requesting,
+              current.state != .stale,
+              current.canRequest else {
+            return false
+        }
+
+        let nonce = makeGatewayReadinessNonce()
+        let body: ClawGatewayReadinessRequest
+        do {
+            body = try ClawGatewayReadinessRequest(requestNonce: nonce)
+        } catch {
+            gatewayReadinessState = ClawGatewayReadinessSummary.make(
+                state: .failed,
+                endpoint: context.safeEndpointDisplay,
+                diagnostic: ClawGatewayReadinessSchemaError.invalidRequest.diagnostic,
+                status: "Gateway readiness 请求未生成。",
+                guidance: "只记录固定脱敏诊断；不会发送任务或改变当前 Mission。",
+                canRequest: true
+            )
+            gatewayReadinessStateBindingDigest = context.bindingDigest
+            return false
+        }
+
+        var headers = [
+            "X-Claw-Control-Plane": ClawGatewayReadinessRequest.controlPlane,
+            "X-Claw-Device": context.deviceName
+        ]
+        if context.token.isEmpty == false {
+            headers["Authorization"] = "Bearer \(context.token)"
+        }
+        let request = ClawGatewayReadinessTransportRequest(
+            endpoint: context.endpoint,
+            safeEndpointDisplay: context.safeEndpointDisplay,
+            headers: headers,
+            body: body,
+            bindingDigest: context.bindingDigest
+        )
+
+        gatewayReadinessGeneration &+= 1
+        let generation = gatewayReadinessGeneration
+        gatewayReadinessStateBindingDigest = context.bindingDigest
+        gatewayReadinessState = ClawGatewayReadinessSummary.make(
+            state: .requesting,
+            endpoint: context.safeEndpointDisplay,
+            status: "正在读取当前 Gateway readiness。",
+            guidance: "只发送一条固定 readiness request，等待一条固定回应后关闭连接；不发送任务、不创建 session/event/artifact、不执行电脑动作。",
+            canRequest: false
+        )
+
+        do {
+            let result = try await transport.requestReadiness(
+                request: request,
+                timeoutNanoseconds: timeoutNanoseconds
+            )
+            guard Task.isCancelled == false,
+                  generation == gatewayReadinessGeneration,
+                  let currentContext = gatewayReadinessContext(for: effectiveReviewFocus),
+                  currentContext.bindingDigest == context.bindingDigest else {
+                return false
+            }
+            guard result.requestCount == 1,
+                  result.responseCount == 1,
+                  result.closeCount == 1,
+                  result.didSendApplicationMessage,
+                  result.response.requestNonce == request.body.requestNonce,
+                  (try? result.response.encodedData()) != nil else {
+                throw ClawGatewayReadinessTransportError.contractViolation
+            }
+
+            let response = result.response
+            gatewayReadinessState = ClawGatewayReadinessSummary.make(
+                state: .attested,
+                endpoint: context.safeEndpointDisplay,
+                assessment: response.assessment,
+                tokenHeader: response.tokenHeader,
+                capabilities: response.capabilities,
+                policies: response.policies,
+                effects: response.effects,
+                redaction: response.redaction,
+                status: "已收到 Gateway readiness 回应 · \(response.assessment.title)。",
+                guidance: readinessGuidance(for: response),
+                canRequest: true
+            )
+            return true
+        } catch {
+            guard generation == gatewayReadinessGeneration,
+                  let currentContext = gatewayReadinessContext(for: effectiveReviewFocus),
+                  currentContext.bindingDigest == context.bindingDigest else {
+                return false
+            }
+            let diagnostic: String
+            if Task.isCancelled {
+                diagnostic = ClawGatewayReadinessTransportError.cancelled.diagnostic
+            } else if let readinessError = error as? ClawGatewayReadinessTransportError {
+                diagnostic = readinessError.diagnostic
+            } else {
+                diagnostic = ClawGatewayReadinessTransportError.connectionFailed.diagnostic
+            }
+            gatewayReadinessState = ClawGatewayReadinessSummary.make(
+                state: .failed,
+                endpoint: context.safeEndpointDisplay,
+                diagnostic: diagnostic,
+                status: "Gateway readiness 读取失败。",
+                guidance: "只记录固定脱敏诊断；等待下一次用户点击，不会自动重连、重试、发送任务或执行电脑动作。",
+                canRequest: true
+            )
+            return false
+        }
+    }
+
+    private func currentGatewayReadinessSummary(
+        for reviewFocus: ClawMissionRunReviewFocus?
+    ) -> ClawGatewayReadinessSummary {
+        guard let context = gatewayReadinessContext(for: reviewFocus) else {
+            return .unavailable
+        }
+        guard isValidProbeEndpoint(context.endpoint),
+              context.token.isEmpty == false,
+              clawGatewayProfile.tokenFingerprint != "unset" else {
+            return ClawGatewayReadinessSummary.make(
+                state: .notConfigured,
+                endpoint: context.safeEndpointDisplay,
+                status: "Gateway readiness 尚未配置。",
+                guidance: "需要合法 ws:// 或 wss:// endpoint 与运行时 header；配置本身不代表 pairing、authorization 或电脑可控。",
+                canRequest: false
+            )
+        }
+
+        guard gatewayReadinessStateBindingDigest == context.bindingDigest else {
+            if gatewayReadinessState.state == .requesting {
+                return ClawGatewayReadinessSummary.make(
+                    state: .stale,
+                    endpoint: context.safeEndpointDisplay,
+                    status: "旧的 Gateway readiness 请求已过期。",
+                    guidance: "当前 Mission、profile 或复核 scope 已变化；旧回应不会覆盖当前状态，也不会继续打开连接。",
+                    canRequest: false
+                )
+            }
+            return ClawGatewayReadinessSummary.make(
+                state: .ready,
+                endpoint: context.safeEndpointDisplay,
+                status: "Gateway readiness 等待用户读取。",
+                guidance: "点击后只发送一条固定 request 并读取一条固定回应；不表示 pairing、authorization 或任务成功。",
+                canRequest: true
+            )
+        }
+        return gatewayReadinessState
+    }
+
+    private func gatewayReadinessContext(
+        for reviewFocus: ClawMissionRunReviewFocus?
+    ) -> GatewayReadinessContext? {
+        let resolution = missionRunResolution
+        guard let task = resolution.task else {
+            return nil
+        }
+        let endpoint = clawGatewayProfile.endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
+        let token = gatewayToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        let parts = [
+            task.id.uuidString,
+            task.status.rawValue,
+            ClawContinuationContract.sha256(task.command),
+            resolution.session?.id.uuidString ?? "none",
+            resolution.session?.taskID.uuidString ?? "none",
+            resolution.session?.status.rawValue ?? "none",
+            String(resolution.session?.updatedAt.timeIntervalSinceReferenceDate ?? 0),
+            resolution.liveRequest?.id.uuidString ?? "none",
+            resolution.liveRequest?.sessionID?.uuidString ?? "none",
+            String(resolution.events.count),
+            String(resolution.events.map(\.sequence).max() ?? 0),
+            endpoint,
+            clawGatewayProfile.tokenFingerprint,
+            ClawMobileBridge.tokenFingerprint(for: token),
+            liveGatewayProfileDigest(),
+            continuationAuthorizationFingerprint(),
+            reviewFocusBindingDigest(reviewFocus),
+            autonomousLoop.phase.rawValue,
+            String(autonomousLoop.iteration),
+            autonomousLoop.taskID?.uuidString ?? "none",
+            autonomousLoop.sessionID?.uuidString ?? "none"
+        ]
+        return GatewayReadinessContext(
+            endpoint: endpoint,
+            safeEndpointDisplay: ClawGatewayLiveRequest.safeEndpointDisplay(endpoint),
+            token: token,
+            deviceName: clawGatewayProfile.deviceName,
+            bindingDigest: ClawContinuationContract.sha256(parts.joined(separator: "|"))
+        )
+    }
+
+    private func makeGatewayReadinessNonce() -> String {
+        let bytes = (0..<18).map { _ in UInt8.random(in: 0...255) }
+        return Data(bytes).base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+    }
+
+    private func readinessGuidance(
+        for response: ClawGatewayReadinessResponse
+    ) -> String {
+        let tokenText = response.tokenHeader == .acceptedForThisRequest
+            ? "本次 header 已被接受"
+            : "本次不要求 token header"
+        return "\(tokenText)，只代表本次 readiness 请求语义，不代表 pairing、authorization、trusted 或电脑可控；assessment 仅是 Gateway 固定脱敏自报。transport reachable、readiness 回应和任务执行状态彼此独立。"
+    }
+
+    private func resetGatewayReadinessState() {
+        gatewayReadinessGeneration &+= 1
+        gatewayReadinessStateBindingDigest = nil
+        guard let context = gatewayReadinessContext(for: gatewayReadinessReviewFocus) else {
+            gatewayReadinessState = .unavailable
+            return
+        }
+        guard isValidProbeEndpoint(context.endpoint),
+              context.token.isEmpty == false,
+              clawGatewayProfile.tokenFingerprint != "unset" else {
+            gatewayReadinessState = ClawGatewayReadinessSummary.make(
+                state: .notConfigured,
+                endpoint: context.safeEndpointDisplay,
+                status: "Gateway readiness 尚未配置。",
+                guidance: "需要合法 ws:// 或 wss:// endpoint 与运行时 header；不会因为配置存在就自动发送请求。",
+                canRequest: false
+            )
+            return
+        }
+        gatewayReadinessState = ClawGatewayReadinessSummary.make(
+            state: .ready,
+            endpoint: context.safeEndpointDisplay,
+            status: "Gateway readiness 等待用户读取。",
+            guidance: "用户点击后只读取固定脱敏状态；不发送任务、不创建 session/event/artifact、不执行电脑动作。",
+            canRequest: true
+        )
     }
 
     private func currentGatewayTransportProbeSummary(
@@ -2027,6 +2448,7 @@ final class ClawStore: ObservableObject {
         clawGatewayProfile.tokenFingerprint = ClawMobileBridge.tokenFingerprint(for: token)
         invalidateContinuationAuthorization(reason: .profileChanged)
         resetGatewayTransportProbeState()
+        resetGatewayReadinessState()
         automationTargets = automationTargets.map { target in
             var updated = target
             if updated.channel == .clawGateway {
@@ -2188,6 +2610,7 @@ final class ClawStore: ObservableObject {
         clawMobileTasks.insert(task, at: 0)
         lastClawMobileEnvelope = ClawMobileBridge.makeEnvelopeString(task: task, profile: clawGatewayProfile)
         resetGatewayTransportProbeState()
+        resetGatewayReadinessState()
         persistMissionRunCheckpointIfNeeded()
     }
 
@@ -5696,7 +6119,27 @@ struct ClawGatewayTransportRetryPolicy: Equatable, Sendable {
     }
 }
 
-struct URLSessionClawGatewayTransport: ClawGatewayTransport, ClawGatewayProbeTransport {
+private final class ClawGatewayReadinessSocketCloser: @unchecked Sendable {
+    private let socket: URLSessionWebSocketTask
+    private let lock = NSLock()
+    private var didClose = false
+
+    init(socket: URLSessionWebSocketTask) {
+        self.socket = socket
+    }
+
+    func close(reason: URLSessionWebSocketTask.CloseCode) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard didClose == false else {
+            return
+        }
+        didClose = true
+        socket.cancel(with: reason, reason: nil)
+    }
+}
+
+struct URLSessionClawGatewayTransport: ClawGatewayTransport, ClawGatewayProbeTransport, ClawGatewayReadinessTransport {
     var retryPolicy: ClawGatewayTransportRetryPolicy
 
     init(retryPolicy: ClawGatewayTransportRetryPolicy = .liveDefault) {
@@ -5758,6 +6201,80 @@ struct URLSessionClawGatewayTransport: ClawGatewayTransport, ClawGatewayProbeTra
         }
         try Task.checkCancellation()
         return result
+    }
+
+    func requestReadiness(
+        request: ClawGatewayReadinessTransportRequest,
+        timeoutNanoseconds: UInt64
+    ) async throws -> ClawGatewayReadinessTransportResult {
+        guard let url = URL(string: request.endpoint),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "ws" || scheme == "wss",
+              url.host?.isEmpty == false else {
+            throw ClawGatewayReadinessTransportError.invalidConfiguration
+        }
+
+        let socket = URLSession.shared.webSocketTask(with: readinessURLRequest(for: url, request: request))
+        let closer = ClawGatewayReadinessSocketCloser(socket: socket)
+        socket.resume()
+        defer {
+            closer.close(reason: .normalClosure)
+        }
+        try Task.checkCancellation()
+
+        do {
+            return try await withThrowingTaskGroup(of: ClawGatewayReadinessTransportResult.self) { group in
+                group.addTask {
+                    try await withTaskCancellationHandler(operation: {
+                        let body = String(data: try request.body.encodedData(), encoding: .utf8) ?? ""
+                        try await socket.send(.string(body))
+                        let message = try await socket.receive()
+                        let data: Data
+                        switch message {
+                        case .data(let payload):
+                            data = payload
+                        case .string(let text):
+                            data = Data(text.utf8)
+                        @unknown default:
+                            throw ClawGatewayReadinessTransportError.invalidResponse
+                        }
+                        let response: ClawGatewayReadinessResponse
+                        do {
+                            response = try JSONDecoder.clawGateway.decode(
+                                ClawGatewayReadinessResponse.self,
+                                from: data
+                            )
+                        } catch {
+                            throw ClawGatewayReadinessTransportError.invalidResponse
+                        }
+                        guard response.requestNonce == request.body.requestNonce else {
+                            throw ClawGatewayReadinessTransportError.nonceMismatch
+                        }
+                        return ClawGatewayReadinessTransportResult(response: response)
+                    }, onCancel: {
+                        closer.close(reason: .goingAway)
+                    })
+                }
+                group.addTask {
+                    try await Task.sleep(for: .nanoseconds(Int64(timeoutNanoseconds)))
+                    throw ClawGatewayReadinessTransportError.timedOut
+                }
+                guard let first = try await group.next() else {
+                    throw ClawGatewayReadinessTransportError.timedOut
+                }
+                group.cancelAll()
+                return first
+            }
+        } catch is CancellationError {
+            throw ClawGatewayReadinessTransportError.cancelled
+        } catch let error as ClawGatewayReadinessTransportError {
+            throw error
+        } catch {
+            if Task.isCancelled {
+                throw ClawGatewayReadinessTransportError.cancelled
+            }
+            throw ClawGatewayReadinessTransportError.connectionFailed
+        }
     }
 
     func streamEvents(
@@ -5900,6 +6417,17 @@ struct URLSessionClawGatewayTransport: ClawGatewayTransport, ClawGatewayProbeTra
     }
 
     private func urlRequest(for url: URL, request: ClawGatewayLiveRequest) -> URLRequest {
+        var urlRequest = URLRequest(url: url)
+        for (key, value) in request.headers {
+            urlRequest.setValue(value, forHTTPHeaderField: key)
+        }
+        return urlRequest
+    }
+
+    private func readinessURLRequest(
+        for url: URL,
+        request: ClawGatewayReadinessTransportRequest
+    ) -> URLRequest {
         var urlRequest = URLRequest(url: url)
         for (key, value) in request.headers {
             urlRequest.setValue(value, forHTTPHeaderField: key)

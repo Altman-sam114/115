@@ -5169,6 +5169,8 @@ struct ClawMissionRunLiveGatewayHealthStripView: View {
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Live Gateway transport 探测，\(probe.status)")
 
+            ClawMissionRunGatewayReadinessView(reviewFocus: reviewFocus)
+
             ClawMissionRunCheckpointView(
                 summary: store.missionRunCheckpointPresentationSummary
             )
@@ -5201,9 +5203,11 @@ struct ClawMissionRunLiveGatewayHealthStripView: View {
         .accessibilityLabel("Mission Run Live Gateway 健康条，\(strip.status)")
         .onAppear {
             store.updateGatewayTransportProbeReviewFocus(reviewFocus)
+            store.updateGatewayReadinessReviewFocus(reviewFocus)
         }
         .onChange(of: reviewFocus) { _, newValue in
             store.updateGatewayTransportProbeReviewFocus(newValue)
+            store.updateGatewayReadinessReviewFocus(newValue)
         }
     }
 
@@ -5226,6 +5230,99 @@ struct ClawMissionRunLiveGatewayHealthStripView: View {
         case .failed, .stale:
             return .orange
         case .notConfigured:
+            return .orange
+        case .unavailable:
+            return .secondary
+        }
+    }
+}
+
+struct ClawMissionRunGatewayReadinessView: View {
+    @EnvironmentObject private var store: ClawStore
+    let reviewFocus: ClawMissionRunReviewFocus?
+
+    var body: some View {
+        let summary = store.gatewayReadinessSummary(for: reviewFocus)
+
+        VStack(alignment: .leading, spacing: 7) {
+            Divider()
+
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Label(summary.title, systemImage: summary.icon)
+                    .font(.footnote.bold())
+                    .foregroundStyle(tint(for: summary))
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                PhoneAgentTag(text: summary.endpoint, icon: "network", tint: tint(for: summary))
+            }
+
+            Text(summary.status)
+                .font(.caption.bold())
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(summary.guidance)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let assessment = summary.assessment {
+                HStack(spacing: 6) {
+                    PhoneAgentTag(text: assessment.rawValue, icon: "checkmark.shield", tint: tint(for: summary))
+                    if let tokenHeader = summary.tokenHeader {
+                        PhoneAgentTag(
+                            text: tokenHeader == .acceptedForThisRequest ? "本次 header 已接受" : "本次不要求 header",
+                            icon: "lock.shield",
+                            tint: .blue
+                        )
+                    }
+                    if summary.effects?.taskAccepted == false,
+                       summary.effects?.sessionCreated == false,
+                       summary.effects?.eventEmitted == false,
+                       summary.effects?.artifactWritten == false,
+                       summary.effects?.handlerInvoked == false {
+                        PhoneAgentTag(text: "effects 全部 false", icon: "nosign", tint: .green)
+                    }
+                }
+            }
+
+            if let capabilities = summary.capabilities {
+                Text("Capability：\(capabilities.workspace.rawValue) · \(capabilities.shell.rawValue) · \(capabilities.browserControl.rawValue) · \(capabilities.desktopControl.rawValue)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Button(
+                ClawGatewayReadinessPresentationContract.actionTitle,
+                systemImage: ClawGatewayReadinessPresentationContract.actionIcon
+            ) {
+                Task {
+                    _ = await store.requestGatewayReadiness(reviewFocus: reviewFocus)
+                }
+            }
+            .frame(
+                maxWidth: .infinity,
+                minHeight: CGFloat(ClawGatewayReadinessPresentationContract.minimumHitArea)
+            )
+            .buttonStyle(SecondaryActionButtonStyle())
+            .disabled(summary.canRequest == false || summary.isInFlight)
+            .opacity(summary.canRequest && summary.isInFlight == false ? 1 : 0.55)
+            .accessibilityLabel(ClawGatewayReadinessPresentationContract.actionTitle)
+            .accessibilityHint(ClawGatewayReadinessPresentationContract.voiceOverHint)
+        }
+        .padding(.top, 4)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Gateway readiness，\(summary.status)")
+    }
+
+    private func tint(for summary: ClawGatewayReadinessSummary) -> Color {
+        switch summary.state {
+        case .attested:
+            return .green
+        case .requesting, .ready:
+            return .blue
+        case .failed, .stale, .notConfigured:
             return .orange
         case .unavailable:
             return .secondary

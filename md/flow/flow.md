@@ -14,6 +14,8 @@ v0.73 追加修复将 request/session revision、token fingerprint/profile diges
 
 v0.74 在同一手机端 presentation 边界增加版本化 `metadata-only Mission Run checkpoint`。状态变化边界从当前安全 summary/Live health 白名单计数 best-effort 保存最新一份本机快照；App 重启时只载入独立的只读交接 summary。历史 checkpoint 不回填 `missionRunResolution`、`missionRunSummary`、task/session/event/artifact/live request/connection、审批、continuation receipt、review focus 或 Smart Operator Rail；compact iPhone 与 regular iPad/宽屏 Dock 复用同一 checkpoint view、summary 和 clear API。未知字段/版本、损坏、超限或存储失败均 fail closed，clear 只清理本机 Application Support 文件，不产生 Gateway 副作用。
 
+v0.75 在 v0.73 transport probe 和 v0.74 checkpoint 之外增加独立的 `claw.gateway.readiness.v1` control plane。用户点击共享 health strip 的 readiness command 后，Store 创建不含 task/session/envelope 的固定 request body，只放运行时 Authorization header、控制面 header、设备 header；独立 WebSocket 完成一条 request、一条 response/error 和一次 close。Gateway 在普通 task envelope pipeline 之前识别并严格校验该 request，读取固定的 capability/policy projector，返回固定脱敏 response；readiness 不调用普通 dispatch、workspace、replay、session、event、artifact、auditLog、receipt、Shell、浏览器、桌面或 handler。response 的 same nonce 仅用于内部绑定，effects 全部为 false；`tokenHeader` 只表示本次 header 被接受/不要求，不表示 pairing、authorization、trusted 或可控。失败、timeout、cancel、duplicate、nonce/schema 错误和 scope/profile/generation stale 均 fail closed，不改变 task/session/event/artifact/live request/connection/health/probe/checkpoint/approval/receipt/review focus/Smart Rail。compact iPhone Mission Run 与 regular iPad/宽屏 Review Detail Dock 复用同一 readiness summary/view/API，入口至少 44pt 并带只读 VoiceOver 边界。
+
 ## 1. 当前核心数据流
 
 ```text

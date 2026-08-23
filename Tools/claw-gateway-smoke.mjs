@@ -35,6 +35,214 @@ server.stderr.on("data", (chunk) => {
 
 await waitFor(() => serverOutput.includes("Claw Gateway listening"), 3000);
 
+const readinessPort = port + 2;
+const readinessWorkspace = `.build/claw-gateway-readiness-smoke-${crypto.randomUUID()}`;
+const readinessLogMarker = `readiness_log_marker_${crypto.randomUUID()}`;
+const readinessServer = spawn(
+  process.execPath,
+  ["Tools/claw-gateway-server.mjs"],
+  {
+    env: {
+      ...process.env,
+      ...gatewayPolicyDefaults(),
+      CLAW_GATEWAY_HOST: host,
+      CLAW_GATEWAY_PORT: String(readinessPort),
+      CLAW_GATEWAY_TOKEN: token,
+      CLAW_WORKSPACE: readinessWorkspace,
+      CLAW_SHELL_ALLOWLIST: `shell-${readinessLogMarker}`,
+      CLAW_BROWSER_HOST_ALLOWLIST: `host-${readinessLogMarker}`,
+      CLAW_BROWSER_APP_ALLOWLIST: `browser-${readinessLogMarker}`,
+      CLAW_DESKTOP_APP_ALLOWLIST: `desktop-${readinessLogMarker}`,
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  },
+);
+let readinessServerOutput = "";
+readinessServer.stdout.on("data", (chunk) => {
+  readinessServerOutput += chunk.toString("utf8");
+});
+readinessServer.stderr.on("data", (chunk) => {
+  readinessServerOutput += chunk.toString("utf8");
+});
+await waitFor(() => readinessServerOutput.includes("Claw Gateway listening"), 3000, () => readinessServerOutput);
+const readinessNonce = `smoke_nonce_${crypto.randomBytes(12).toString("base64url")}`;
+const readinessResult = await connectAndCollectReadinessFrames({
+  host,
+  port: readinessPort,
+  token,
+  request: {
+    controlPlane: "claw.gateway.readiness.v1",
+    kind: "readinessRequest",
+    requestNonce: readinessNonce,
+  },
+});
+const readinessMessages = readinessResult.messages;
+expect(readinessMessages.length === 1, "readiness should return exactly one response");
+expect(readinessResult.closeFrames === 1, "readiness should close exactly once");
+const readinessResponse = readinessMessages[0];
+expect(readinessResponse.controlPlane === "claw.gateway.readiness.v1", "readiness control plane mismatch");
+expect(readinessResponse.kind === "readinessResponse", "readiness response kind mismatch");
+expect(readinessResponse.requestNonce === readinessNonce, "readiness nonce should round trip");
+expect(readinessResponse.transport === "websocket-response", "readiness transport should be fixed");
+expect(readinessResponse.tokenHeader === "accepted-for-this-request", "readiness token header semantics should stay request-scoped");
+expect(readinessResponse.assessment === "capability-degraded", "default readiness should be capability degraded");
+expect(Object.keys(readinessResponse).sort().join(",") === "assessment,capabilities,controlPlane,effects,kind,policies,redaction,requestNonce,tokenHeader,transport", "readiness response top-level keys must be fixed");
+expect(Object.values(readinessResponse.effects).every((value) => value === false), "readiness effects must all be false");
+const readinessSerialized = JSON.stringify(readinessResponse);
+for (const forbidden of [
+  token,
+  tokenFingerprint(token),
+  "Authorization",
+  "Bearer",
+  readinessWorkspace,
+  readinessLogMarker,
+  "file://",
+  "/sessions/",
+  "toolArguments",
+  "instruction",
+]) {
+  expect(!readinessSerialized.includes(forbidden), `readiness response leaked ${forbidden}`);
+}
+for (const forbidden of [
+  token,
+  tokenFingerprint(token),
+  readinessWorkspace,
+  readinessLogMarker,
+  "allowlist=",
+  "appAllowlist=",
+  "token fingerprint",
+  "Authorization",
+  "Bearer",
+  "file://",
+  "/sessions/",
+]) {
+  expect(!readinessServerOutput.includes(forbidden), `readiness Gateway startup leaked ${forbidden}`);
+}
+await fs.access(readinessWorkspace).then(
+  () => expect(false, "readiness should not create a workspace"),
+  (error) => expect(error?.code === "ENOENT", "readiness workspace side-effect check failed unexpectedly"),
+);
+await fs.access(`${readinessWorkspace}/sessions`).then(
+  () => expect(false, "readiness should not create session state"),
+  (error) => expect(error?.code === "ENOENT", "readiness session side-effect check failed unexpectedly"),
+);
+
+const websocketReadinessMalformed = await connectAndCollectReadinessFrames({
+  host,
+  port: readinessPort,
+  rawText: `{"controlPlane":"claw.gateway.readiness.v1","kind":"readinessRequest",`,
+});
+assertReadinessError(websocketReadinessMalformed, "readiness_invalid_request", "websocket malformed readiness");
+
+const websocketReadinessExtraKey = await connectAndCollectReadinessFrames({
+  host,
+  port: readinessPort,
+  request: {
+    controlPlane: "claw.gateway.readiness.v1",
+    kind: "readinessRequest",
+    requestNonce: `websocket_extra_${crypto.randomBytes(12).toString("base64url")}`,
+    extra: "fixed-marker",
+  },
+});
+assertReadinessError(websocketReadinessExtraKey, "readiness_invalid_request", "websocket extra readiness key");
+
+const websocketReadinessMissingHeader = await connectAndCollectReadinessFrames({
+  host,
+  port: readinessPort,
+  controlPlane: null,
+  request: {
+    controlPlane: "claw.gateway.readiness.v1",
+    kind: "readinessRequest",
+    requestNonce: `websocket_missing_header_${crypto.randomBytes(12).toString("base64url")}`,
+  },
+});
+assertReadinessError(websocketReadinessMissingHeader, "readiness_control_plane_required", "websocket missing readiness header");
+
+const websocketReadinessWrongHeader = await connectAndCollectReadinessFrames({
+  host,
+  port: readinessPort,
+  controlPlane: "claw.gateway.unknown.v1",
+  request: {
+    controlPlane: "claw.gateway.readiness.v1",
+    kind: "readinessRequest",
+    requestNonce: `websocket_wrong_header_${crypto.randomBytes(12).toString("base64url")}`,
+  },
+});
+assertReadinessError(websocketReadinessWrongHeader, "readiness_control_plane_required", "websocket wrong readiness header");
+
+const websocketReadinessWrongBodyMarker = await connectAndCollectReadinessFrames({
+  host,
+  port: readinessPort,
+  controlPlane: null,
+  rawText: `{"controlPlane":"claw.gateway.unknown.v1","kind":"ordinary","requestNonce":"${readinessLogMarker}"}`,
+});
+assertReadinessError(websocketReadinessWrongBodyMarker, "readiness_control_plane_required", "websocket wrong readiness body marker");
+
+const websocketReadinessKindMarker = await connectAndCollectReadinessFrames({
+  host,
+  port: readinessPort,
+  controlPlane: null,
+  rawText: `{"kind":"readinessResponse","requestNonce":"${readinessLogMarker}"}`,
+});
+assertReadinessError(websocketReadinessKindMarker, "readiness_control_plane_required", "websocket readiness kind without header");
+
+const websocketReadinessNestedDuplicate = await connectAndCollectReadinessFrames({
+  host,
+  port: readinessPort,
+  rawText: `{"controlPlane":"claw.gateway.readiness.v1","kind":"readinessRequest","requestNonce":"websocket_nested_duplicate","nested":{"label":"a","lab\\u0065l":"b"}}`,
+});
+assertReadinessError(websocketReadinessNestedDuplicate, "readiness_duplicate_request", "websocket nested duplicate key");
+
+const websocketReadinessDuplicateFrame = await connectAndCollectReadinessFrames({
+  host,
+  port: readinessPort,
+  frames: [
+    JSON.stringify({
+      controlPlane: "claw.gateway.readiness.v1",
+      kind: "readinessRequest",
+      requestNonce: `websocket_duplicate_first_${crypto.randomBytes(12).toString("base64url")}`,
+    }),
+    JSON.stringify({
+      controlPlane: "claw.gateway.readiness.v1",
+      kind: "readinessRequest",
+      requestNonce: `websocket_duplicate_second_${crypto.randomBytes(12).toString("base64url")}`,
+    }),
+  ],
+});
+assertReadinessError(websocketReadinessDuplicateFrame, "readiness_duplicate_request", "websocket second readiness message");
+
+const websocketOrdinaryDuplicate = await connectAndCollectReadinessFrames({
+  host,
+  port: readinessPort,
+  controlPlane: null,
+  schema: "claw.computer.control.v1",
+  rawText: `{"schemaVersion":"claw.computer.control.v1","schemaVersion":"claw.computer.control.v1"}`,
+});
+expect(websocketOrdinaryDuplicate.messages.length === 1, "websocket ordinary duplicate should return one fixed event");
+expect(websocketOrdinaryDuplicate.messages[0]?.kind === "actionFailed", "websocket ordinary duplicate should remain ordinary error");
+expect(websocketOrdinaryDuplicate.messages[0]?.summary === "gateway error: invalid_json", "websocket ordinary duplicate error mismatch");
+expect(websocketOrdinaryDuplicate.messages[0]?.controlPlane === undefined, "websocket ordinary duplicate must not become readiness");
+expect(websocketOrdinaryDuplicate.closeFrames >= 1, "websocket ordinary duplicate should close");
+
+const websocketReadinessNonceMismatch = await connectAndCollectReadinessFrames({
+  host,
+  port: readinessPort,
+  request: {
+    controlPlane: "claw.gateway.readiness.v1",
+    kind: "readinessRequest",
+    requestNonce: `websocket_nonce_actual_${crypto.randomBytes(12).toString("base64url")}`,
+  },
+  expectedNonce: `websocket_nonce_expected_${crypto.randomBytes(12).toString("base64url")}`,
+});
+expect(websocketReadinessNonceMismatch.nonceMismatch === true, "websocket readiness nonce mismatch must fail closed");
+expect(websocketReadinessNonceMismatch.messages.length === 1, "websocket nonce mismatch should expose one response only");
+expect(websocketReadinessNonceMismatch.closeFrames >= 1, "websocket nonce mismatch should close");
+readinessServer.kill();
+await fs.access(readinessWorkspace).then(
+  () => expect(false, "readiness negative cases created a workspace"),
+  (error) => expect(error?.code === "ENOENT", "readiness negative side-effect check failed unexpectedly"),
+);
+
 const envelope = makeEnvelope(token);
 const events = await connectAndCollectEvents({
   host,
@@ -2534,6 +2742,136 @@ function connectAndCollectEvents({ host, port, token, envelope }) {
       }
     }
   });
+}
+
+function connectAndCollectReadiness({ host, port, token, request }) {
+  return connectAndCollectReadinessFrames({ host, port, token, request }).then((result) => result.messages);
+}
+
+function connectAndCollectReadinessFrames({
+  host,
+  port,
+  token = "smoke-token",
+  controlPlane = "claw.gateway.readiness.v1",
+  schema,
+  request,
+  rawText,
+  frames,
+  expectedNonce,
+}) {
+  return new Promise((resolve, reject) => {
+    const socket = net.createConnection({ host, port });
+    const key = crypto.randomBytes(16).toString("base64");
+    let handshake = "";
+    let buffer = Buffer.alloc(0);
+    const messages = [];
+    let settled = false;
+    let closeFrames = 0;
+
+    socket.on("connect", () => {
+      const headers = [
+        "GET / HTTP/1.1",
+        `Host: ${host}:${port}`,
+        "Upgrade: websocket",
+        "Connection: Upgrade",
+        `Sec-WebSocket-Key: ${key}`,
+        "Sec-WebSocket-Version: 13",
+      ];
+      if (schema !== undefined && schema !== null) {
+        headers.push(`X-Claw-Schema: ${schema}`);
+      }
+      if (controlPlane !== null && controlPlane !== undefined) {
+        headers.push(`X-Claw-Control-Plane: ${controlPlane}`);
+      }
+      headers.push(`Authorization: Bearer ${token}`, "", "");
+      socket.write(
+        headers.join("\r\n"),
+      );
+    });
+
+    socket.on("data", (chunk) => {
+      if (!handshake.includes("\r\n\r\n")) {
+        handshake += chunk.toString("latin1");
+        const split = handshake.indexOf("\r\n\r\n");
+        if (split === -1) {
+          return;
+        }
+        const head = handshake.slice(0, split);
+        if (!head.includes("101 Switching Protocols")) {
+          reject(new Error(`readiness upgrade failed: ${head}`));
+          socket.destroy();
+          return;
+        }
+        const remainder = Buffer.from(handshake.slice(split + 4), "latin1");
+        const rawFrames = frames || [rawText ?? JSON.stringify(request)];
+        socket.write(Buffer.concat(rawFrames.map((frame) => encodeClientFrame(frame))));
+        if (remainder.length > 0) {
+          consume(remainder);
+        }
+        return;
+      }
+      consume(chunk);
+    });
+
+    socket.on("error", (error) => {
+      if (!settled) {
+        settled = true;
+        reject(error);
+      }
+    });
+    socket.setTimeout(3000, () => {
+      if (!settled) {
+        settled = true;
+        socket.destroy();
+        reject(new Error("timeout waiting for readiness response"));
+      }
+    });
+    socket.on("close", () => {
+      if (!settled) {
+        settled = true;
+        const serialized = messages.map((message) => JSON.stringify(message)).join("\n");
+        const responseNonce = messages.find((message) => typeof message?.requestNonce === "string")?.requestNonce;
+        resolve({
+          messages,
+          closeFrames,
+          nonceMismatch: expectedNonce !== undefined && responseNonce !== expectedNonce,
+          serialized,
+        });
+      }
+    });
+
+    function consume(chunk) {
+      buffer = Buffer.concat([buffer, chunk]);
+      while (buffer.length >= 2) {
+        const frame = parseServerFrame(buffer);
+        if (!frame) {
+          return;
+        }
+        buffer = buffer.subarray(frame.consumed);
+        if (frame.opcode === 0x8) {
+          closeFrames += 1;
+          socket.end();
+          return;
+        }
+        if (frame.opcode === 0x1) {
+          messages.push(JSON.parse(frame.payload.toString("utf8")));
+        }
+      }
+    }
+  });
+}
+
+function assertReadinessError(result, code, label) {
+  expect(result.messages.length === 1, `${label} should return exactly one fixed error`);
+  const message = result.messages[0];
+  expect(message?.controlPlane === "claw.gateway.readiness.v1", `${label} control plane mismatch`);
+  expect(message?.kind === "readinessError", `${label} kind mismatch`);
+  expect(message?.errorCode === code, `${label} error code mismatch`);
+  expect(result.closeFrames >= 1, `${label} should close the WebSocket`);
+  expect(!result.serialized.includes(token), `${label} leaked the bearer token`);
+  expect(!result.serialized.includes("Authorization"), `${label} leaked the authorization header`);
+  expect(!result.serialized.includes("Bearer"), `${label} leaked the bearer scheme`);
+  expect(!result.serialized.includes(readinessLogMarker), `${label} leaked the test marker`);
 }
 
 function encodeClientFrame(text) {

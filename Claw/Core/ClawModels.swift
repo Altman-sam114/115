@@ -2425,6 +2425,712 @@ enum ClawGatewayTransportProbePresentationContract {
     static let sharedHealthStripView = "ClawMissionRunLiveGatewayHealthStripView"
 }
 
+enum ClawGatewayReadinessSchemaError: Error, Equatable, Sendable {
+    case invalidRequest
+    case invalidResponse
+    case invalidNonce
+    case invalidValue
+    case unknownField
+    case malformed
+
+    var diagnostic: String {
+        switch self {
+        case .invalidRequest:
+            return "readiness_invalid_request"
+        case .invalidResponse, .malformed, .unknownField, .invalidValue, .invalidNonce:
+            return "readiness_invalid_response"
+        }
+    }
+}
+
+private func readinessStrictKeys<K: CodingKey>(
+    _ decoder: Decoder,
+    keyType: K.Type,
+    expected: Set<String>
+) throws {
+    let actual: Set<String>
+    do {
+        actual = Set(try decoder.container(keyedBy: keyType).allKeys.map(\.stringValue))
+    } catch {
+        throw ClawGatewayReadinessSchemaError.malformed
+    }
+    guard actual == expected else {
+        throw ClawGatewayReadinessSchemaError.unknownField
+    }
+}
+
+private func validateReadinessNonce(_ nonce: String) throws {
+    guard (8...128).contains(nonce.utf8.count),
+          nonce.unicodeScalars.allSatisfy({ scalar in
+              switch scalar.value {
+              case 48...57, 65...90, 95, 97...122:
+                  return true
+              default:
+                  return false
+              }
+          }) else {
+        throw ClawGatewayReadinessSchemaError.invalidNonce
+    }
+}
+
+struct ClawGatewayReadinessRequest: Codable, Equatable, Sendable {
+    static let controlPlane = "claw.gateway.readiness.v1"
+    static let requestKind = "readinessRequest"
+
+    let controlPlane: String
+    let kind: String
+    let requestNonce: String
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case controlPlane
+        case kind
+        case requestNonce
+    }
+
+    init(requestNonce: String) throws {
+        self.controlPlane = Self.controlPlane
+        self.kind = Self.requestKind
+        self.requestNonce = requestNonce
+        try validate()
+    }
+
+    init(from decoder: Decoder) throws {
+        try readinessStrictKeys(
+            decoder,
+            keyType: CodingKeys.self,
+            expected: Set(CodingKeys.allCases.map(\.stringValue))
+        )
+        do {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            controlPlane = try container.decode(String.self, forKey: .controlPlane)
+            kind = try container.decode(String.self, forKey: .kind)
+            requestNonce = try container.decode(String.self, forKey: .requestNonce)
+        } catch let error as ClawGatewayReadinessSchemaError {
+            throw error
+        } catch {
+            throw ClawGatewayReadinessSchemaError.malformed
+        }
+        try validate()
+    }
+
+    func encode(to encoder: Encoder) throws {
+        try validate()
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(controlPlane, forKey: .controlPlane)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(requestNonce, forKey: .requestNonce)
+    }
+
+    func encodedData() throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return try encoder.encode(self)
+    }
+
+    private func validate() throws {
+        guard controlPlane == Self.controlPlane,
+              kind == Self.requestKind else {
+            throw ClawGatewayReadinessSchemaError.invalidRequest
+        }
+        try validateReadinessNonce(requestNonce)
+    }
+}
+
+enum ClawGatewayReadinessAssessment: String, CaseIterable, Codable, Equatable, Sendable {
+    case policyReady = "policy-ready"
+    case capabilityDegraded = "capability-degraded"
+    case policyBlocked = "policy-blocked"
+    case unavailable
+
+    var title: String {
+        switch self {
+        case .policyReady:
+            return "Gateway policy ready"
+        case .capabilityDegraded:
+            return "Gateway capability degraded"
+        case .policyBlocked:
+            return "Gateway policy blocked"
+        case .unavailable:
+            return "Gateway readiness unavailable"
+        }
+    }
+}
+
+enum ClawGatewayReadinessCapabilityState: String, CaseIterable, Codable, Equatable, Sendable {
+    case workspaceOnly = "workspace-only"
+    case configured
+    case allowlisted
+    case dryRun = "dry-run"
+    case disabled
+    case unavailable
+}
+
+struct ClawGatewayReadinessCapabilities: Codable, Equatable, Sendable {
+    let workspace: ClawGatewayReadinessCapabilityState
+    let shell: ClawGatewayReadinessCapabilityState
+    let browserNetwork: ClawGatewayReadinessCapabilityState
+    let browserControl: ClawGatewayReadinessCapabilityState
+    let screenCapture: ClawGatewayReadinessCapabilityState
+    let windowMetadata: ClawGatewayReadinessCapabilityState
+    let accessibilityObservation: ClawGatewayReadinessCapabilityState
+    let desktopControl: ClawGatewayReadinessCapabilityState
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case workspace
+        case shell
+        case browserNetwork
+        case browserControl
+        case screenCapture
+        case windowMetadata
+        case accessibilityObservation
+        case desktopControl
+    }
+
+    init(
+        workspace: ClawGatewayReadinessCapabilityState,
+        shell: ClawGatewayReadinessCapabilityState,
+        browserNetwork: ClawGatewayReadinessCapabilityState,
+        browserControl: ClawGatewayReadinessCapabilityState,
+        screenCapture: ClawGatewayReadinessCapabilityState,
+        windowMetadata: ClawGatewayReadinessCapabilityState,
+        accessibilityObservation: ClawGatewayReadinessCapabilityState,
+        desktopControl: ClawGatewayReadinessCapabilityState
+    ) {
+        self.workspace = workspace
+        self.shell = shell
+        self.browserNetwork = browserNetwork
+        self.browserControl = browserControl
+        self.screenCapture = screenCapture
+        self.windowMetadata = windowMetadata
+        self.accessibilityObservation = accessibilityObservation
+        self.desktopControl = desktopControl
+    }
+
+    init(from decoder: Decoder) throws {
+        try readinessStrictKeys(
+            decoder,
+            keyType: CodingKeys.self,
+            expected: Set(CodingKeys.allCases.map(\.stringValue))
+        )
+        do {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            workspace = try container.decode(ClawGatewayReadinessCapabilityState.self, forKey: .workspace)
+            shell = try container.decode(ClawGatewayReadinessCapabilityState.self, forKey: .shell)
+            browserNetwork = try container.decode(ClawGatewayReadinessCapabilityState.self, forKey: .browserNetwork)
+            browserControl = try container.decode(ClawGatewayReadinessCapabilityState.self, forKey: .browserControl)
+            screenCapture = try container.decode(ClawGatewayReadinessCapabilityState.self, forKey: .screenCapture)
+            windowMetadata = try container.decode(ClawGatewayReadinessCapabilityState.self, forKey: .windowMetadata)
+            accessibilityObservation = try container.decode(ClawGatewayReadinessCapabilityState.self, forKey: .accessibilityObservation)
+            desktopControl = try container.decode(ClawGatewayReadinessCapabilityState.self, forKey: .desktopControl)
+        } catch {
+            throw ClawGatewayReadinessSchemaError.invalidResponse
+        }
+    }
+}
+
+enum ClawGatewayReadinessPolicyValue: String, CaseIterable, Codable, Equatable, Sendable {
+    case enforced
+    case sessionWorkspaceOnly = "session-workspace-only"
+    case required
+    case notStarted = "not-started"
+}
+
+struct ClawGatewayReadinessPolicies: Codable, Equatable, Sendable {
+    let structuredToolArguments: ClawGatewayReadinessPolicyValue
+    let actionAllowlist: ClawGatewayReadinessPolicyValue
+    let workspaceScope: ClawGatewayReadinessPolicyValue
+    let sensitiveApproval: ClawGatewayReadinessPolicyValue
+    let finalSubmit: ClawGatewayReadinessPolicyValue
+    let metadataRedaction: ClawGatewayReadinessPolicyValue
+    let taskExecution: ClawGatewayReadinessPolicyValue
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case structuredToolArguments
+        case actionAllowlist
+        case workspaceScope
+        case sensitiveApproval
+        case finalSubmit
+        case metadataRedaction
+        case taskExecution
+    }
+
+    init(
+        structuredToolArguments: ClawGatewayReadinessPolicyValue,
+        actionAllowlist: ClawGatewayReadinessPolicyValue,
+        workspaceScope: ClawGatewayReadinessPolicyValue,
+        sensitiveApproval: ClawGatewayReadinessPolicyValue,
+        finalSubmit: ClawGatewayReadinessPolicyValue,
+        metadataRedaction: ClawGatewayReadinessPolicyValue,
+        taskExecution: ClawGatewayReadinessPolicyValue
+    ) {
+        self.structuredToolArguments = structuredToolArguments
+        self.actionAllowlist = actionAllowlist
+        self.workspaceScope = workspaceScope
+        self.sensitiveApproval = sensitiveApproval
+        self.finalSubmit = finalSubmit
+        self.metadataRedaction = metadataRedaction
+        self.taskExecution = taskExecution
+    }
+
+    init(from decoder: Decoder) throws {
+        try readinessStrictKeys(
+            decoder,
+            keyType: CodingKeys.self,
+            expected: Set(CodingKeys.allCases.map(\.stringValue))
+        )
+        do {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            structuredToolArguments = try container.decode(ClawGatewayReadinessPolicyValue.self, forKey: .structuredToolArguments)
+            actionAllowlist = try container.decode(ClawGatewayReadinessPolicyValue.self, forKey: .actionAllowlist)
+            workspaceScope = try container.decode(ClawGatewayReadinessPolicyValue.self, forKey: .workspaceScope)
+            sensitiveApproval = try container.decode(ClawGatewayReadinessPolicyValue.self, forKey: .sensitiveApproval)
+            finalSubmit = try container.decode(ClawGatewayReadinessPolicyValue.self, forKey: .finalSubmit)
+            metadataRedaction = try container.decode(ClawGatewayReadinessPolicyValue.self, forKey: .metadataRedaction)
+            taskExecution = try container.decode(ClawGatewayReadinessPolicyValue.self, forKey: .taskExecution)
+        } catch {
+            throw ClawGatewayReadinessSchemaError.invalidResponse
+        }
+    }
+}
+
+struct ClawGatewayReadinessEffects: Codable, Equatable, Sendable {
+    let taskAccepted: Bool
+    let sessionCreated: Bool
+    let eventEmitted: Bool
+    let artifactWritten: Bool
+    let handlerInvoked: Bool
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case taskAccepted
+        case sessionCreated
+        case eventEmitted
+        case artifactWritten
+        case handlerInvoked
+    }
+
+    init(
+        taskAccepted: Bool = false,
+        sessionCreated: Bool = false,
+        eventEmitted: Bool = false,
+        artifactWritten: Bool = false,
+        handlerInvoked: Bool = false
+    ) throws {
+        self.taskAccepted = taskAccepted
+        self.sessionCreated = sessionCreated
+        self.eventEmitted = eventEmitted
+        self.artifactWritten = artifactWritten
+        self.handlerInvoked = handlerInvoked
+        try validate()
+    }
+
+    init(from decoder: Decoder) throws {
+        try readinessStrictKeys(
+            decoder,
+            keyType: CodingKeys.self,
+            expected: Set(CodingKeys.allCases.map(\.stringValue))
+        )
+        do {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            taskAccepted = try container.decode(Bool.self, forKey: .taskAccepted)
+            sessionCreated = try container.decode(Bool.self, forKey: .sessionCreated)
+            eventEmitted = try container.decode(Bool.self, forKey: .eventEmitted)
+            artifactWritten = try container.decode(Bool.self, forKey: .artifactWritten)
+            handlerInvoked = try container.decode(Bool.self, forKey: .handlerInvoked)
+        } catch {
+            throw ClawGatewayReadinessSchemaError.invalidResponse
+        }
+        try validate()
+    }
+
+    private func validate() throws {
+        guard taskAccepted == false,
+              sessionCreated == false,
+              eventEmitted == false,
+              artifactWritten == false,
+              handlerInvoked == false else {
+            throw ClawGatewayReadinessSchemaError.invalidValue
+        }
+    }
+}
+
+enum ClawGatewayReadinessRedactionValue: String, CaseIterable, Codable, Equatable, Sendable {
+    case omitted
+    case fixedOnly = "fixed-only"
+}
+
+struct ClawGatewayReadinessRedaction: Codable, Equatable, Sendable {
+    let rawToken: ClawGatewayReadinessRedactionValue
+    let allowlistEntries: ClawGatewayReadinessRedactionValue
+    let workspacePath: ClawGatewayReadinessRedactionValue
+    let requestPayload: ClawGatewayReadinessRedactionValue
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case rawToken
+        case allowlistEntries
+        case workspacePath
+        case requestPayload
+    }
+
+    init(
+        rawToken: ClawGatewayReadinessRedactionValue,
+        allowlistEntries: ClawGatewayReadinessRedactionValue,
+        workspacePath: ClawGatewayReadinessRedactionValue,
+        requestPayload: ClawGatewayReadinessRedactionValue
+    ) {
+        self.rawToken = rawToken
+        self.allowlistEntries = allowlistEntries
+        self.workspacePath = workspacePath
+        self.requestPayload = requestPayload
+    }
+
+    init(from decoder: Decoder) throws {
+        try readinessStrictKeys(
+            decoder,
+            keyType: CodingKeys.self,
+            expected: Set(CodingKeys.allCases.map(\.stringValue))
+        )
+        do {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            rawToken = try container.decode(ClawGatewayReadinessRedactionValue.self, forKey: .rawToken)
+            allowlistEntries = try container.decode(ClawGatewayReadinessRedactionValue.self, forKey: .allowlistEntries)
+            workspacePath = try container.decode(ClawGatewayReadinessRedactionValue.self, forKey: .workspacePath)
+            requestPayload = try container.decode(ClawGatewayReadinessRedactionValue.self, forKey: .requestPayload)
+        } catch {
+            throw ClawGatewayReadinessSchemaError.invalidResponse
+        }
+        guard rawToken == .omitted,
+              allowlistEntries == .omitted,
+              workspacePath == .omitted,
+              requestPayload == .fixedOnly else {
+            throw ClawGatewayReadinessSchemaError.invalidValue
+        }
+    }
+}
+
+enum ClawGatewayReadinessTokenHeader: String, CaseIterable, Codable, Equatable, Sendable {
+    case acceptedForThisRequest = "accepted-for-this-request"
+    case notRequired = "not-required"
+}
+
+struct ClawGatewayReadinessResponse: Codable, Equatable, Sendable {
+    static let controlPlane = ClawGatewayReadinessRequest.controlPlane
+    static let responseKind = "readinessResponse"
+    static let transport = "websocket-response"
+
+    let controlPlane: String
+    let kind: String
+    let requestNonce: String
+    let assessment: ClawGatewayReadinessAssessment
+    let transport: String
+    let tokenHeader: ClawGatewayReadinessTokenHeader
+    let capabilities: ClawGatewayReadinessCapabilities
+    let policies: ClawGatewayReadinessPolicies
+    let effects: ClawGatewayReadinessEffects
+    let redaction: ClawGatewayReadinessRedaction
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case controlPlane
+        case kind
+        case requestNonce
+        case assessment
+        case transport
+        case tokenHeader
+        case capabilities
+        case policies
+        case effects
+        case redaction
+    }
+
+    init(
+        requestNonce: String,
+        assessment: ClawGatewayReadinessAssessment,
+        tokenHeader: ClawGatewayReadinessTokenHeader,
+        capabilities: ClawGatewayReadinessCapabilities,
+        policies: ClawGatewayReadinessPolicies,
+        effects: ClawGatewayReadinessEffects,
+        redaction: ClawGatewayReadinessRedaction
+    ) throws {
+        controlPlane = Self.controlPlane
+        kind = Self.responseKind
+        self.requestNonce = requestNonce
+        self.assessment = assessment
+        transport = Self.transport
+        self.tokenHeader = tokenHeader
+        self.capabilities = capabilities
+        self.policies = policies
+        self.effects = effects
+        self.redaction = redaction
+        try validate()
+    }
+
+    init(from decoder: Decoder) throws {
+        try readinessStrictKeys(
+            decoder,
+            keyType: CodingKeys.self,
+            expected: Set(CodingKeys.allCases.map(\.stringValue))
+        )
+        do {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            controlPlane = try container.decode(String.self, forKey: .controlPlane)
+            kind = try container.decode(String.self, forKey: .kind)
+            requestNonce = try container.decode(String.self, forKey: .requestNonce)
+            assessment = try container.decode(ClawGatewayReadinessAssessment.self, forKey: .assessment)
+            transport = try container.decode(String.self, forKey: .transport)
+            tokenHeader = try container.decode(ClawGatewayReadinessTokenHeader.self, forKey: .tokenHeader)
+            capabilities = try container.decode(ClawGatewayReadinessCapabilities.self, forKey: .capabilities)
+            policies = try container.decode(ClawGatewayReadinessPolicies.self, forKey: .policies)
+            effects = try container.decode(ClawGatewayReadinessEffects.self, forKey: .effects)
+            redaction = try container.decode(ClawGatewayReadinessRedaction.self, forKey: .redaction)
+        } catch let error as ClawGatewayReadinessSchemaError {
+            throw error
+        } catch {
+            throw ClawGatewayReadinessSchemaError.invalidResponse
+        }
+        try validate()
+    }
+
+    func encode(to encoder: Encoder) throws {
+        try validate()
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(controlPlane, forKey: .controlPlane)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(requestNonce, forKey: .requestNonce)
+        try container.encode(assessment, forKey: .assessment)
+        try container.encode(transport, forKey: .transport)
+        try container.encode(tokenHeader, forKey: .tokenHeader)
+        try container.encode(capabilities, forKey: .capabilities)
+        try container.encode(policies, forKey: .policies)
+        try container.encode(effects, forKey: .effects)
+        try container.encode(redaction, forKey: .redaction)
+    }
+
+    func encodedData() throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return try encoder.encode(self)
+    }
+
+    static func defaultResponse(
+        requestNonce: String,
+        assessment: ClawGatewayReadinessAssessment = .capabilityDegraded,
+        tokenHeader: ClawGatewayReadinessTokenHeader = .acceptedForThisRequest
+    ) -> ClawGatewayReadinessResponse {
+        let capabilities = ClawGatewayReadinessCapabilities(
+            workspace: .workspaceOnly,
+            shell: .dryRun,
+            browserNetwork: .disabled,
+            browserControl: .dryRun,
+            screenCapture: .dryRun,
+            windowMetadata: .dryRun,
+            accessibilityObservation: .dryRun,
+            desktopControl: .dryRun
+        )
+        let policies = ClawGatewayReadinessPolicies(
+            structuredToolArguments: .enforced,
+            actionAllowlist: .enforced,
+            workspaceScope: .sessionWorkspaceOnly,
+            sensitiveApproval: .enforced,
+            finalSubmit: .required,
+            metadataRedaction: .enforced,
+            taskExecution: .notStarted
+        )
+        let effects = try! ClawGatewayReadinessEffects()
+        let redaction = ClawGatewayReadinessRedaction(
+            rawToken: .omitted,
+            allowlistEntries: .omitted,
+            workspacePath: .omitted,
+            requestPayload: .fixedOnly
+        )
+        return try! ClawGatewayReadinessResponse(
+            requestNonce: requestNonce,
+            assessment: assessment,
+            tokenHeader: tokenHeader,
+            capabilities: capabilities,
+            policies: policies,
+            effects: effects,
+            redaction: redaction
+        )
+    }
+
+    private func validate() throws {
+        guard controlPlane == Self.controlPlane,
+              kind == Self.responseKind,
+              transport == Self.transport else {
+            throw ClawGatewayReadinessSchemaError.invalidResponse
+        }
+        try validateReadinessNonce(requestNonce)
+        guard redaction.rawToken == .omitted,
+              redaction.allowlistEntries == .omitted,
+              redaction.workspacePath == .omitted,
+              redaction.requestPayload == .fixedOnly,
+              effects.taskAccepted == false,
+              effects.sessionCreated == false,
+              effects.eventEmitted == false,
+              effects.artifactWritten == false,
+              effects.handlerInvoked == false else {
+            throw ClawGatewayReadinessSchemaError.invalidValue
+        }
+    }
+}
+
+struct ClawGatewayReadinessTransportRequest: Equatable, Sendable {
+    let endpoint: String
+    let safeEndpointDisplay: String
+    let headers: [String: String]
+    let body: ClawGatewayReadinessRequest
+    let bindingDigest: String
+
+    var bodyBytes: Int {
+        (try? body.encodedData().count) ?? 0
+    }
+
+    var authorizationHeaderPresent: Bool {
+        headers["Authorization"] != nil
+    }
+}
+
+struct ClawGatewayReadinessTransportResult: Equatable, Sendable {
+    let response: ClawGatewayReadinessResponse
+    let requestCount: Int
+    let responseCount: Int
+    let closeCount: Int
+    let didSendApplicationMessage: Bool
+
+    init(
+        response: ClawGatewayReadinessResponse,
+        requestCount: Int = 1,
+        responseCount: Int = 1,
+        closeCount: Int = 1,
+        didSendApplicationMessage: Bool = true
+    ) {
+        self.response = response
+        self.requestCount = requestCount
+        self.responseCount = responseCount
+        self.closeCount = closeCount
+        self.didSendApplicationMessage = didSendApplicationMessage
+    }
+}
+
+struct ClawGatewayReadinessSummary: Equatable, Codable, Sendable {
+    var state: ClawGatewayReadinessState
+    var title: String
+    var status: String
+    var guidance: String
+    var icon: String
+    var endpoint: String
+    var assessment: ClawGatewayReadinessAssessment?
+    var tokenHeader: ClawGatewayReadinessTokenHeader?
+    var capabilities: ClawGatewayReadinessCapabilities?
+    var policies: ClawGatewayReadinessPolicies?
+    var effects: ClawGatewayReadinessEffects?
+    var redaction: ClawGatewayReadinessRedaction?
+    var diagnostic: String?
+    var canRequest: Bool
+    var isVisible: Bool
+
+    var isInFlight: Bool {
+        state == .requesting
+    }
+
+    static let unavailable = make(
+        state: .unavailable,
+        endpoint: "未配置",
+        status: "当前 Mission 尚未准备 Gateway readiness 查询。",
+        guidance: "readiness 只读取固定脱敏的 Gateway 状态，不发送任务、不创建 session/event/artifact、不执行电脑动作。",
+        canRequest: false
+    )
+
+    static func make(
+        state: ClawGatewayReadinessState,
+        endpoint: String,
+        assessment: ClawGatewayReadinessAssessment? = nil,
+        tokenHeader: ClawGatewayReadinessTokenHeader? = nil,
+        capabilities: ClawGatewayReadinessCapabilities? = nil,
+        policies: ClawGatewayReadinessPolicies? = nil,
+        effects: ClawGatewayReadinessEffects? = nil,
+        redaction: ClawGatewayReadinessRedaction? = nil,
+        diagnostic: String? = nil,
+        status: String,
+        guidance: String,
+        canRequest: Bool
+    ) -> ClawGatewayReadinessSummary {
+        ClawGatewayReadinessSummary(
+            state: state,
+            title: state.title,
+            status: status,
+            guidance: guidance,
+            icon: state.icon,
+            endpoint: endpoint,
+            assessment: assessment,
+            tokenHeader: tokenHeader,
+            capabilities: capabilities,
+            policies: policies,
+            effects: effects,
+            redaction: redaction,
+            diagnostic: diagnostic,
+            canRequest: canRequest,
+            isVisible: true
+        )
+    }
+}
+
+enum ClawGatewayReadinessState: String, CaseIterable, Codable, Equatable, Sendable {
+    case unavailable
+    case notConfigured
+    case ready
+    case requesting
+    case attested
+    case failed
+    case stale
+
+    var title: String {
+        switch self {
+        case .unavailable:
+            return "暂无 readiness 范围"
+        case .notConfigured:
+            return "readiness 未配置"
+        case .ready:
+            return "等待用户读取"
+        case .requesting:
+            return "正在读取 readiness"
+        case .attested:
+            return "已收到 readiness 回应"
+        case .failed:
+            return "readiness 读取失败"
+        case .stale:
+            return "readiness 结果已过期"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .unavailable:
+            return "questionmark.circle"
+        case .notConfigured:
+            return "exclamationmark.triangle.fill"
+        case .ready:
+            return "checkmark.shield"
+        case .requesting:
+            return "hourglass.circle.fill"
+        case .attested:
+            return "checkmark.shield.fill"
+        case .failed:
+            return "xmark.shield.fill"
+        case .stale:
+            return "arrow.triangle.2.circlepath"
+        }
+    }
+}
+
+enum ClawGatewayReadinessPresentationContract {
+    static let sharedView = "ClawMissionRunGatewayReadinessView"
+    static let sharedHealthStripView = "ClawMissionRunLiveGatewayHealthStripView"
+    static let actionTitle = "读取 Gateway readiness"
+    static let actionIcon = "checkmark.shield"
+    static let minimumHitArea = 44
+    static let voiceOverHint = "只读取固定脱敏的 Gateway capability 和 policy；不发送任务、不创建 session、event 或 artifact、不执行电脑动作。token header 只代表本次请求通过或不要求，不代表 pairing 或 authorization；不自动配对、重连、审批、发送或重试。"
+}
+
 struct ClawMissionRunApprovalFastLaneSummary: Equatable, Codable, Sendable {
     var title: String
     var status: String

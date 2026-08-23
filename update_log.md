@@ -23,6 +23,39 @@
 
 ## 历史记录
 
+### v0.75 / 受控 Gateway Readiness Attestation
+
+日期：2026-08-23
+
+实现范围：
+
+- 增加独立 `claw.gateway.readiness.v1` control plane。request body 严格只允许 `controlPlane`、`kind`、`requestNonce`；response 使用固定 capability/policy/assessment/tokenHeader/effects/redaction schema，same nonce，所有 effects 固定为 `false`，未知字段、错误 enum、类型错误和非法 nonce fail closed。
+- runtime token 仅进入本次 WebSocket `Authorization: Bearer` header；`tokenHeader` 只表达本次 header 被接受或不要求，不表达 pairing、authorization、trusted 或电脑可控。独立 URLSession transport/fake 保证单 request、单 response、单 close，具备有界 timeout/cancel、固定诊断和 generation/profile/Mission/stale guard。
+- Gateway readiness route 位于普通 task envelope pipeline 之前，只读固定 config/policy projector，不调用 task/session/workspace/replay/event/artifact/auditLog/receipt/handler/Shell/browser/desktop 路径；response 不创建任务、会话、workspace、replay、event、artifact 或外部动作。direct/WebSocket smoke 增加 readiness 和普通 task 分流/no-side-effect 断言。
+- compact iPhone Mission Run 与 regular iPad/宽屏 Review Detail Dock 在共享 health strip 复用同一 readiness summary/view/API，入口至少 44pt，VoiceOver 固定说明只读和无副作用边界；readiness 不改变 v0.73 probe、v0.74 checkpoint、Live health、审批、receipt、review focus 或 Smart Rail。
+- 同步 README、协议、flow、flowchart、test 和本日志；未实现 pairing/authorization trust、后台保活、heartbeat、retry/reconnect、macOS target、Accessibility bridge、browser controller 或任何 task action。
+
+关键文件：
+
+- `Claw/Core/ClawModels.swift`
+- `Claw/Services/ClawStore.swift`
+- `Claw/Views/ContentView.swift`
+- `ClawTests/ClawTests.swift`
+- `Tools/LogicSmoke.swift`
+- `Tools/claw-gateway-server.mjs`
+- `Tools/claw-gateway-direct-smoke.mjs`
+- `Tools/claw-gateway-smoke.mjs`
+- `README.md`
+- `Docs/claw-mobile-gateway-protocol.md`
+- `md/flow/flow.md`
+- `md/flow/flowchart.md`
+- `md/test/test.md`
+- `update_log.md`
+
+验证状态：本轮只执行允许的非编译静态检查；本地未运行 build、XCTest、LogicSmoke、Gateway fixture/direct/WebSocket smoke、`node --check` 或 `xcodebuild`。commit、GitHub Actions run、artifact 和 Agent C 复判待 push 后产生，不能预写通过结论。
+
+遗留事项：需要 Agent C 使用 `Altman-sam114` 下载最新 `origin/main` run，核对 readiness 固定 schema、一次 close、stale/no-side-effect/redaction、普通 task/v0.73/v0.74 回归、manifest/JUnit/日志/结果包与 commit/run/attempt 完全一致。
+
 ### v0.74 / 跨重启 Mission Run 安全交接快照
 
 日期：2026-08-23

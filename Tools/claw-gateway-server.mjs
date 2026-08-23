@@ -10,6 +10,16 @@ import { spawn } from "node:child_process";
 
 const DEFAULT_PORT = 18789;
 const SCHEMA_VERSION = "claw.computer.control.v1";
+const READINESS_CONTROL_PLANE = "claw.gateway.readiness.v1";
+const READINESS_REQUEST_KIND = "readinessRequest";
+const READINESS_RESPONSE_KIND = "readinessResponse";
+const READINESS_ERROR_KIND = "readinessError";
+const READINESS_KINDS = new Set([
+  READINESS_REQUEST_KIND,
+  READINESS_RESPONSE_KIND,
+  READINESS_ERROR_KIND,
+]);
+const READINESS_TRANSPORT = "websocket-response";
 const TASK_REPLAY_CACHE_LIMIT = 128;
 const CONTINUATION_RECEIPT_CACHE_LIMIT = 128;
 const CONTINUATION_RECEIPT_TTL_MS = 600_000;
@@ -176,7 +186,7 @@ if (process.argv.includes("--emit-events-stream")) {
     }
     let events;
     try {
-      events = await makeGatewayEvents(JSON.parse(line), options);
+      events = await makeGatewayEvents(parseStrictJSONText(line).value, options);
     } catch (error) {
       events = [errorEvent(error, true)];
     }
@@ -189,7 +199,7 @@ if (process.argv.includes("--emit-events-stream")) {
 }
 
 if (process.argv.includes("--emit-events")) {
-  const input = JSON.parse(await readEnvelopeInput());
+  const input = parseStrictJSONText(await readEnvelopeInput()).value;
   const envelopes = Array.isArray(input) ? input : [input];
   for (const envelope of envelopes) {
     let events;
@@ -220,24 +230,73 @@ server.on("upgrade", (request, socket, head) => {
     assertAuthorized(request, options);
     acceptWebSocket(request, socket);
     const connection = new WebSocketConnection(socket);
+    connection.readinessConnection = hasControlPlaneHeader(request);
     if (head.length > 0) {
       connection.push(head);
     }
     connection.onText = async (text) => {
+      if (connection.handledMessage) {
+        reportReadinessDuplicate(connection);
+        return;
+      }
+      connection.handledMessage = true;
+      const headerControlPlane = request.headers["x-claw-control-plane"];
+      let parsed;
+      let inspectionError;
       try {
-        const envelope = JSON.parse(text);
+        parsed = parseStrictJSONText(text);
+      } catch (error) {
+        inspectionError = error;
+      }
+      if (parsed?.readinessCandidate || inspectionError?.readinessCandidate) {
+        connection.readinessConnection = true;
+      }
+      await Promise.resolve();
+      if (connection.duplicateReported) {
+        return;
+      }
+      try {
+        if (inspectionError) {
+          if (connection.readinessConnection) {
+            const code = inspectionError instanceof GatewayError
+              ? inspectionError.code
+              : "readiness_invalid_request";
+            connection.send(JSON.stringify(readinessError(code)));
+          } else {
+            connection.send(JSON.stringify(errorEvent(new GatewayError(400, "invalid_json"))));
+          }
+          closeAfterMessage(connection);
+          return;
+        }
+
+        const envelope = parsed.value;
+
+        if (connection.readinessConnection || isReadinessCandidateBody(envelope)) {
+          try {
+            if (headerControlPlane !== READINESS_CONTROL_PLANE) {
+              throw new GatewayError(400, "readiness_control_plane_required");
+            }
+            if (request.headers["x-claw-schema"]) {
+              throw new GatewayError(400, "readiness_schema_header_conflict");
+            }
+            const readinessResponse = makeGatewayReadinessResponse(envelope, options);
+            connection.send(JSON.stringify(readinessResponse));
+          } catch (error) {
+            connection.send(JSON.stringify(readinessError(error?.code)));
+          }
+          closeAfterMessage(connection);
+          return;
+        }
+
         const events = await makeGatewayEvents(envelope, options);
         for (const event of events) {
           connection.send(JSON.stringify(event));
           await sleep(8);
         }
-        connection.close();
-        if (options.once) {
-          server.close();
-        }
+        closeAfterMessage(connection);
       } catch (error) {
         connection.send(JSON.stringify(errorEvent(error)));
-        connection.close();
+        closeAfterMessage(connection);
       }
     };
   } catch (error) {
@@ -246,28 +305,17 @@ server.on("upgrade", (request, socket, head) => {
 });
 
 server.listen(options.port, options.host, () => {
-  console.log(`Claw Gateway listening on ws://${options.host}:${options.port}`);
-  console.log(`workspace ${options.workspace}`);
-  console.log(
-    `shell ${options.allowShell ? "enabled" : "dry-run"} allowlist=${[...options.shellAllowlist].join(",") || "empty"}`,
-  );
-  console.log(
-    `screenCapture ${options.allowScreenCapture ? "enabled" : "dry-run"} windowMetadata=${options.allowWindowMetadata ? "enabled" : "dry-run"}`,
-  );
-  console.log(
-    `accessibilityObserve ${options.allowAccessibilityObserve ? "enabled" : "dry-run"}`,
-  );
-  console.log(
-    `browserControl ${options.allowBrowserControl ? "enabled" : "dry-run"} appAllowlist=${[...options.browserAppAllowlist].join(",") || "empty"}`,
-  );
-  console.log(
-    `desktopControl ${options.allowDesktopControl ? "enabled" : "dry-run"} appAllowlist=${[...options.desktopAppAllowlist].join(",") || "empty"}`,
-  );
-  if (options.token) {
-    console.log(`token fingerprint ${tokenFingerprint(options.token)}`);
-  } else {
-    console.log("token disabled; set CLAW_GATEWAY_TOKEN for paired iOS live mode");
-  }
+  console.log("Claw Gateway listening transport=websocket");
+  console.log("Claw Gateway startup status=redacted");
+  console.log("Claw Gateway policy status workspace=configured");
+  console.log(`Claw Gateway policy status shell=${options.allowShell && options.shellAllowlist.size > 0 ? "allowlisted" : "dry-run"}`);
+  console.log(`Claw Gateway policy status browserNetwork=${options.allowBrowserNetwork && options.browserHostAllowlist.size > 0 ? "allowlisted" : "disabled"}`);
+  console.log(`Claw Gateway policy status browserControl=${options.allowBrowserControl && options.browserAppAllowlist.size > 0 ? "allowlisted" : "dry-run"}`);
+  console.log(`Claw Gateway policy status screenCapture=${options.allowScreenCapture ? "configured" : "dry-run"}`);
+  console.log(`Claw Gateway policy status windowMetadata=${options.allowWindowMetadata ? "configured" : "dry-run"}`);
+  console.log(`Claw Gateway policy status accessibilityObserve=${options.allowAccessibilityObserve ? "configured" : "dry-run"}`);
+  console.log(`Claw Gateway policy status desktopControl=${options.allowDesktopControl && options.desktopAppAllowlist.size > 0 ? "allowlisted" : "dry-run"}`);
+  console.log(`Claw Gateway auth status configured=${options.token ? "configured" : "not-configured"} required=${options.requireToken ? "required" : "optional"}`);
 });
 
 function assertUpgradeRequest(request) {
@@ -292,6 +340,339 @@ function assertAuthorized(request, config) {
   const authorization = String(request.headers.authorization || "");
   if (authorization !== `Bearer ${config.token}`) {
     throw new GatewayError(401, "invalid_bearer_token");
+  }
+}
+
+function hasControlPlaneHeader(request) {
+  const value = request.headers["x-claw-control-plane"];
+  return typeof value === "string" && value.length > 0;
+}
+
+function reportReadinessDuplicate(connection) {
+  if (!connection.readinessConnection || connection.duplicateReported) {
+    return;
+  }
+  connection.duplicateReported = true;
+  connection.send(JSON.stringify(readinessError("readiness_duplicate_request")));
+  closeAfterMessage(connection);
+}
+
+function closeAfterMessage(connection) {
+  connection.close();
+  if (options.once) {
+    server.close();
+  }
+}
+
+function isReadinessCandidateBody(value) {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      Array.isArray(value) === false &&
+      (Object.prototype.hasOwnProperty.call(value, "controlPlane") || isReadinessKind(value.kind)),
+  );
+}
+
+function isReadinessKind(value) {
+  return typeof value === "string" && (READINESS_KINDS.has(value) || value.startsWith("readiness"));
+}
+
+function parseStrictJSONText(text) {
+  const inspection = inspectJSONText(text);
+  if (inspection.duplicateKey) {
+    const error = new GatewayError(400, inspection.readinessCandidate ? "readiness_duplicate_request" : "invalid_json");
+    error.readinessCandidate = inspection.readinessCandidate;
+    throw error;
+  }
+  try {
+    return {
+      value: JSON.parse(text),
+      readinessCandidate: inspection.readinessCandidate,
+    };
+  } catch (error) {
+    if (error && typeof error === "object") {
+      error.readinessCandidate = inspection.readinessCandidate;
+    }
+    throw error;
+  }
+}
+
+function inspectJSONText(text) {
+  const state = {
+    duplicateKey: false,
+    readinessCandidate: false,
+  };
+  let index = 0;
+
+  const fail = () => {
+    const error = new Error("invalid_json");
+    error.readinessCandidate = state.readinessCandidate;
+    throw error;
+  };
+
+  const skipWhitespace = () => {
+    while (index < text.length && /\s/.test(text[index])) {
+      index += 1;
+    }
+  };
+
+  const readString = () => {
+    if (text[index] !== '"') {
+      fail();
+    }
+    index += 1;
+    let value = "";
+    while (index < text.length) {
+      const character = text[index++];
+      if (character === '"') {
+        return value;
+      }
+      if (character === "\\") {
+        if (index >= text.length) {
+          fail();
+        }
+        const escape = text[index++];
+        switch (escape) {
+          case '"':
+          case "\\":
+          case "/":
+            value += escape;
+            break;
+          case "b":
+            value += "\b";
+            break;
+          case "f":
+            value += "\f";
+            break;
+          case "n":
+            value += "\n";
+            break;
+          case "r":
+            value += "\r";
+            break;
+          case "t":
+            value += "\t";
+            break;
+          case "u": {
+            const hex = text.slice(index, index + 4);
+            if (/^[0-9A-Fa-f]{4}$/.test(hex) === false) {
+              fail();
+            }
+            value += String.fromCharCode(Number.parseInt(hex, 16));
+            index += 4;
+            break;
+          }
+          default:
+            fail();
+        }
+        continue;
+      }
+      if (character < " ") {
+        fail();
+      }
+      value += character;
+    }
+    fail();
+  };
+
+  const readNumber = () => {
+    const match = text.slice(index).match(/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/);
+    if (!match) {
+      fail();
+    }
+    index += match[0].length;
+    return undefined;
+  };
+
+  const readValue = (depth) => {
+    if (depth > 128) {
+      fail();
+    }
+    skipWhitespace();
+    const character = text[index];
+    if (character === '"') {
+      return readString();
+    }
+    if (character === "{") {
+      return readObject(depth);
+    }
+    if (character === "[") {
+      return readArray(depth);
+    }
+    if (text.startsWith("true", index)) {
+      index += 4;
+      return true;
+    }
+    if (text.startsWith("false", index)) {
+      index += 5;
+      return false;
+    }
+    if (text.startsWith("null", index)) {
+      index += 4;
+      return null;
+    }
+    if (character === "-" || /\d/.test(character || "")) {
+      return readNumber();
+    }
+    fail();
+  };
+
+  const readObject = (depth) => {
+    index += 1;
+    const keys = new Set();
+    skipWhitespace();
+    if (text[index] === "}") {
+      index += 1;
+      return undefined;
+    }
+    while (index < text.length) {
+      skipWhitespace();
+      const key = readString();
+      if (keys.has(key)) {
+        state.duplicateKey = true;
+      }
+      keys.add(key);
+      if (depth === 0 && key === "controlPlane") {
+        state.readinessCandidate = true;
+      }
+      skipWhitespace();
+      if (text[index] !== ":") {
+        fail();
+      }
+      index += 1;
+      const value = readValue(depth + 1);
+      if (depth === 0 && key === "kind" && isReadinessKind(value)) {
+        state.readinessCandidate = true;
+      }
+      skipWhitespace();
+      if (text[index] === "}") {
+        index += 1;
+        return undefined;
+      }
+      if (text[index] !== ",") {
+        fail();
+      }
+      index += 1;
+    }
+    fail();
+  };
+
+  const readArray = (depth) => {
+    index += 1;
+    skipWhitespace();
+    if (text[index] === "]") {
+      index += 1;
+      return undefined;
+    }
+    while (index < text.length) {
+      readValue(depth + 1);
+      skipWhitespace();
+      if (text[index] === "]") {
+        index += 1;
+        return undefined;
+      }
+      if (text[index] !== ",") {
+        fail();
+      }
+      index += 1;
+    }
+    fail();
+  };
+
+  if (typeof text !== "string" || text.length === 0) {
+    fail();
+  }
+  try {
+    readValue(0);
+    skipWhitespace();
+    if (index !== text.length) {
+      fail();
+    }
+    return state;
+  } catch (error) {
+    if (error && typeof error === "object") {
+      error.readinessCandidate = Boolean(error.readinessCandidate || state.readinessCandidate);
+    }
+    throw error;
+  }
+}
+
+function readinessError(code) {
+  const allowed = new Set([
+    "readiness_invalid_request",
+    "readiness_control_plane_required",
+    "readiness_duplicate_request",
+    "readiness_nonce_invalid",
+    "readiness_schema_header_conflict",
+  ]);
+  return {
+    controlPlane: READINESS_CONTROL_PLANE,
+    kind: READINESS_ERROR_KIND,
+    errorCode: allowed.has(code) ? code : "readiness_invalid_request",
+  };
+}
+
+function makeGatewayReadinessResponse(request, config) {
+  validateReadinessRequest(request);
+  const capabilities = {
+    workspace: "workspace-only",
+    shell: config.allowShell && config.shellAllowlist.size > 0 ? "allowlisted" : "dry-run",
+    browserNetwork: config.allowBrowserNetwork && config.browserHostAllowlist.size > 0 ? "allowlisted" : "disabled",
+    browserControl: config.allowBrowserControl && config.browserAppAllowlist.size > 0 ? "allowlisted" : "dry-run",
+    screenCapture: config.allowScreenCapture ? "configured" : "dry-run",
+    windowMetadata: config.allowWindowMetadata ? "configured" : "dry-run",
+    accessibilityObservation: config.allowAccessibilityObserve ? "configured" : "dry-run",
+    desktopControl: config.allowDesktopControl && config.desktopAppAllowlist.size > 0 ? "allowlisted" : "dry-run",
+  };
+  const policies = {
+    structuredToolArguments: "enforced",
+    actionAllowlist: "enforced",
+    workspaceScope: "session-workspace-only",
+    sensitiveApproval: "enforced",
+    finalSubmit: "required",
+    metadataRedaction: "enforced",
+    taskExecution: "not-started",
+  };
+  const degraded = Object.values(capabilities).some((value) => ["disabled", "dry-run", "unavailable"].includes(value));
+  return {
+    controlPlane: READINESS_CONTROL_PLANE,
+    kind: READINESS_RESPONSE_KIND,
+    requestNonce: request.requestNonce,
+    assessment: degraded ? "capability-degraded" : "policy-ready",
+    transport: READINESS_TRANSPORT,
+    tokenHeader: config.token ? "accepted-for-this-request" : "not-required",
+    capabilities,
+    policies,
+    effects: {
+      taskAccepted: false,
+      sessionCreated: false,
+      eventEmitted: false,
+      artifactWritten: false,
+      handlerInvoked: false,
+    },
+    redaction: {
+      rawToken: "omitted",
+      allowlistEntries: "omitted",
+      workspacePath: "omitted",
+      requestPayload: "fixed-only",
+    },
+  };
+}
+
+function validateReadinessRequest(request) {
+  if (!request || typeof request !== "object" || Array.isArray(request)) {
+    throw new GatewayError(400, "readiness_invalid_request");
+  }
+  const keys = Object.keys(request);
+  const expected = ["controlPlane", "kind", "requestNonce"];
+  if (keys.length !== expected.length || expected.some((key) => keys.includes(key) === false)) {
+    throw new GatewayError(400, "readiness_invalid_request");
+  }
+  if (request.controlPlane !== READINESS_CONTROL_PLANE || request.kind !== READINESS_REQUEST_KIND) {
+    throw new GatewayError(400, "readiness_invalid_request");
+  }
+  if (typeof request.requestNonce !== "string" || /^[A-Za-z0-9_-]{8,128}$/.test(request.requestNonce) === false) {
+    throw new GatewayError(400, "readiness_nonce_invalid");
   }
 }
 
@@ -343,6 +724,10 @@ class WebSocketConnection {
   constructor(socket) {
     this.socket = socket;
     this.buffer = Buffer.alloc(0);
+    this.handledMessage = false;
+    this.readinessConnection = false;
+    this.duplicateReported = false;
+    this.closed = false;
     this.onText = () => {};
     socket.on("data", (chunk) => this.push(chunk));
     socket.on("error", () => {});
@@ -377,7 +762,8 @@ class WebSocketConnection {
   }
 
   close() {
-    if (!this.socket.destroyed) {
+    if (!this.closed && !this.socket.destroyed) {
+      this.closed = true;
       this.socket.end(encodeFrame(Buffer.alloc(0), 0x8));
     }
   }
@@ -451,6 +837,9 @@ function encodeFrame(payload, opcode) {
 }
 
 async function makeGatewayEvents(envelope, config) {
+  if (isReadinessCandidateBody(envelope)) {
+    throw new GatewayError(400, "readiness_websocket_only");
+  }
   validateEnvelope(envelope, config);
   const lineage = envelope.task?.lineage;
   const hasContinuationLineage = lineage !== undefined && lineage !== null;

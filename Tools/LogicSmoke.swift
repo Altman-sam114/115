@@ -90,6 +90,52 @@ enum LogicSmoke {
             failures.append("checkpoint fixture should be constructible")
         }
 
+        let readinessStore = ClawStore(autoScanLocalArtifacts: false)
+        readinessStore.setGateway(
+            url: "wss://gateway.example.test/v1?private-marker=hidden",
+            token: "readiness-secret"
+        )
+        readinessStore.generatePhoneAgentPlan()
+        readinessStore.queueClawMobileTaskFromCurrentPlan()
+        let readinessFake = ClawGatewayReadinessTransportFake()
+        expect(readinessStore.gatewayReadinessSummary.state == .ready, "readiness should be ready after task/profile setup")
+        let readinessBeforeEvents = readinessStore.gatewayEvents
+        let readinessBeforeHealth = readinessStore.gatewayLiveHealthSummary
+        let readinessResult = await readinessStore.requestGatewayReadiness(transport: readinessFake)
+        expect(readinessResult, "readiness fake should attest fixed response")
+        expect(readinessStore.gatewayReadinessSummary.state == .attested, "readiness should expose attested only after strict response")
+        expect(readinessFake.callCount == 1 && readinessFake.requestBodyCount == 1, "readiness should send one body")
+        expect(readinessFake.responseCount == 1 && readinessFake.closeCount == 1, "readiness should receive one response and close once")
+        expect(readinessFake.authorizationHeaderPresent == [true], "readiness should carry runtime auth only as a header")
+        expect(readinessStore.gatewayEvents == readinessBeforeEvents, "readiness must not create Gateway events")
+        expect(readinessStore.gatewayLiveHealthSummary == readinessBeforeHealth, "readiness must not change live health")
+        let readinessVisible = [
+            readinessStore.gatewayReadinessSummary.title,
+            readinessStore.gatewayReadinessSummary.status,
+            readinessStore.gatewayReadinessSummary.guidance
+        ].joined(separator: " ")
+        expect(readinessVisible.contains("readiness-secret") == false, "readiness summary must redact token")
+        expect(readinessVisible.contains("private-marker") == false, "readiness summary must redact endpoint query")
+        expect(ClawGatewayReadinessPresentationContract.sharedView == "ClawMissionRunGatewayReadinessView", "readiness view contract should be shared")
+        expect(ClawGatewayReadinessPresentationContract.sharedHealthStripView == "ClawMissionRunLiveGatewayHealthStripView", "readiness should share the health strip")
+        expect(ClawGatewayReadinessPresentationContract.minimumHitArea >= 44, "readiness control should have a 44pt hit area")
+        expect(ClawGatewayReadinessPresentationContract.voiceOverHint.contains("不发送任务"), "readiness hint should deny task send")
+        expect(ClawGatewayReadinessPresentationContract.voiceOverHint.contains("不代表 pairing"), "readiness hint should deny pairing semantics")
+
+        let staleFake = ClawGatewayReadinessTransportFake(outcome: .waitForRelease)
+        let staleReadinessTask = Task {
+            await readinessStore.requestGatewayReadiness(transport: staleFake)
+        }
+        for _ in 0..<100 {
+            if staleFake.callCount > 0 { break }
+            await Task.yield()
+        }
+        readinessStore.setGateway(url: "ws://new-gateway.example.test", token: "new-readiness-secret")
+        staleFake.release()
+        expect(await staleReadinessTask.value == false, "stale readiness response should be discarded")
+        expect(readinessStore.gatewayReadinessSummary.state != .attested, "stale readiness response must not overwrite current profile")
+        expect(staleFake.closeCount == 1, "stale readiness transport should close once")
+
         let staged = LocalArtifactValidator.validate(
             manifest: store.model.artifactManifest,
             presentFiles: Set(store.model.artifactManifest.requiredFiles)

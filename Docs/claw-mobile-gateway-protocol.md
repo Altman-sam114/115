@@ -484,6 +484,59 @@ metadata 只能包含安全摘要，不能放入浏览器正文、命令输出�
 8. 推 `actionCompleted`、`actionFailed`、`approvalRequested` 或 `actionSkipped`。
 9. 最后推 `sessionCompleted`。
 
+## v0.75 `claw.gateway.readiness.v1` 独立 Control Plane
+
+readiness 是与 `claw.computer.control.v1` 完全分离的用户显式、单次、只读 WebSocket control plane。连接只接受一条 text request，request body 的严格 key allowlist 是 `controlPlane`、`kind`、`requestNonce`，值固定为 `claw.gateway.readiness.v1`、`readinessRequest` 和 8...128 字节的 base64url/ASCII nonce。请求不携带 task、session、event、artifact、command、instruction、target、`toolArguments`、URL/path 或自然语言。
+
+运行时 token 只允许出现在 `Authorization: Bearer <token>` header；另有固定 `X-Claw-Control-Plane: claw.gateway.readiness.v1` 和设备 header。readiness 不发送 `X-Claw-Schema: claw.computer.control.v1`，不把 header/token 写入 body、summary、日志或 checkpoint。response 的固定 top-level keys 是：
+
+```json
+{
+  "controlPlane": "claw.gateway.readiness.v1",
+  "kind": "readinessResponse",
+  "requestNonce": "<same opaque nonce>",
+  "assessment": "capability-degraded",
+  "transport": "websocket-response",
+  "tokenHeader": "accepted-for-this-request",
+  "capabilities": {
+    "workspace": "workspace-only",
+    "shell": "dry-run",
+    "browserNetwork": "disabled",
+    "browserControl": "dry-run",
+    "screenCapture": "dry-run",
+    "windowMetadata": "dry-run",
+    "accessibilityObservation": "dry-run",
+    "desktopControl": "dry-run"
+  },
+  "policies": {
+    "structuredToolArguments": "enforced",
+    "actionAllowlist": "enforced",
+    "workspaceScope": "session-workspace-only",
+    "sensitiveApproval": "enforced",
+    "finalSubmit": "required",
+    "metadataRedaction": "enforced",
+    "taskExecution": "not-started"
+  },
+  "effects": {
+    "taskAccepted": false,
+    "sessionCreated": false,
+    "eventEmitted": false,
+    "artifactWritten": false,
+    "handlerInvoked": false
+  },
+  "redaction": {
+    "rawToken": "omitted",
+    "allowlistEntries": "omitted",
+    "workspacePath": "omitted",
+    "requestPayload": "fixed-only"
+  }
+}
+```
+
+`assessment` 只允许 `policy-ready`、`capability-degraded`、`policy-blocked`、`unavailable`；capability、policy、token header、redaction 也只能使用实现中固定枚举。`tokenHeader=accepted-for-this-request`、`policy-ready`、`configured` 或 `allowlisted` 都不表示 pairing、authorization、trusted、TCC/Accessibility 权限、浏览器控制成功、Shell 成功或动作成功。收到 response 后客户端验证固定 keys、枚举、同 nonce、全 false effects 和一次 request/response/close；未知字段、错误类型、nonce 不匹配、额外 message、超时、取消或 malformed response 均 fail closed，并只显示固定诊断。
+
+Gateway readiness handler 只读取进程内固定 capability/policy projector，且位于普通 envelope route 之前；它不调用 `validateEnvelope`、dispatch preflight、`makeGatewayEvents`、workspace/replay/session/event/artifact/auditLog/receipt writer 或任何 handler、Shell、浏览器、桌面动作。成功不会创建 task、session、workspace、replay record、event、artifact、receipt 或 checkpoint。它不是密码学 attestation、pairing、授权、信任建立、后台 heartbeat 或 macOS 控制器。
+
 ## 安全边界
 
 - iOS 端不能静默读取其他 App 收件箱，也不能控制桌面屏幕。
