@@ -158,12 +158,15 @@ v0.66 的可信跨任务续接把三种信任明确分开：v0.65 decision 只�
 
 receipt 不是授权或持久身份：固定 10 分钟 TTL、进程内最多 128 条、单次消费，Gateway 重启、过期、淘汰、并发复用或任一绑定不匹配都 fail closed。raw receipt 只允许存在于 live wire DTO、iOS 内存 vault、私有 frozen envelope 和 Gateway receipt cache；公开 envelope 固定显示 `receipt: omitted`，普通 event、artifact/metadata、UI/VoiceOver、日志、JUnit、failure summary 和 CI manifest 都不得保存原文。continuation 首次发送尝试后立即清理 iOS vault，并禁用普通任务的同-envelope 自动重连/重发；网络不确定时也不能复用该 receipt。v0.66 不做自动创建、自动审批、自动发送、自动重试 receipt、无人值守循环、跨进程/跨重启续接、父 workspace 复用或 Shell continuation。
 
+v0.71 为 `extractData` continuation 增加与 `manageFiles` 对称的 typed editor。用户只能编辑 `extractionGoal` 和 workspace 内安全相对 `outputPath`；`schema`、`sourcePriority`、`validateCompleteness` 与 exact key set 固定不变。客户端在 draft 编辑前后执行 exact-key、UTF-8 字节上限（goal/path 500、schema 1000）、NUL/绝对路径/`~`/反斜杠归一化逃逸/`..` segment 校验，Gateway 仍执行二次 preflight。安全 receipt 草稿合法编辑后才进入 `readyForApproval`，approval-gated 草稿始终 `needsApproval` 且无 receipt 派发路径；非法、stale、queued、冻结或已发送状态均 fail closed，不自动排队、审批、冻结、发送或刷新 receipt。本轮不增加 action、artifact、event、schema 或 WebSocket framing，也不读取或展示提取 payload。
+
 ## 运行
 
 打开 `Claw.xcodeproj`，选择 `Claw` scheme，在 iPhone 模拟器或真机运行。默认协作验证不在本机跑命令行编译、XCTest 或 smoke；命令行 build、真实 iPhone Simulator XCTest、Swift logic smoke、Gateway smoke 和 `node --check` 统一由 GitHub Actions workflow 执行。结果包始终保留 `xctest.log`（包含 simulator discovery 错误）；XCTest 成功时必须同时包含 `ClawTests.xcresult`，否则 packaging 失败。结果包还包含 manifest、JUnit、`xcodebuild.log` 和各 smoke 日志，并由 Agent C 下载复判。
 
 ## 完成情况
 
+- 2026-08-23：v0.71 ExtractData Continuation Typed Editor 已加入 `extractData` 的 goal/outputPath typed editor、固定策略校验、safe/approval-gated/locked 状态覆盖、Swift LogicSmoke/XCTest 和同步文档；本轮仅做本地非编译静态检查，commit、云端 run、artifact 与 Agent C 复判待 push 后产生，不能预写通过结论。
 - 2026-07-26：v0.66 Trusted Cross-Task Multi-Round Continuation 的工作区实现已包含 Swift、Gateway、测试、workflow 和文档改动，云端验收仍待提交后的最新 `origin/main` GitHub Actions artifact 与 Agent C 复判。受限闭环固定为父 safe decision 签发 10 分钟、128 条容量、单次、进程内 receipt；用户显式 draft -> queue -> approve/freeze -> send；child 新 task 在全部前置校验后用新 workspace 执行 selected action，再运行 `runAgentLoop`。审批型/最终提交/外部/破坏性/证据不足/无动作路径不可派发，raw receipt 和父 payload 不进入公开展示、普通事件、artifact 或日志；不预写 run、commit 或通过结论。
 - 2026-07-26：新增 v0.65 Agent Loop Selected Action Decision Contract。Gateway 为选中动作生成固定策略分支、候选数量/序位和一致性证据，风险与 handoff 只绑定实际选中项；Swift 对缺失、未知、越界或矛盾合同 fail closed，推荐仍需用户显式触发并重新通过全部 Gateway gate。
 - 2026-07-26：新增 v0.62 Agent Loop Envelope Allowlist Intersection。Gateway 推荐动作取 request、envelope 与固定支持种类的交集，空交集只返回 `none` 并 blocked handoff；双 smoke 覆盖全阻断和部分交集，手机/iPad 对未知、未授权或矛盾策略 metadata fail closed。推荐 metadata 不构成执行授权，真实动作仍经过 `actionPolicy`。

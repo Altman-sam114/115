@@ -2903,6 +2903,386 @@ enum LogicSmoke {
             failures.append("manageFiles continuation smoke fixture should produce a readyForInput draft")
         }
 
+        let extractDataRawToken = "extract-data-continuation-secret"
+        func makeExtractDataContinuationSmoke(
+            requiresApproval: Bool
+        ) -> (
+            store: ClawStore,
+            parentTask: ClawMobileTask,
+            parentSession: ClawGatewaySession,
+            draft: ClawContinuationDraft
+        )? {
+            let store = ClawStore(autoScanLocalArtifacts: false)
+            store.setGateway(url: "ws://127.0.0.1:18789", token: extractDataRawToken)
+            store.phoneAgentCommand = "打开浏览器采集证据后提取结构化数据"
+            store.generatePhoneAgentPlan()
+            store.queueClawMobileTaskFromCurrentPlan()
+            store.approveLatestClawMobileTask()
+            store.simulateSendLatestClawMobileTask()
+
+            guard let parentTask = store.clawMobileTasks.first,
+                  let parentSession = store.clawGatewaySessions.first,
+                  let traceAction = parentTask.actions.first(where: { $0.kind == .runAgentLoop }) else {
+                return nil
+            }
+            let trace = ClawGatewayArtifact(
+                kind: .agentTrace,
+                title: "trusted-extract-data-continuation-trace.json",
+                reference: "file:///omitted/trusted-extract-data-continuation-trace.json",
+                isRedacted: true,
+                metadata: [
+                    "readinessScore": "100",
+                    "readinessCanContinue": "true",
+                    "satisfiedSignals": "browserTrace,accessibilityTree",
+                    "degradedSignals": "",
+                    "missingSignals": "",
+                    "selectedNextActionKind": "extractData",
+                    "selectedNextActionRequiresApproval": requiresApproval ? "true" : "false",
+                    "nextActionPolicy": "envelope-intersection",
+                    "nextActionPolicyDiagnostic": "allowed",
+                    "requestedNextActionCount": "2",
+                    "effectiveNextActionCount": "2",
+                    "blockedNextActionCount": "0",
+                    "selectedNextActionAllowedByEnvelope": "true",
+                    "selectedActionDecisionPolicy": "evidence-first-safe-v1",
+                    "selectedActionDecisionReason": requiresApproval ? "approval-required-fallback" : "safe-without-approval",
+                    "selectedActionCandidateCount": "2",
+                    "selectedActionCandidateOrdinal": "1",
+                    "selectedActionFromCandidates": "true",
+                    "selectedActionDecisionConsistent": "true",
+                    "riskTags": requiresApproval ? "approval-required" : "",
+                    "stopReason": requiresApproval ? "approval-required" : "none",
+                    "handoffStatus": requiresApproval ? "waiting-for-approval" : "ready-to-continue"
+                ]
+            )
+            let traceSequence = (store.gatewayEvents.map(\.sequence).max() ?? 0) + 1
+            store.ingestGatewayEvents([
+                ClawGatewayEvent(
+                    sessionID: parentSession.id,
+                    taskID: parentTask.id,
+                    sequence: traceSequence,
+                    kind: .artifactStored,
+                    actionID: traceAction.id,
+                    actionKind: traceAction.kind,
+                    actionTitle: traceAction.title,
+                    resultStatus: .succeeded,
+                    summary: "Stored trusted extractData continuation trace",
+                    artifacts: [trace]
+                )
+            ])
+
+            if requiresApproval {
+                store.ingestGatewayEvents([
+                    ClawGatewayEvent(
+                        sessionID: parentSession.id,
+                        taskID: parentTask.id,
+                        sequence: traceSequence + 1,
+                        kind: .sessionCompleted,
+                        summary: "Gateway completed with approval-gated extractData continuation"
+                    )
+                ])
+            } else {
+                let review = ClawAgentTraceReviewSummary.latest(from: [trace])
+                guard let review else {
+                    return nil
+                }
+                let decisionDigest = review.continuationDecisionDigest(
+                    taskID: parentTask.id,
+                    sessionID: parentSession.id,
+                    artifactID: trace.id,
+                    round: 0
+                )
+                // Gateway parentSessionID is transport scope; local event sessionID is app scope.
+                let offer = ClawGatewayContinuationOffer(
+                    contract: ClawContinuationContract.receiptContract,
+                    receipt: String(repeating: "e", count: 43),
+                    expiresAt: Date.now.addingTimeInterval(300),
+                    parentTaskID: parentTask.id,
+                    parentSessionID: UUID(),
+                    parentAgentTraceArtifactID: trace.id,
+                    parentDecisionDigest: decisionDigest,
+                    parentRound: 0,
+                    selectedActionKind: .extractData
+                )
+                store.ingestGatewayWireEvents([
+                    ClawGatewayWireEvent(
+                        event: ClawGatewayEvent(
+                            sessionID: parentSession.id,
+                            taskID: parentTask.id,
+                            sequence: traceSequence + 1,
+                            kind: .sessionCompleted,
+                            summary: "Gateway completed with a private extractData continuation offer"
+                        ),
+                        continuationOffer: offer
+                    )
+                ])
+            }
+
+            store.prepareContinuationDraft(sourceTaskID: parentTask.id, sourceSessionID: parentSession.id)
+            guard let draft = store.continuationDraft else {
+                return nil
+            }
+            return (store, parentTask, parentSession, draft)
+        }
+
+        let validExtractDataArguments = ClawContinuationActionArguments.makeExtractDataArguments(
+            extractionGoal: "提取结构化证据",
+            outputPath: "reports/extracted.json"
+        )
+        expect(
+            Set(validExtractDataArguments.keys) == Set([
+                "extractionGoal", "outputPath", "schema", "sourcePriority", "validateCompleteness"
+            ]),
+            "extractData continuation should use an exact argument key set"
+        )
+        expect(
+            ClawContinuationActionArguments.validate(kind: .extractData, arguments: validExtractDataArguments).isEmpty,
+            "extractData continuation should accept the fixed valid policy"
+        )
+        expect(
+            validExtractDataArguments["sourcePriority"] == ClawContinuationActionArguments.extractDataSourcePriority &&
+                validExtractDataArguments["schema"] == ClawContinuationActionArguments.extractDataSchema &&
+                validExtractDataArguments["validateCompleteness"] == "true",
+            "extractData continuation should preserve fixed source schema and completeness policy"
+        )
+
+        let extractDataMarker = "extract-data-private-marker"
+        let invalidExtractDataArguments: [([String: String], String)] = [
+            (
+                ClawContinuationActionArguments.makeExtractDataArguments(extractionGoal: "", outputPath: "reports/data.json"),
+                "请输入提取目标。"
+            ),
+            (
+                ClawContinuationActionArguments.makeExtractDataArguments(extractionGoal: "goal", outputPath: "/private/data.json"),
+                "输出路径必须是 workspace 内的相对路径。"
+            ),
+            (
+                ClawContinuationActionArguments.makeExtractDataArguments(extractionGoal: "goal", outputPath: "~/data.json"),
+                "输出路径必须是 workspace 内的相对路径。"
+            ),
+            (
+                ClawContinuationActionArguments.makeExtractDataArguments(extractionGoal: "goal", outputPath: "C:\\tmp\\data.json"),
+                "输出路径必须是 workspace 内的相对路径。"
+            ),
+            (
+                ClawContinuationActionArguments.makeExtractDataArguments(extractionGoal: "goal", outputPath: "reports/../data.json"),
+                "输出路径必须是 workspace 内的相对路径。"
+            ),
+            (
+                ClawContinuationActionArguments.makeExtractDataArguments(extractionGoal: "goal", outputPath: "reports\\..\\data.json"),
+                "输出路径必须是 workspace 内的相对路径。"
+            ),
+            (
+                ClawContinuationActionArguments.makeExtractDataArguments(extractionGoal: "goal", outputPath: "\\~/data.json"),
+                "输出路径必须是 workspace 内的相对路径。"
+            ),
+            (
+                ClawContinuationActionArguments.makeExtractDataArguments(extractionGoal: "goal", outputPath: "reports\0data.json"),
+                "输出路径必须是 workspace 内的相对路径。"
+            ),
+            (
+                ClawContinuationActionArguments.makeExtractDataArguments(extractionGoal: "goal\0\(extractDataMarker)", outputPath: "reports/data.json"),
+                "请输入提取目标。"
+            ),
+            (
+                ClawContinuationActionArguments.makeExtractDataArguments(extractionGoal: String(repeating: "界", count: 167), outputPath: "reports/data.json"),
+                "提取参数长度超过限制。"
+            ),
+            (
+                ClawContinuationActionArguments.makeExtractDataArguments(extractionGoal: "goal", outputPath: String(repeating: "界", count: 167)),
+                "提取参数长度超过限制。"
+            )
+        ]
+        for (arguments, expectedMessage) in invalidExtractDataArguments {
+            let message = ClawContinuationActionArguments.validationMessage(kind: .extractData, arguments: arguments)
+            expect(
+                ClawContinuationActionArguments.validate(kind: .extractData, arguments: arguments).isEmpty == false,
+                "extractData continuation should reject invalid typed arguments"
+            )
+            expect(message == expectedMessage, "extractData continuation should expose a fixed validation message")
+            expect(message?.contains(extractDataMarker) == false, "extractData validation should redact input markers")
+        }
+        var unknownExtractDataKey = validExtractDataArguments
+        unknownExtractDataKey["unexpectedKey"] = extractDataMarker
+        expect(
+            ClawContinuationActionArguments.validationMessage(kind: .extractData, arguments: unknownExtractDataKey) == "提取参数包含不支持的字段。",
+            "extractData continuation should reject unknown keys"
+        )
+        var missingExtractDataKey = validExtractDataArguments
+        missingExtractDataKey.removeValue(forKey: "schema")
+        expect(
+            ClawContinuationActionArguments.validationMessage(kind: .extractData, arguments: missingExtractDataKey) == "提取参数包含不支持的字段。",
+            "extractData continuation should reject missing keys"
+        )
+        var changedExtractDataPolicy = validExtractDataArguments
+        changedExtractDataPolicy["schema"] = extractDataMarker
+        expect(
+            ClawContinuationActionArguments.validationMessage(kind: .extractData, arguments: changedExtractDataPolicy) == "提取参数不符合固定安全策略。",
+            "extractData continuation should reject fixed policy changes"
+        )
+        changedExtractDataPolicy = validExtractDataArguments
+        changedExtractDataPolicy["sourcePriority"] = extractDataMarker
+        expect(
+            ClawContinuationActionArguments.validationMessage(kind: .extractData, arguments: changedExtractDataPolicy) == "提取参数不符合固定安全策略。",
+            "extractData continuation should reject source priority changes"
+        )
+        var oversizedExtractDataSchema = validExtractDataArguments
+        oversizedExtractDataSchema["schema"] = String(repeating: "界", count: 334)
+        expect(
+            ClawContinuationActionArguments.validationMessage(kind: .extractData, arguments: oversizedExtractDataSchema) == "提取参数长度超过限制。",
+            "extractData continuation should reject schema over 1000 UTF-8 bytes"
+        )
+        let exactExtractDataBoundary = ClawContinuationActionArguments.makeExtractDataArguments(
+            extractionGoal: String(repeating: "x", count: 500),
+            outputPath: String(repeating: "p", count: 500)
+        )
+        expect(
+            ClawContinuationActionArguments.validate(kind: .extractData, arguments: exactExtractDataBoundary).isEmpty,
+            "extractData continuation should accept the 500-byte boundary"
+        )
+        let multibyteExtractDataBoundary = ClawContinuationActionArguments.makeExtractDataArguments(
+            extractionGoal: String(repeating: "界", count: 166),
+            outputPath: String(repeating: "界", count: 166)
+        )
+        expect(
+            multibyteExtractDataBoundary["extractionGoal"]?.utf8.count == 498 &&
+                multibyteExtractDataBoundary["outputPath"]?.utf8.count == 498 &&
+                ClawContinuationActionArguments.validate(kind: .extractData, arguments: multibyteExtractDataBoundary).isEmpty,
+            "extractData continuation should measure UTF-8 bytes"
+        )
+
+        if let extractFixture = makeExtractDataContinuationSmoke(requiresApproval: false) {
+            let extractStore = extractFixture.store
+            let parentTask = extractFixture.parentTask
+            let parentSession = extractFixture.parentSession
+            let draft = extractFixture.draft
+            let parentScope = extractStore.missionRunSummary.missionScopeID
+            let parentFocus = parentScope.map {
+                ClawMissionRunReviewFocus(scopeID: $0, reviewKind: "agent-trace")
+            }
+            let sourceDigest = draft.sourceDecisionDigest
+            let receiptHandle = draft.receiptHandle
+            let receiptExpiry = draft.receiptExpiresAt
+            let taskCount = extractStore.clawMobileTasks.count
+            let sessionCount = extractStore.clawGatewaySessions.count
+            let eventCount = extractStore.gatewayEvents.count
+
+            expect(draft.sourceSelectedActionKind == .extractData, "extractData continuation should select extractData")
+            expect(draft.state == .readyForApproval, "safe extractData continuation should be ready for approval")
+            expect(receiptHandle != nil, "safe extractData continuation should retain a receipt handle")
+            expect(extractStore.missionRunSummary.continuationDraft.extractionArguments.isVisible, "extractData editor should be visible")
+            expect(extractStore.missionRunSummary.continuationDraft.extractionArguments.isEditable, "extractData editor should be editable")
+            expect(extractStore.missionRunSummary.continuationDraft.extractionArguments.isValid, "default extractData arguments should be valid")
+
+            expect(
+                extractStore.updateContinuationExtractionArguments(
+                    extractionGoal: extractDataMarker,
+                    outputPath: "../\(extractDataMarker).json"
+                ) == false,
+                "extractData editor should reject unsafe input"
+            )
+            expect(extractStore.continuationDraft?.state == .readyForInput, "invalid extractData input should remain editable")
+            expect(
+                extractStore.missionRunSummary.continuationDraft.extractionArguments.validationMessage == "输出路径必须是 workspace 内的相对路径。",
+                "extractData editor should expose the fixed path validation message"
+            )
+            expect(extractStore.clawMobileTasks.count == taskCount, "invalid extractData input should not create a task")
+            expect(extractStore.clawGatewaySessions.count == sessionCount, "invalid extractData input should not create a session")
+            expect(extractStore.gatewayEvents.count == eventCount, "invalid extractData input should not emit an event")
+            expect(extractStore.continuationDraft?.receiptHandle == receiptHandle, "invalid extractData input should not consume the receipt")
+
+            expect(
+                extractStore.updateContinuationExtractionArguments(
+                    extractionGoal: "提取来源、摘要和置信度",
+                    outputPath: "reports/continuation-data.json"
+                ),
+                "valid extractData input should be accepted"
+            )
+            expect(extractStore.continuationDraft?.state == .readyForApproval, "valid safe extractData input should be ready for approval")
+            expect(extractStore.continuationDraft?.sourceDecisionDigest == sourceDigest, "extractData edit should preserve decision digest")
+            expect(extractStore.continuationDraft?.receiptHandle == receiptHandle, "extractData edit should preserve receipt handle")
+            expect(extractStore.continuationDraft?.receiptExpiresAt == receiptExpiry, "extractData edit should preserve receipt expiry")
+            expect(extractStore.missionRunSummary.taskID == parentTask.id, "extractData edit should preserve parent task scope")
+            expect(extractStore.missionRunSummary.sessionID == parentSession.id, "extractData edit should preserve parent session scope")
+            expect(extractStore.missionRunSummary.missionScopeID == parentScope, "extractData edit should preserve Mission scope")
+            if let parentFocus {
+                expect(
+                    extractStore.missionRunSummary.activeReviewFocus(from: parentFocus) == "agent-trace",
+                    "extractData edit should preserve review focus"
+                )
+            } else {
+                failures.append("extractData continuation should expose parent review scope")
+            }
+
+            if let childTaskID = extractStore.queueContinuationDraft(id: draft.id),
+               let childTask = extractStore.clawMobileTasks.first(where: { $0.id == childTaskID }) {
+                expect(childTask.actions.map(\.kind) == [.extractData, .runAgentLoop], "extractData child actions should be ordered selected action then loop")
+                expect(extractStore.missionRunSummary.continuationDraft.extractionArguments.isVisible == false, "queued extractData editor should be locked")
+                expect(
+                    extractStore.updateContinuationExtractionArguments(
+                        extractionGoal: "late edit",
+                        outputPath: "reports/late.json"
+                    ) == false,
+                    "queued extractData editor should reject edits"
+                )
+                expect(extractStore.lastClawMobileEnvelope.contains(extractDataRawToken) == false, "extractData envelope should redact the raw token")
+            } else {
+                failures.append("safe extractData continuation should queue a child task")
+            }
+        } else {
+            failures.append("safe extractData continuation smoke fixture should produce a draft")
+        }
+
+        if let approvalExtractFixture = makeExtractDataContinuationSmoke(requiresApproval: true) {
+            let approvalStore = approvalExtractFixture.store
+            let draft = approvalExtractFixture.draft
+            let taskCount = approvalStore.clawMobileTasks.count
+            let eventCount = approvalStore.gatewayEvents.count
+            expect(draft.state == .needsApproval, "approval-gated extractData continuation should stay needsApproval")
+            expect(draft.receiptHandle == nil, "approval-gated extractData continuation should not have a receipt")
+            expect(
+                approvalStore.updateContinuationExtractionArguments(
+                    extractionGoal: "人工复核后的提取目标",
+                    outputPath: "reports/approval-gated.json"
+                ),
+                "approval-gated extractData editor should accept valid input"
+            )
+            expect(approvalStore.continuationDraft?.state == .needsApproval, "valid approval-gated extractData input should remain needsApproval")
+            expect(approvalStore.continuationDraft?.validationIssues == [.approvalRequired], "approval-gated extractData should retain approval requirement")
+            expect(approvalStore.continuationDraft?.receiptHandle == nil, "editing approval-gated extractData should not create a receipt")
+            expect(approvalStore.queueContinuationDraft(id: draft.id) == nil, "approval-gated extractData should not queue")
+            expect(approvalStore.clawMobileTasks.count == taskCount, "approval-gated extractData should not create a child")
+            expect(
+                approvalStore.updateContinuationExtractionArguments(
+                    extractionGoal: extractDataMarker,
+                    outputPath: "../\(extractDataMarker).json"
+                ) == false,
+                "approval-gated extractData should reject unsafe edits"
+            )
+            expect(approvalStore.continuationDraft?.state == .readyForInput, "invalid approval-gated extractData should remain editable")
+            expect(approvalStore.continuationDraft?.validationIssues == [.approvalRequired, .invalidArguments], "approval gate should remain on invalid extractData input")
+            expect(approvalStore.gatewayEvents.count == eventCount, "approval-gated extractData editing should not emit events")
+            expect(approvalStore.lastClawMobileEnvelope.contains(extractDataMarker) == false, "extractData editor should redact markers from the envelope")
+        } else {
+            failures.append("approval-gated extractData continuation smoke fixture should produce a draft")
+        }
+
+        if let staleExtractFixture = makeExtractDataContinuationSmoke(requiresApproval: false) {
+            let staleStore = staleExtractFixture.store
+            staleStore.setGateway(url: "ws://127.0.0.1:18789", token: "changed-extract-data-secret")
+            expect(staleStore.continuationDraft?.state == .stale, "profile changes should stale an extractData draft")
+            expect(staleStore.missionRunSummary.continuationDraft.extractionArguments.isVisible == false, "stale extractData editor should be hidden")
+            expect(
+                staleStore.updateContinuationExtractionArguments(
+                    extractionGoal: "stale edit",
+                    outputPath: "reports/stale.json"
+                ) == false,
+                "stale extractData editor should reject edits"
+            )
+        } else {
+            failures.append("stale extractData continuation smoke fixture should produce a draft")
+        }
+
         let sensitiveAgentTrace = ClawGatewayArtifact(
             kind: .agentTrace,
             title: "agent-loop file:///private/tmp/trace.json",

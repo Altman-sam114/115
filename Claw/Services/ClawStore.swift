@@ -1549,6 +1549,48 @@ final class ClawStore: ObservableObject {
     }
 
     @discardableResult
+    func updateContinuationExtractionArguments(extractionGoal: String, outputPath: String) -> Bool {
+        guard var draft = continuationDraft,
+              draft.childTaskID == nil,
+              draft.sourceSelectedActionKind == .extractData,
+              draft.state == .readyForInput || draft.state == .readyForApproval || draft.state == .needsApproval else {
+            return false
+        }
+        guard validateContinuationSource(draft) else {
+            invalidateContinuationAuthorization(reason: .sourceTraceChanged)
+            return false
+        }
+        guard clawGatewayProfile.allowedActionKinds.contains(.extractData) else {
+            invalidateContinuationAuthorization(reason: .actionNotAllowed)
+            return false
+        }
+        if let issue = continuationEditingAuthorizationIssue(for: draft) {
+            invalidateContinuationAuthorization(reason: issue)
+            return false
+        }
+
+        let arguments = ClawContinuationActionArguments.makeExtractDataArguments(
+            extractionGoal: extractionGoal,
+            outputPath: outputPath
+        )
+        draft.proposedAction.toolArguments = arguments
+        let parameterIssues = ClawContinuationActionArguments.validate(
+            kind: .extractData,
+            arguments: arguments
+        )
+        if draft.sourceSelectedActionRequiresApproval {
+            draft.validationIssues = Array(Set(parameterIssues + [.approvalRequired])).sorted { $0.rawValue < $1.rawValue }
+            draft.state = parameterIssues.isEmpty ? .needsApproval : .readyForInput
+        } else {
+            draft.validationIssues = parameterIssues
+            draft.state = parameterIssues.isEmpty ? .readyForApproval : .readyForInput
+        }
+        draft.updatedAt = Date.now
+        continuationDraft = draft
+        return parameterIssues.isEmpty
+    }
+
+    @discardableResult
     func queueContinuationDraft(id: UUID) -> UUID? {
         guard var draft = continuationDraft,
               draft.id == id else {
@@ -2189,6 +2231,37 @@ final class ClawStore: ObservableObject {
         }
     }
 
+    private func continuationEditingAuthorizationIssue(
+        for draft: ClawContinuationDraft
+    ) -> ClawContinuationValidationIssue? {
+        guard draft.proposedAction.kind == draft.sourceSelectedActionKind,
+              draft.proposedAction.approval == .userConfirmation else {
+            return .sourceScopeMismatch
+        }
+        if let handle = draft.receiptHandle {
+            guard let entry = continuationReceipts[handle] else {
+                return .missingReceipt
+            }
+            guard entry.offer.expiresAt > Date.now else {
+                return .receiptExpired
+            }
+            let offer = entry.offer
+            guard offer.hasValidShape,
+                  offer.parentTaskID == draft.sourceTaskID,
+                  entry.localSessionID == draft.sourceSessionID,
+                  offer.parentAgentTraceArtifactID == draft.sourceAgentTraceArtifactID,
+                  offer.parentDecisionDigest == draft.sourceDecisionDigest,
+                  offer.parentRound == draft.sourceRound,
+                  offer.selectedActionKind == draft.sourceSelectedActionKind,
+                  draft.receiptExpiresAt == offer.expiresAt else {
+                return .sourceScopeMismatch
+            }
+        } else if draft.sourceSelectedActionRequiresApproval == false {
+            return .missingReceipt
+        }
+        return nil
+    }
+
     private func validateContinuationSource(_ draft: ClawContinuationDraft) -> Bool {
         guard let task = clawMobileTasks.first(where: { $0.id == draft.sourceTaskID }),
               let session = clawGatewaySessions.first(where: {
@@ -2197,6 +2270,12 @@ final class ClawStore: ObservableObject {
               session.updatedAt == draft.sourceSessionUpdatedAt,
               let review = ClawAgentTraceReviewSummary.latest(from: session),
               review.latestArtifactID == draft.sourceAgentTraceArtifactID else {
+            return false
+        }
+        let expectedEligibility: ClawContinuationEligibility = draft.sourceSelectedActionRequiresApproval
+            ? .needsApproval(draft.sourceSelectedActionKind)
+            : .ready(draft.sourceSelectedActionKind)
+        guard review.continuationEligibility == expectedEligibility else {
             return false
         }
         let round = task.continuationLineage?.childRound ?? 0
@@ -2316,6 +2395,36 @@ final class ClawStore: ObservableObject {
         )
     }
 
+    private func continuationExtractionArgumentsPresentation(
+        draft: ClawContinuationDraft,
+        state: ClawContinuationDraftState
+    ) -> ClawContinuationExtractionArgumentsPresentationSummary {
+        guard draft.sourceSelectedActionKind == .extractData else {
+            return .unavailable
+        }
+        let isEditable = draft.childTaskID == nil &&
+            (state == .readyForInput || state == .readyForApproval || state == .needsApproval)
+        guard isEditable else {
+            return .unavailable
+        }
+        let arguments = draft.proposedAction.toolArguments
+        let validationMessage = ClawContinuationActionArguments.validationMessage(
+            kind: .extractData,
+            arguments: arguments
+        )
+        return ClawContinuationExtractionArgumentsPresentationSummary(
+            extractionGoal: arguments["extractionGoal"] ?? "",
+            outputPath: arguments["outputPath"] ?? "",
+            validationMessage: validationMessage,
+            isValid: validationMessage == nil && ClawContinuationActionArguments.validate(
+                kind: .extractData,
+                arguments: arguments
+            ).isEmpty,
+            isEditable: isEditable,
+            isVisible: isEditable
+        )
+    }
+
     private func continuationDraftPresentation(
         task: ClawMobileTask?,
         session: ClawGatewaySession?,
@@ -2351,6 +2460,7 @@ final class ClawStore: ObservableObject {
                 action = (nil, nil, false)
             }
             let fileArguments = continuationFileArgumentsPresentation(draft: draft, state: state)
+            let extractionArguments = continuationExtractionArgumentsPresentation(draft: draft, state: state)
             let status: String
             let guidance: String
             switch state {
@@ -2396,7 +2506,8 @@ final class ClawStore: ObservableObject {
                 requiresHumanAction: state != .sent,
                 hasMetadataGap: draft.validationIssues.contains(.invalidDecision),
                 isVisible: true,
-                fileArguments: fileArguments
+                fileArguments: fileArguments,
+                extractionArguments: extractionArguments
             )
         }
 
@@ -3212,6 +3323,16 @@ enum PhoneAgentPlanner {
 }
 
 enum ClawContinuationActionArguments {
+    static let extractDataSourcePriority = "browserTrace,accessibilityTree,commandOutput,fileDiff,screenObservation"
+    static let extractDataSchema = "title:string,source:string,summary:string,confidence:number"
+    private static let extractDataKeys: Set<String> = [
+        "extractionGoal",
+        "outputPath",
+        "schema",
+        "sourcePriority",
+        "validateCompleteness"
+    ]
+
     struct Proposal {
         var action: ClawMobileAction
         var issues: [ClawContinuationValidationIssue]
@@ -3253,13 +3374,10 @@ enum ClawContinuationActionArguments {
                 "writeText": sourceText.contains("placeholder") ? "" : sourceText
             ]
         case .extractData:
-            arguments = [
-                "extractionGoal": cleanObjective,
-                "sourcePriority": "browserTrace,accessibilityTree,commandOutput,fileDiff,screenObservation",
-                "schema": "title:string,source:string,summary:string,confidence:number",
-                "outputPath": "claw-output/continuation-extracted-data.json",
-                "validateCompleteness": "true"
-            ]
+            arguments = makeExtractDataArguments(
+                extractionGoal: cleanObjective,
+                outputPath: "claw-output/continuation-extracted-data.json"
+            )
         case .operateDesktopApp:
             arguments = [
                 "targetApp": sourceArguments["targetApp"] ?? "",
@@ -3303,12 +3421,47 @@ enum ClawContinuationActionArguments {
         ]
     }
 
+    static func makeExtractDataArguments(extractionGoal: String, outputPath: String) -> [String: String] {
+        [
+            "extractionGoal": extractionGoal.trimmingCharacters(in: .whitespacesAndNewlines),
+            "outputPath": outputPath.trimmingCharacters(in: .whitespacesAndNewlines),
+            "schema": extractDataSchema,
+            "sourcePriority": extractDataSourcePriority,
+            "validateCompleteness": "true"
+        ]
+    }
+
     static func validationMessage(
         kind: ClawMobileActionKind,
         arguments: [String: String]
     ) -> String? {
         guard validate(kind: kind, arguments: arguments).isEmpty == false else {
             return nil
+        }
+        if kind == .extractData {
+            guard Set(arguments.keys) == extractDataKeys else {
+                return "提取参数包含不支持的字段。"
+            }
+            guard nonempty(arguments["extractionGoal"]) else {
+                return "请输入提取目标。"
+            }
+            guard nonempty(arguments["outputPath"]) else {
+                return "请输入 workspace 相对输出路径。"
+            }
+            guard isSafeExtractDataWorkspacePath(arguments["outputPath"]) else {
+                return "输出路径必须是 workspace 内的相对路径。"
+            }
+            guard bounded(arguments["extractionGoal"], 500),
+                  bounded(arguments["outputPath"], 500),
+                  bounded(arguments["schema"], 1_000) else {
+                return "提取参数长度超过限制。"
+            }
+            guard arguments["sourcePriority"] == extractDataSourcePriority,
+                  arguments["schema"] == extractDataSchema,
+                  arguments["validateCompleteness"] == "true" else {
+                return "提取参数不符合固定安全策略。"
+            }
+            return "提取参数需要重新复核。"
         }
         guard kind == .manageFiles else {
             return "续接参数需要重新复核。"
@@ -3419,8 +3572,27 @@ enum ClawContinuationActionArguments {
         default:
             return [.unsupportedSelectedAction]
         }
-        let bounded = arguments.values.allSatisfy { $0.utf8.count <= 4_096 }
-        return valid && bounded && Set(arguments.keys).isSubset(of: allowedKeys) ? [] : [.invalidArguments]
+        let allValuesBounded = arguments.values.allSatisfy { $0.utf8.count <= 4_096 }
+        if kind == .extractData {
+            let exactKeys = Set(arguments.keys) == extractDataKeys
+            let goal = arguments["extractionGoal"]
+            let outputPath = arguments["outputPath"]
+            let schema = arguments["schema"]
+            let fixedPolicy = arguments["sourcePriority"] == extractDataSourcePriority &&
+                arguments["schema"] == extractDataSchema &&
+                arguments["validateCompleteness"] == "true"
+            let strictBounds = bounded(
+                goal,
+                500
+            ) && bounded(outputPath, 500) && bounded(schema, 1_000)
+            let strictValid = nonempty(goal) &&
+                nonempty(outputPath) &&
+                isSafeExtractDataWorkspacePath(outputPath) &&
+                fixedPolicy &&
+                strictBounds
+            return exactKeys && strictValid ? [] : [.invalidArguments]
+        }
+        return valid && allValuesBounded && Set(arguments.keys).isSubset(of: allowedKeys) ? [] : [.invalidArguments]
     }
 
     static func validateLoop(_ arguments: [String: String]) -> [ClawContinuationValidationIssue] {
@@ -3456,7 +3628,12 @@ enum ClawContinuationActionArguments {
 
     private static func nonempty(_ value: String?) -> Bool {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return trimmed.isEmpty == false
+        return trimmed.isEmpty == false && trimmed.contains("\0") == false
+    }
+
+    private static func bounded(_ value: String?, _ maximum: Int) -> Bool {
+        guard let value else { return false }
+        return value.contains("\0") == false && value.utf8.count <= maximum
     }
 
     private static func bool(_ value: String?) -> Bool {
@@ -3475,6 +3652,23 @@ enum ClawContinuationActionArguments {
             trimmed.hasPrefix("/") == false &&
             trimmed.hasPrefix("~") == false &&
             trimmed.split(separator: "/").contains("..") == false
+    }
+
+    private static func isSafeExtractDataWorkspacePath(_ value: String?) -> Bool {
+        guard let value else { return false }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalized = trimmed.replacingOccurrences(of: "\\", with: "/")
+        guard trimmed.isEmpty == false,
+              trimmed.contains("\0") == false,
+              trimmed.hasPrefix("/") == false,
+              trimmed.hasPrefix("~") == false,
+              normalized.hasPrefix("/") == false,
+              normalized.hasPrefix("~") == false,
+              normalized.range(of: "^[A-Za-z]:", options: .regularExpression) == nil else {
+            return false
+        }
+        let segments = normalized.split(separator: "/", omittingEmptySubsequences: false)
+        return segments.isEmpty == false && segments.contains { $0 == ".." } == false
     }
 }
 

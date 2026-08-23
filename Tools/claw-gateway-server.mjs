@@ -19,6 +19,8 @@ const CONTINUATION_LINEAGE_CONTRACT = "claw.continuation.lineage.v1";
 const CONTINUATION_RECEIPT_CONTRACT = "claw.continuation.receipt.v1";
 const CONTINUATION_DECISION_POLICY = "evidence-first-safe-v1";
 const CONTINUATION_DECISION_REASON = "safe-without-approval";
+const EXTRACT_DATA_SOURCE_PRIORITY = "browserTrace,accessibilityTree,commandOutput,fileDiff,screenObservation";
+const EXTRACT_DATA_SCHEMA = "title:string,source:string,summary:string,confidence:number";
 const CONTINUATION_ACTION_KINDS = new Set([
   "observeScreen",
   "controlBrowser",
@@ -902,11 +904,16 @@ function validateContinuationActionArguments(action, config) {
       break;
     case "extractData":
       requireExactArgumentKeys(args, ["extractionGoal", "outputPath", "schema", "sourcePriority", "validateCompleteness"]);
-      requireBoundedText(args.extractionGoal, 1, 500);
+      requireBoundedUTF8Text(args.extractionGoal, 1, 500);
+      requireBoundedUTF8Text(args.outputPath, 1, 500);
       requireSafeRelativePath(args.outputPath);
-      requireBoundedText(args.schema, 1, 1000);
-      if (args.validateCompleteness !== "true") throw new GatewayError(400, "continuation_action_arguments_invalid");
-      validateSourcePriority(args.sourcePriority);
+      if (
+        args.schema !== EXTRACT_DATA_SCHEMA ||
+        args.sourcePriority !== EXTRACT_DATA_SOURCE_PRIORITY ||
+        args.validateCompleteness !== "true"
+      ) {
+        throw new GatewayError(400, "continuation_action_arguments_invalid");
+      }
       break;
     case "operateDesktopApp":
     case "composeMessage":
@@ -1211,6 +1218,17 @@ function requireBoundedText(value, min, max) {
   }
 }
 
+function requireBoundedUTF8Text(value, min, max) {
+  if (
+    typeof value !== "string" ||
+    value.trim().length < min ||
+    Buffer.byteLength(value, "utf8") > max ||
+    value.includes("\0")
+  ) {
+    throw new GatewayError(400, "continuation_action_arguments_invalid");
+  }
+}
+
 function requireBooleanString(value) {
   if (value !== "true" && value !== "false") throw new GatewayError(400, "continuation_action_arguments_invalid");
 }
@@ -1223,16 +1241,17 @@ function requireIntegerString(value, min, max) {
 
 function requireSafeRelativePath(value) {
   requireBoundedText(value, 1, 500);
-  const normalized = path.posix.normalize(value.replace(/\\/g, "/"));
-  if (path.isAbsolute(value) || normalized === ".." || normalized.startsWith("../") || normalized.includes("\0")) {
-    throw new GatewayError(400, "continuation_action_arguments_invalid");
-  }
-}
-
-function validateSourcePriority(value) {
-  const allowed = new Set(["browserTrace", "accessibilityTree", "fileDiff", "commandOutput", "screenObservation"]);
-  const sources = parseCSV(value);
-  if (sources.length === 0 || sources.length > 5 || sources.some((source) => !allowed.has(source))) {
+  const trimmed = value.trim();
+  const normalized = trimmed.replace(/\\/g, "/");
+  const segments = normalized.split("/");
+  if (
+    path.isAbsolute(trimmed) ||
+    normalized.startsWith("/") ||
+    normalized.startsWith("~") ||
+    /^[A-Za-z]:/.test(normalized) ||
+    segments.includes("..") ||
+    normalized.includes("\0")
+  ) {
     throw new GatewayError(400, "continuation_action_arguments_invalid");
   }
 }

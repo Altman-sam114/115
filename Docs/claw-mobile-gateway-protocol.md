@@ -119,6 +119,8 @@ v0.11 起，Gateway Session 面板在 Live request 附近展示连接健康摘�
 
 v0.70 的 Gateway 配对诊断仍是客户端 presentation-only 摘要，不是新的握手协议。`ClawGatewayPairingDiagnosticsSummary` 只从既有 profile、runtime token 状态、`ClawGatewayLiveRequest`、当前 task/session、连接状态和脱敏事件派生，明确区分 `canAttemptLive` 与匹配当前 task/session 的真实 ack；endpoint 只显示安全 display，token 只显示短指纹。`ClawGatewayResumeIntentPresentationSummary` 只允许用户记录短生命周期内存意图，并绑定当前 scope、profile digest、session revision 和 continuation authorization fingerprint；任何 stale/mismatch、receipt 状态变化或 profile 变化都会关闭入口。该切片不增加 `claw.computer.control.v1` 字段，不改变 WebSocket framing、transport/replay/receipt/approval 合同，不把 intent 当成 receipt，也不自动发送、审批、重试、刷新 receipt 或跨重启恢复。
 
+v0.71 的 `extractData` continuation editor 仍是客户端 presentation/store 能力，不增加 action、artifact、event、schema 字段或 WebSocket framing。编辑器只提交 exact key set：`extractionGoal`、`outputPath`、`schema`、`sourcePriority`、`validateCompleteness`；只有前两个字段可编辑，后面三项固定为 `title:string,source:string,summary:string,confidence:number`、`browserTrace,accessibilityTree,commandOutput,fileDiff,screenObservation` 和 `true`。客户端要求 goal/path 各不超过 500 UTF-8 bytes、schema 不超过 1000 UTF-8 bytes，并拒绝空值、NUL、绝对路径、`~`、反斜杠归一化后的路径逃逸和 `..` path segment；Gateway continuation preflight 仍对 exact keys、有界文本、source-priority allowlist、completeness 和 workspace 相对路径再次校验。非法编辑只返回固定脱敏提示并保持 `readyForInput`；safe-without-approval + 有效 receipt 才能进入 `readyForApproval`，approval-gated 仍是 `needsApproval` 且不创建 receipt 或派发路径。queue、approve/freeze、send、stale 或 profile/scope/trace/receipt 变化后编辑入口关闭；不会自动 queue、approve、send、retry 或刷新 receipt，也不读取提取 artifact payload。
+
 失败动作可以标记 `isRetryable`。手机端二次确认后，网关可重试失败动作并把新的 artifact 追加到对应 result。
 
 ## Mission Run Presentation Layer

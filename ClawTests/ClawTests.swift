@@ -2673,6 +2673,51 @@ final class ClawTests: XCTestCase {
         let draft = try XCTUnwrap(store.continuationDraft)
         XCTAssertEqual(draft.state, .readyForApproval)
         XCTAssertEqual(draft.sourceSessionID, localSession.id)
+        let sourceDigest = draft.sourceDecisionDigest
+        let receiptHandle = draft.receiptHandle
+        let receiptExpiry = draft.receiptExpiresAt
+        let taskCount = store.clawMobileTasks.count
+        let sessionCount = store.clawGatewaySessions.count
+        let eventCount = store.gatewayEvents.count
+        let defaultExtraction = store.missionRunSummary.continuationDraft.extractionArguments
+        XCTAssertTrue(defaultExtraction.isVisible)
+        XCTAssertTrue(defaultExtraction.isEditable)
+        XCTAssertTrue(defaultExtraction.isValid)
+        XCTAssertEqual(defaultExtraction.validationMessage, nil)
+        XCTAssertEqual(draft.proposedAction.toolArguments["sourcePriority"], ClawContinuationActionArguments.extractDataSourcePriority)
+        XCTAssertEqual(draft.proposedAction.toolArguments["schema"], ClawContinuationActionArguments.extractDataSchema)
+        XCTAssertEqual(draft.proposedAction.toolArguments["validateCompleteness"], "true")
+
+        XCTAssertFalse(store.updateContinuationExtractionArguments(
+            extractionGoal: "private-marker-goal",
+            outputPath: "../private-marker.json"
+        ))
+        XCTAssertEqual(store.continuationDraft?.state, .readyForInput)
+        XCTAssertEqual(store.clawMobileTasks.count, taskCount)
+        XCTAssertEqual(store.clawGatewaySessions.count, sessionCount)
+        XCTAssertEqual(store.gatewayEvents.count, eventCount)
+        XCTAssertNil(store.continuationDraft?.childTaskID)
+        XCTAssertEqual(
+            store.missionRunSummary.continuationDraft.extractionArguments.validationMessage,
+            "输出路径必须是 workspace 内的相对路径。"
+        )
+        XCTAssertFalse(
+            store.missionRunSummary.continuationDraft.extractionArguments.validationMessage?.contains("private-marker") == true
+        )
+
+        XCTAssertTrue(store.updateContinuationExtractionArguments(
+            extractionGoal: "提取来源、摘要和置信度",
+            outputPath: "reports/continuation-data.json"
+        ))
+        let editedDraft = try XCTUnwrap(store.continuationDraft)
+        XCTAssertEqual(editedDraft.state, .readyForApproval)
+        XCTAssertEqual(editedDraft.sourceDecisionDigest, sourceDigest)
+        XCTAssertEqual(editedDraft.receiptHandle, receiptHandle)
+        XCTAssertEqual(editedDraft.receiptExpiresAt, receiptExpiry)
+        XCTAssertEqual(editedDraft.proposedAction.toolArguments["sourcePriority"], ClawContinuationActionArguments.extractDataSourcePriority)
+        XCTAssertEqual(editedDraft.proposedAction.toolArguments["schema"], ClawContinuationActionArguments.extractDataSchema)
+        XCTAssertEqual(editedDraft.proposedAction.toolArguments["validateCompleteness"], "true")
+        XCTAssertTrue(store.missionRunSummary.continuationDraft.extractionArguments.isValid)
 
         let childTaskID = try XCTUnwrap(store.queueContinuationDraft(id: draft.id))
         let childTask = try XCTUnwrap(store.clawMobileTasks.first(where: { $0.id == childTaskID }))
@@ -2682,6 +2727,13 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(childTask.actions.map(\.kind), [.extractData, .runAgentLoop])
         XCTAssertEqual(Set(childTask.actions.map(\.id)).count, 2)
         XCTAssertTrue(Set(childTask.actions.map(\.id)).isDisjoint(with: Set(parentTask.actions.map(\.id))))
+        XCTAssertEqual(childTask.actions[0].toolArguments["extractionGoal"], "提取来源、摘要和置信度")
+        XCTAssertEqual(childTask.actions[0].toolArguments["outputPath"], "reports/continuation-data.json")
+        XCTAssertFalse(store.missionRunSummary.continuationDraft.extractionArguments.isVisible)
+        XCTAssertFalse(store.updateContinuationExtractionArguments(
+            extractionGoal: "late edit",
+            outputPath: "reports/late.json"
+        ))
         XCTAssertFalse(store.lastClawMobileEnvelope.contains(rawReceipt))
         XCTAssertTrue(store.lastClawMobileEnvelope.contains("\"lineage\""))
         XCTAssertFalse(store.lastClawMobileEnvelope.contains("continuationLineage"))
@@ -2689,6 +2741,10 @@ final class ClawTests: XCTestCase {
         store.approveTask(id: childTaskID)
         XCTAssertEqual(store.clawMobileTasks.first(where: { $0.id == childTaskID })?.status, .readyToSend)
         XCTAssertEqual(store.continuationDraft?.state, .approvedFrozen)
+        XCTAssertFalse(store.updateContinuationExtractionArguments(
+            extractionGoal: "frozen edit",
+            outputPath: "reports/frozen.json"
+        ))
         XCTAssertFalse(store.lastClawMobileEnvelope.contains(rawReceipt))
 
         store.approveTask(id: childTaskID)
@@ -2699,7 +2755,87 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(store.clawMobileTasks.first(where: { $0.id == childTaskID })?.status, .sent)
         XCTAssertEqual(store.continuationDraft?.state, .sent)
         XCTAssertNotNil(store.lastGatewayLiveRequest)
+        XCTAssertFalse(store.updateContinuationExtractionArguments(
+            extractionGoal: "sent edit",
+            outputPath: "reports/sent.json"
+        ))
         XCTAssertFalse(store.lastClawMobileEnvelope.contains(rawReceipt))
+    }
+
+    func testContinuationExtractDataArgumentsUseExactFixedPolicy() {
+        let valid = ClawContinuationActionArguments.makeExtractDataArguments(
+            extractionGoal: "提取结构化证据",
+            outputPath: "reports/extracted.json"
+        )
+        XCTAssertEqual(Set(valid.keys), Set([
+            "extractionGoal", "outputPath", "schema", "sourcePriority", "validateCompleteness"
+        ]))
+        XCTAssertTrue(ClawContinuationActionArguments.validate(kind: .extractData, arguments: valid).isEmpty)
+        XCTAssertNil(ClawContinuationActionArguments.validationMessage(kind: .extractData, arguments: valid))
+
+        let privateMarker = "private-marker"
+        let invalidCases: [([String: String], String)] = [
+            (ClawContinuationActionArguments.makeExtractDataArguments(extractionGoal: "", outputPath: "reports/data.json"), "请输入提取目标。"),
+            (ClawContinuationActionArguments.makeExtractDataArguments(extractionGoal: "goal", outputPath: ""), "请输入 workspace 相对输出路径。"),
+            (ClawContinuationActionArguments.makeExtractDataArguments(extractionGoal: "goal", outputPath: "/private/tmp/data.json"), "输出路径必须是 workspace 内的相对路径。"),
+            (ClawContinuationActionArguments.makeExtractDataArguments(extractionGoal: "goal", outputPath: "~/data.json"), "输出路径必须是 workspace 内的相对路径。"),
+            (ClawContinuationActionArguments.makeExtractDataArguments(extractionGoal: "goal", outputPath: "C:\\tmp\\data.json"), "输出路径必须是 workspace 内的相对路径。"),
+            (ClawContinuationActionArguments.makeExtractDataArguments(extractionGoal: "goal", outputPath: "reports/../data.json"), "输出路径必须是 workspace 内的相对路径。"),
+            (ClawContinuationActionArguments.makeExtractDataArguments(extractionGoal: "goal", outputPath: "reports\\..\\data.json"), "输出路径必须是 workspace 内的相对路径。"),
+            (ClawContinuationActionArguments.makeExtractDataArguments(extractionGoal: "goal", outputPath: "\\~/data.json"), "输出路径必须是 workspace 内的相对路径。"),
+            (ClawContinuationActionArguments.makeExtractDataArguments(extractionGoal: "goal", outputPath: "reports\0data.json"), "输出路径必须是 workspace 内的相对路径。"),
+            (ClawContinuationActionArguments.makeExtractDataArguments(extractionGoal: "goal\0\(privateMarker)", outputPath: "reports/data.json"), "请输入提取目标。"),
+            (ClawContinuationActionArguments.makeExtractDataArguments(extractionGoal: String(repeating: "界", count: 167), outputPath: "reports/data.json"), "提取参数长度超过限制。"),
+            (ClawContinuationActionArguments.makeExtractDataArguments(extractionGoal: "goal", outputPath: String(repeating: "界", count: 167)), "提取参数长度超过限制。")
+        ]
+        for (arguments, expectedMessage) in invalidCases {
+            XCTAssertFalse(ClawContinuationActionArguments.validate(kind: .extractData, arguments: arguments).isEmpty)
+            let message = ClawContinuationActionArguments.validationMessage(kind: .extractData, arguments: arguments)
+            XCTAssertEqual(message, expectedMessage)
+            XCTAssertFalse(message?.contains(privateMarker) == true)
+        }
+
+        var unknownKey = valid
+        unknownKey["unexpectedKey"] = privateMarker
+        XCTAssertEqual(
+            ClawContinuationActionArguments.validationMessage(kind: .extractData, arguments: unknownKey),
+            "提取参数包含不支持的字段。"
+        )
+        var missingKey = valid
+        missingKey.removeValue(forKey: "schema")
+        XCTAssertFalse(ClawContinuationActionArguments.validate(kind: .extractData, arguments: missingKey).isEmpty)
+        XCTAssertEqual(
+            ClawContinuationActionArguments.validationMessage(kind: .extractData, arguments: missingKey),
+            "提取参数包含不支持的字段。"
+        )
+        for key in ["sourcePriority", "schema", "validateCompleteness"] {
+            var changedPolicy = valid
+            changedPolicy[key] = privateMarker
+            XCTAssertFalse(ClawContinuationActionArguments.validate(kind: .extractData, arguments: changedPolicy).isEmpty)
+            XCTAssertEqual(
+                ClawContinuationActionArguments.validationMessage(kind: .extractData, arguments: changedPolicy),
+                "提取参数不符合固定安全策略。"
+            )
+        }
+        var oversizedSchema = valid
+        oversizedSchema["schema"] = String(repeating: "界", count: 334)
+        XCTAssertFalse(ClawContinuationActionArguments.validate(kind: .extractData, arguments: oversizedSchema).isEmpty)
+        XCTAssertEqual(
+            ClawContinuationActionArguments.validationMessage(kind: .extractData, arguments: oversizedSchema),
+            "提取参数长度超过限制。"
+        )
+        let exactBoundary = ClawContinuationActionArguments.makeExtractDataArguments(
+            extractionGoal: String(repeating: "x", count: 500),
+            outputPath: String(repeating: "p", count: 500)
+        )
+        XCTAssertTrue(ClawContinuationActionArguments.validate(kind: .extractData, arguments: exactBoundary).isEmpty)
+        let multibyteBoundary = ClawContinuationActionArguments.makeExtractDataArguments(
+            extractionGoal: String(repeating: "界", count: 166),
+            outputPath: String(repeating: "界", count: 166)
+        )
+        XCTAssertEqual(multibyteBoundary["extractionGoal"]?.utf8.count, 498)
+        XCTAssertEqual(multibyteBoundary["outputPath"]?.utf8.count, 498)
+        XCTAssertTrue(ClawContinuationActionArguments.validate(kind: .extractData, arguments: multibyteBoundary).isEmpty)
     }
 
     func testContinuationManageFilesEditorRejectsInvalidArguments() throws {
@@ -2780,7 +2916,54 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(store.missionRunSummary.continuationDraft.fileArguments.writeText, "late")
     }
 
+    func testContinuationExtractDataEditorKeepsApprovalRequiredDecisionGated() throws {
+        let (store, parentTask, parentSession, draft) = try makeApprovalGatedContinuationDraft(
+            selectedKind: .extractData
+        )
+        let sourceDigest = draft.sourceDecisionDigest
+        let taskCount = store.clawMobileTasks.count
+        let sessionCount = store.clawGatewaySessions.count
+        let eventCount = store.gatewayEvents.count
+
+        XCTAssertEqual(draft.state, .needsApproval)
+        XCTAssertNil(draft.receiptHandle)
+        XCTAssertTrue(store.missionRunSummary.continuationDraft.extractionArguments.isVisible)
+        XCTAssertTrue(store.missionRunSummary.continuationDraft.extractionArguments.isEditable)
+        XCTAssertTrue(store.updateContinuationExtractionArguments(
+            extractionGoal: "人工复核后的提取目标",
+            outputPath: "reports/approval-gated.json"
+        ))
+        XCTAssertEqual(store.continuationDraft?.state, .needsApproval)
+        XCTAssertEqual(store.continuationDraft?.validationIssues, [.approvalRequired])
+        XCTAssertEqual(store.continuationDraft?.sourceDecisionDigest, sourceDigest)
+        XCTAssertNil(store.continuationDraft?.receiptHandle)
+        XCTAssertNil(store.continuationDraft?.childTaskID)
+        XCTAssertEqual(store.clawMobileTasks.count, taskCount)
+        XCTAssertEqual(store.clawGatewaySessions.count, sessionCount)
+        XCTAssertEqual(store.gatewayEvents.count, eventCount)
+        XCTAssertEqual(store.missionRunSummary.taskID, parentTask.id)
+        XCTAssertEqual(store.missionRunSummary.sessionID, parentSession.id)
+        XCTAssertNil(store.queueContinuationDraft(id: draft.id))
+        XCTAssertEqual(store.continuationDraft?.state, .needsApproval)
+
+        XCTAssertFalse(store.updateContinuationExtractionArguments(
+            extractionGoal: "private-marker",
+            outputPath: "../private-marker.json"
+        ))
+        XCTAssertEqual(store.continuationDraft?.state, .readyForInput)
+        XCTAssertEqual(store.continuationDraft?.validationIssues, [.approvalRequired, .invalidArguments])
+        XCTAssertEqual(store.clawMobileTasks.count, taskCount)
+        XCTAssertEqual(store.gatewayEvents.count, eventCount)
+        XCTAssertFalse(store.lastClawMobileEnvelope.contains("private-marker"))
+    }
+
     private func makeManageFilesContinuationDraft() throws -> (ClawStore, ClawMobileTask, ClawGatewaySession, ClawContinuationDraft) {
+        try makeApprovalGatedContinuationDraft(selectedKind: .manageFiles)
+    }
+
+    private func makeApprovalGatedContinuationDraft(
+        selectedKind: ClawMobileActionKind
+    ) throws -> (ClawStore, ClawMobileTask, ClawGatewaySession, ClawContinuationDraft) {
         let store = ClawStore(autoScanLocalArtifacts: false)
         store.setGateway(url: "ws://127.0.0.1:18789", token: "continuation-test-secret")
         store.phoneAgentCommand = "打开浏览器采集证据后整理成 workspace 文件"
@@ -2794,8 +2977,8 @@ final class ClawTests: XCTestCase {
         let traceAction = try XCTUnwrap(parentTask.actions.first(where: { $0.kind == .runAgentLoop }))
         let trace = ClawGatewayArtifact(
             kind: .agentTrace,
-            title: "manage-files-continuation-trace.json",
-            reference: "file:///omitted/manage-files-continuation-trace.json",
+            title: "approval-gated-continuation-trace.json",
+            reference: "file:///omitted/approval-gated-continuation-trace.json",
             isRedacted: true,
             metadata: [
                 "readinessScore": "100",
@@ -2803,7 +2986,7 @@ final class ClawTests: XCTestCase {
                 "satisfiedSignals": "browserTrace,accessibilityTree",
                 "degradedSignals": "",
                 "missingSignals": "",
-                "selectedNextActionKind": "manageFiles",
+                "selectedNextActionKind": selectedKind.rawValue,
                 "selectedNextActionRequiresApproval": "true",
                 "nextActionPolicy": "envelope-intersection",
                 "nextActionPolicyDiagnostic": "allowed",
@@ -2817,7 +3000,9 @@ final class ClawTests: XCTestCase {
                 "selectedActionCandidateOrdinal": "1",
                 "selectedActionFromCandidates": "true",
                 "selectedActionDecisionConsistent": "true",
-                "riskTags": "approval-required,destructive-action-gate",
+                "riskTags": selectedKind == .manageFiles
+                    ? "approval-required,destructive-action-gate"
+                    : "approval-required",
                 "stopReason": "approval-required",
                 "handoffStatus": "waiting-for-approval"
             ]
@@ -2833,7 +3018,7 @@ final class ClawTests: XCTestCase {
                 actionKind: traceAction.kind,
                 actionTitle: traceAction.title,
                 resultStatus: .succeeded,
-                summary: "Stored manageFiles continuation trace",
+                summary: "Stored approval-gated continuation trace",
                 artifacts: [trace]
             )
         ])
@@ -2844,14 +3029,17 @@ final class ClawTests: XCTestCase {
                 taskID: parentTask.id,
                 sequence: sequence + 1,
                 kind: .sessionCompleted,
-                summary: "Gateway completed with approval-gated manageFiles continuation"
+                summary: "Gateway completed with approval-gated continuation"
             )
         ])
 
         store.prepareContinuationDraft(sourceTaskID: parentTask.id, sourceSessionID: parentSession.id)
         let draft = try XCTUnwrap(store.continuationDraft)
-        XCTAssertEqual(draft.state, .readyForInput)
-        XCTAssertEqual(draft.sourceSelectedActionKind, .manageFiles)
+        XCTAssertEqual(
+            draft.state,
+            selectedKind == .manageFiles ? .readyForInput : .needsApproval
+        )
+        XCTAssertEqual(draft.sourceSelectedActionKind, selectedKind)
         XCTAssertEqual(draft.sourceSelectedActionRequiresApproval, true)
         XCTAssertNil(draft.receiptHandle)
         return (store, parentTask, parentSession, draft)

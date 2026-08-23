@@ -958,6 +958,34 @@ const continuationParentEvents = await connectAndCollectEvents({
 const continuationOffer = continuationParentEvents.find((event) => event.kind === "sessionCompleted")?.continuationOffer;
 assertContinuationOffer(continuationOffer, continuationParentEnvelope, "websocket continuation parent");
 assertPrivateContinuationOffer(continuationParentEvents, continuationOffer.receipt, "websocket continuation parent");
+const invalidContinuationChild = makeContinuationChildEnvelope(continuationParentEnvelope, continuationOffer);
+invalidContinuationChild.task.actions[0].toolArguments.sourcePriority = "browserTrace";
+const invalidContinuationEvents = await connectAndCollectEvents({
+  host,
+  port: continuationPort,
+  token,
+  envelope: invalidContinuationChild,
+});
+assertContinuationEnvelopeFailure(
+  invalidContinuationEvents,
+  "continuation_action_arguments_invalid",
+  continuationOffer.receipt,
+  "websocket extractData fixed policy",
+);
+const invalidContinuationPathChild = makeContinuationChildEnvelope(continuationParentEnvelope, continuationOffer);
+invalidContinuationPathChild.task.actions[0].toolArguments.outputPath = "C:\\tmp\\data.json";
+const invalidContinuationPathEvents = await connectAndCollectEvents({
+  host,
+  port: continuationPort,
+  token,
+  envelope: invalidContinuationPathChild,
+});
+assertContinuationEnvelopeFailure(
+  invalidContinuationPathEvents,
+  "continuation_action_arguments_invalid",
+  continuationOffer.receipt,
+  "websocket extractData drive path",
+);
 const concurrentChildA = makeContinuationChildEnvelope(continuationParentEnvelope, continuationOffer);
 const concurrentChildB = makeContinuationChildEnvelope(continuationParentEnvelope, continuationOffer);
 const concurrentResults = await Promise.all([
@@ -1176,7 +1204,7 @@ function makeContinuationChildEnvelope(parent, offer) {
           inputPreview: "trusted child",
           toolArguments: {
             extractionGoal: "extract inherited continuation evidence",
-            sourcePriority: "browserTrace",
+            sourcePriority: "browserTrace,accessibilityTree,commandOutput,fileDiff,screenObservation",
             schema: "title:string,source:string,summary:string,confidence:number",
             outputPath: "continuation/extracted.json",
             validateCompleteness: "true",

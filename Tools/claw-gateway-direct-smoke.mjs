@@ -996,6 +996,49 @@ const continuationParentEvents = await continuationStream.send(continuationParen
 const continuationOffer = continuationParentEvents.find((event) => event.kind === "sessionCompleted")?.continuationOffer;
 assertContinuationOffer(continuationOffer, continuationParentEnvelope, "direct continuation parent");
 assertPrivateContinuationOffer(continuationParentEvents, continuationOffer.receipt, "direct continuation parent");
+const invalidContinuationCases = [
+  {
+    label: "direct extractData fixed source policy",
+    mutate: (envelope) => {
+      envelope.task.actions[0].toolArguments.sourcePriority = "browserTrace";
+    },
+  },
+  {
+    label: "direct extractData missing schema",
+    mutate: (envelope) => {
+      delete envelope.task.actions[0].toolArguments.schema;
+    },
+  },
+  {
+    label: "direct extractData path traversal",
+    mutate: (envelope) => {
+      envelope.task.actions[0].toolArguments.outputPath = "reports/../data.json";
+    },
+  },
+  {
+    label: "direct extractData drive path",
+    mutate: (envelope) => {
+      envelope.task.actions[0].toolArguments.outputPath = "C:\\tmp\\data.json";
+    },
+  },
+  {
+    label: "direct extractData UTF-8 bound",
+    mutate: (envelope) => {
+      envelope.task.actions[0].toolArguments.extractionGoal = "界".repeat(167);
+    },
+  },
+];
+for (const testCase of invalidContinuationCases) {
+  const invalidContinuationEnvelope = makeContinuationChildEnvelope(continuationParentEnvelope, continuationOffer);
+  testCase.mutate(invalidContinuationEnvelope);
+  const invalidContinuationFailure = await continuationStream.sendExpectFailure(invalidContinuationEnvelope);
+  assertContinuationStreamFailure(
+    invalidContinuationFailure,
+    "continuation_action_arguments_invalid",
+    [continuationOffer.receipt],
+    testCase.label,
+  );
+}
 const continuationChildEnvelope = makeContinuationChildEnvelope(continuationParentEnvelope, continuationOffer);
 const continuationChildEvents = await continuationStream.send(continuationChildEnvelope);
 await assertContinuationChildSuccess(
@@ -2785,7 +2828,7 @@ function makeContinuationChildEnvelope(parent, offer) {
     inputPreview: "trusted child",
     toolArguments: {
       extractionGoal: "extract inherited continuation evidence",
-      sourcePriority: "browserTrace",
+      sourcePriority: "browserTrace,accessibilityTree,commandOutput,fileDiff,screenObservation",
       schema: "title:string,source:string,summary:string,confidence:number",
       outputPath: "continuation/extracted.json",
       validateCompleteness: "true",

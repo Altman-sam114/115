@@ -1537,6 +1537,24 @@ struct ClawContinuationFileArgumentsPresentationSummary: Equatable, Codable, Sen
     )
 }
 
+struct ClawContinuationExtractionArgumentsPresentationSummary: Equatable, Codable, Sendable {
+    var extractionGoal: String
+    var outputPath: String
+    var validationMessage: String?
+    var isValid: Bool
+    var isEditable: Bool
+    var isVisible: Bool
+
+    static let unavailable = ClawContinuationExtractionArgumentsPresentationSummary(
+        extractionGoal: "",
+        outputPath: "",
+        validationMessage: nil,
+        isValid: false,
+        isEditable: false,
+        isVisible: false
+    )
+}
+
 struct ClawContinuationDraftPresentationSummary: Equatable, Codable, Sendable {
     var title: String
     var status: String
@@ -1555,6 +1573,7 @@ struct ClawContinuationDraftPresentationSummary: Equatable, Codable, Sendable {
     var hasMetadataGap: Bool
     var isVisible: Bool
     var fileArguments: ClawContinuationFileArgumentsPresentationSummary = .unavailable
+    var extractionArguments: ClawContinuationExtractionArgumentsPresentationSummary = .unavailable
 
     static let unavailable = ClawContinuationDraftPresentationSummary(
         title: "可信续接待生成",
@@ -1572,7 +1591,8 @@ struct ClawContinuationDraftPresentationSummary: Equatable, Codable, Sendable {
         canPerformAction: false,
         requiresHumanAction: false,
         hasMetadataGap: false,
-        isVisible: false
+        isVisible: false,
+        extractionArguments: .unavailable
     )
 }
 

@@ -1614,6 +1614,8 @@ struct ClawMissionRunContinuationDraftView: View {
     let onAction: (ClawContinuationDraftPresentationSummary) -> Void
     @State private var fileWritePath = ""
     @State private var fileWriteText = ""
+    @State private var extractionGoal = ""
+    @State private var extractionOutputPath = ""
 
     var body: some View {
         if summary.isVisible {
@@ -1686,6 +1688,48 @@ struct ClawMissionRunContinuationDraftView: View {
                     }
                     .padding(8)
                     .background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+                } else if summary.extractionArguments.isVisible {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("提取参数", systemImage: "tablecells.badge.ellipsis")
+                            .font(.footnote.bold())
+                            .foregroundStyle(tint)
+
+                        TextField("提取目标", text: $extractionGoal, axis: .vertical)
+                            .lineLimit(3...6)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(minHeight: 44)
+                            .disabled(summary.extractionArguments.isEditable == false)
+                            .accessibilityLabel("结构化数据提取目标")
+                            .accessibilityHint("只填写提取目标，不会自动加入队列、审批或发送")
+
+                        TextField("workspace 相对输出路径", text: $extractionOutputPath)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(minHeight: 44)
+                            .disabled(summary.extractionArguments.isEditable == false)
+                            .accessibilityLabel("结构化数据 workspace 相对输出路径")
+                            .accessibilityHint("只允许填写 workspace 内的相对路径，不会自动加入队列、审批或发送")
+
+                        Button(
+                            "应用提取参数",
+                            systemImage: "checkmark.circle",
+                            action: applyExtractionArguments
+                        )
+                        .font(.footnote.bold())
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .buttonStyle(SecondaryActionButtonStyle())
+                        .disabled(summary.extractionArguments.isEditable == false)
+                        .accessibilityHint("只校验并更新结构化提取参数，不会自动加入队列、审批或发送")
+                        .accessibilityInputLabels(["应用提取参数", "更新提取参数"])
+
+                        if let validationMessage = summary.extractionArguments.validationMessage {
+                            Text(validationMessage)
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .padding(8)
+                    .background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
                 }
 
                 if let actionTitle = summary.actionTitle {
@@ -1710,23 +1754,39 @@ struct ClawMissionRunContinuationDraftView: View {
             .accessibilityElement(children: .contain)
             .accessibilityLabel("可信多轮续接，\(summary.status)")
             .onAppear {
-                syncFileEditor()
+                syncEditors()
             }
             .onChange(of: summary.draftID) { _, _ in
-                syncFileEditor()
+                syncEditors()
             }
             .onChange(of: summary.fileArguments) { _, _ in
-                syncFileEditor()
+                syncEditors()
+            }
+            .onChange(of: summary.extractionArguments) { _, _ in
+                syncEditors()
             }
         }
     }
 
-    private func syncFileEditor() {
-        guard summary.fileArguments.isVisible else {
-            return
+    private func syncEditors() {
+        fileWritePath = ""
+        fileWriteText = ""
+        extractionGoal = ""
+        extractionOutputPath = ""
+        if summary.fileArguments.isVisible {
+            fileWritePath = summary.fileArguments.writePath
+            fileWriteText = summary.fileArguments.writeText
+        } else if summary.extractionArguments.isVisible {
+            extractionGoal = summary.extractionArguments.extractionGoal
+            extractionOutputPath = summary.extractionArguments.outputPath
         }
-        fileWritePath = summary.fileArguments.writePath
-        fileWriteText = summary.fileArguments.writeText
+    }
+
+    private func applyExtractionArguments() {
+        _ = store.updateContinuationExtractionArguments(
+            extractionGoal: extractionGoal,
+            outputPath: extractionOutputPath
+        )
     }
 
     private var tint: Color {
