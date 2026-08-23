@@ -37,6 +37,12 @@ final class ClawStore: ObservableObject {
         var bindingDigest: String
     }
 
+    private struct GatewayTransportProbeContext {
+        var request: ClawGatewayLiveRequest
+        var bindingDigest: String
+        var endpoint: String
+    }
+
     @Published private(set) var model: LocalClawModel
     @Published private(set) var validation: ArtifactValidationResult
     @Published var selectedCategory: ClawCapabilityCategory?
@@ -64,6 +70,7 @@ final class ClawStore: ObservableObject {
     @Published private(set) var gatewayEvents: [ClawGatewayEvent]
     @Published private(set) var autonomousLoop: ClawAutonomousLoopState
     @Published private(set) var continuationDraft: ClawContinuationDraft?
+    @Published private(set) var gatewayTransportProbeState: ClawGatewayTransportProbeSummary
 
     private let artifactDirectoryURL: URL
     private var gatewayConnectionSessionID: UUID?
@@ -71,6 +78,7 @@ final class ClawStore: ObservableObject {
     private var continuationApprovalRecords: [UUID: ClawContinuationApprovalRecord]
     private var frozenContinuationEnvelopes: [UUID: String]
     private var explicitResumeIntent: ExplicitResumeIntent?
+    private var gatewayTransportProbeGeneration: Int
 
     init(
         model: LocalClawModel? = nil,
@@ -118,6 +126,8 @@ final class ClawStore: ObservableObject {
         self.continuationApprovalRecords = [:]
         self.frozenContinuationEnvelopes = [:]
         self.explicitResumeIntent = nil
+        self.gatewayTransportProbeState = .unavailable
+        self.gatewayTransportProbeGeneration = 0
         self.autonomousLoop = ClawAutonomousLoopState(
             phase: .idle,
             runMode: .simulatedEventStream,
@@ -170,6 +180,10 @@ final class ClawStore: ObservableObject {
         gatewayLiveHealthSummary.asMissionRunHealthStrip()
     }
 
+    var gatewayTransportProbeSummary: ClawGatewayTransportProbeSummary {
+        currentGatewayTransportProbeSummary()
+    }
+
     var gatewayLiveHealthSummary: ClawGatewayLiveHealthSummary {
         let resolution = missionRunResolution
         return ClawGatewayLiveHealthSummary.make(
@@ -186,6 +200,198 @@ final class ClawStore: ObservableObject {
 
     var gatewayResumeIntentPresentationSummary: ClawGatewayResumeIntentPresentationSummary {
         makeGatewayResumeIntentPresentationSummary()
+    }
+
+    @discardableResult
+    func probeLiveGatewayTransport<T: ClawGatewayProbeTransport>(
+        transport: T = URLSessionClawGatewayTransport(),
+        timeoutNanoseconds: UInt64 = 3_000_000_000
+    ) async -> Bool {
+        guard let context = gatewayTransportProbeContext(),
+              context.request.canAttemptLive else {
+            resetGatewayTransportProbeState()
+            return false
+        }
+
+        let current = currentGatewayTransportProbeSummary()
+        guard current.bindingDigest == context.bindingDigest,
+              current.state != .probing,
+              current.state != .stale else {
+            return false
+        }
+
+        gatewayTransportProbeGeneration &+= 1
+        let generation = gatewayTransportProbeGeneration
+        gatewayTransportProbeState = ClawGatewayTransportProbeSummary.make(
+            state: .probing,
+            endpoint: context.endpoint,
+            bindingDigest: context.bindingDigest,
+            canProbe: false,
+            status: "正在检查当前 Live Gateway transport。",
+            guidance: "只建立独立 socket 并发送一次 control-frame ping；不发送任务、不执行电脑动作、不自动配对或重试。"
+        )
+
+        do {
+            let result = try await transport.probeTransport(
+                request: context.request,
+                timeoutNanoseconds: timeoutNanoseconds
+            )
+            guard Task.isCancelled == false,
+                  generation == gatewayTransportProbeGeneration,
+                  let currentContext = gatewayTransportProbeContext(),
+                  currentContext.bindingDigest == context.bindingDigest else {
+                return false
+            }
+
+            guard result.pingCount == 1,
+                  result.didSendApplicationMessage == false,
+                  result.didCloseSocket else {
+                gatewayTransportProbeState = ClawGatewayTransportProbeSummary.make(
+                    state: .failed,
+                    endpoint: context.endpoint,
+                    bindingDigest: context.bindingDigest,
+                    diagnostic: "probe_contract_failed",
+                    canProbe: true,
+                    status: "Live Gateway transport 探测失败。",
+                    guidance: "探测合同未满足；没有任务、Gateway action、session、event 或 artifact 副作用。"
+                )
+                return false
+            }
+
+            gatewayTransportProbeState = ClawGatewayTransportProbeSummary.make(
+                state: .transportReachable,
+                endpoint: context.endpoint,
+                bindingDigest: context.bindingDigest,
+                pingCount: result.pingCount,
+                latencyMilliseconds: result.latencyMilliseconds,
+                canProbe: true,
+                status: "Live Gateway transport 可达。",
+                guidance: "一次 control-frame ping 已成功；这不等于 Gateway 已配对、已授权、已收到任务或允许执行电脑动作。"
+            )
+            return true
+        } catch {
+            guard generation == gatewayTransportProbeGeneration,
+                  let currentContext = gatewayTransportProbeContext(),
+                  currentContext.bindingDigest == context.bindingDigest else {
+                return false
+            }
+            let diagnostic: String
+            if Task.isCancelled {
+                diagnostic = ClawGatewayTransportProbeError.cancelled.diagnostic
+            } else if let probeError = error as? ClawGatewayTransportProbeError {
+                diagnostic = probeError.diagnostic
+            } else {
+                diagnostic = "probe_failed"
+            }
+            gatewayTransportProbeState = ClawGatewayTransportProbeSummary.make(
+                state: .failed,
+                endpoint: context.endpoint,
+                bindingDigest: context.bindingDigest,
+                diagnostic: diagnostic,
+                canProbe: true,
+                status: "Live Gateway transport 探测失败。",
+                guidance: "只记录固定脱敏诊断；不会发送任务、执行电脑动作、模拟回退、自动配对或自动重试。"
+            )
+            return false
+        }
+    }
+
+    private func currentGatewayTransportProbeSummary() -> ClawGatewayTransportProbeSummary {
+        guard let context = gatewayTransportProbeContext() else {
+            return .unavailable
+        }
+        guard context.request.canAttemptLive else {
+            return ClawGatewayTransportProbeSummary.make(
+                state: .notConfigured,
+                endpoint: context.endpoint,
+                bindingDigest: context.bindingDigest,
+                canProbe: false,
+                status: "Live Gateway transport 探测未配置。",
+                guidance: "需要合法 ws:// 或 wss:// endpoint 与运行时 token；不会因为配置存在就发送网络请求。"
+            )
+        }
+
+        guard gatewayTransportProbeState.bindingDigest == context.bindingDigest else {
+            if gatewayTransportProbeState.state == .probing {
+                return ClawGatewayTransportProbeSummary.make(
+                    state: .stale,
+                    endpoint: context.endpoint,
+                    bindingDigest: gatewayTransportProbeState.bindingDigest,
+                    canProbe: false,
+                    status: "旧的 Live Gateway 探测结果已过期。",
+                    guidance: "当前 task/session/profile 已变化；旧 probe 结果不会覆盖当前 Mission，也不会继续打开 socket。"
+                )
+            }
+            return ClawGatewayTransportProbeSummary.make(
+                state: .ready,
+                endpoint: context.endpoint,
+                bindingDigest: context.bindingDigest,
+                canProbe: true,
+                status: "Live Gateway transport 探测待用户触发。",
+                guidance: "点击后只发送一次 control-frame ping；可达不等于已配对、已授权或任务成功。"
+            )
+        }
+        return gatewayTransportProbeState
+    }
+
+    private func gatewayTransportProbeContext() -> GatewayTransportProbeContext? {
+        let resolution = missionRunResolution
+        guard let task = resolution.task else {
+            return nil
+        }
+        var request = ClawGatewayLiveClient.makeRequest(
+            task: task,
+            profile: clawGatewayProfile,
+            envelopeJSON: "",
+            rawToken: gatewayToken,
+            sessionID: resolution.session?.id
+        )
+        if task.status == .blocked {
+            request.canAttemptLive = false
+        }
+        let digestParts = [
+            task.id.uuidString,
+            task.status.rawValue,
+            resolution.session?.id.uuidString ?? "none",
+            resolution.session?.taskID.uuidString ?? "none",
+            String(resolution.session?.updatedAt.timeIntervalSinceReferenceDate ?? 0),
+            resolution.liveRequest?.id.uuidString ?? "none",
+            resolution.liveRequest?.sessionID?.uuidString ?? "none",
+            liveGatewayProfileDigest(),
+            continuationAuthorizationFingerprint()
+        ]
+        return GatewayTransportProbeContext(
+            request: request,
+            bindingDigest: ClawContinuationContract.sha256(digestParts.joined(separator: "|")),
+            endpoint: request.safeEndpointDisplay
+        )
+    }
+
+    private func resetGatewayTransportProbeState() {
+        gatewayTransportProbeGeneration &+= 1
+        guard let context = gatewayTransportProbeContext() else {
+            gatewayTransportProbeState = .unavailable
+            return
+        }
+        guard context.request.canAttemptLive else {
+            gatewayTransportProbeState = ClawGatewayTransportProbeSummary.make(
+                state: .notConfigured,
+                endpoint: context.endpoint,
+                bindingDigest: context.bindingDigest,
+                canProbe: false,
+                status: "Live Gateway transport 探测未配置。",
+                guidance: "需要合法 ws:// 或 wss:// endpoint 与运行时 token；不会因为配置存在就发送网络请求。"
+            )
+            return
+        }
+        gatewayTransportProbeState = ClawGatewayTransportProbeSummary.make(
+            state: .ready,
+            endpoint: context.endpoint,
+            bindingDigest: context.bindingDigest,
+            canProbe: true,
+            status: "Live Gateway transport 探测待用户触发。",
+            guidance: "点击后只发送一次 control-frame ping；可达不等于已配对、已授权或任务成功。"
+        )
     }
 
     var autonomousLoopStatusText: String {
@@ -1404,6 +1610,7 @@ final class ClawStore: ObservableObject {
         clawGatewayProfile.endpoint = url.trimmingCharacters(in: .whitespacesAndNewlines)
         clawGatewayProfile.tokenFingerprint = ClawMobileBridge.tokenFingerprint(for: token)
         invalidateContinuationAuthorization(reason: .profileChanged)
+        resetGatewayTransportProbeState()
         automationTargets = automationTargets.map { target in
             var updated = target
             if updated.channel == .clawGateway {
@@ -1564,6 +1771,7 @@ final class ClawStore: ObservableObject {
         )
         clawMobileTasks.insert(task, at: 0)
         lastClawMobileEnvelope = ClawMobileBridge.makeEnvelopeString(task: task, profile: clawGatewayProfile)
+        resetGatewayTransportProbeState()
     }
 
     func ingestGatewayWireEvents(_ wireEvents: [ClawGatewayWireEvent]) {
@@ -2162,6 +2370,7 @@ final class ClawStore: ObservableObject {
                 mode: mode
             )
             clawGatewaySessions.insert(session, at: 0)
+            resetGatewayTransportProbeState()
             ingestGatewayEvents([preparedEvent])
             lastClawMobileEnvelope = ClawMobileBridge.makeEnvelopeString(
                 task: task,
@@ -4973,6 +5182,13 @@ enum ClawGatewayLiveClient {
     }
 }
 
+protocol ClawGatewayProbeTransport: Sendable {
+    func probeTransport(
+        request: ClawGatewayLiveRequest,
+        timeoutNanoseconds: UInt64
+    ) async throws -> ClawGatewayTransportProbeResult
+}
+
 protocol ClawGatewayTransport: Sendable {
     func streamEvents(
         request: ClawGatewayLiveRequest,
@@ -4998,11 +5214,68 @@ struct ClawGatewayTransportRetryPolicy: Equatable, Sendable {
     }
 }
 
-struct URLSessionClawGatewayTransport: ClawGatewayTransport {
+struct URLSessionClawGatewayTransport: ClawGatewayTransport, ClawGatewayProbeTransport {
     var retryPolicy: ClawGatewayTransportRetryPolicy
 
     init(retryPolicy: ClawGatewayTransportRetryPolicy = .liveDefault) {
         self.retryPolicy = retryPolicy
+    }
+
+    func probeTransport(
+        request: ClawGatewayLiveRequest,
+        timeoutNanoseconds: UInt64
+    ) async throws -> ClawGatewayTransportProbeResult {
+        guard request.canAttemptLive,
+              let url = URL(string: request.endpoint),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "ws" || scheme == "wss",
+              url.host?.isEmpty == false else {
+            throw ClawGatewayTransportProbeError.invalidConfiguration
+        }
+
+        let socket = URLSession.shared.webSocketTask(with: urlRequest(for: url, request: request))
+        socket.resume()
+        defer {
+            socket.cancel(with: .normalClosure, reason: nil)
+        }
+
+        try Task.checkCancellation()
+        let startedAt = Date()
+        let result = try await withThrowingTaskGroup(of: ClawGatewayTransportProbeResult.self) { group in
+            group.addTask {
+                try await withTaskCancellationHandler(operation: {
+                    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                        socket.sendPing { error in
+                            if let error {
+                                continuation.resume(throwing: error)
+                            } else {
+                                continuation.resume()
+                            }
+                        }
+                    }
+                }, onCancel: {
+                    socket.cancel(with: .goingAway, reason: nil)
+                })
+                let elapsed = max(0, Int(Date().timeIntervalSince(startedAt) * 1_000))
+                return ClawGatewayTransportProbeResult(
+                    pingCount: 1,
+                    didSendApplicationMessage: false,
+                    didCloseSocket: true,
+                    latencyMilliseconds: elapsed
+                )
+            }
+            group.addTask {
+                try await Task.sleep(for: .nanoseconds(Int64(timeoutNanoseconds)))
+                throw ClawGatewayTransportProbeError.timedOut
+            }
+            guard let first = try await group.next() else {
+                throw ClawGatewayTransportProbeError.timedOut
+            }
+            group.cancelAll()
+            return first
+        }
+        try Task.checkCancellation()
+        return result
     }
 
     func streamEvents(
@@ -5189,6 +5462,29 @@ enum ClawGatewayTransportError: LocalizedError {
             return "Invalid continuation offer identity"
         case .invalidEventIdentity:
             return "Invalid Gateway event identity"
+        }
+    }
+}
+
+enum ClawGatewayTransportProbeError: Error, Equatable, Sendable {
+    case invalidConfiguration
+    case connectionFailed
+    case pingFailed
+    case timedOut
+    case cancelled
+
+    var diagnostic: String {
+        switch self {
+        case .invalidConfiguration:
+            return "probe_not_configured"
+        case .connectionFailed:
+            return "probe_connection_failed"
+        case .pingFailed:
+            return "probe_ping_failed"
+        case .timedOut:
+            return "probe_timeout"
+        case .cancelled:
+            return "probe_cancelled"
         }
     }
 }

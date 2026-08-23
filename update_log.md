@@ -23,6 +23,35 @@
 
 ## 历史记录
 
+### v0.73 / 显式 Live Gateway transport probe
+
+日期：2026-08-23
+
+当前实现范围：
+
+- 在既有 Live Gateway health strip 增加一次性、用户显式的 transport probe summary 与 Store API。合法 `ws://`/`wss://` endpoint 和 runtime token 只用于独立 WebSocket header；连接后恰好发送一次 control-frame ping，在有界 timeout、失败或取消后关闭 socket。
+- probe 不发送 JSON envelope/application message，不创建 Gateway session、event、artifact、replay、handler 或模拟 fallback，不修改任务 health、approval、continuation receipt、review focus 或 Smart Operator Rail。成功只表示 transport reachable，不表示 paired、authorized、Gateway ack、桌面权限或任务成功。
+- 增加固定状态、固定脱敏诊断、task/session/profile/continuation/generation stale guard、重复点击 fail closed、fake transport 的 call/ping/application-message/body/close 断言；compact iPhone 与 regular iPad/宽屏 Dock 复用同一 view/summary/API，控件至少 44pt 并带 transport-only VoiceOver hint。
+
+关键文件：
+
+- `Claw/Core/ClawModels.swift`
+- `Claw/Services/ClawStore.swift`
+- `Claw/Views/ContentView.swift`
+- `ClawTests/ClawTests.swift`
+- `Tools/LogicSmoke.swift`
+- `README.md`
+- `Docs/claw-mobile-gateway-protocol.md`
+- `md/flow/flow.md`
+- `md/flow/flowchart.md`
+- `md/test/test.md`
+- `update_log.md`
+- `md/prompt/v0（核心智能能力）/v0.73（显式LiveGateway心跳探测）.md`
+
+验证状态：仅进行本地非编译静态检查；未运行本地编译、XCTest、LogicSmoke、Gateway fixture/direct/WebSocket smoke、`node --check` 或 `xcodebuild`。本轮 commit、GitHub Actions run、attempt、artifact 和 Agent C 复判待 `origin/main` push 后产生；不能以本地静态检查预写云端通过。
+
+未实现：后台保活、定时 heartbeat、自动重连/重试、静默配对、真实 pairing protocol、新 envelope/action/event/artifact/schema 字段、原生 macOS/Mac Catalyst target、Accessibility bridge 和 Gateway server 改动。已保留用户 Xcode 配置改动、旧 v0.70 prompt 及其他无关工作区文件。
+
 ### v0.72 / Mac-iPad Smart Operator Action Rail
 
 日期：2026-08-23

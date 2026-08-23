@@ -8,6 +8,8 @@ v0.70 在现有 Live Gateway Health 旁增加配对诊断和显式恢复意图 p
 
 v0.72 在同一 presentation 边界增加 Smart Operator Action Rail。`missionRunSmartOperatorActionSummary` 从当前 continuation draft、Mission primary、resume intent 和 next review metadata 按固定优先级选择唯一候选；compact Mission Run 与 regular Review Detail Dock 复用同一 summary、view 和 dispatcher。Rail 只分派既有 Store/primary/focus 入口，不能自动执行、审批、发送、重试或消费 receipt；render-time stale guard 比较 opaque command digest、task/session/Mission scope、phase/primary、continuation safe state、resume binding 和 review kind，任何变化都 fail closed。focusReview 只更新当前 scoped focus，不改变任务状态；本轮不增加 Gateway action 或协议字段。
 
+v0.73 在同一 health strip 增加用户显式的 Live Gateway transport probe。当前 Mission 和合法 ws/wss + runtime token 通过现有 profile/header preflight 后，Store 只打开独立 socket、发送一次 control-frame ping，并在有界 timeout、失败或取消后关闭；compact iPhone 与 regular iPad/宽屏 Dock 复用同一 probe summary/view/API。成功只表示 transport reachable，不表示配对、授权、Gateway ack 或任务成功；probe 与既有 live health、session、events、artifacts、fallback、approval、receipt、review focus 和 Smart Rail 分离。task/session/profile/continuation/generation stale guard、重复点击和非法配置均 fail closed，不进入 Gateway application message 或后台保活。
+
 ## 1. 当前核心数据流
 
 ```text
@@ -21,7 +23,8 @@ v0.72 在同一 presentation 边界增加 Smart Operator Action Rail。`missionR
   -> ClawMobileEnvelope(JSON)
   -> 模拟事件流或 WebSocket live Gateway
   -> ClawGatewayLiveRequest + ClawGatewayConnectionState 记录 preflight 和连接阶段
-  -> URLSessionClawGatewayTransport 有界重连 + ping 可观测性
+  -> URLSessionClawGatewayTransport 有界重连 + 任务 ping 可观测性
+  -> 用户显式 Live transport probe：安全 preflight -> 独立 WebSocket -> 一次 control-frame ping/pong -> 局部 metadata-only summary/stale guard；不发送 envelope，不创建 session/event/artifact
   -> Gateway Dispatch Preflight：普通首次 dispatch 只接受 sent；敏感 approval/audit 合同 fail closed；continuation 走独立 readyToSend + receipt 分支
   -> Gateway process-local task replay guard 防止同一 task.id 重复执行 handler
   -> Gateway session-start capability snapshot auditLog + 安全 metadata

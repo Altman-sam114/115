@@ -5095,6 +5095,7 @@ struct ClawGatewayLiveRequestCard: View {
 }
 
 struct ClawMissionRunLiveGatewayHealthStripView: View {
+    @EnvironmentObject private var store: ClawStore
     let strip: ClawMissionRunLiveGatewayHealthStrip
 
     var body: some View {
@@ -5117,6 +5118,43 @@ struct ClawMissionRunLiveGatewayHealthStripView: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            let probe = store.gatewayTransportProbeSummary
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Label(probe.title, systemImage: probe.icon)
+                        .font(.footnote.bold())
+                        .foregroundStyle(probeTint(probe))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                    if let latency = probe.latencyMilliseconds {
+                        PhoneAgentTag(text: "\(latency) ms", icon: "timer", tint: .blue)
+                    }
+                }
+
+                Text(probe.status)
+                    .font(.caption.bold())
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(probe.guidance)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Button("检查 Live Gateway transport", systemImage: "waveform.path.ecg") {
+                    Task {
+                        _ = await store.probeLiveGatewayTransport()
+                    }
+                }
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .buttonStyle(SecondaryActionButtonStyle())
+                .disabled(probe.canProbe == false || probe.isInFlight)
+                .opacity(probe.canProbe && probe.isInFlight == false ? 1 : 0.55)
+                .accessibilityLabel("检查 Live Gateway transport")
+                .accessibilityHint("只检查 transport，不发送任务、不执行电脑动作、不自动配对、不自动审批、不自动发送、不自动重试")
+            }
+            .padding(.top, 4)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Live Gateway transport 探测，\(probe.status)")
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
@@ -5153,6 +5191,21 @@ struct ClawMissionRunLiveGatewayHealthStripView: View {
         case .danger: return .red
         case .info: return .blue
         case .neutral: return .secondary
+        }
+    }
+
+    private func probeTint(_ summary: ClawGatewayTransportProbeSummary) -> Color {
+        switch summary.state {
+        case .transportReachable:
+            return .green
+        case .probing, .ready:
+            return .blue
+        case .failed, .stale:
+            return .orange
+        case .notConfigured:
+            return .orange
+        case .unavailable:
+            return .secondary
         }
     }
 }

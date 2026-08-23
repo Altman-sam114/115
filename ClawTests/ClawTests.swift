@@ -132,6 +132,104 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(store.lastGatewayLiveRequest?.sessionID, missionBSessionID)
     }
 
+    func testExplicitTransportProbeIsUnavailableWithoutMissionAndHasNoCalls() async {
+        let store = ClawStore(autoScanLocalArtifacts: false)
+        let recorder = ProbeTransportRecorder(outcome: .success)
+
+        XCTAssertEqual(store.gatewayTransportProbeSummary.state, .unavailable)
+        XCTAssertFalse(store.gatewayTransportProbeSummary.canProbe)
+        let didProbe = await store.probeLiveGatewayTransport(transport: recorder)
+        XCTAssertFalse(didProbe)
+        XCTAssertEqual(recorder.callCount, 0)
+        XCTAssertEqual(recorder.pingCount, 0)
+        XCTAssertEqual(recorder.closeCount, 0)
+        XCTAssertTrue(store.gatewayEvents.isEmpty)
+    }
+
+    func testExplicitTransportProbeSendsOnlyOnePingAndKeepsTaskHealthSeparate() async throws {
+        let store = ClawStore(autoScanLocalArtifacts: false)
+        store.setGateway(url: "ws://127.0.0.1:18789/private-marker?token=hidden", token: "probe-secret")
+        store.generatePhoneAgentPlan()
+        store.queueClawMobileTaskFromCurrentPlan()
+        let recorder = ProbeTransportRecorder(outcome: .success)
+        let eventsBefore = store.gatewayEvents
+        let taskStatusBefore = store.clawMobileTasks.first?.status
+
+        XCTAssertEqual(store.gatewayTransportProbeSummary.state, .ready)
+        let didProbe = await store.probeLiveGatewayTransport(transport: recorder)
+        XCTAssertTrue(didProbe)
+        let summary = store.gatewayTransportProbeSummary
+        XCTAssertEqual(summary.state, .transportReachable)
+        XCTAssertEqual(summary.pingCount, 1)
+        XCTAssertEqual(recorder.callCount, 1)
+        XCTAssertEqual(recorder.pingCount, 1)
+        XCTAssertEqual(recorder.applicationMessageCount, 0)
+        XCTAssertEqual(recorder.closeCount, 1)
+        XCTAssertEqual(recorder.lastBodyBytes, 0)
+        XCTAssertEqual(store.gatewayEvents, eventsBefore)
+        XCTAssertEqual(store.clawMobileTasks.first?.status, taskStatusBefore)
+        XCTAssertNil(store.lastGatewayLiveRequest)
+        XCTAssertFalse(summary.status.contains("probe-secret"))
+        XCTAssertFalse(summary.guidance.contains("Authorization"))
+        XCTAssertFalse(summary.endpoint.contains("token="))
+
+        let didProbeAgain = await store.probeLiveGatewayTransport(transport: recorder)
+        XCTAssertTrue(didProbeAgain)
+        XCTAssertEqual(recorder.callCount, 2)
+        XCTAssertEqual(recorder.pingCount, 2)
+        XCTAssertEqual(recorder.closeCount, 2)
+    }
+
+    func testExplicitTransportProbeFailuresAreBoundedAndRedacted() async {
+        let outcomes: [ProbeTransportRecorder.Outcome] = [.connectionFailure, .pingFailure, .timeout, .cancelled]
+        for outcome in outcomes {
+            let store = ClawStore(autoScanLocalArtifacts: false)
+            store.setGateway(url: "wss://gateway.example.test/v1?marker=private-marker", token: "probe-secret")
+            store.generatePhoneAgentPlan()
+            store.queueClawMobileTaskFromCurrentPlan()
+            let recorder = ProbeTransportRecorder(outcome: outcome)
+
+            let didProbe = await store.probeLiveGatewayTransport(transport: recorder, timeoutNanoseconds: 1_000_000)
+            XCTAssertFalse(didProbe)
+            let summary = store.gatewayTransportProbeSummary
+            XCTAssertEqual(summary.state, .failed)
+            XCTAssertTrue(summary.canProbe)
+            XCTAssertEqual(recorder.callCount, 1)
+            XCTAssertEqual(recorder.closeCount, 1)
+            XCTAssertEqual(recorder.applicationMessageCount, 0)
+            XCTAssertTrue(store.gatewayEvents.isEmpty)
+            let visible = [summary.title, summary.status, summary.guidance, summary.diagnostic ?? ""].joined(separator: " ")
+            XCTAssertFalse(visible.contains("probe-secret"))
+            XCTAssertFalse(visible.contains("Authorization"))
+            XCTAssertFalse(visible.contains("private-marker"))
+            XCTAssertFalse(visible.contains("file://"))
+        }
+    }
+
+    func testExplicitTransportProbeDuplicateAndStaleResultsHaveNoSideEffects() async {
+        let store = ClawStore(autoScanLocalArtifacts: false)
+        store.setGateway(url: "ws://127.0.0.1:18789", token: "probe-secret")
+        store.generatePhoneAgentPlan()
+        store.queueClawMobileTaskFromCurrentPlan()
+        let recorder = ProbeTransportRecorder(outcome: .success, delayNanoseconds: 2_000_000)
+        let first = Task { await store.probeLiveGatewayTransport(transport: recorder) }
+        await Task.yield()
+        XCTAssertEqual(store.gatewayTransportProbeSummary.state, .probing)
+        let duplicateProbe = await store.probeLiveGatewayTransport(transport: recorder)
+        XCTAssertFalse(duplicateProbe)
+        XCTAssertEqual(recorder.callCount, 1)
+
+        store.phoneAgentCommand = "prepare a new Mission scope"
+        store.generatePhoneAgentPlan()
+        store.queueClawMobileTaskFromCurrentPlan()
+        XCTAssertEqual(store.gatewayTransportProbeSummary.state, .ready)
+        _ = await first.value
+        XCTAssertEqual(store.gatewayTransportProbeSummary.state, .ready)
+        XCTAssertEqual(recorder.pingCount, 1)
+        XCTAssertEqual(recorder.closeCount, 1)
+        XCTAssertTrue(store.gatewayEvents.isEmpty)
+    }
+
     func testDefaultModelIsPlaceholderAndDoesNotDownload() {
         let store = ClawStore(autoScanLocalArtifacts: false)
 
@@ -5074,6 +5172,62 @@ final class ClawTests: XCTestCase {
 
         store.approveLatestClawMobileTask()
         XCTAssertEqual(store.clawMobileTasks[0].status, .blocked)
+    }
+}
+
+private final class ProbeTransportRecorder: @unchecked Sendable, ClawGatewayProbeTransport {
+    enum Outcome {
+        case success
+        case connectionFailure
+        case pingFailure
+        case timeout
+        case cancelled
+    }
+
+    let outcome: Outcome
+    let delayNanoseconds: UInt64
+    private(set) var callCount = 0
+    private(set) var pingCount = 0
+    private(set) var applicationMessageCount = 0
+    private(set) var closeCount = 0
+    private(set) var lastBodyBytes: Int?
+
+    init(outcome: Outcome, delayNanoseconds: UInt64 = 0) {
+        self.outcome = outcome
+        self.delayNanoseconds = delayNanoseconds
+    }
+
+    func probeTransport(
+        request: ClawGatewayLiveRequest,
+        timeoutNanoseconds: UInt64
+    ) async throws -> ClawGatewayTransportProbeResult {
+        callCount += 1
+        lastBodyBytes = request.bodyBytes
+        defer {
+            closeCount += 1
+        }
+        if delayNanoseconds > 0 {
+            try await Task.sleep(for: .nanoseconds(Int64(delayNanoseconds)))
+        }
+        switch outcome {
+        case .success:
+            pingCount += 1
+            return ClawGatewayTransportProbeResult(
+                pingCount: 1,
+                didSendApplicationMessage: false,
+                didCloseSocket: true,
+                latencyMilliseconds: 1
+            )
+        case .connectionFailure:
+            throw ClawGatewayTransportProbeError.connectionFailed
+        case .pingFailure:
+            pingCount += 1
+            throw ClawGatewayTransportProbeError.pingFailed
+        case .timeout:
+            throw ClawGatewayTransportProbeError.timedOut
+        case .cancelled:
+            throw ClawGatewayTransportProbeError.cancelled
+        }
     }
 }
 

@@ -123,6 +123,8 @@ v0.71 的 `extractData` continuation editor 仍是客户端 presentation/store �
 
 v0.72 的 Smart Operator Action Rail 是客户端 metadata-only presentation，不改变 `claw.computer.control.v1` envelope、action、event、artifact、schema 或 WebSocket framing。`ClawMissionRunSmartOperatorActionSummary` 只保存固定 action kind、脱敏 title/status/guidance、opaque command/scope/binding 值和既有 continuation/resume/review metadata；固定优先级为 continuation ready action、prepare continuation、enabled Mission primary、resume intent、focusReview，缺少安全候选时返回 disabled/none。compact 与 regular 复用同一 summary/view/dispatcher，渲染快照过期或 scope/profile/receipt/review 不匹配时拒绝调用。Rail 不直接访问 Gateway transport、不构造 envelope、不消费 receipt，不代表已配对或已授权；点击仍走既有 queue/approval/freeze/send、primary dispatch、resume intent 或 scoped focus 闸门。
 
+v0.73 的 Live Gateway transport probe 是客户端局部、用户显式的一次性探测，不是新的 pairing/heartbeat protocol。合法 `ws://`/`wss://` endpoint 和运行时 token 通过现有安全 header 构造独立 WebSocket；socket 建立后只调用一次 WebSocket control-frame ping，在有界 timeout 内返回并关闭 socket。probe 不发送 JSON application message 或 `ClawMobileEnvelope`，不进入 `validateEnvelope`、session、workspace、replay guard、action handler、event、artifact 或模拟 fallback。`ClawGatewayTransportProbeSummary` 只保存固定状态、safe endpoint display、有限延迟、固定脱敏诊断和 opaque binding；成功仅表示 `transportReachable`，不表示 paired、authorized、Gateway ack、桌面权限、receipt 有效或任务成功。compact iPhone 与 regular iPad/宽屏 Dock 复用同一 summary/view/Store dispatcher；重复点击、非法配置、timeout、取消、profile/task/session/continuation/generation 变化均 fail closed，不能后台保活、自动重试或静默配对。本轮不新增 `claw.computer.control.v1` 字段、action/event/artifact kind 或 WebSocket application framing。
+
 失败动作可以标记 `isRetryable`。手机端二次确认后，网关可重试失败动作并把新的 artifact 追加到对应 result。
 
 ## Mission Run Presentation Layer

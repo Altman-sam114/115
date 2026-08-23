@@ -1798,6 +1798,115 @@ struct ClawMissionRunLiveGatewayHealthStrip: Equatable, Codable, Sendable {
     var isReviewable: Bool
 }
 
+enum ClawGatewayTransportProbeState: String, CaseIterable, Codable, Sendable {
+    case unavailable
+    case notConfigured
+    case ready
+    case probing
+    case transportReachable
+    case failed
+    case stale
+
+    var title: String {
+        switch self {
+        case .unavailable:
+            return "暂无探测范围"
+        case .notConfigured:
+            return "探测未配置"
+        case .ready:
+            return "等待用户探测"
+        case .probing:
+            return "正在探测 transport"
+        case .transportReachable:
+            return "transport 可达"
+        case .failed:
+            return "transport 探测失败"
+        case .stale:
+            return "探测结果已过期"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .unavailable:
+            return "questionmark.circle"
+        case .notConfigured:
+            return "exclamationmark.triangle.fill"
+        case .ready:
+            return "waveform.path.ecg"
+        case .probing:
+            return "hourglass.circle.fill"
+        case .transportReachable:
+            return "checkmark.circle.fill"
+        case .failed:
+            return "xmark.circle.fill"
+        case .stale:
+            return "arrow.triangle.2.circlepath"
+        }
+    }
+}
+
+struct ClawGatewayTransportProbeSummary: Equatable, Codable, Sendable {
+    var state: ClawGatewayTransportProbeState
+    var title: String
+    var status: String
+    var guidance: String
+    var icon: String
+    var endpoint: String
+    var canProbe: Bool
+    var pingCount: Int
+    var latencyMilliseconds: Int?
+    var diagnostic: String?
+    var bindingDigest: String?
+    var isVisible: Bool
+
+    var isInFlight: Bool {
+        state == .probing
+    }
+
+    static let unavailable = ClawGatewayTransportProbeSummary(
+        state: .unavailable,
+        title: ClawGatewayTransportProbeState.unavailable.title,
+        status: "当前 Mission 尚未准备 Live Gateway 探测。",
+        guidance: "探测只检查 transport 可达性，不发送任务、不执行电脑动作，也不代表已配对或已授权。",
+        icon: ClawGatewayTransportProbeState.unavailable.icon,
+        endpoint: "未配置",
+        canProbe: false,
+        pingCount: 0,
+        latencyMilliseconds: nil,
+        diagnostic: nil,
+        bindingDigest: nil,
+        isVisible: true
+    )
+
+    static func make(
+        state: ClawGatewayTransportProbeState,
+        endpoint: String,
+        bindingDigest: String?,
+        pingCount: Int = 0,
+        latencyMilliseconds: Int? = nil,
+        diagnostic: String? = nil,
+        canProbe: Bool,
+        status: String,
+        guidance: String
+    ) -> ClawGatewayTransportProbeSummary {
+        ClawGatewayTransportProbeSummary(
+            state: state,
+            title: state.title,
+            status: status,
+            guidance: guidance,
+            icon: state.icon,
+            endpoint: endpoint,
+            canProbe: canProbe,
+            pingCount: pingCount,
+            latencyMilliseconds: latencyMilliseconds,
+            diagnostic: diagnostic,
+            bindingDigest: bindingDigest,
+            isVisible: true
+        )
+    }
+}
+
 struct ClawMissionRunApprovalFastLaneSummary: Equatable, Codable, Sendable {
     var title: String
     var status: String
@@ -8658,6 +8767,25 @@ struct ClawGatewayLiveRequest: Identifiable, Equatable, Codable, Sendable {
             }
         }
         return candidate
+    }
+}
+
+struct ClawGatewayTransportProbeResult: Equatable, Sendable {
+    var pingCount: Int
+    var didSendApplicationMessage: Bool
+    var didCloseSocket: Bool
+    var latencyMilliseconds: Int?
+
+    init(
+        pingCount: Int = 1,
+        didSendApplicationMessage: Bool = false,
+        didCloseSocket: Bool = true,
+        latencyMilliseconds: Int? = nil
+    ) {
+        self.pingCount = pingCount
+        self.didSendApplicationMessage = didSendApplicationMessage
+        self.didCloseSocket = didCloseSocket
+        self.latencyMilliseconds = latencyMilliseconds
     }
 }
 

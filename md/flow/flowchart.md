@@ -14,6 +14,8 @@ v0.70 的 Live Gateway 诊断与恢复意图路径如下；它只记录当前 sc
 
 v0.72 的 Smart Operator Action Rail 只汇总既有 metadata，不是自动执行器。compact Mission Run 与 regular Review Detail Dock 使用同一个 summary、view 和 dispatcher；优先级固定，渲染快照变化则关闭入口。
 
+v0.73 的 transport probe 是一次用户点击触发的局部探测，不是后台心跳。它只发送一次 control-frame ping，成功表示 transport reachable，不表示配对、授权或任务成功；compact/regular 共享同一 summary/view/dispatcher，旧 scope 或 generation 结果丢弃。
+
 ```mermaid
 flowchart LR
   M["当前 Mission metadata"] --> C["continuation draft"]
@@ -30,6 +32,24 @@ flowchart LR
   D --> Existing["既有 Store / primary / scoped focus 闸门"]
   Existing -->|"focusReview"| Focus["只更新 focus\n不改变任务状态"]
   Existing -->|"其他动作"| Gate["仍需既有审批/receipt/send 流程"]
+```
+
+```mermaid
+flowchart LR
+  Mission["当前 Mission + profile"] --> Preflight{"ws/wss + runtime token + scope?"}
+  Preflight -->|否| Disabled["notConfigured / unavailable\n无 socket"]
+  Preflight -->|是| Ready["ready\n等待用户点击"]
+  Ready --> Click{"用户显式点击"}
+  Click --> Probe["独立 WebSocket\n一次 control-frame ping"]
+  Probe --> Outcome{"有界结果"}
+  Outcome -->|成功| Reachable["transportReachable\n不等于配对/授权"]
+  Outcome -->|失败/timeout/取消| Failed["failed\n固定脱敏诊断"]
+  Probe --> Close["结果或取消后关闭 socket"]
+  Mission --> Stale{"task/session/profile/generation 变化?"}
+  Stale -->|是| StaleResult["stale / 丢弃旧结果\n无任务副作用"]
+  Probe -. 不发送 .-> NoEnvelope["无 JSON envelope\n无 Gateway session/event/artifact"]
+  Reachable --> Shared["compact iPhone + regular iPad/宽屏\n共享 summary/view/dispatcher"]
+  Failed --> Shared
 ```
 
 ```mermaid

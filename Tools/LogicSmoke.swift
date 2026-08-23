@@ -3,7 +3,7 @@ import Foundation
 @main
 enum LogicSmoke {
     @MainActor
-    static func main() {
+    static func main() async {
         var failures: [String] = []
 
         func expect(_ condition: @autoclosure () -> Bool, _ message: String) {
@@ -75,6 +75,51 @@ enum LogicSmoke {
 
         store.queueClawMobileTaskFromCurrentPlan()
         expect(store.clawMobileTasks.isEmpty == false, "Claw mobile task should be queued")
+        let probeStoreWithoutMission = ClawStore(autoScanLocalArtifacts: false)
+        let unavailableProbe = ProbeSmokeTransport()
+        let unavailableProbeResult = await probeStoreWithoutMission.probeLiveGatewayTransport(transport: unavailableProbe)
+        expect(unavailableProbeResult == false, "transport probe should fail closed without a Mission")
+        expect(probeStoreWithoutMission.gatewayTransportProbeSummary.state == .unavailable, "transport probe should be unavailable without a Mission")
+        expect(unavailableProbe.callCount == 0, "unavailable transport probe should not open a socket")
+
+        let probeEventsBefore = store.gatewayEvents
+        let probeTaskStatusBefore = store.clawMobileTasks[0].status
+        let probeTransport = ProbeSmokeTransport()
+        let probeResult = await store.probeLiveGatewayTransport(transport: probeTransport)
+        expect(probeResult, "explicit transport probe should report a successful control ping")
+        expect(store.gatewayTransportProbeSummary.state == .transportReachable, "successful probe should expose transport reachable")
+        expect(store.gatewayTransportProbeSummary.pingCount == 1, "successful probe should record one ping")
+        expect(probeTransport.callCount == 1, "successful probe should call transport once")
+        expect(probeTransport.pingCount == 1, "successful probe should send one ping")
+        expect(probeTransport.applicationMessageCount == 0, "probe should not send an application message")
+        expect(probeTransport.closeCount == 1, "probe should close its socket once")
+        expect(probeTransport.lastBodyBytes == 0, "probe request should carry no envelope body")
+        expect(store.gatewayEvents == probeEventsBefore, "probe should not create Gateway events")
+        expect(store.clawMobileTasks[0].status == probeTaskStatusBefore, "probe should not change task status")
+        expect(store.lastGatewayLiveRequest == nil, "probe should not create a live task request")
+        expect(store.gatewayTransportProbeSummary.guidance.contains("配对") == true, "probe guidance should distinguish reachability from pairing")
+
+        let failedProbeStore = ClawStore(autoScanLocalArtifacts: false)
+        failedProbeStore.setGateway(url: "wss://gateway.example.test/v1?marker=private-marker", token: "probe-secret")
+        failedProbeStore.generatePhoneAgentPlan()
+        failedProbeStore.queueClawMobileTaskFromCurrentPlan()
+        let failedProbeTransport = ProbeSmokeTransport(outcome: .timeout)
+        let failedProbeResult = await failedProbeStore.probeLiveGatewayTransport(
+            transport: failedProbeTransport,
+            timeoutNanoseconds: 1_000_000
+        )
+        expect(failedProbeResult == false, "timeout probe should fail")
+        expect(failedProbeStore.gatewayTransportProbeSummary.state == .failed, "timeout probe should expose failed state")
+        expect(failedProbeStore.gatewayTransportProbeSummary.diagnostic == "probe_timeout", "timeout probe should expose fixed diagnostic")
+        expect(failedProbeTransport.callCount == 1 && failedProbeTransport.closeCount == 1, "failed probe should close exactly once")
+        let failedProbeVisible = [
+            failedProbeStore.gatewayTransportProbeSummary.status,
+            failedProbeStore.gatewayTransportProbeSummary.guidance,
+            failedProbeStore.gatewayTransportProbeSummary.diagnostic ?? ""
+        ].joined(separator: " ")
+        expect(failedProbeVisible.contains("probe-secret") == false, "probe failure must not expose token")
+        expect(failedProbeVisible.contains("private-marker") == false, "probe failure must not expose URL query")
+
         let pairingAfterQueue = store.gatewayPairingDiagnosticsSummary
         expect(pairingAfterQueue.canAttemptLive, "configured Gateway should expose canAttemptLive separately from acknowledgement")
         expect(pairingAfterQueue.hasGatewayAck == false, "configured Gateway should not claim ack before live event")
@@ -4035,6 +4080,42 @@ enum LogicSmoke {
                 print("- \(failure)")
             }
             Foundation.exit(1)
+        }
+    }
+}
+
+private final class ProbeSmokeTransport: @unchecked Sendable, ClawGatewayProbeTransport {
+    enum Outcome {
+        case success
+        case timeout
+    }
+
+    let outcome: Outcome
+    private(set) var callCount = 0
+    private(set) var pingCount = 0
+    private(set) var applicationMessageCount = 0
+    private(set) var closeCount = 0
+    private(set) var lastBodyBytes: Int?
+
+    init(outcome: Outcome = .success) {
+        self.outcome = outcome
+    }
+
+    func probeTransport(
+        request: ClawGatewayLiveRequest,
+        timeoutNanoseconds: UInt64
+    ) async throws -> ClawGatewayTransportProbeResult {
+        callCount += 1
+        lastBodyBytes = request.bodyBytes
+        defer {
+            closeCount += 1
+        }
+        switch outcome {
+        case .success:
+            pingCount += 1
+            return ClawGatewayTransportProbeResult()
+        case .timeout:
+            throw ClawGatewayTransportProbeError.timedOut
         }
     }
 }
