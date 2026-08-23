@@ -243,6 +243,8 @@ final class ClawGatewayReadinessTransportFake: @unchecked Sendable, ClawGatewayR
     let response: ClawGatewayReadinessResponse?
     private let releaseStream: AsyncStream<Void>
     private var releaseContinuation: AsyncStream<Void>.Continuation?
+    private let callStream: AsyncStream<Void>
+    private var callContinuation: AsyncStream<Void>.Continuation?
     private(set) var callCount = 0
     private(set) var requestBodyCount = 0
     private(set) var responseCount = 0
@@ -262,6 +264,17 @@ final class ClawGatewayReadinessTransportFake: @unchecked Sendable, ClawGatewayR
         var continuation: AsyncStream<Void>.Continuation?
         self.releaseStream = AsyncStream { continuation = $0 }
         self.releaseContinuation = continuation
+        var callContinuation: AsyncStream<Void>.Continuation?
+        self.callStream = AsyncStream { callContinuation = $0 }
+        self.callContinuation = callContinuation
+    }
+
+    func waitForCall() async {
+        guard callCount == 0 else {
+            return
+        }
+        var iterator = callStream.makeAsyncIterator()
+        _ = await iterator.next()
     }
 
     func release() {
@@ -273,6 +286,7 @@ final class ClawGatewayReadinessTransportFake: @unchecked Sendable, ClawGatewayR
         timeoutNanoseconds: UInt64
     ) async throws -> ClawGatewayReadinessTransportResult {
         callCount += 1
+        callContinuation?.yield(())
         requestBodyCount += 1
         requestBodies.append(String(data: try request.body.encodedData(), encoding: .utf8) ?? "")
         headerNames.append(request.headers.keys.sorted())

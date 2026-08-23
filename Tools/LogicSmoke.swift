@@ -126,10 +126,7 @@ enum LogicSmoke {
         let staleReadinessTask = Task {
             await readinessStore.requestGatewayReadiness(transport: staleFake)
         }
-        for _ in 0..<100 {
-            if staleFake.callCount > 0 { break }
-            await Task.yield()
-        }
+        await staleFake.waitForCall()
         readinessStore.setGateway(url: "ws://new-gateway.example.test", token: "new-readiness-secret")
         staleFake.release()
         let staleReadinessResult = await staleReadinessTask.value
