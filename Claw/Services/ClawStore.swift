@@ -829,7 +829,7 @@ final class ClawStore: ObservableObject {
         do {
             let result = try await withTaskCancellationHandler(operation: {
                 await Task.yield()
-                try await transportTask.value
+                return try await transportTask.value
             }, onCancel: {
                 transportTask.cancel()
             })
