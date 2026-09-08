@@ -5584,23 +5584,42 @@ final class ClawTests: XCTestCase {
         let first = Task {
             await store.requestGatewayReadiness(transport: duplicateFake)
         }
-        await duplicateFake.waitForCall()
+        XCTAssertTrue(
+            await duplicateFake.waitForCall(timeoutNanoseconds: 1_000_000_000),
+            "readiness duplicate fixture must start within the bound"
+        )
         let duplicateResult = await store.requestGatewayReadiness(transport: duplicateFake)
         XCTAssertFalse(duplicateResult)
         XCTAssertEqual(duplicateFake.callCount, 1)
         first.cancel()
-        _ = await first.value
+        XCTAssertTrue(
+            await duplicateFake.waitForClose(timeoutNanoseconds: 1_000_000_000),
+            "cancelled readiness fixture must close within the bound"
+        )
         XCTAssertEqual(duplicateFake.closeCount, 1)
 
         let staleFake = ClawGatewayReadinessTransportFake(outcome: .waitForRelease)
+        let staleResultLatch = ClawGatewayReadinessResultLatch<Bool>()
         let staleTask = Task {
-            await store.requestGatewayReadiness(transport: staleFake)
+            let result = await store.requestGatewayReadiness(transport: staleFake)
+            staleResultLatch.finish(result)
+            return result
         }
-        await staleFake.waitForCall()
+        XCTAssertTrue(
+            await staleFake.waitForCall(timeoutNanoseconds: 1_000_000_000),
+            "stale readiness fixture must start within the bound"
+        )
         store.setGateway(url: "ws://new-gateway.example.test", token: "new-readiness-secret")
         staleFake.release()
-        let staleResult = await staleTask.value
-        XCTAssertFalse(staleResult)
+        XCTAssertTrue(
+            await staleFake.waitForClose(timeoutNanoseconds: 1_000_000_000),
+            "stale readiness fixture must close within the bound"
+        )
+        let staleResult = await staleResultLatch.wait(timeoutNanoseconds: 1_000_000_000)
+        if staleResult == nil {
+            staleTask.cancel()
+        }
+        XCTAssertTrue(staleResult == false)
         XCTAssertNotEqual(store.gatewayReadinessSummary.state, .attested)
         XCTAssertEqual(staleFake.callCount, 1)
         XCTAssertEqual(staleFake.closeCount, 1)

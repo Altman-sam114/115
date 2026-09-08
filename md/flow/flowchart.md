@@ -20,6 +20,8 @@ v0.73 的 transport probe 是一次用户点击触发的局部探测，不是后
 
 v0.74 的 checkpoint 是手机端本地、只读、metadata-only 交接边界。它只保存最新一份严格白名单 JSON；恢复、损坏、写入失败和清除都不进入 Gateway 执行流。
 
+v0.76 readiness 修复轮的客户端等待路径使用一次性 signal：request、strict response 和 close 完成后才接受 attested；release、取消和 timeout 都在有界窗口内唤醒并只关闭一次。profile/generation/binding 变化仍使旧结果失效，Authorization header 之外不保存 token。
+
 ```mermaid
 flowchart LR
   M["当前 Mission metadata"] --> C["continuation draft"]

@@ -123,13 +123,26 @@ enum LogicSmoke {
         expect(ClawGatewayReadinessPresentationContract.voiceOverHint.contains("不代表 pairing"), "readiness hint should deny pairing semantics")
 
         let staleFake = ClawGatewayReadinessTransportFake(outcome: .waitForRelease)
+        let staleResultLatch = ClawGatewayReadinessResultLatch<Bool>()
         let staleReadinessTask = Task {
-            await readinessStore.requestGatewayReadiness(transport: staleFake)
+            let result = await readinessStore.requestGatewayReadiness(transport: staleFake)
+            staleResultLatch.finish(result)
+            return result
         }
-        await staleFake.waitForCall()
+        expect(
+            await staleFake.waitForCall(timeoutNanoseconds: 1_000_000_000),
+            "stale readiness fixture must start within the bound"
+        )
         readinessStore.setGateway(url: "ws://new-gateway.example.test", token: "new-readiness-secret")
         staleFake.release()
-        let staleReadinessResult = await staleReadinessTask.value
+        expect(
+            await staleFake.waitForClose(timeoutNanoseconds: 1_000_000_000),
+            "stale readiness fixture must close within the bound"
+        )
+        let staleReadinessResult = await staleResultLatch.wait(timeoutNanoseconds: 1_000_000_000)
+        if staleReadinessResult == nil {
+            staleReadinessTask.cancel()
+        }
         expect(staleReadinessResult == false, "stale readiness response should be discarded")
         expect(readinessStore.gatewayReadinessSummary.state != .attested, "stale readiness response must not overwrite current profile")
         expect(staleFake.closeCount == 1, "stale readiness transport should close once")

@@ -537,6 +537,8 @@ readiness 是与 `claw.computer.control.v1` 完全分离的用户显式、单次
 
 Gateway readiness handler 只读取进程内固定 capability/policy projector，且位于普通 envelope route 之前；它不调用 `validateEnvelope`、dispatch preflight、`makeGatewayEvents`、workspace/replay/session/event/artifact/auditLog/receipt writer 或任何 handler、Shell、浏览器、桌面动作。成功不会创建 task、session、workspace、replay record、event、artifact、receipt 或 checkpoint。它不是密码学 attestation、pairing、授权、信任建立、后台 heartbeat 或 macOS 控制器。
 
+v0.76 readiness 修复不改变上述 wire schema 或 Gateway route。客户端 fake 使用一次性可取消信号和有界等待，严格校验 response 的 nonce/编码，并在 success、release、cancel、timeout 和 error 路径各只记录一次 close；测试只能观察 header 名称和 presence，不保存 Authorization 值。失败或过期结果仍由 generation/binding digest 丢弃，不改变任务、session、event、artifact、health、checkpoint 或审批状态。
+
 ### v0.76 AgentTrace 证据交接包
 
 手机端从既有 `agentTrace` metadata 派生 `ClawAgentTraceHandoffPackSummary`，固定按证据、决策、审批、交接、安全五行展示。它只消费 `ClawAgentTraceReviewSummary` 已通过 allowlist 的 readiness/decision/handoff 字段，不打开 artifact reference，不读取 `file://` payload，也不把自然语言、原始 risk tag 或 handoffSummary 当作授权依据。unknown signal/action、候选计数或序位越界、policy/approval/envelope/handoff 矛盾和 stale focus 均进入待复核状态，不报告可继续。

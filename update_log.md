@@ -35,6 +35,22 @@
  - `md/prompt/v0（核心智能能力）/v0.76（AgentTrace证据交接包）.md`
 验证状态：本地仅执行 `git diff --check`、文本搜索和 diff 范围复核；未运行本地编译、XCTest、LogicSmoke、Gateway fixture/direct/WebSocket smoke、`node --check` 或 `xcodebuild`。提交并 push 后必须由最新 GitHub Actions artifact 与 Agent C 复判覆盖本轮 Swift、UI、LogicSmoke、XCTest、Gateway 回归、manifest/JUnit/日志和敏感信息合同。
 遗留事项：等待 Agent B/main push 后的最新云端 run；Agent C 必须确认 artifact 与最新 commit/run/attempt 精确匹配后，才能宣布 v0.76 通过。
+
+### v0.76 / readiness 云端失败修复
+日期：2026-09-08
+
+实现范围：
+
+- 将 `ClawGatewayReadinessTransportFake` 的 call/release/close 协调改为线程安全的一次性 signal；`waitForCall`、`waitForClose`、wait-for-release、取消和 timeout 都有界，success/error/cancel 只记录一次 close。
+- success fake 仅在同 nonce、response 可编码且严格计数满足时返回 response；`ClawStore.requestGatewayReadiness` 继续要求一次 request/response/close 和 application message，运行时 token 仍只在 Authorization header，stale/generation/binding guard 与无副作用合同不变。
+- readiness XCTest/LogicSmoke 增加 bounded call/close 等待；未删除 duplicate、stale、redaction 或 side-effect 断言，也未修改 Gateway server、协议 schema、工程配置或 AgentTrace。
+
+关键文件：`Claw/Services/ClawStore.swift`、`ClawTests/ClawTests.swift`、`Tools/LogicSmoke.swift`、`README.md`、`Docs/claw-mobile-gateway-protocol.md`、`md/flow/flow.md`、`md/flow/flowchart.md`、`md/test/test.md`、`update_log.md`。
+
+验证状态：仅执行允许的静态检查（`git status`、`git diff --check`、文本搜索和 diff 复核）；未运行本地编译、XCTest、LogicSmoke、Gateway smoke、fixture、`node --check` 或 `xcodebuild`。提交并 push 后必须由新的 GitHub Actions run 和 Agent C artifact 复判确认，不能把本轮静态检查或旧 cancelled run 当作通过。
+
+遗留事项：等待 `origin/main` 最新 run 的 manifest、JUnit/摘要、XCTest、LogicSmoke、Gateway 回归、Xcode build 和 artifact 与修复 commit/run/attempt 完全匹配后验收。
+
 ### v0.75 / 受控 Gateway Readiness Attestation
 
 日期：2026-08-23

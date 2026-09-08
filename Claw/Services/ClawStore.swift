@@ -222,6 +222,157 @@ enum ClawGatewayReadinessTransportError: Error, LocalizedError, Equatable, Senda
     }
 }
 
+private final class ClawGatewayReadinessSignal: @unchecked Sendable {
+    private let lock = NSLock()
+    private var result: Bool?
+    private var waiter: CheckedContinuation<Bool, Never>?
+
+    func wait() async -> Bool {
+        await withCheckedContinuation { continuation in
+            let completedResult: Bool?
+            lock.lock()
+            if let result {
+                completedResult = result
+            } else {
+                completedResult = nil
+                waiter = continuation
+            }
+            lock.unlock()
+
+            if let completedResult {
+                continuation.resume(returning: completedResult)
+            }
+        }
+    }
+
+    func signal() {
+        complete(with: true)
+    }
+
+    func cancel() {
+        complete(with: false)
+    }
+
+    private func complete(with result: Bool) {
+        let continuation: CheckedContinuation<Bool, Never>?
+        lock.lock()
+        guard self.result == nil else {
+            lock.unlock()
+            return
+        }
+        self.result = result
+        continuation = waiter
+        waiter = nil
+        lock.unlock()
+        continuation?.resume(returning: result)
+    }
+}
+
+private func waitForClawGatewayReadinessSignal(
+    _ signal: ClawGatewayReadinessSignal,
+    timeoutNanoseconds: UInt64
+) async -> Bool {
+    await withTaskGroup(of: Bool.self) { group in
+        group.addTask {
+            await withTaskCancellationHandler(operation: {
+                await signal.wait()
+            }, onCancel: {
+                signal.cancel()
+            })
+        }
+        group.addTask {
+            do {
+                try await Task.sleep(nanoseconds: timeoutNanoseconds)
+            } catch {
+                signal.cancel()
+                return false
+            }
+            signal.cancel()
+            return false
+        }
+        let result = await group.next() ?? false
+        group.cancelAll()
+        return result
+    }
+}
+
+final class ClawGatewayReadinessResultLatch<Value: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var didComplete = false
+    private var value: Value?
+    private var waiter: CheckedContinuation<Value?, Never>?
+
+    func finish(_ value: Value) {
+        let continuation: CheckedContinuation<Value?, Never>?
+        lock.lock()
+        guard didComplete == false else {
+            lock.unlock()
+            return
+        }
+        didComplete = true
+        self.value = value
+        continuation = waiter
+        waiter = nil
+        lock.unlock()
+        continuation?.resume(returning: value)
+    }
+
+    func wait(timeoutNanoseconds: UInt64) async -> Value? {
+        await withTaskGroup(of: Value?.self) { group in
+            group.addTask {
+                await withTaskCancellationHandler(operation: {
+                    await self.waitForValue()
+                }, onCancel: {
+                    self.cancelWaiter()
+                })
+            }
+            group.addTask {
+                do {
+                    try await Task.sleep(nanoseconds: timeoutNanoseconds)
+                } catch {
+                    self.cancelWaiter()
+                    return nil
+                }
+                self.cancelWaiter()
+                return nil
+            }
+            let result = await group.next() ?? nil
+            group.cancelAll()
+            return result
+        }
+    }
+
+    private func waitForValue() async -> Value? {
+        await withCheckedContinuation { continuation in
+            let completedValue: Value?
+            let isComplete: Bool
+            lock.lock()
+            if didComplete {
+                isComplete = true
+                completedValue = value
+            } else {
+                isComplete = false
+                completedValue = nil
+                waiter = continuation
+            }
+            lock.unlock()
+
+            if isComplete {
+                continuation.resume(returning: completedValue)
+            }
+        }
+    }
+
+    private func cancelWaiter() {
+        let continuation: CheckedContinuation<Value?, Never>?
+        lock.lock()
+        continuation = waiter
+        waiter = nil
+        lock.unlock()
+        continuation?.resume(returning: nil)
+    }
+}
+
 protocol ClawGatewayReadinessTransport: Sendable {
     func requestReadiness(
         request: ClawGatewayReadinessTransportRequest,
@@ -241,19 +392,56 @@ final class ClawGatewayReadinessTransportFake: @unchecked Sendable, ClawGatewayR
 
     let outcome: Outcome
     let response: ClawGatewayReadinessResponse?
-    private let releaseStream: AsyncStream<Void>
-    private var releaseContinuation: AsyncStream<Void>.Continuation?
-    private let callStream: AsyncStream<Void>
-    private var callContinuation: AsyncStream<Void>.Continuation?
-    private(set) var callCount = 0
-    private(set) var requestBodyCount = 0
-    private(set) var responseCount = 0
-    private(set) var closeCount = 0
-    private(set) var timeoutCount = 0
-    private(set) var cancelCount = 0
-    private(set) var requestBodies: [String] = []
-    private(set) var headerNames: [[String]] = []
-    private(set) var authorizationHeaderPresent: [Bool] = []
+    private let releaseSignal = ClawGatewayReadinessSignal()
+    private let callSignal = ClawGatewayReadinessSignal()
+    private let closeSignal = ClawGatewayReadinessSignal()
+    private let stateLock = NSLock()
+    private var didClose = false
+    private var _callCount = 0
+    private var _requestBodyCount = 0
+    private var _responseCount = 0
+    private var _closeCount = 0
+    private var _timeoutCount = 0
+    private var _cancelCount = 0
+    private var _requestBodies: [String] = []
+    private var _headerNames: [[String]] = []
+    private var _authorizationHeaderPresent: [Bool] = []
+
+    var callCount: Int {
+        withStateLock { _callCount }
+    }
+
+    var requestBodyCount: Int {
+        withStateLock { _requestBodyCount }
+    }
+
+    var responseCount: Int {
+        withStateLock { _responseCount }
+    }
+
+    var closeCount: Int {
+        withStateLock { _closeCount }
+    }
+
+    var timeoutCount: Int {
+        withStateLock { _timeoutCount }
+    }
+
+    var cancelCount: Int {
+        withStateLock { _cancelCount }
+    }
+
+    var requestBodies: [String] {
+        withStateLock { _requestBodies }
+    }
+
+    var headerNames: [[String]] {
+        withStateLock { _headerNames }
+    }
+
+    var authorizationHeaderPresent: [Bool] {
+        withStateLock { _authorizationHeaderPresent }
+    }
 
     init(
         outcome: Outcome = .success,
@@ -261,69 +449,150 @@ final class ClawGatewayReadinessTransportFake: @unchecked Sendable, ClawGatewayR
     ) {
         self.outcome = outcome
         self.response = response
-        var continuation: AsyncStream<Void>.Continuation?
-        self.releaseStream = AsyncStream { continuation = $0 }
-        self.releaseContinuation = continuation
-        var callContinuation: AsyncStream<Void>.Continuation?
-        self.callStream = AsyncStream { callContinuation = $0 }
-        self.callContinuation = callContinuation
     }
 
-    func waitForCall() async {
+    @discardableResult
+    func waitForCall(timeoutNanoseconds: UInt64 = 1_000_000_000) async -> Bool {
         guard callCount == 0 else {
-            return
+            return true
         }
-        var iterator = callStream.makeAsyncIterator()
-        _ = await iterator.next()
+        return await waitForClawGatewayReadinessSignal(
+            callSignal,
+            timeoutNanoseconds: timeoutNanoseconds
+        )
+    }
+
+    @discardableResult
+    func waitForClose(timeoutNanoseconds: UInt64 = 1_000_000_000) async -> Bool {
+        guard closeCount == 0 else {
+            return true
+        }
+        return await waitForClawGatewayReadinessSignal(
+            closeSignal,
+            timeoutNanoseconds: timeoutNanoseconds
+        )
     }
 
     func release() {
-        releaseContinuation?.yield(())
+        releaseSignal.signal()
     }
 
     func requestReadiness(
         request: ClawGatewayReadinessTransportRequest,
         timeoutNanoseconds: UInt64
     ) async throws -> ClawGatewayReadinessTransportResult {
-        callCount += 1
-        callContinuation?.yield(())
-        requestBodyCount += 1
-        requestBodies.append(String(data: try request.body.encodedData(), encoding: .utf8) ?? "")
-        headerNames.append(request.headers.keys.sorted())
-        authorizationHeaderPresent.append(request.authorizationHeaderPresent)
         defer {
-            closeCount += 1
+            closeOnce()
         }
 
+        guard Task.isCancelled == false else {
+            incrementCancelCount()
+            throw ClawGatewayReadinessTransportError.cancelled
+        }
+
+        let encodedBody = try request.body.encodedData()
+        withStateLock {
+            _callCount += 1
+            _requestBodyCount += 1
+            _requestBodies.append(String(data: encodedBody, encoding: .utf8) ?? "")
+            _headerNames.append(request.headers.keys.sorted())
+            _authorizationHeaderPresent.append(request.authorizationHeaderPresent)
+        }
+        callSignal.signal()
+
         if outcome == .waitForRelease {
-            await withTaskCancellationHandler(operation: {
-                var iterator = releaseStream.makeAsyncIterator()
-                _ = await iterator.next()
-            }, onCancel: {
-                releaseContinuation?.yield(())
-            })
-            if Task.isCancelled {
-                cancelCount += 1
-                throw ClawGatewayReadinessTransportError.cancelled
+            let released = await waitForClawGatewayReadinessSignal(
+                releaseSignal,
+                timeoutNanoseconds: timeoutNanoseconds
+            )
+            if Task.isCancelled || released == false {
+                if Task.isCancelled {
+                    incrementCancelCount()
+                    throw ClawGatewayReadinessTransportError.cancelled
+                }
+                incrementTimeoutCount()
+                throw ClawGatewayReadinessTransportError.timedOut
             }
         }
 
         switch outcome {
         case .success, .waitForRelease:
             let response = response ?? .defaultResponse(requestNonce: request.body.requestNonce)
-            responseCount += 1
-            return ClawGatewayReadinessTransportResult(response: response)
+            incrementResponseCount()
+            guard response.requestNonce == request.body.requestNonce else {
+                throw ClawGatewayReadinessTransportError.nonceMismatch
+            }
+            guard (try? response.encodedData()) != nil else {
+                throw ClawGatewayReadinessTransportError.invalidResponse
+            }
+            closeOnce()
+            let counts = stateSnapshot()
+            return ClawGatewayReadinessTransportResult(
+                response: response,
+                requestCount: counts.callCount,
+                responseCount: counts.responseCount,
+                closeCount: counts.closeCount,
+                didSendApplicationMessage: true
+            )
         case .connectionFailed:
             throw ClawGatewayReadinessTransportError.connectionFailed
         case .timedOut:
-            timeoutCount += 1
+            incrementTimeoutCount()
             throw ClawGatewayReadinessTransportError.timedOut
         case .cancelled:
-            cancelCount += 1
+            incrementCancelCount()
             throw ClawGatewayReadinessTransportError.cancelled
         case .invalidResponse:
-            responseCount += 1
+            incrementResponseCount()
             throw ClawGatewayReadinessTransportError.invalidResponse
+        }
+    }
+
+    private func withStateLock<T>(_ body: () -> T) -> T {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return body()
+    }
+
+    private func incrementResponseCount() {
+        withStateLock {
+            _responseCount += 1
+        }
+    }
+
+    private func incrementTimeoutCount() {
+        withStateLock {
+            _timeoutCount += 1
+        }
+    }
+
+    private func incrementCancelCount() {
+        withStateLock {
+            _cancelCount += 1
+        }
+    }
+
+    private func closeOnce() {
+        let shouldSignal = withStateLock { () -> Bool in
+            guard didClose == false else {
+                return false
+            }
+            didClose = true
+            _closeCount += 1
+            return true
+        }
+        if shouldSignal {
+            closeSignal.signal()
+        }
+    }
+
+    private func stateSnapshot() -> (
+        callCount: Int,
+        responseCount: Int,
+        closeCount: Int
+    ) {
+        withStateLock {
+            (_callCount, _responseCount, _closeCount)
         }
     }
 }
@@ -844,7 +1113,12 @@ final class ClawStore: ObservableObject {
                   result.closeCount == 1,
                   result.didSendApplicationMessage,
                   result.response.requestNonce == request.body.requestNonce,
-                  (try? result.response.encodedData()) != nil else {
+                  let encodedResponse = try? result.response.encodedData(),
+                  let decodedResponse = try? JSONDecoder.clawGateway.decode(
+                      ClawGatewayReadinessResponse.self,
+                      from: encodedResponse
+                  ),
+                  decodedResponse == result.response else {
                 throw ClawGatewayReadinessTransportError.contractViolation
             }
 

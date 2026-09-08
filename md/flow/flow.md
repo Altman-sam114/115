@@ -16,6 +16,8 @@ v0.74 在同一手机端 presentation 边界增加版本化 `metadata-only Missi
 
 v0.75 在 v0.73 transport probe 和 v0.74 checkpoint 之外增加独立的 `claw.gateway.readiness.v1` control plane。用户点击共享 health strip 的 readiness command 后，Store 创建不含 task/session/envelope 的固定 request body，只放运行时 Authorization header、控制面 header、设备 header；独立 WebSocket 完成一条 request、一条 response/error 和一次 close。Gateway 在普通 task envelope pipeline 之前识别并严格校验该 request，读取固定的 capability/policy projector，返回固定脱敏 response；readiness 不调用普通 dispatch、workspace、replay、session、event、artifact、auditLog、receipt、Shell、浏览器、桌面或 handler。response 的 same nonce 仅用于内部绑定，effects 全部为 false；`tokenHeader` 只表示本次 header 被接受/不要求，不表示 pairing、authorization、trusted 或可控。失败、timeout、cancel、duplicate、nonce/schema 错误和 scope/profile/generation stale 均 fail closed，不改变 task/session/event/artifact/live request/connection/health/probe/checkpoint/approval/receipt/review focus/Smart Rail。compact iPhone Mission Run 与 regular iPad/宽屏 Review Detail Dock 复用同一 readiness summary/view/API，入口至少 44pt 并带只读 VoiceOver 边界。
 
+v0.76 readiness 修复轮把客户端 fake 的 call/release/close 协调改为一次性可取消信号，并让 `waitForCall`、`waitForClose` 和 wait-for-release 都有界；success 在严格 response 校验后才返回 `true/.attested`，并确认 request/response/close 各一次。取消、timeout、profile/generation stale 仍在旧结果落地前关闭并丢弃，token 只走 Authorization header，body/summary/日志继续脱敏；不改 Gateway schema、普通任务流或 AgentTrace。
+
 ## 1. 当前核心数据流
 
 ```text
