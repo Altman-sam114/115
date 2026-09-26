@@ -2484,7 +2484,7 @@ private func validateReadinessNonce(_ nonce: String) throws {
     guard (8...128).contains(nonce.utf8.count),
           nonce.unicodeScalars.allSatisfy({ scalar in
               switch scalar.value {
-              case 48...57, 65...90, 95, 97...122:
+              case 45, 48...57, 65...90, 95, 97...122:
                   return true
               default:
                   return false

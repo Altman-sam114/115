@@ -12,6 +12,22 @@ enum LogicSmoke {
             }
         }
 
+        for nonce in ["--------", "________", "aB09-_aB09-_", String(repeating: "-", count: 128)] {
+            do {
+                let request = try ClawGatewayReadinessRequest(requestNonce: nonce)
+                let decoded = try JSONDecoder.clawGateway.decode(ClawGatewayReadinessRequest.self, from: request.encodedData())
+                expect(decoded == request, "readiness must accept the complete base64url alphabet")
+                let response = ClawGatewayReadinessResponse.defaultResponse(requestNonce: nonce)
+                let decodedResponse = try JSONDecoder.clawGateway.decode(ClawGatewayReadinessResponse.self, from: response.encodedData())
+                expect(decodedResponse == response, "readiness response must preserve URL-safe nonces")
+            } catch {
+                failures.append("valid base64url readiness nonce was rejected")
+            }
+        }
+        for nonce in ["short-_", String(repeating: "-", count: 129), "aB09+_aB09", "aB09/_aB09", "aB09=_aB09", "aB09 _aB09"] {
+            expect((try? ClawGatewayReadinessRequest(requestNonce: nonce)) == nil, "invalid readiness nonce must remain rejected")
+        }
+
         let store = ClawStore(autoScanLocalArtifacts: false)
         expect(store.model.name == "Claw Local Agent 1.5B", "default model name should match Claw local agent")
         expect(store.model.installState == .placeholder, "model should start as placeholder")

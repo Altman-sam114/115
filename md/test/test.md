@@ -1,8 +1,10 @@
 # 测试规范
 
+v0.77 nonce 回归：固定连字符、下划线、混合 base64url 和 128 字节输入验证 request/response 编码往返；过短、129 字节、加号/斜杠/等号/空白/非 ASCII 仍拒绝。修复随机 nonce 导致 transport 未调用的漏测，生产超时不变，所有业务验证只在云端。
+
 v0.77（2026-09-26）恢复云端测试编译：async wait 必须先在异步测试上下文求值，再传给同步 `XCTAssertTrue` / `expect` autoclosure。保留有界等待、取消、stale 与 close-count 断言。只以新 main run 的 artifact 判定通过。
 
-v0.77 首次云端复判发现 Simulator 的 readiness duplicate fixture 在 1 秒启动观察截止前尚未进入 transport（其余 102 项 XCTest 通过）。测试为 MainActor 调度设置独立 5 秒启动观察上限；生产 request 的 3 秒 response timeout、1 秒 close 观察、duplicate/stale/close-count 断言保持原值和覆盖。这是测试同步预算，不是放宽 Gateway 响应时限。
+v0.77 首次云端复判发现 Simulator 的 readiness duplicate fixture 在 1 秒启动观察截止前尚未进入 transport（其余 99 项 XCTest 通过）。测试为 MainActor 调度设置独立 5 秒启动观察上限；生产 request 的 3 秒 response timeout、1 秒 close 观察、duplicate/stale/close-count 断言保持原值和覆盖。这是测试同步预算，不是放宽 Gateway 响应时限。
 
 本文指导 Agent A/B/C 选择非编译静态检查、GitHub Actions 云端重验证和 Agent C 结果包复判方式。
 

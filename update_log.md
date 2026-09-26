@@ -23,6 +23,15 @@
 
 ## 历史记录
 
+### v0.77 / Readiness nonce 字符集根因修复
+日期：2026-09-27
+
+- 最新 main db863f4574f0ccf94f71e80ad2dd9cbd42546055 的 run 36234586078 attempt 1 失败；云端日志为 100 项 XCTest 中同一 readiness 测试 13 个断言失败，成功请求 fake call/response/close 为 0。artifact 下载核对进行中，不能判为通过。
+- 生成器和 Gateway 允许 base64url 连字符，Swift validator 漏掉 ASCII 45，导致随机请求在 transport 前被拒绝。修复共享 validator，增加固定合法/非法字符与长度回归，不继续扩大超时。
+- 修改 ClawModels.swift、ClawTests.swift、LogicSmoke.swift；同步 README、协议、flow、flowchart、test 和提示词。本地仅静态检查；新 main 云端验证待推送，未宣称发布就绪。
+- v0.78 Mac/iPad 草稿、用户签名和旧提示词保留，不混入基线修复提交。
+
+
 ### v0.77 / 恢复云端验证基线
 日期：2026-09-26
 

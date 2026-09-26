@@ -1,5 +1,7 @@
 # Claw Computer-Control Gateway 协议草案
 
+Readiness requestNonce 严格使用 [A-Za-z0-9_-]{8,128}；Swift 与 Gateway 一致，连字符和下划线均合法，加号、斜杠、等号仍拒绝。nonce 仅内部绑定，不展示或记录原值。
+
 调研/设计日期：2026-06-10
 
 ## 定位

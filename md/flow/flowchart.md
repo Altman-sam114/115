@@ -1,5 +1,7 @@
 # 项目流程图
 
+v0.77 readiness 路径：base64url nonce → 字符集/长度校验 → request encode → transport → same nonce response 校验；连字符和下划线均合法，不改变控制面或任务边界。
+
 本文把 `md/flow/flow.md` 的核心逻辑画成可视化 Mermaid 图，方便人工快速复核。
 
 v0.63 的 Mission Run 展示先以当前 task 为根，只接收同 task 的 session、request 和 events。复核聚焦绑定 task/session scope；新 Mission 或 task-to-session 切换会使旧聚焦失效，iPhone 与 iPad/mac 均恢复当前 Mission 的全量详情。

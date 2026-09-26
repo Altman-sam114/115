@@ -1,5 +1,7 @@
 # 项目核心流程文档
 
+v0.77 根因修复：readiness base64url nonce 的共享 request/response validator 补 ASCII 45，与 Gateway 正则一致；否则请求在 transport 前随机失败，增加等待时间无效。
+
 ## 0. 一句话总览
 
 Claw 的当前主链路是：用户在 iPhone 输入电脑任务，App 生成可审批的 Claw computer-control envelope，桌面 Gateway 在安全策略内执行或模拟执行，并把事件、artifact、审批点和失败信息回传给手机端。

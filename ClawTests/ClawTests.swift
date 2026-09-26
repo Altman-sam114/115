@@ -5484,6 +5484,27 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(store.clawMobileTasks[0].status, .blocked)
     }
 
+    func testReadinessNonceAcceptsEntireBase64URLAlphabet() throws {
+        // Deterministic coverage of both URL-safe characters; random nonces hid this regression.
+        for nonce in ["--------", "________", "aB09-_aB09-_", String(repeating: "-", count: 128)] {
+            let request = try ClawGatewayReadinessRequest(requestNonce: nonce)
+            let decoded = try JSONDecoder.clawGateway.decode(
+                ClawGatewayReadinessRequest.self, from: request.encodedData()
+            )
+            XCTAssertEqual(decoded, request)
+            let response = ClawGatewayReadinessResponse.defaultResponse(requestNonce: nonce)
+            let decodedResponse = try JSONDecoder.clawGateway.decode(
+                ClawGatewayReadinessResponse.self, from: response.encodedData()
+            )
+            XCTAssertEqual(decodedResponse, response)
+        }
+        for nonce in ["short-_", String(repeating: "-", count: 129),
+                      "aB09+_aB09", "aB09/_aB09", "aB09=_aB09", "aB09 _aB09",
+                      "aB09\n_aB09", "aB09é_aB09"] {
+            XCTAssertThrowsError(try ClawGatewayReadinessRequest(requestNonce: nonce))
+        }
+    }
+
     func testGatewayReadinessWireSchemaIsStrictAndRedacted() throws {
         let request = try ClawGatewayReadinessRequest(requestNonce: "test_nonce_123456")
         let requestData = try request.encodedData()
