@@ -23,6 +23,14 @@
 
 ## 历史记录
 
+### v0.77 / 恢复云端验证基线
+日期：2026-09-26
+
+- 复核最新 main run 34175749191 attempt 1：Swift logic smoke 和 XCTest 在六处 async autoclosure 断言编译失败，不能将此前的 readiness 修复记为通过。
+- 修复 `Tools/LogicSmoke.swift`、`ClawTests/ClawTests.swift`：异步等待先求值，原有超时、取消、stale、无副作用和 close-count 断言全部保留。
+- 用户明确禁止子 agent，本次由 Agent X 单实例顺序保留规划、实现、artifact 复判阶段；提示词在 `md/prompt/v0（核心智能能力）/v0.77（恢复云端验证基线）.md`。
+- 本地仅静态检查；云端结果待最新 main push 后复判。Mac/iPad 和发布级智能能力仍是后续目标，未宣称完成。
+
 ### v0.76 / AgentTrace 证据交接包
 日期：2026-08-24
 实现范围：

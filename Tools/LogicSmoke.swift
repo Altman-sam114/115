@@ -129,14 +129,16 @@ enum LogicSmoke {
             staleResultLatch.finish(result)
             return result
         }
+        let staleReadinessDidStart = await staleFake.waitForCall(timeoutNanoseconds: 1_000_000_000)
         expect(
-            await staleFake.waitForCall(timeoutNanoseconds: 1_000_000_000),
+            staleReadinessDidStart,
             "stale readiness fixture must start within the bound"
         )
         readinessStore.setGateway(url: "ws://new-gateway.example.test", token: "new-readiness-secret")
         staleFake.release()
+        let staleReadinessDidClose = await staleFake.waitForClose(timeoutNanoseconds: 1_000_000_000)
         expect(
-            await staleFake.waitForClose(timeoutNanoseconds: 1_000_000_000),
+            staleReadinessDidClose,
             "stale readiness fixture must close within the bound"
         )
         let staleReadinessResult = await staleResultLatch.wait(timeoutNanoseconds: 1_000_000_000)

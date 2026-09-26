@@ -5584,16 +5584,18 @@ final class ClawTests: XCTestCase {
         let first = Task {
             await store.requestGatewayReadiness(transport: duplicateFake)
         }
+        let duplicateDidStart = await duplicateFake.waitForCall(timeoutNanoseconds: 1_000_000_000)
         XCTAssertTrue(
-            await duplicateFake.waitForCall(timeoutNanoseconds: 1_000_000_000),
+            duplicateDidStart,
             "readiness duplicate fixture must start within the bound"
         )
         let duplicateResult = await store.requestGatewayReadiness(transport: duplicateFake)
         XCTAssertFalse(duplicateResult)
         XCTAssertEqual(duplicateFake.callCount, 1)
         first.cancel()
+        let duplicateDidClose = await duplicateFake.waitForClose(timeoutNanoseconds: 1_000_000_000)
         XCTAssertTrue(
-            await duplicateFake.waitForClose(timeoutNanoseconds: 1_000_000_000),
+            duplicateDidClose,
             "cancelled readiness fixture must close within the bound"
         )
         XCTAssertEqual(duplicateFake.closeCount, 1)
@@ -5605,14 +5607,16 @@ final class ClawTests: XCTestCase {
             staleResultLatch.finish(result)
             return result
         }
+        let staleDidStart = await staleFake.waitForCall(timeoutNanoseconds: 1_000_000_000)
         XCTAssertTrue(
-            await staleFake.waitForCall(timeoutNanoseconds: 1_000_000_000),
+            staleDidStart,
             "stale readiness fixture must start within the bound"
         )
         store.setGateway(url: "ws://new-gateway.example.test", token: "new-readiness-secret")
         staleFake.release()
+        let staleDidClose = await staleFake.waitForClose(timeoutNanoseconds: 1_000_000_000)
         XCTAssertTrue(
-            await staleFake.waitForClose(timeoutNanoseconds: 1_000_000_000),
+            staleDidClose,
             "stale readiness fixture must close within the bound"
         )
         let staleResult = await staleResultLatch.wait(timeoutNanoseconds: 1_000_000_000)

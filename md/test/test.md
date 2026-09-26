@@ -1,5 +1,7 @@
 # 测试规范
 
+v0.77（2026-09-26）恢复云端测试编译：async wait 必须先在异步测试上下文求值，再传给同步 `XCTAssertTrue` / `expect` autoclosure。保留有界等待、取消、stale 与 close-count 断言。只以新 main run 的 artifact 判定通过。
+
 本文指导 Agent A/B/C 选择非编译静态检查、GitHub Actions 云端重验证和 Agent C 结果包复判方式。
 
 ## 固定前缀 / 环境要求
