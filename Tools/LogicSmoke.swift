@@ -129,7 +129,7 @@ enum LogicSmoke {
             staleResultLatch.finish(result)
             return result
         }
-        let staleReadinessDidStart = await staleFake.waitForCall(timeoutNanoseconds: 1_000_000_000)
+        let staleReadinessDidStart = await staleFake.waitForCall(timeoutNanoseconds: 5_000_000_000)
         expect(
             staleReadinessDidStart,
             "stale readiness fixture must start within the bound"

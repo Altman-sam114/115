@@ -5584,7 +5584,8 @@ final class ClawTests: XCTestCase {
         let first = Task {
             await store.requestGatewayReadiness(transport: duplicateFake)
         }
-        let duplicateDidStart = await duplicateFake.waitForCall(timeoutNanoseconds: 1_000_000_000)
+        // Simulator scheduling is separate from the transport's three-second response timeout.
+        let duplicateDidStart = await duplicateFake.waitForCall(timeoutNanoseconds: 5_000_000_000)
         XCTAssertTrue(
             duplicateDidStart,
             "readiness duplicate fixture must start within the bound"
@@ -5607,7 +5608,7 @@ final class ClawTests: XCTestCase {
             staleResultLatch.finish(result)
             return result
         }
-        let staleDidStart = await staleFake.waitForCall(timeoutNanoseconds: 1_000_000_000)
+        let staleDidStart = await staleFake.waitForCall(timeoutNanoseconds: 5_000_000_000)
         XCTAssertTrue(
             staleDidStart,
             "stale readiness fixture must start within the bound"

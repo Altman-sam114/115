@@ -26,6 +26,8 @@
 ### v0.77 / 恢复云端验证基线
 日期：2026-09-26
 
+- 首次 artifact 复判：a3a48f4 / run 36233990856 / attempt 1 的 manifest、JUnit、日志和 xcresult 精确匹配；静态、Swift logic、fixture、Gateway direct/WebSocket、iOS build 通过，XCTest 仅 readiness duplicate fixture 1 秒启动观察失败。保留失败结论，追加独立 5 秒测试启动观察预算，生产 3 秒 response timeout 和关闭/取消断言不变；需新 run 重验。
+
 - 复核最新 main run 34175749191 attempt 1：Swift logic smoke 和 XCTest 在六处 async autoclosure 断言编译失败，不能将此前的 readiness 修复记为通过。
 - 修复 `Tools/LogicSmoke.swift`、`ClawTests/ClawTests.swift`：异步等待先求值，原有超时、取消、stale、无副作用和 close-count 断言全部保留。
 - 用户明确禁止子 agent，本次由 Agent X 单实例顺序保留规划、实现、artifact 复判阶段；提示词在 `md/prompt/v0（核心智能能力）/v0.77（恢复云端验证基线）.md`。
