@@ -26,6 +26,9 @@
 ### v0.78 / Mac 与 iPad 工作台基础
 日期：2026-09-27
 
+- 首次 C 复判：b2a9cafde36a967cc5aa326965ca830f32ac292a / run 36309166142 attempt 1 失败。结果包 claw-ci-v0.78-main-b2a9cafde36a-run36309166142-attempt1（462358 bytes，解压 2.4M）identity、manifest、JUnit、日志及三个 xcresult 一致。iOS/Catalyst Release 均成功（126/135 秒）；iPhone/iPad 各 103 项 XCTest 零失败，但其后的 simctl launch 因选中设备 Shutdown 返回 405，没有截图，因此平台检查失败。
+- 追加云端流程修复：截图前 bootstatus -b、显式安装本轮 Debug app，再 launch/screenshot；不删除任何测试或放宽门槛。加入 Release build timing summary 用于后续按证据优化。v0.79 live 发送草稿保留，未混入本次修复。新 run 仍须完整重验。
+
 - 前置 v0.77 commit 7f618a3078fa59884d81c742eeb78957d8ee7069 / run 36308683756 attempt 1 已通过；下载 claw-ci-v0.2-main-7f618a3078fa-run36308683756-attempt1（344497 bytes，解压 1.4M），manifest、10 项零失败 JUnit、build/XCTest、LogicSmoke、fixture 与 Gateway 双 smoke 日志一致。
 - 接续已有 v0.78 草稿：共享 scheme、Catalyst、iPad 四方向、侧栏/键盘导航、根视图聚焦与自适应工作台拆分。云端增加 Catalyst Release、iPad XCTest 和双设备截图；平台 outcome 纳入 manifest/JUnit/失败门槛。
 - 本地仅静态检查；用户 signing team/xcuserdata 及旧提示词保留。aitrans 仅只读参考。v0.78 待 main push 云端验收，发布级总目标未完成。

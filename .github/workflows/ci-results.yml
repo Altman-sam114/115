@@ -142,6 +142,7 @@ jobs:
             -project "$XCODE_PROJECT" \
             -scheme "$XCODE_SCHEME" \
             -configuration Release \
+            -showBuildTimingSummary \
             -destination "$XCODE_DESTINATION" \
             -derivedDataPath .derivedData-ci \
             -resultBundlePath "$RESULT_BUNDLE" \
@@ -159,6 +160,7 @@ jobs:
             -project "$XCODE_PROJECT" \
             -scheme "$XCODE_SCHEME" \
             -configuration Release \
+            -showBuildTimingSummary \
             -destination 'generic/platform=macOS,variant=Mac Catalyst' \
             -derivedDataPath .derivedData-catalyst \
             -resultBundlePath "$RESULT_DIR/MacCatalyst.xcresult" \
@@ -202,6 +204,8 @@ jobs:
               -maximum-test-execution-time-allowance 120 \
               CODE_SIGNING_ALLOWED=NO \
               test
+            xcrun simctl bootstatus "$simulator_udid" -b
+            xcrun simctl install "$simulator_udid" .derivedData-tests/Build/Products/Debug-iphonesimulator/Claw.app
             xcrun simctl launch "$simulator_udid" com.claw.prototype
             sleep 2
             xcrun simctl io "$simulator_udid" screenshot "$RESULT_DIR/iphone-workspace.png"
@@ -244,6 +248,8 @@ jobs:
               -maximum-test-execution-time-allowance 120 \
               CODE_SIGNING_ALLOWED=NO \
               test-without-building
+            xcrun simctl bootstatus "$simulator_udid" -b
+            xcrun simctl install "$simulator_udid" .derivedData-tests/Build/Products/Debug-iphonesimulator/Claw.app
             xcrun simctl launch "$simulator_udid" com.claw.prototype
             sleep 2
             xcrun simctl io "$simulator_udid" screenshot "$RESULT_DIR/ipad-workspace.png"
