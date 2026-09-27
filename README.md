@@ -255,3 +255,5 @@ v0.76 增加 AgentTrace 证据交接包。它只从现有 `agentTrace` 的已校
 - 2026-07-03：升级协作制度为 main 直推、GitHub Actions 云端重验证和 Agent C 下载未加密结果包复判；新增 `ci-results` workflow。验证：本轮至少需运行 `git diff --check` 和 workflow YAML 语法检查；真实云端试跑依赖仓库配置 `origin`。
 - 2026-06-28：建立多 Agent 协作系统和项目记忆目录，统一入口为 `AGENTS.md`，新增 `update_log.md`、`md/prompt/README.md`、`md/prompt/v0（项目初始化）/v0.1（建立多Agent迭代文档）.md`、`md/test/test.md`、`md/flow/flow.md`、`md/flow/flowchart.md`。验证：文档-only 改动，按 `md/test/test.md` 运行静态检查；未运行 Gateway/Swift smoke。
 - 2026-06-27：新增项目级开发规范草案，固化后续 Codex 开发规范、测试矩阵、README/协议文档更新要求和项目方向约束。后续已迁移为标准入口 `AGENTS.md`。
+
+v0.81 清理 Mac/iPad 云端截图中的无效 SF Symbol，统一文件能力图标为系统兼容的 `folder.fill`。

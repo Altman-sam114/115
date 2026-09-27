@@ -437,3 +437,5 @@ child task/action/session ID 全部新建，actions 必须恰好是 selected act
 - `ClawGatewayEventStream.apply` 必须能按事件累积结果和 artifact。
 - Smoke 断言不能因为实现不方便被删除。
 - CI manifest 的 commitSha/runId/runAttempt 必须对应 Agent C 正在验收的 `origin/main` 最新 run。
+
+v0.81 平台图标使用系统兼容的 SF Symbol，避免 Catalyst/iPad 启动日志产生 Invalid Configuration。

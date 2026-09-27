@@ -310,3 +310,5 @@ grep -R -n -E "法律|法务|合同|诉讼|律师|法院|legal|lawyer|court|laws
 - 不得把旧 artifact、旧 output 或 checkout 自带报告冒充本轮云端结果。
 - 文档-only 修改可只跑本地静态检查，但必须说明未跑业务测试的原因。
 - 最终回复必须写清楚每条测试命令和结果、云端 run 状态、结果包是否已下载复判。
+
+v0.81 云端日志须无 `Invalid Configuration` 或 `No symbol named` 图标警告，并保留全量平台回归。

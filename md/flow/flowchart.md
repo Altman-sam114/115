@@ -300,3 +300,5 @@ flowchart TD
   J -->|暂停等待人工| WAIT["暂停<br/>权限、密钥、账号、冲突、方向或人工决策"]
   J -->|总目标完成| REPORT["最终汇报<br/>版本、commit、run、artifact、测试、风险"]
 ```
+
+v0.81：能力图标 -> 系统兼容 SF Symbol -> Mac/iPad 无效 symbol 警告为 0。

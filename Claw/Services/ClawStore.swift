@@ -2532,7 +2532,7 @@ final class ClawStore: ObservableObject {
                 title: "文件变更安全",
                 status: review.compactStatus,
                 reason: review.hasMetadata ? "只展示文件变更策略诊断和写入状态。" : "文件变更 metadata 待同步。",
-                icon: "folder.badge.gearshape.fill",
+                icon: "folder.fill",
                 reviewKind: "file-change-safety",
                 actionHint: needsReview ? "确认文件策略、workspace 范围和写入结果" : "抽查文件变更",
                 isActionable: needsReview,

@@ -8497,7 +8497,7 @@ extension ClawMissionRunSummary {
                 id: "file",
                 title: "文件变更策略",
                 reviewKind: "file-change-safety",
-                icon: "folder.badge.gearshape.fill",
+                icon: "folder.fill",
                 focusedOn: focusedKind,
                 diagnostic: gatewayFileChangeSafetyReview?.filePolicyDiagnostic,
                 retryableReason: gatewayFileChangeSafetyReview?.fileRetryableReason,
@@ -9925,7 +9925,7 @@ extension ClawMissionRunSummary {
         case "artifact-metadata":
             return "paperclip.badge.ellipsis"
         case "file-change-safety":
-            return "folder.badge.gearshape.fill"
+            return "folder.fill"
         case "shell-safety":
             return "terminal.fill"
         case "extraction-completeness":

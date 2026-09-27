@@ -3029,3 +3029,7 @@
 ## v0.80 真实会话与模拟重试隔离（2026-09-27）
 
 仅允许进程内登记的 simulated session 使用本机模拟 retry；live 或未知来源 session 拒绝重试并保留失败事件、artifact 与审批状态，Mission 继续路径同步 fail closed。
+
+## v0.81 平台图标兼容性（2026-09-27）
+
+修复云端 iPad 启动日志中的 `folder.badge.gearshape.fill` 无效 SF Symbol，统一为 `folder.fill`，并纳入平台日志验收。
