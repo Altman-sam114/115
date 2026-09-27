@@ -2,6 +2,8 @@
 
 v0.79 修复普通任务 live 发送：传输 envelope 的状态与已发送任务保持一致；电脑任务面板及 Mission 开始/审批按钮显式打开 async transport。Mission 审批绑定当前任务，异步结果只更新仍匹配的 Mission。已发送任务不能重新审批/重复发送。续接继续使用冻结 readyToSend 合同。
 
+v0.80 隔离真实 Gateway 会话与模拟重试：只有模拟入口创建的 session 才显示并执行本机重试；真实失败保留原始事件与证据，要求重新审批并发送新任务。
+
 ## Mac 与 iPad 工作台（v0.78）
 
 Mac Catalyst 与 iPad 共用现有 Store/Gateway 协议。默认任务工作台，侧栏、工作区菜单和 Command+1…5 切换页面；iPad 支持四方向。内容宽度至少 900pt 且非辅助大字体时双栏，根视图保留 scoped review focus。电脑动作仍由授权 Gateway 执行。云端增加 Catalyst Release、iPad XCTest 和启动截图；本机不编译。发布缺口见 Docs/release-readiness.md。

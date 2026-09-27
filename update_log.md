@@ -3025,3 +3025,7 @@
 ## v0.79 真实发送一致性（2026-09-27）
 
 普通任务 live envelope 现在以 `sent` wire 状态进入 Gateway，Bridge 与 Mission 开始/审批按钮显式使用 async transport；审批绑定当前 task ID，已发送任务不能重复审批或重复创建 session。新增 transport recorder、Mission 一次性发送与任务替换回归。v0.78 修复 run `36310198213` 的 103 项 iPhone/iPad XCTest、Swift/Gateway smoke 和 iOS/Catalyst Release 均通过；iPad 启动截图阶段超时，artifact `claw-ci-v0.78-main-8409d0ab66e1-run36310198213-attempt1` 已核对并判定不通过。当前 workflow 将设备预启动并优先选择 iPad mini，降低重复 boot 导致的云端耗时。
+
+## v0.80 真实会话与模拟重试隔离（2026-09-27）
+
+仅允许进程内登记的 simulated session 使用本机模拟 retry；live 或未知来源 session 拒绝重试并保留失败事件、artifact 与审批状态，Mission 继续路径同步 fail closed。

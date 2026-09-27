@@ -5484,6 +5484,24 @@ final class ClawTests: XCTestCase {
         }
     }
 
+    func testLiveGatewaySessionCannotUseSimulatorRetry() async {
+        let store = ClawStore(autoScanLocalArtifacts: false)
+        store.setGateway(url: "ws://127.0.0.1:18789", token: "paired-secret")
+        store.phoneAgentCommand = "打开浏览器搜索资料"
+        store.generatePhoneAgentPlan()
+        store.queueClawMobileTaskFromCurrentPlan()
+        store.approveLatestClawMobileTask()
+        await store.sendLatestClawMobileTaskOverLiveGateway(transport: SensitiveFailingClawGatewayTransport())
+
+        let sessions = store.clawGatewaySessions
+        let events = store.gatewayEvents
+        XCTAssertFalse(store.canRetryLatestGatewayFailures)
+        store.retryLatestGatewayFailures()
+        XCTAssertEqual(store.clawGatewaySessions, sessions)
+        XCTAssertEqual(store.gatewayEvents, events)
+        XCTAssertTrue(store.lastGatewayEvent.contains("不能由模拟器重试"))
+    }
+
     func testLiveGatewayHealthSummaryFallsBackWhenNoRequestExists() {
         let store = ClawStore(autoScanLocalArtifacts: false)
 

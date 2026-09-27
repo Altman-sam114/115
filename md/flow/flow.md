@@ -1,6 +1,7 @@
 # 项目核心流程文档
 
 v0.79 普通发送链路：点击时 task ID -> 显式 async live transport -> 审批状态检查 -> sent wire 副本 -> prepared session -> Gateway ordinary sent preflight。Bridge 与 Mission live 开始/审批都使用真实 async 入口；Mission 审批必须绑定原任务，异步完成仅更新匹配的 Mission。重复发送/重新审批 sent 任务不产生新会话或事件；continuation frozen 分支不变。
+v0.80 重试链路按 session 来源隔离：只有模拟入口登记的 session 可使用本机模拟 retry；真实 Gateway 失败拒绝模拟重试并保留 events/artifacts/approval 状态。
 
 ## v0.78 自适应客户端入口
 

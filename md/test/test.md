@@ -1,6 +1,7 @@
 # 测试规范
 
 v0.79 云端 XCTest transport recorder 必须核对未审批零调用、已审批 wire task.status=sent、task ID/actions 一致、重复发送/重新审批后的调用数/session/events/request 不变。Mission live 开始必须等待审批，审批后只发送一次并完成当前循环，替换任务后旧 Mission 不得批准新任务。Mock transport 按 ordinary sent / continuation readyToSend 拒绝不匹配状态。LogicSmoke 复核 sent 不能重新审批创建会话；保留全部 continuation 与双平台/Gateway 云端回归。
+v0.80 云端 XCTest 必须核对模拟 session 仍可重试，live session 即使切换 dispatch mode 也拒绝 simulator retry，拒绝前后 session/events/artifacts/approval 不变；保留 v0.79 与双平台/Gateway 回归。
 
 ## v0.78 Mac / iPad 验收
 

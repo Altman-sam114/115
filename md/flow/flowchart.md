@@ -1,6 +1,7 @@
 # 项目流程图
 
 v0.79：普通审批 -> readyToSend -> 显式 live 点击 -> sent wire envelope -> Gateway sent preflight；sent 再审批/发送 -> 拒绝；continuation 仍走 frozen readyToSend + receipt。
+v0.80：模拟 session -> 可模拟 retry；live/未知 session -> 拒绝模拟 retry -> 保留失败证据 -> 新任务审批发送。
 
 ## v0.78 平台流程
 

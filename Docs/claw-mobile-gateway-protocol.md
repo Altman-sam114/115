@@ -612,3 +612,4 @@ v0.76 readiness 修复不改变上述 wire schema 或 Gateway route。客户端 
 5. `runShellCommand`: 已有 allowlist 真执行边界和 metadata-only Shell Command Safety review；继续补 dry-run/approve/run 三阶段 UI 和命令模板。
 6. `operateDesktopApp`: 已支持 macOS App 聚焦、粘贴草稿和 allowlist 快捷键；继续补视觉定位、控件级可访问性动作和回滚。
 7. 手机端写入本地审计日志，并把屏幕、文件和账号上下文最小化保留。
+v0.80：Gateway live transport 失败不会被本机 simulator retry 冒充成功。Store 只对进程内登记的 simulated session 暴露重试入口；真实失败需重新审批并发送新任务，原始 session、事件和 artifact 保持可审计。

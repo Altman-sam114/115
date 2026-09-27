@@ -12,7 +12,7 @@ permissions:
 
 env:
   CI_POLICY_VERSION: v0.3
-  PRODUCT_ITERATION: v0.79
+  PRODUCT_ITERATION: v0.80
   PROJECT_NAME: Claw
   XCODE_PROJECT: Claw.xcodeproj
   XCODE_SCHEME: Claw

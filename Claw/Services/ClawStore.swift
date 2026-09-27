@@ -675,12 +675,17 @@ final class ClawStore: ObservableObject {
     @Published private(set) var autonomousLoop: ClawAutonomousLoopState
     @Published private(set) var continuationDraft: ClawContinuationDraft?
     @Published private(set) var gatewayTransportProbeState: ClawGatewayTransportProbeSummary
+    var canRetryLatestGatewayFailures: Bool {
+        guard let session = clawGatewaySessions.first else { return false }
+        return simulatedGatewaySessionIDs.contains(session.id) && session.retryableCount > 0
+    }
     @Published private(set) var gatewayReadinessState: ClawGatewayReadinessSummary
     @Published private(set) var missionRunCheckpointPresentationSummary: ClawMissionRunCheckpointPresentationSummary
 
     private let artifactDirectoryURL: URL
     private let missionRunCheckpointStore: any ClawMissionRunCheckpointStore
     private var gatewayConnectionSessionID: UUID?
+    private var simulatedGatewaySessionIDs: Set<UUID>
     private var continuationReceipts: [String: ContinuationReceiptEntry]
     private var continuationApprovalRecords: [UUID: ClawContinuationApprovalRecord]
     private var frozenContinuationEnvelopes: [UUID: String]
@@ -737,6 +742,7 @@ final class ClawStore: ObservableObject {
         self.lastGatewayLiveRequest = nil
         self.gatewayEvents = []
         self.gatewayConnectionSessionID = nil
+        self.simulatedGatewaySessionIDs = []
         self.continuationDraft = nil
         self.continuationReceipts = [:]
         self.continuationApprovalRecords = [:]
@@ -2908,6 +2914,17 @@ final class ClawStore: ObservableObject {
             sessionID: latestSession.id,
             appendCheckpoint: "loop.retry iteration=\(nextIteration) retryable=\(latestSession.retryableCount)"
         )
+        guard canRetryLatestGatewayFailures else {
+            setAutonomousLoop(
+                phase: .blocked,
+                statusLine: "真实 Gateway 会话不能由模拟器重试。",
+                lastDecision: "请重新审批并发送新的真实任务，保留当前失败证据。",
+                requiresUserApproval: true,
+                sessionID: latestSession.id,
+                appendCheckpoint: "loop.retry refused_live_session"
+            )
+            return
+        }
         retryLatestGatewayFailures()
         updateAutonomousLoopFromLatestGatewaySession()
     }
@@ -3564,6 +3581,9 @@ final class ClawStore: ObservableObject {
                 mode: mode
             )
             clawGatewaySessions.insert(session, at: 0)
+            if mode == .simulatedEventStream {
+                simulatedGatewaySessionIDs.insert(session.id)
+            }
             resetGatewayTransportProbeState()
             ingestGatewayEvents([preparedEvent])
             lastClawMobileEnvelope = ClawMobileBridge.makeEnvelopeString(
@@ -4135,6 +4155,10 @@ final class ClawStore: ObservableObject {
 
     func retryLatestGatewayFailures() {
         guard clawGatewaySessions.isEmpty == false else {
+            return
+        }
+        guard canRetryLatestGatewayFailures else {
+            lastGatewayEvent = "真实 Gateway 会话不能由模拟器重试；请重新审批并发送新任务。"
             return
         }
         clawGatewaySessions[0] = ClawGatewaySimulator.retryFailures(in: clawGatewaySessions[0])

@@ -5118,7 +5118,7 @@ struct ClawGatewaySessionPanel: View {
             if let session = store.clawGatewaySessions.first {
                 ClawGatewaySessionCard(session: session)
 
-                if session.retryableCount > 0 {
+                if store.canRetryLatestGatewayFailures {
                     Button {
                         store.retryLatestGatewayFailures()
                     } label: {
