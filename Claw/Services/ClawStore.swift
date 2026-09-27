@@ -2783,6 +2783,20 @@ final class ClawStore: ObservableObject {
     }
 
     func startAutonomousComputerTakeover(maxIterations: Int = 3) {
+        prepareAutonomousComputerTakeover(maxIterations: maxIterations)
+        updateAutonomousLoopAfterTaskQueued()
+    }
+
+    func startAutonomousComputerTakeoverOverLiveGateway<T: ClawGatewayTransport>(
+        maxIterations: Int = 3, transport: T = URLSessionClawGatewayTransport()
+    ) async {
+        prepareAutonomousComputerTakeover(maxIterations: maxIterations)
+        updateAutonomousLoopAfterTaskQueued(dispatchWhenReady: false)
+        guard let task = clawMobileTasks.first, task.status == .queued || task.status == .readyToSend else { return }
+        await dispatchAutonomousLoopTaskOverLiveGateway(task, transport: transport)
+    }
+
+    private func prepareAutonomousComputerTakeover(maxIterations: Int) {
         let trimmed = phoneAgentCommand.trimmingCharacters(in: .whitespacesAndNewlines)
         let command = trimmed.isEmpty ? "接管电脑，打开浏览器完成资料收集并整理结果" : trimmed
         phoneAgentCommand = command
@@ -2802,24 +2816,36 @@ final class ClawStore: ObservableObject {
 
         generatePhoneAgentPlan()
         queueClawMobileTaskFromCurrentPlan()
-        updateAutonomousLoopAfterTaskQueued()
     }
 
     func approveAndContinueAutonomousLoop() {
+        guard let task = prepareAutonomousLoopApproval() else { return }
+        dispatchAutonomousLoopTask(task)
+    }
+
+    func approveAndContinueAutonomousLoopOverLiveGateway<T: ClawGatewayTransport>(
+        transport: T = URLSessionClawGatewayTransport()
+    ) async {
+        guard let task = prepareAutonomousLoopApproval() else { return }
+        await dispatchAutonomousLoopTaskOverLiveGateway(task, transport: transport)
+    }
+
+    private func prepareAutonomousLoopApproval() -> ClawMobileTask? {
         guard autonomousLoop.phase == .waitingForUserApproval else {
-            return
+            return nil
         }
-        approveLatestClawMobileTask()
-        guard let task = clawMobileTasks.first else {
+        guard let taskID = autonomousLoop.taskID, clawMobileTasks.first?.id == taskID else {
             setAutonomousLoop(
                 phase: .blocked,
-                statusLine: "没有可审批的 Claw 电脑任务。",
-                lastDecision: "审批继续失败：任务队列为空。",
+                statusLine: "当前任务已变化，请重新生成并复核计划。",
+                lastDecision: "审批继续失败：当前任务与 Mission 不匹配。",
                 requiresUserApproval: false,
-                appendCheckpoint: "loop.approval missing_task"
+                appendCheckpoint: "loop.approval task_scope_changed"
             )
-            return
+            return nil
         }
+        approveTask(id: taskID)
+        guard let task = clawMobileTasks.first, task.id == taskID else { return nil }
         guard task.status != .blocked else {
             setAutonomousLoop(
                 phase: .blocked,
@@ -2829,9 +2855,10 @@ final class ClawStore: ObservableObject {
                 taskID: task.id,
                 appendCheckpoint: "loop.blocked approvals=\(task.approvalCount) blocked=\(task.blockedCount)"
             )
-            return
+            return nil
         }
-        dispatchAutonomousLoopTask(task)
+        guard task.status == .readyToSend || task.status == .queued else { return nil }
+        return task
     }
 
     func continueAutonomousLoopAfterReview() {
@@ -3197,6 +3224,9 @@ final class ClawStore: ObservableObject {
             return
         }
         guard let lineage = task.continuationLineage else {
+            guard task.status == .queued || task.status == .waitingForApproval || task.status == .readyToSend else {
+                return
+            }
             clawMobileTasks[index].status = .readyToSend
             lastClawMobileEnvelope = ClawMobileBridge.makeEnvelopeString(
                 task: clawMobileTasks[index],
@@ -3515,7 +3545,10 @@ final class ClawStore: ObservableObject {
                 lastClawMobileEnvelope = ClawMobileBridge.makeEnvelopeString(task: candidate, profile: clawGatewayProfile)
                 return nil
             }
-            envelopeJSON = ClawMobileBridge.makeEnvelopeString(task: candidate, profile: clawGatewayProfile)
+            // Ordinary Gateway preflight accepts only sent; continuation retains its frozen readyToSend envelope.
+            var wireTask = candidate
+            wireTask.status = .sent
+            envelopeJSON = ClawMobileBridge.makeEnvelopeString(task: wireTask, profile: clawGatewayProfile)
         }
         if candidate.status == .readyToSend || candidate.status == .queued {
             clawMobileTasks[index].status = .sent
@@ -4430,7 +4463,7 @@ final class ClawStore: ObservableObject {
         ].joined(separator: "|")
     }
 
-    private func updateAutonomousLoopAfterTaskQueued() {
+    private func updateAutonomousLoopAfterTaskQueued(dispatchWhenReady: Bool = true) {
         guard let task = clawMobileTasks.first else {
             setAutonomousLoop(
                 phase: .blocked,
@@ -4466,22 +4499,35 @@ final class ClawStore: ObservableObject {
                 appendCheckpoint: "loop.waiting_approval approvals=\(task.approvalCount) risk=\(task.riskScore)"
             )
         case .queued, .readyToSend, .sent:
-            dispatchAutonomousLoopTask(task)
+            if dispatchWhenReady { dispatchAutonomousLoopTask(task) }
         }
     }
 
     private func dispatchAutonomousLoopTask(_ task: ClawMobileTask) {
+        prepareAutonomousLoopDispatch(task, mode: gatewayDispatchMode)
+        sendTask(id: task.id)
+        updateAutonomousLoopFromLatestGatewaySession()
+    }
+
+    private func dispatchAutonomousLoopTaskOverLiveGateway<T: ClawGatewayTransport>(
+        _ task: ClawMobileTask, transport: T
+    ) async {
+        prepareAutonomousLoopDispatch(task, mode: .liveGateway)
+        await sendTaskOverLiveGateway(id: task.id, transport: transport)
+        guard autonomousLoop.taskID == task.id, clawGatewaySessions.first?.taskID == task.id else { return }
+        updateAutonomousLoopFromLatestGatewaySession()
+    }
+
+    private func prepareAutonomousLoopDispatch(_ task: ClawMobileTask, mode: ClawGatewayDispatchMode) {
         setAutonomousLoop(
             phase: .dispatching,
-            runMode: gatewayDispatchMode,
-            statusLine: "正在把 Claw 电脑任务发送到 \(gatewayDispatchMode.title)。",
+            runMode: mode,
+            statusLine: "正在把 Claw 电脑任务发送到 \(mode.title)。",
             lastDecision: "发送 \(task.actions.count) 个动作；风险分 \(task.riskScore)。",
             requiresUserApproval: false,
             taskID: task.id,
-            appendCheckpoint: "loop.dispatch mode=\(gatewayDispatchMode.rawValue) actions=\(task.actions.count)"
+            appendCheckpoint: "loop.dispatch mode=\(mode.rawValue) actions=\(task.actions.count)"
         )
-        sendLatestClawMobileTask()
-        updateAutonomousLoopFromLatestGatewaySession()
     }
 
     private func updateAutonomousLoopFromLatestGatewaySession() {

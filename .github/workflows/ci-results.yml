@@ -12,7 +12,7 @@ permissions:
 
 env:
   CI_POLICY_VERSION: v0.3
-  PRODUCT_ITERATION: v0.78
+  PRODUCT_ITERATION: v0.79
   PROJECT_NAME: Claw
   XCODE_PROJECT: Claw.xcodeproj
   XCODE_SCHEME: Claw
@@ -192,6 +192,7 @@ jobs:
             '
             )"
             echo "Using iPhone simulator $simulator_udid."
+            xcrun simctl bootstatus "$simulator_udid" -b
             /usr/bin/xcodebuild \
               -project "$XCODE_PROJECT" \
               -scheme "$XCODE_SCHEME" \
@@ -204,7 +205,6 @@ jobs:
               -maximum-test-execution-time-allowance 120 \
               CODE_SIGNING_ALLOWED=NO \
               test
-            xcrun simctl bootstatus "$simulator_udid" -b
             xcrun simctl install "$simulator_udid" .derivedData-tests/Build/Products/Debug-iphonesimulator/Claw.app
             xcrun simctl launch "$simulator_udid" com.claw.prototype
             sleep 2
@@ -228,14 +228,16 @@ jobs:
             for runtime, devices in payload.get("devices", {}).items():
                 if "iOS" not in runtime:
                     continue
-                for device in devices:
-                    if device.get("isAvailable") and device.get("name", "").startswith("iPad"):
-                        print(device["udid"])
-                        raise SystemExit(0)
+                candidates = [device for device in devices if device.get("isAvailable") and device.get("name", "").startswith("iPad")]
+                candidates.sort(key=lambda device: ("mini" not in device.get("name", "").lower(), device.get("name", "")))
+                if candidates:
+                    print(candidates[0]["udid"])
+                    raise SystemExit(0)
             raise SystemExit("No available iPad simulator")
             '
             )"
             echo "Using iPad simulator $simulator_udid."
+            xcrun simctl bootstatus "$simulator_udid" -b
             /usr/bin/xcodebuild \
               -project "$XCODE_PROJECT" \
               -scheme "$XCODE_SCHEME" \
@@ -248,7 +250,6 @@ jobs:
               -maximum-test-execution-time-allowance 120 \
               CODE_SIGNING_ALLOWED=NO \
               test-without-building
-            xcrun simctl bootstatus "$simulator_udid" -b
             xcrun simctl install "$simulator_udid" .derivedData-tests/Build/Products/Debug-iphonesimulator/Claw.app
             xcrun simctl launch "$simulator_udid" com.claw.prototype
             sleep 2

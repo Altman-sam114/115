@@ -5277,16 +5277,26 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(store.gatewayLiveHealthSummary.latestEventKind, .gatewayConnected)
     }
 
-    func testLiveGatewayTransportEventsUpdateSession() async {
+    func testLiveGatewayTransportEventsUpdateSession() async throws {
         let store = ClawStore(autoScanLocalArtifacts: false)
+        let transport = OrdinaryDispatchRecordingTransport()
 
         store.setGateway(url: "ws://127.0.0.1:18789", token: "paired-secret")
         store.phoneAgentCommand = "打开浏览器搜索资料"
         store.generatePhoneAgentPlan()
         store.queueClawMobileTaskFromCurrentPlan()
+        await store.sendLatestClawMobileTaskOverLiveGateway(transport: transport)
+        XCTAssertTrue(transport.envelopes.isEmpty, "Unapproved tasks must not contact transport")
+        XCTAssertTrue(store.clawGatewaySessions.isEmpty)
         store.approveLatestClawMobileTask()
 
-        await store.sendLatestClawMobileTaskOverLiveGateway(transport: MockClawGatewayTransport())
+        await store.sendLatestClawMobileTaskOverLiveGateway(transport: transport)
+        XCTAssertEqual(transport.envelopes.count, 1)
+        let body = try XCTUnwrap(transport.envelopes.first?.data(using: .utf8))
+        let wire = try JSONDecoder.clawGateway.decode(ClawMobileEnvelope.self, from: body)
+        XCTAssertEqual(wire.task.status, .sent)
+        XCTAssertEqual(wire.task.id, store.clawMobileTasks[0].id)
+        XCTAssertEqual(wire.task.actions, store.clawMobileTasks[0].actions)
 
         XCTAssertEqual(store.clawMobileTasks[0].status, .sent)
         XCTAssertEqual(store.lastGatewayLiveRequest?.canAttemptLive, true)
@@ -5302,6 +5312,55 @@ final class ClawTests: XCTestCase {
             result.status == .succeeded &&
             result.artifacts.contains { $0.kind == .browserTrace }
         })
+
+        let task = store.clawMobileTasks[0]
+        let sessions = store.clawGatewaySessions
+        let events = store.gatewayEvents
+        let request = store.lastGatewayLiveRequest
+        store.approveTask(id: task.id)
+        XCTAssertEqual(store.clawMobileTasks[0], task, "Sent ordinary tasks cannot be approved again")
+        await store.sendTaskOverLiveGateway(id: task.id, transport: transport)
+        XCTAssertEqual(transport.envelopes.count, 1, "Repeated sends cannot open another transport")
+        XCTAssertEqual(store.clawGatewaySessions, sessions)
+        XCTAssertEqual(store.gatewayEvents, events)
+        XCTAssertEqual(store.lastGatewayLiveRequest, request)
+    }
+
+    func testMissionLiveApprovalDispatchesExactlyOnceAndCompletesCurrentLoop() async throws {
+        let store = ClawStore(autoScanLocalArtifacts: false)
+        let transport = OrdinaryDispatchRecordingTransport()
+        store.setGateway(url: "ws://127.0.0.1:18789", token: "paired-secret")
+        store.gatewayDispatchMode = .liveGateway
+        store.phoneAgentCommand = "打开浏览器搜索资料"
+        await store.startAutonomousComputerTakeoverOverLiveGateway(transport: transport)
+        XCTAssertEqual(store.autonomousLoop.phase, .waitingForUserApproval)
+        XCTAssertTrue(transport.envelopes.isEmpty)
+        XCTAssertTrue(store.clawGatewaySessions.isEmpty)
+        let taskID = try XCTUnwrap(store.clawMobileTasks.first?.id)
+
+        await store.approveAndContinueAutonomousLoopOverLiveGateway(transport: transport)
+        XCTAssertEqual(transport.envelopes.count, 1)
+        XCTAssertEqual(store.autonomousLoop.taskID, taskID)
+        XCTAssertEqual(store.autonomousLoop.phase, .completed)
+        XCTAssertEqual(store.autonomousLoop.runMode, .liveGateway)
+        XCTAssertEqual(store.clawGatewaySessions.first?.taskID, taskID)
+        await store.approveAndContinueAutonomousLoopOverLiveGateway(transport: transport)
+        XCTAssertEqual(transport.envelopes.count, 1)
+        XCTAssertEqual(store.clawGatewaySessions.count, 1)
+    }
+
+    func testMissionApprovalCannotApproveAReplacementTask() async {
+        let store = ClawStore(autoScanLocalArtifacts: false)
+        let transport = OrdinaryDispatchRecordingTransport()
+        store.setGateway(url: "ws://127.0.0.1:18789", token: "paired-secret")
+        store.phoneAgentCommand = "打开浏览器搜索资料"
+        await store.startAutonomousComputerTakeoverOverLiveGateway(transport: transport)
+        store.queueClawMobileTaskFromCurrentPlan()
+        let replacement = store.clawMobileTasks[0]
+        await store.approveAndContinueAutonomousLoopOverLiveGateway(transport: transport)
+        XCTAssertEqual(store.clawMobileTasks[0], replacement)
+        XCTAssertTrue(transport.envelopes.isEmpty)
+        XCTAssertTrue(store.clawGatewaySessions.isEmpty)
     }
 
     func testLiveGatewayReconnectDiagnosticsCompleteAfterRetry() async {
@@ -6148,6 +6207,28 @@ private final class ProbeTransportRecorder: @unchecked Sendable, ClawGatewayProb
     }
 }
 
+private final class OrdinaryDispatchRecordingTransport: @unchecked Sendable, ClawGatewayTransport {
+    private let lock = NSLock()
+    private var recordedEnvelopes: [String] = []
+
+    var envelopes: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return recordedEnvelopes
+    }
+
+    func streamEvents(
+        request: ClawGatewayLiveRequest, envelopeJSON: String, sessionID: UUID, taskID: UUID
+    ) -> AsyncThrowingStream<ClawGatewayWireEvent, Error> {
+        lock.lock()
+        recordedEnvelopes.append(envelopeJSON)
+        lock.unlock()
+        return MockClawGatewayTransport().streamEvents(
+            request: request, envelopeJSON: envelopeJSON, sessionID: sessionID, taskID: taskID
+        )
+    }
+}
+
 private struct MockClawGatewayTransport: ClawGatewayTransport {
     func streamEvents(
         request: ClawGatewayLiveRequest,
@@ -6165,6 +6246,12 @@ private struct MockClawGatewayTransport: ClawGatewayTransport {
             if let lineage = envelope.task.continuationLineage,
                lineage.receipt.count != 43 || lineage.receipt == "omitted" {
                 continuation.finish(throwing: ClawGatewayTransportError.invalidContinuationOffer)
+                return
+            }
+            // Match Gateway dispatch preflight instead of accepting a stale pre-send envelope.
+            guard envelope.task.id == taskID,
+                  envelope.task.continuationLineage == nil ? envelope.task.status == .sent : envelope.task.status == .readyToSend else {
+                continuation.finish(throwing: URLError(.cannotParseResponse))
                 return
             }
 

@@ -1,5 +1,7 @@
 # 项目核心流程文档
 
+v0.79 普通发送链路：点击时 task ID -> 显式 async live transport -> 审批状态检查 -> sent wire 副本 -> prepared session -> Gateway ordinary sent preflight。Bridge 与 Mission live 开始/审批都使用真实 async 入口；Mission 审批必须绑定原任务，异步完成仅更新匹配的 Mission。重复发送/重新审批 sent 任务不产生新会话或事件；continuation frozen 分支不变。
+
 ## v0.78 自适应客户端入口
 
 ContentView 持有目的页与 scoped review focus -> ClawDestinationView -> PhoneAgentView 读取实际内容宽度及 Dynamic Type -> ClawWorkspaceLayout 选择 compact/workbench。宽度至少 900pt 且非辅助大字体时双栏；布局共用父 Binding，不在生命周期隐式发送、审批或探测 Gateway。

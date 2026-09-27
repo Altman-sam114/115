@@ -4196,6 +4196,14 @@ enum LogicSmoke {
         store.approveLatestClawMobileTask()
         store.sendLatestClawMobileTask()
         expect(store.lastGatewayLiveRequest?.canAttemptLive == false, "live gateway should require a paired token")
+        let sentTaskSnapshot = store.clawMobileTasks[0]
+        let sentSessionsSnapshot = store.clawGatewaySessions
+        let sentEventsSnapshot = store.gatewayEvents
+        store.approveTask(id: sentTaskSnapshot.id)
+        store.sendTask(id: sentTaskSnapshot.id)
+        expect(store.clawMobileTasks[0] == sentTaskSnapshot, "sent ordinary task cannot be reapproved")
+        expect(store.clawGatewaySessions == sentSessionsSnapshot, "duplicate ordinary send must not create a session")
+        expect(store.gatewayEvents == sentEventsSnapshot, "duplicate ordinary send must not append events")
         expect(store.gatewayEvents.contains { $0.kind == .fallbackUsed }, "live gateway preflight should fallback when not paired")
         expect(store.gatewayLiveHealthSummary.hasFallback, "live health should mark fallback")
         expect(store.gatewayLiveHealthSummary.canAttemptLive == false, "live health should preserve preflight status")

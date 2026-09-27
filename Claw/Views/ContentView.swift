@@ -550,6 +550,18 @@ enum ClawMissionRunPrimaryActionDispatcher {
             return
         }
 
+        if store.gatewayDispatchMode == .liveGateway, action == .start || action == .approveAndContinue {
+            Task {
+                guard store.gatewayDispatchMode == .liveGateway, store.missionRunSummary == currentSummary else { return }
+                if action == .start {
+                    await store.startAutonomousComputerTakeoverOverLiveGateway()
+                } else {
+                    await store.approveAndContinueAutonomousLoopOverLiveGateway()
+                }
+            }
+            return
+        }
+
         switch action {
         case .start:
             store.startAutonomousComputerTakeover()
@@ -5032,7 +5044,7 @@ struct ClawMobileBridgePanel: View {
                     .buttonStyle(SecondaryActionButtonStyle())
 
                     Button {
-                        store.sendLatestClawMobileTask()
+                        sendCurrentTask()
                     } label: {
                         Label("发送", systemImage: "paperplane.fill")
                             .frame(maxWidth: .infinity)
@@ -5063,6 +5075,17 @@ struct ClawMobileBridgePanel: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(12)
                 .background(.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+    }
+
+    private func sendCurrentTask() {
+        guard let taskID = store.clawMobileTasks.first?.id else { return }
+        if store.gatewayDispatchMode == .liveGateway {
+            Task {
+                await store.sendTaskOverLiveGateway(id: taskID)
+            }
+        } else {
+            store.sendTask(id: taskID)
         }
     }
 }

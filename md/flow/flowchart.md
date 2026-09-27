@@ -1,5 +1,7 @@
 # 项目流程图
 
+v0.79：普通审批 -> readyToSend -> 显式 live 点击 -> sent wire envelope -> Gateway sent preflight；sent 再审批/发送 -> 拒绝；continuation 仍走 frozen readyToSend + receipt。
+
 ## v0.78 平台流程
 
 根视图目的页/复核聚焦 -> 侧栏或工作区菜单 -> 实际宽度与大字体策略 -> 单栏或双栏共享审批入口。main 提交 -> iOS/Catalyst Release -> iPhone/iPad XCTest -> manifest/JUnit/日志/xcresult/启动截图 -> 精确 SHA 结果包复判。

@@ -1,5 +1,7 @@
 # Claw Computer-Control Gateway 协议草案
 
+普通任务初次 wire envelope 必须为 sent，Store 在创建会话前生成同 identity/actions 的 sent 副本；续接仍为独立 frozen readyToSend + receipt。审批不得把 sent/blocked 普通任务变回可发送。UI 显式 live 点击捕获 task ID 并调用 async transport，不在生命周期隐式发送。
+
 ## Mac / iPad 客户端边界
 
 v0.78 的 Mac Catalyst 与 iPad 共用 planner、bridge、审批与 reducer，不新增 schema/action/artifact。侧栏与键盘只切换本地目的页，布局只重排并保留 scoped focus；运行于 Mac 不代表已获得桌面操作权限，真实动作仍发生于授权 Gateway。

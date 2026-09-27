@@ -1,5 +1,7 @@
 # 测试规范
 
+v0.79 云端 XCTest transport recorder 必须核对未审批零调用、已审批 wire task.status=sent、task ID/actions 一致、重复发送/重新审批后的调用数/session/events/request 不变。Mission live 开始必须等待审批，审批后只发送一次并完成当前循环，替换任务后旧 Mission 不得批准新任务。Mock transport 按 ordinary sent / continuation readyToSend 拒绝不匹配状态。LogicSmoke 复核 sent 不能重新审批创建会话；保留全部 continuation 与双平台/Gateway 云端回归。
+
 ## v0.78 Mac / iPad 验收
 
 本地仅静态检查。云端新增 Catalyst Release build、iPad test-without-building，iOS build 改 Release；iPhone/iPad 测试后 launch 并各保存一张截图。Swift smoke/fixture 包含 Claw/Core/*.swift。平台 outcome 纳入 manifest/JUnit/最终失败门槛，成功时必须有日志、xcresult 与截图。布局测试覆盖窄屏、900pt 边界、NaN/Infinity、辅助大字体和唯一稳定快捷键。真实窗口缩放、分屏/旋转、VoiceOver 与键盘交互仍需人工验收，单元测试不替代这些检查。

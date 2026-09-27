@@ -1,13 +1,15 @@
 # Claw 发布准备清单
 
-评估日期：2026-09-26。目标：Mac/iPad 上可使用、可审计的电脑智能体控制台。当前仍为原型，**不是发布候选版本**。用户授权本次由一个 Agent X 连续迭代，不创建子 agent；规划、实现、云端 artifact 复判分别记录。
+评估日期：2026-09-27。目标：Mac/iPad 上可使用、可审计的电脑智能体控制台。当前仍为原型，**不是发布候选版本**。用户授权本次由一个 Agent X 连续迭代，不创建子 agent；规划、实现、云端 artifact 复判分别记录。
 
 ## 当前轮次
 
 | 轮次 | 范围 | 验收门槛 |
 | --- | --- | --- |
-| v0.77 | 修复 async autoclosure 导致云端测试无法编译 | 最新 main 全部 required checks + 下载 artifact 复判 |
+| v0.77 | 修复云端 async 测试编译与 readiness nonce 字符集不一致 | 最新 main 全部 required checks + 下载 artifact 复判 |
 | v0.78 | Mac Catalyst 构建、iPad 方向、按窗口宽度自适应、工作台拆分 | Release Catalyst + iPhone/iPad XCTest + 全量 Gateway 回归 |
+
+v0.79 聚焦普通任务和 Mission 的真实传输、任务身份绑定与重复发送防护；仅在前轮云端 artifact 通过后提交。本轮仍不代表发布候选。
 
 ## 发布门槛
 
