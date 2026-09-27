@@ -29,6 +29,12 @@ enum LogicSmoke {
         }
 
         let store = ClawStore(autoScanLocalArtifacts: false)
+        expect(!ClawWorkspaceLayout.usesReviewColumn(width: 834, accessibilitySize: false), "narrow iPad window must keep a readable single column")
+        expect(ClawWorkspaceLayout.usesReviewColumn(width: 1200, accessibilitySize: false), "wide window should expose the review column")
+        expect(!ClawWorkspaceLayout.usesReviewColumn(width: 1200, accessibilitySize: true), "accessibility text must retain a single column")
+        expect(!ClawWorkspaceLayout.usesReviewColumn(width: .infinity, accessibilitySize: false), "invalid geometry must not create columns")
+        expect(MainTab.allCases.first == .phoneAgent, "workspace should open on tasks")
+        expect(Set(MainTab.allCases.map(\.shortcut)).count == MainTab.allCases.count, "workspace shortcuts must be unique")
         expect(store.model.name == "Claw Local Agent 1.5B", "default model name should match Claw local agent")
         expect(store.model.installState == .placeholder, "model should start as placeholder")
         expect(store.model.artifactManifest.allowsNetworkDownload == false, "model must not download weights")

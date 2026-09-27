@@ -11,7 +11,8 @@ permissions:
   actions: read
 
 env:
-  CI_POLICY_VERSION: v0.2
+  CI_POLICY_VERSION: v0.3
+  PRODUCT_ITERATION: v0.78
   PROJECT_NAME: Claw
   XCODE_PROJECT: Claw.xcodeproj
   XCODE_SCHEME: Claw
@@ -23,11 +24,13 @@ jobs:
   ci-results:
     name: Build, Smoke, and Package Results
     runs-on: macos-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
 
       - name: Prepare result metadata
         id: meta
@@ -37,7 +40,7 @@ jobs:
           short_sha="${GITHUB_SHA::12}"
           branch_slug="$(printf '%s' "$GITHUB_REF_NAME" | tr '/_ ' '---' | tr -cd 'A-Za-z0-9.-')"
           project_slug="$(printf '%s' "$PROJECT_NAME" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9.-')"
-          artifact_name="${project_slug}-ci-${CI_POLICY_VERSION}-${branch_slug}-${short_sha}-run${GITHUB_RUN_ID}-attempt${GITHUB_RUN_ATTEMPT}"
+          artifact_name="${project_slug}-ci-${PRODUCT_ITERATION}-${branch_slug}-${short_sha}-run${GITHUB_RUN_ID}-attempt${GITHUB_RUN_ATTEMPT}"
           echo "short_sha=$short_sha" >> "$GITHUB_OUTPUT"
           echo "branch_slug=$branch_slug" >> "$GITHUB_OUTPUT"
           echo "artifact_name=$artifact_name" >> "$GITHUB_OUTPUT"
@@ -47,7 +50,7 @@ jobs:
         continue-on-error: true
         shell: bash
         run: |
-          set -o pipefail
+          set -euo pipefail
           {
             echo "Checking whitespace for the pushed revision."
             if git rev-parse HEAD^ >/dev/null 2>&1; then
@@ -62,7 +65,7 @@ jobs:
         continue-on-error: true
         shell: bash
         run: |
-          set -o pipefail
+          set -euo pipefail
           plutil -lint "$XCODE_PROJECT/project.pbxproj" 2>&1 | tee "$RESULT_DIR/plutil.log"
 
       - name: Gateway JavaScript syntax check
@@ -70,7 +73,7 @@ jobs:
         continue-on-error: true
         shell: bash
         run: |
-          set -o pipefail
+          set -euo pipefail
           {
             node --check Tools/claw-gateway-server.mjs
             node --check Tools/claw-gateway-direct-smoke.mjs
@@ -82,7 +85,7 @@ jobs:
         continue-on-error: true
         shell: bash
         run: |
-          set -o pipefail
+          set -euo pipefail
           {
             mkdir -p .build/SwiftModuleCache
             sdk_path="$(xcrun --sdk macosx --show-sdk-path)"
@@ -90,7 +93,7 @@ jobs:
               -swift-version 6 \
               -sdk "$sdk_path" \
               -module-cache-path .build/SwiftModuleCache \
-              Claw/Core/ClawModels.swift Claw/Services/ClawStore.swift Tools/LogicSmoke.swift \
+              Claw/Core/*.swift Claw/Services/ClawStore.swift Tools/LogicSmoke.swift \
               -o .build/claw-logic-smoke
             .build/claw-logic-smoke
           } 2>&1 | tee "$RESULT_DIR/swift-logic-smoke.log"
@@ -100,7 +103,7 @@ jobs:
         continue-on-error: true
         shell: bash
         run: |
-          set -o pipefail
+          set -euo pipefail
           node Tools/claw-gateway-direct-smoke.mjs 2>&1 | tee "$RESULT_DIR/gateway-direct-smoke.log"
 
       - name: Swift Gateway event fixture
@@ -108,7 +111,7 @@ jobs:
         continue-on-error: true
         shell: bash
         run: |
-          set -o pipefail
+          set -euo pipefail
           {
             mkdir -p .build/SwiftFixtureModuleCache
             sdk_path="$(xcrun --sdk macosx --show-sdk-path)"
@@ -116,7 +119,7 @@ jobs:
               -swift-version 6 \
               -sdk "$sdk_path" \
               -module-cache-path .build/SwiftFixtureModuleCache \
-              Claw/Core/ClawModels.swift Tools/ClawGatewayEventFixture.swift \
+              Claw/Core/*.swift Tools/ClawGatewayEventFixture.swift \
               -o .build/claw-gateway-event-fixture
             .build/claw-gateway-event-fixture --self-test
           } 2>&1 | tee "$RESULT_DIR/swift-gateway-fixture.log"
@@ -126,7 +129,7 @@ jobs:
         continue-on-error: true
         shell: bash
         run: |
-          set -o pipefail
+          set -euo pipefail
           node Tools/claw-gateway-smoke.mjs 2>&1 | tee "$RESULT_DIR/gateway-websocket-smoke.log"
 
       - name: Xcode build
@@ -134,25 +137,41 @@ jobs:
         continue-on-error: true
         shell: bash
         run: |
-          set -o pipefail
-          rm -rf "$RESULT_BUNDLE" .derivedData-ci
+          set -euo pipefail
           /usr/bin/xcodebuild \
             -project "$XCODE_PROJECT" \
             -scheme "$XCODE_SCHEME" \
-            -configuration Debug \
+            -configuration Release \
             -destination "$XCODE_DESTINATION" \
             -derivedDataPath .derivedData-ci \
             -resultBundlePath "$RESULT_BUNDLE" \
             CODE_SIGNING_ALLOWED=NO \
             build 2>&1 | tee "$RESULT_DIR/xcodebuild.log"
 
+      - name: Mac Catalyst Release build
+        id: catalyst_build
+        continue-on-error: true
+        timeout-minutes: 15
+        shell: bash
+        run: |
+          set -euo pipefail
+          /usr/bin/xcodebuild \
+            -project "$XCODE_PROJECT" \
+            -scheme "$XCODE_SCHEME" \
+            -configuration Release \
+            -destination 'generic/platform=macOS,variant=Mac Catalyst' \
+            -derivedDataPath .derivedData-catalyst \
+            -resultBundlePath "$RESULT_DIR/MacCatalyst.xcresult" \
+            CODE_SIGNING_ALLOWED=NO \
+            build 2>&1 | tee "$RESULT_DIR/mac-catalyst-build.log"
+
       - name: XCTest
         id: xctest
         continue-on-error: true
+        timeout-minutes: 15
         shell: bash
         run: |
-          set -o pipefail
-          rm -rf "$RESULT_DIR/ClawTests.xcresult" .derivedData-tests
+          set -euo pipefail
           : > "$RESULT_DIR/xctest.log"
           {
             echo "Discovering an available iPhone simulator."
@@ -179,9 +198,56 @@ jobs:
               -derivedDataPath .derivedData-tests \
               -resultBundlePath "$RESULT_DIR/ClawTests.xcresult" \
               -parallel-testing-enabled NO \
+              -test-timeouts-enabled YES \
+              -maximum-test-execution-time-allowance 120 \
               CODE_SIGNING_ALLOWED=NO \
               test
+            xcrun simctl launch "$simulator_udid" com.claw.prototype
+            sleep 2
+            xcrun simctl io "$simulator_udid" screenshot "$RESULT_DIR/iphone-workspace.png"
           } 2>&1 | tee -a "$RESULT_DIR/xctest.log"
+
+      - name: iPad XCTest and workspace launch
+        id: ipad_xctest
+        continue-on-error: true
+        timeout-minutes: 15
+        shell: bash
+        run: |
+          set -euo pipefail
+          : > "$RESULT_DIR/ipad-xctest.log"
+          {
+            echo "Discovering an available iPad simulator on the cloud runner."
+            simulator_udid="$(
+              xcrun simctl list devices available -j | python3 -c '
+            import json, sys
+            payload = json.load(sys.stdin)
+            for runtime, devices in payload.get("devices", {}).items():
+                if "iOS" not in runtime:
+                    continue
+                for device in devices:
+                    if device.get("isAvailable") and device.get("name", "").startswith("iPad"):
+                        print(device["udid"])
+                        raise SystemExit(0)
+            raise SystemExit("No available iPad simulator")
+            '
+            )"
+            echo "Using iPad simulator $simulator_udid."
+            /usr/bin/xcodebuild \
+              -project "$XCODE_PROJECT" \
+              -scheme "$XCODE_SCHEME" \
+              -configuration Debug \
+              -destination "platform=iOS Simulator,id=$simulator_udid" \
+              -derivedDataPath .derivedData-tests \
+              -resultBundlePath "$RESULT_DIR/ClawIPadTests.xcresult" \
+              -parallel-testing-enabled NO \
+              -test-timeouts-enabled YES \
+              -maximum-test-execution-time-allowance 120 \
+              CODE_SIGNING_ALLOWED=NO \
+              test-without-building
+            xcrun simctl launch "$simulator_udid" com.claw.prototype
+            sleep 2
+            xcrun simctl io "$simulator_udid" screenshot "$RESULT_DIR/ipad-workspace.png"
+          } 2>&1 | tee -a "$RESULT_DIR/ipad-xctest.log"
 
       - name: Write CI manifest and summaries
         id: package_results
@@ -199,6 +265,8 @@ jobs:
           GATEWAY_WEBSOCKET_OUTCOME: ${{ steps.gateway_websocket_smoke.outcome }}
           XCODE_BUILD_OUTCOME: ${{ steps.xcode_build.outcome }}
           XCTEST_OUTCOME: ${{ steps.xctest.outcome }}
+          CATALYST_BUILD_OUTCOME: ${{ steps.catalyst_build.outcome }}
+          IPAD_XCTEST_OUTCOME: ${{ steps.ipad_xctest.outcome }}
         run: |
           python3 - <<'PY'
           import datetime
@@ -220,6 +288,8 @@ jobs:
               ("gateway-websocket-smoke", os.environ["GATEWAY_WEBSOCKET_OUTCOME"], "ci-results/gateway-websocket-smoke.log"),
               ("xcodebuild", os.environ["XCODE_BUILD_OUTCOME"], "ci-results/xcodebuild.log"),
               ("xctest", os.environ["XCTEST_OUTCOME"], "ci-results/xctest.log"),
+              ("mac-catalyst-release", os.environ["CATALYST_BUILD_OUTCOME"], "ci-results/mac-catalyst-build.log"),
+              ("ipad-xctest", os.environ["IPAD_XCTEST_OUTCOME"], "ci-results/ipad-xctest.log"),
           ]
 
           xctest_log = result_dir / "xctest.log"
@@ -236,19 +306,30 @@ jobs:
                   "ci-results/xctest.log; ci-results/ClawTests.xcresult",
               ))
 
+          missing_platform_artifacts = []
+          for outcome_key, required in [
+              ("CATALYST_BUILD_OUTCOME", ["mac-catalyst-build.log", "MacCatalyst.xcresult"]),
+              ("IPAD_XCTEST_OUTCOME", ["ipad-xctest.log", "ClawIPadTests.xcresult", "ipad-workspace.png"]),
+              ("XCTEST_OUTCOME", ["iphone-workspace.png"]),
+          ]:
+              if os.environ[outcome_key] == "success":
+                  missing_platform_artifacts.extend(name for name in required if not (result_dir / name).exists())
+          checks.append(("platform-artifacts", "failure" if missing_platform_artifacts else "success", ", ".join(missing_platform_artifacts) or "ci-results"))
+
           def aggregate(names):
               selected = [outcome for name, outcome, _ in checks if name in names]
               return "success" if selected and all(outcome == "success" for outcome in selected) else "failure"
 
           manifest = {
-              "version": os.environ["CI_POLICY_VERSION"],
+              "version": os.environ["PRODUCT_ITERATION"],
+              "ciPolicyVersion": os.environ["CI_POLICY_VERSION"],
               "branch": os.environ["GITHUB_REF_NAME"],
               "commitSha": os.environ["GITHUB_SHA"],
               "shortSha": os.environ["SHORT_SHA"],
               "runId": os.environ["GITHUB_RUN_ID"],
               "runAttempt": os.environ["GITHUB_RUN_ATTEMPT"],
               "workflowName": os.environ["GITHUB_WORKFLOW"],
-              "createdAt": datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+              "createdAt": datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat(),
               "projectName": os.environ["PROJECT_NAME"],
               "scheme": os.environ["XCODE_SCHEME"],
               "destination": os.environ["XCODE_DESTINATION"],
@@ -266,14 +347,23 @@ jobs:
               "buildLogPath": "ci-results/xcodebuild.log",
               "failureSummaryPath": "ci-results/ci-failure-summary.md",
               "staticChecksOutcome": aggregate({"git-diff-check", "plutil", "node-check"}),
-              "buildOutcome": os.environ["XCODE_BUILD_OUTCOME"],
-              "testOutcome": aggregate({"swift-logic-smoke", "swift-gateway-fixture", "gateway-direct-smoke", "gateway-websocket-smoke", "xctest", "xctest-artifacts"}),
+              "buildOutcome": aggregate({"xcodebuild", "mac-catalyst-release"}),
+              "catalystBuildOutcome": os.environ["CATALYST_BUILD_OUTCOME"],
+              "ipadTestOutcome": os.environ["IPAD_XCTEST_OUTCOME"],
+              "platformArtifactsOutcome": "failure" if missing_platform_artifacts else "success",
+              "catalystBuildLogPath": "ci-results/mac-catalyst-build.log",
+              "ipadTestLogPath": "ci-results/ipad-xctest.log",
+              "ipadTestResultBundlePath": "ci-results/ClawIPadTests.xcresult",
+              "workspaceScreenshots": ["ci-results/iphone-workspace.png", "ci-results/ipad-workspace.png"],
+              "testOutcome": aggregate({"swift-logic-smoke", "swift-gateway-fixture", "gateway-direct-smoke", "gateway-websocket-smoke", "xctest", "xctest-artifacts", "ipad-xctest", "platform-artifacts"}),
               "projectSpecificReports": [
                   "ci-results/swift-logic-smoke.log",
                   "ci-results/swift-gateway-fixture.log",
                   "ci-results/gateway-direct-smoke.log",
                   "ci-results/gateway-websocket-smoke.log",
                   "ci-results/xctest.log",
+                  "ci-results/mac-catalyst-build.log",
+                  "ci-results/ipad-xctest.log",
                   "ci-results/node-check.log",
               ],
               "artifactName": os.environ["ARTIFACT_NAME"],
@@ -328,10 +418,10 @@ jobs:
               '',
           ]
           (result_dir / "junit.xml").write_text("\n".join(junit), encoding="utf-8")
-          if missing_xctest_artifacts:
+          if missing_xctest_artifacts or missing_platform_artifacts:
               raise SystemExit(
-                  "XCTest succeeded but required result artifacts are missing: "
-                  + ", ".join(missing_xctest_artifacts)
+                  "Successful checks are missing required result artifacts: "
+                  + ", ".join(missing_xctest_artifacts + missing_platform_artifacts)
               )
           PY
 
@@ -357,6 +447,8 @@ jobs:
           GATEWAY_WEBSOCKET_OUTCOME: ${{ steps.gateway_websocket_smoke.outcome }}
           XCODE_BUILD_OUTCOME: ${{ steps.xcode_build.outcome }}
           XCTEST_OUTCOME: ${{ steps.xctest.outcome }}
+          CATALYST_BUILD_OUTCOME: ${{ steps.catalyst_build.outcome }}
+          IPAD_XCTEST_OUTCOME: ${{ steps.ipad_xctest.outcome }}
           PACKAGE_RESULTS_OUTCOME: ${{ steps.package_results.outcome }}
         run: |
           python3 - <<'PY'
@@ -373,6 +465,8 @@ jobs:
               "gateway-websocket-smoke": os.environ["GATEWAY_WEBSOCKET_OUTCOME"],
               "xcodebuild": os.environ["XCODE_BUILD_OUTCOME"],
               "xctest": os.environ["XCTEST_OUTCOME"],
+              "mac-catalyst-release": os.environ["CATALYST_BUILD_OUTCOME"],
+              "ipad-xctest": os.environ["IPAD_XCTEST_OUTCOME"],
               "package-results": os.environ["PACKAGE_RESULTS_OUTCOME"],
           }
           failed = {name: outcome for name, outcome in outcomes.items() if outcome != "success"}

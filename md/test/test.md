@@ -1,5 +1,10 @@
 # 测试规范
 
+## v0.78 Mac / iPad 验收
+
+本地仅静态检查。云端新增 Catalyst Release build、iPad test-without-building，iOS build 改 Release；iPhone/iPad 测试后 launch 并各保存一张截图。Swift smoke/fixture 包含 Claw/Core/*.swift。平台 outcome 纳入 manifest/JUnit/最终失败门槛，成功时必须有日志、xcresult 与截图。布局测试覆盖窄屏、900pt 边界、NaN/Infinity、辅助大字体和唯一稳定快捷键。真实窗口缩放、分屏/旋转、VoiceOver 与键盘交互仍需人工验收，单元测试不替代这些检查。
+
+
 v0.77 nonce 回归：固定连字符、下划线、混合 base64url 和 128 字节输入验证 request/response 编码往返；过短、129 字节、加号/斜杠/等号/空白/非 ASCII 仍拒绝。修复随机 nonce 导致 transport 未调用的漏测，生产超时不变，所有业务验证只在云端。
 
 v0.77（2026-09-26）恢复云端测试编译：async wait 必须先在异步测试上下文求值，再传给同步 `XCTAssertTrue` / `expect` autoclosure。保留有界等待、取消、stale 与 close-count 断言。只以新 main run 的 artifact 判定通过。

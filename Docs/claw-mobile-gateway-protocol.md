@@ -1,5 +1,10 @@
 # Claw Computer-Control Gateway 协议草案
 
+## Mac / iPad 客户端边界
+
+v0.78 的 Mac Catalyst 与 iPad 共用 planner、bridge、审批与 reducer，不新增 schema/action/artifact。侧栏与键盘只切换本地目的页，布局只重排并保留 scoped focus；运行于 Mac 不代表已获得桌面操作权限，真实动作仍发生于授权 Gateway。
+
+
 Readiness requestNonce 严格使用 [A-Za-z0-9_-]{8,128}；Swift 与 Gateway 一致，连字符和下划线均合法，加号、斜杠、等号仍拒绝。nonce 仅内部绑定，不展示或记录原值。
 
 调研/设计日期：2026-06-10

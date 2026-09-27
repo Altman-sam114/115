@@ -1,5 +1,10 @@
 # 项目核心流程文档
 
+## v0.78 自适应客户端入口
+
+ContentView 持有目的页与 scoped review focus -> ClawDestinationView -> PhoneAgentView 读取实际内容宽度及 Dynamic Type -> ClawWorkspaceLayout 选择 compact/workbench。宽度至少 900pt 且非辅助大字体时双栏；布局共用父 Binding，不在生命周期隐式发送、审批或探测 Gateway。
+
+
 v0.77 根因修复：readiness base64url nonce 的共享 request/response validator 补 ASCII 45，与 Gateway 正则一致；否则请求在 transport 前随机失败，增加等待时间无效。
 
 ## 0. 一句话总览

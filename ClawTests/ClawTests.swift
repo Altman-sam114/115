@@ -4,6 +4,28 @@ import Foundation
 
 @MainActor
 final class ClawTests: XCTestCase {
+    func testWorkbenchAdaptsToActualWindowAndAccessibilitySize() {
+        for width in [320.0, 600, 834, 899, -1, .nan, .infinity] {
+            XCTAssertFalse(ClawWorkspaceLayout.usesReviewColumn(width: width, accessibilitySize: false))
+        }
+        for width in [900.0, 1024, 1366, 1920] {
+            XCTAssertTrue(ClawWorkspaceLayout.usesReviewColumn(width: width, accessibilitySize: false))
+            XCTAssertFalse(ClawWorkspaceLayout.usesReviewColumn(width: width, accessibilitySize: true))
+            let leadingWidth = ClawWorkspaceLayout.leadingColumnWidth(for: width)
+            XCTAssertTrue((330...440).contains(leadingWidth))
+            XCTAssertGreaterThanOrEqual(width - leadingWidth - 65, 400)
+        }
+        XCTAssertEqual(ClawWorkspaceLayout.leadingColumnWidth(for: .nan), 330)
+        XCTAssertEqual(ClawWorkspaceLayout.leadingColumnWidth(for: 1200), 432, accuracy: 0.001)
+    }
+
+    func testWorkspaceDestinationsHaveUniqueStableShortcuts() {
+        XCTAssertEqual(MainTab.allCases.first, .phoneAgent)
+        XCTAssertEqual(Set(MainTab.allCases.map(\.shortcut)).count, MainTab.allCases.count)
+        XCTAssertEqual(Set(MainTab.allCases), [.phoneAgent, .link, .chat, .skills, .ranking])
+        XCTAssertTrue(MainTab.allCases.allSatisfy { !$0.title.isEmpty && !$0.icon.isEmpty })
+    }
+
     func testMissionRunBindsSessionAndScopedReviewFocus() throws {
         let store = ClawStore(autoScanLocalArtifacts: false)
         store.phoneAgentCommand = "打开浏览器搜索 Mission A，整理结果并发到 Slack Authorization: Bearer old-secret file:///private/tmp/old.json"

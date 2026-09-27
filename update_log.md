@@ -23,6 +23,14 @@
 
 ## 历史记录
 
+### v0.78 / Mac 与 iPad 工作台基础
+日期：2026-09-27
+
+- 前置 v0.77 commit 7f618a3078fa59884d81c742eeb78957d8ee7069 / run 36308683756 attempt 1 已通过；下载 claw-ci-v0.2-main-7f618a3078fa-run36308683756-attempt1（344497 bytes，解压 1.4M），manifest、10 项零失败 JUnit、build/XCTest、LogicSmoke、fixture 与 Gateway 双 smoke 日志一致。
+- 接续已有 v0.78 草稿：共享 scheme、Catalyst、iPad 四方向、侧栏/键盘导航、根视图聚焦与自适应工作台拆分。云端增加 Catalyst Release、iPad XCTest 和双设备截图；平台 outcome 纳入 manifest/JUnit/失败门槛。
+- 本地仅静态检查；用户 signing team/xcuserdata 及旧提示词保留。aitrans 仅只读参考。v0.78 待 main push 云端验收，发布级总目标未完成。
+
+
 ### v0.77 / Readiness nonce 字符集根因修复
 日期：2026-09-27
 

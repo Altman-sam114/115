@@ -1,5 +1,10 @@
 # Claw iOS Controller Prototype
 
+## Mac 与 iPad 工作台（v0.78）
+
+Mac Catalyst 与 iPad 共用现有 Store/Gateway 协议。默认任务工作台，侧栏、工作区菜单和 Command+1…5 切换页面；iPad 支持四方向。内容宽度至少 900pt 且非辅助大字体时双栏，根视图保留 scoped review focus。电脑动作仍由授权 Gateway 执行。云端增加 Catalyst Release、iPad XCTest 和启动截图；本机不编译。发布缺口见 Docs/release-readiness.md。
+
+
 v0.77 修复 readiness base64url nonce 的 Swift/Gateway 字符集不一致：请求和回应均接受 A-Z、a-z、0-9、下划线与连字符，仍限制 8–128 UTF-8 字节。固定输入回归防止随机 nonce 掩盖错误。
 
 这是一个 SwiftUI iPhone 原型 App，用手机作为 Claw 控制台：用户用自然语言描述电脑任务，App 生成可审批的执行计划和 JSON envelope，真正的浏览器、文件、Shell、桌面 App 操作交给用户自托管的 Claw Gateway 在电脑上执行。

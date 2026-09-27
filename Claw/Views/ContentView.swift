@@ -3,55 +3,47 @@ import UniformTypeIdentifiers
 
 struct ContentView: View {
     @EnvironmentObject private var store: ClawStore
-    @State private var selectedTab: MainTab = .link
+    @State private var selectedTab: MainTab? = .phoneAgent
+    @State private var preferredCompactColumn: NavigationSplitViewColumn = .detail
+    @State private var reviewFocus: ClawMissionRunReviewFocus?
     @State private var showingImporter = false
     @State private var importError: String?
 
     var body: some View {
-        TabView(selection: $selectedTab) {
+        NavigationSplitView(preferredCompactColumn: $preferredCompactColumn) {
+            List(MainTab.allCases, selection: $selectedTab) { tab in
+                NavigationLink(value: tab) {
+                    Label(tab.title, systemImage: tab.icon)
+                        .frame(minHeight: 44)
+                }
+            }
+            .navigationTitle("Claw")
+            .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 260)
+        } detail: {
             NavigationStack {
-                LinkDashboardView(
+                ClawDestinationView(
+                    destination: selectedTab ?? .phoneAgent,
                     showingImporter: $showingImporter,
-                    importError: $importError
+                    importError: $importError,
+                    reviewFocus: $reviewFocus
                 )
+                .toolbar {
+                    ToolbarItem(placement: .primaryAction) {
+                        Menu("切换工作区", systemImage: "rectangle.3.group") {
+                            ForEach(MainTab.allCases) { tab in
+                                Button(tab.title, systemImage: tab.icon) {
+                                    selectedTab = tab
+                                    preferredCompactColumn = .detail
+                                }
+                                .keyboardShortcut(KeyEquivalent(tab.shortcut), modifiers: .command)
+                            }
+                        }
+                        .accessibilityHint("切换任务、连接、聊天或能力页面，不会发送或审批任务")
+                    }
+                }
             }
-            .tabItem {
-                Label("连接", systemImage: "rectangle.connected.to.line.below")
-            }
-            .tag(MainTab.link)
-
-            NavigationStack {
-                ChatWorkspaceView()
-            }
-            .tabItem {
-                Label("聊天", systemImage: "bubble.left.and.text.bubble.right.fill")
-            }
-            .tag(MainTab.chat)
-
-            NavigationStack {
-                PhoneAgentView()
-            }
-            .tabItem {
-                Label("电脑接管", systemImage: "display.and.arrow.down")
-            }
-            .tag(MainTab.phoneAgent)
-
-            NavigationStack {
-                SkillLibraryView()
-            }
-            .tabItem {
-                Label("能力", systemImage: "square.grid.2x2.fill")
-            }
-            .tag(MainTab.skills)
-
-            NavigationStack {
-                RankingView()
-            }
-            .tabItem {
-                Label("榜单", systemImage: "chart.bar.xaxis")
-            }
-            .tag(MainTab.ranking)
         }
+        .navigationSplitViewStyle(.balanced)
         .tint(.red)
         .fileImporter(
             isPresented: $showingImporter,
@@ -73,14 +65,6 @@ struct ContentView: View {
             }
         }
     }
-}
-
-enum MainTab: Hashable {
-    case link
-    case chat
-    case phoneAgent
-    case skills
-    case ranking
 }
 
 struct LinkDashboardView: View {
@@ -427,90 +411,6 @@ struct AutomationTargetRow: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .panelCard()
-    }
-}
-
-struct PhoneAgentView: View {
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-
-    private let examples = [
-        "接管我的电脑，打开浏览器搜索竞品信息，整理成表格后发到 Slack",
-        "读取微信新消息并自动回复客户",
-        "在项目目录运行测试，失败时定位原因并准备补丁"
-    ]
-
-    var body: some View {
-        Group {
-            if horizontalSizeClass == .regular {
-                PhoneAgentWorkbenchLayout(examples: examples)
-            } else {
-                PhoneAgentCompactLayout(examples: examples)
-            }
-        }
-        .background(AppSurfaceBackground())
-        .navigationTitle("Claw Agent")
-        .navigationBarTitleDisplayMode(.inline)
-    }
-}
-
-struct PhoneAgentCompactLayout: View {
-    let examples: [String]
-    @State private var reviewFocus: ClawMissionRunReviewFocus?
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                PhoneAgentCommandPanel(examples: examples)
-
-                ClawMissionRunPanel(reviewFocus: $reviewFocus)
-
-                PhoneAgentPlanPanel()
-
-                ClawMobileBridgePanel()
-
-                ClawGatewaySessionPanel()
-
-                PhoneAgentPermissionMatrix()
-
-                PhoneAgentExecutionPanel()
-            }
-            .padding(16)
-        }
-    }
-}
-
-struct PhoneAgentWorkbenchLayout: View {
-    let examples: [String]
-    @State private var reviewFocus: ClawMissionRunReviewFocus?
-
-    var body: some View {
-        GeometryReader { proxy in
-            let leftWidth = min(max(proxy.size.width * 0.36, 330), 440)
-
-            HStack(alignment: .top, spacing: 16) {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        PhoneAgentCommandPanel(examples: examples)
-                        ClawMissionRunPanel(reviewFocus: $reviewFocus)
-                    }
-                    .padding(.vertical, 16)
-                    .padding(.leading, 16)
-                }
-                .frame(width: leftWidth)
-
-                Divider()
-                    .padding(.vertical, 16)
-
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        PhoneAgentReviewColumn(reviewFocus: $reviewFocus)
-                    }
-                    .padding(.vertical, 16)
-                    .padding(.trailing, 16)
-                }
-                .frame(maxWidth: .infinity)
-            }
-        }
     }
 }
 

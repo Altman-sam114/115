@@ -1,5 +1,10 @@
 # 项目流程图
 
+## v0.78 平台流程
+
+根视图目的页/复核聚焦 -> 侧栏或工作区菜单 -> 实际宽度与大字体策略 -> 单栏或双栏共享审批入口。main 提交 -> iOS/Catalyst Release -> iPhone/iPad XCTest -> manifest/JUnit/日志/xcresult/启动截图 -> 精确 SHA 结果包复判。
+
+
 v0.77 readiness 路径：base64url nonce → 字符集/长度校验 → request encode → transport → same nonce response 校验；连字符和下划线均合法，不改变控制面或任务边界。
 
 本文把 `md/flow/flow.md` 的核心逻辑画成可视化 Mermaid 图，方便人工快速复核。

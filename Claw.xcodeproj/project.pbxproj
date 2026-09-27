@@ -14,6 +14,12 @@
 		2B0000010000000000000005 /* ClawShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B0000100000000000000005 /* ClawShortcuts.swift */; };
 		2B0000010000000000000006 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 2B0000100000000000000006 /* Assets.xcassets */; };
 		2B0000010000000000000007 /* ClawTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B0000100000000000000007 /* ClawTests.swift */; };
+		2B0000010000000000000008 /* MainTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B000010000000000000000A /* MainTab.swift */; };
+		2B0000010000000000000009 /* ClawWorkspaceLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B000010000000000000000B /* ClawWorkspaceLayout.swift */; };
+		2B000001000000000000000A /* ClawDestinationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B000010000000000000000C /* ClawDestinationView.swift */; };
+		2B000001000000000000000B /* PhoneAgentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B000010000000000000000D /* PhoneAgentView.swift */; };
+		2B000001000000000000000C /* PhoneAgentCompactLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B000010000000000000000E /* PhoneAgentCompactLayout.swift */; };
+		2B000001000000000000000D /* PhoneAgentWorkbenchLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B000010000000000000000F /* PhoneAgentWorkbenchLayout.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -36,6 +42,12 @@
 		2B0000100000000000000007 /* ClawTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClawTests.swift; sourceTree = "<group>"; };
 		2B0000100000000000000008 /* Claw.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Claw.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		2B0000100000000000000009 /* ClawTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ClawTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		2B000010000000000000000A /* MainTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainTab.swift; sourceTree = "<group>"; };
+		2B000010000000000000000B /* ClawWorkspaceLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClawWorkspaceLayout.swift; sourceTree = "<group>"; };
+		2B000010000000000000000C /* ClawDestinationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClawDestinationView.swift; sourceTree = "<group>"; };
+		2B000010000000000000000D /* PhoneAgentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneAgentView.swift; sourceTree = "<group>"; };
+		2B000010000000000000000E /* PhoneAgentCompactLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneAgentCompactLayout.swift; sourceTree = "<group>"; };
+		2B000010000000000000000F /* PhoneAgentWorkbenchLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneAgentWorkbenchLayout.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -89,6 +101,8 @@
 			isa = PBXGroup;
 			children = (
 				2B0000100000000000000002 /* ClawModels.swift */,
+				2B000010000000000000000B /* ClawWorkspaceLayout.swift */,
+				2B000010000000000000000A /* MainTab.swift */,
 			);
 			path = Core;
 			sourceTree = "<group>";
@@ -106,6 +120,10 @@
 			isa = PBXGroup;
 			children = (
 				2B0000100000000000000004 /* ContentView.swift */,
+				2B000010000000000000000F /* PhoneAgentWorkbenchLayout.swift */,
+				2B000010000000000000000E /* PhoneAgentCompactLayout.swift */,
+				2B000010000000000000000D /* PhoneAgentView.swift */,
+				2B000010000000000000000C /* ClawDestinationView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -231,6 +249,12 @@
 				2B0000010000000000000002 /* ClawModels.swift in Sources */,
 				2B0000010000000000000003 /* ClawStore.swift in Sources */,
 				2B0000010000000000000004 /* ContentView.swift in Sources */,
+				2B000001000000000000000D /* PhoneAgentWorkbenchLayout.swift in Sources */,
+				2B000001000000000000000C /* PhoneAgentCompactLayout.swift in Sources */,
+				2B000001000000000000000B /* PhoneAgentView.swift in Sources */,
+				2B000001000000000000000A /* ClawDestinationView.swift in Sources */,
+				2B0000010000000000000009 /* ClawWorkspaceLayout.swift in Sources */,
+				2B0000010000000000000008 /* MainTab.swift in Sources */,
 				2B0000010000000000000005 /* ClawShortcuts.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -396,7 +420,8 @@
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -404,10 +429,12 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.claw.prototype";
+				PRODUCT_BUNDLE_IDENTIFIER = com.claw.prototype;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 6.0;
+				SUPPORTS_MACCATALYST = YES;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
@@ -434,7 +461,8 @@
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -442,10 +470,12 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.claw.prototype";
+				PRODUCT_BUNDLE_IDENTIFIER = com.claw.prototype;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 6.0;
+				SUPPORTS_MACCATALYST = YES;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
@@ -465,9 +495,11 @@
 					"@loader_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.claw.prototype.tests";
+				PRODUCT_BUNDLE_IDENTIFIER = com.claw.prototype.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 6.0;
+				SUPPORTS_MACCATALYST = YES;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Claw.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Claw";
 			};
@@ -488,9 +520,11 @@
 					"@loader_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.claw.prototype.tests";
+				PRODUCT_BUNDLE_IDENTIFIER = com.claw.prototype.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 6.0;
+				SUPPORTS_MACCATALYST = YES;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Claw.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Claw";
 			};
