@@ -17,6 +17,8 @@ node Tools/claw-gateway-server.mjs
 
 流程：请求模型 -> 严格校验最多八个 typed 动作 -> 固定追加既有证据复核步骤 -> 人工查看计划 -> 显式生成任务 -> 复核最终参数 -> 审批 -> 显式发送。模型不能指定 approval、风险、权限、安全开关、envelope 或 receipt；未知字段/种类、路径逃逸、URL credentials、超限与错误响应拒绝。未知正文/收件人可留空，真实发送仍由 v0.84 gate 阻断，不补占位内容。Mission 启动保留同一 command/profile 的有效模型计划，旧计划失效后不会偷偷改用规则。
 
+模型预填的有效参数也不视为用户已复核。每个可编辑动作都须打开实际参数并点“应用并确认参数”；关闭、非法/旧编辑器、模拟审批不计为复核。Mission 和参数列表会提示下一项；真实审批与真实发送各自阻断未复核模型输入，全部确认后仍要重新审批，不会自动发送。
+
 单次规划最多两个并发、30 秒服务预算、2048 输出 token 预算；`CLAW_PLANNER_TIMEOUT_MS` 可显式设为 100...30000。无自动重试/redirect/工具调用，取消只停止等待并尽力中止计算，不承诺撤销已开始的推理。模型计划和用量只在内存，不进入 checkpoint、metadata 或日志。原本机 Core ML 模型页面仍是未安装占位状态，不与 Gateway Ollama 混同。
 
 云端新增真实 HTTP 请求链路 smoke：生产 Swift transport -> Gateway -> 小型 Ollama 协议 stub -> typed 计划 -> 待审批；无需下载权重。该测试证明协议与安全边界，不证明真实模型质量或真实桌面操作。官方参考：[Ollama Chat API](https://docs.ollama.com/api/chat)、[Structured Outputs](https://docs.ollama.com/capabilities/structured-outputs)。

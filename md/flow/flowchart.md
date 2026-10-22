@@ -9,7 +9,8 @@ flowchart TD
   Validate -->|失败或 stale| Stop["固定失败或丢弃\n不模拟、不自动换规则、不执行"]
   Validate -->|通过| Plan["模型计划 + 实际用量\n不创建执行状态"]
   Plan --> Review["用户复核 / 显式生成任务\ntyped kind + 固定安全参数和证据复核尾步"]
-  Review --> Existing["既有 allowlist / 最终参数 / 审批\n用户显式 sent 发送"]
+  Review --> Inputs["每个模型执行参数须打开并合法 Apply\n关闭/旧按钮/模拟审批不算复核"]
+  Inputs --> Existing["审批与发送分别检查待复核集合\n既有 allowlist / 最终参数 / 新审批 / 显式 sent"]
 ```
 
 ```mermaid

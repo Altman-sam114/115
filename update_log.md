@@ -27,11 +27,12 @@
 ### v0.85 / 自托管模型规划主路径
 日期：2026-10-22
 
+- 首次 C 退回：`7336cdae7a45d07c3a4d5d38b2772b308509aed5` / run `39838524028` attempt `1`，已下载 `claw-ci-v0.85-main-7336cdae7a45-run39838524028-attempt1`（116,478 bytes / 解压 540 KiB），manifest/JUnit/主日志核对一致，14 项中 XCTest/iPad 两项失败。生产 Swift HTTP client 与 20 次有界 provider fixture 请求、双平台 Release、LogicSmoke/fixture/Gateway smoke 通过；XCTest 因新 checkpoint fake 的 clear 返回类型错误未编译，iPad 缺共享 host 停止，无截图，整轮不通过。追加测试签名修复使用现有 ClearResult，并合入逐项参数复核安全补强，保留全部断言后重新云端验收，不推进下一版本。
 - 上轮修复与最新 run `39829293264` 已完成精确 artifact/日志/实际看图复判，属于有效进展；本轮不新增看板，转向真实推理请求和 typed 动作计划。
 - 新独立 HTTP `claw.gateway.planning.v1` 控制面：强制非空 Gateway token、只发送本次文本与固定 schema、同机显式配置的 Ollama `/api/chat`、一次推理/无 redirect/重试/下载、固定输出与容量/超时预算、断连取消和固定脱敏错误，不进入任何电脑执行 pipeline。
 - 新 Core 合同和独立 Swift HTTP transport，严格 nonce/shape/duplicate key/类型/字节/路径/URL 与八类 typed inputs；模型不能指定审批/风险/权限/安全开关或 loop。模型步骤不再靠标题/target 推断 kind，固定安全 toolArguments 与证据复核尾步沿用 Bridge/allowlist/最终参数/普通审批；缺正文仍不能真实发送。
 - Store 规划 operation 绑定 command/profile/plan/task/session/continuation revision；成功只更新来源明确的待审计划和实际用量，失败不自动生成规则/模拟结果，取消和旧 scope 丢弃。Mission 启动保留有效模型计划，command/profile 编辑后的旧计划不能 queue 或启动。共享 Mac/iPad/iPhone 主入口有显式数据去向、请求/取消/失败、来源和用量，不在生命周期联网。
-- 新增 13 项 XCTest（预期各 149 项）与 LogicSmoke；新增 cloud-only Node planning smoke，并复用已编译 LogicSmoke 执行生产 HTTP client -> Gateway -> 小型 Ollama stub -> 待审批，验证协议与安全负向矩阵、不下载权重。workflow 新增 syntax/smoke/manifest/JUnit/最终 gate，保留原全矩阵，成功预期 15 项检查。project 只暂存新增源码注册，不包含用户签名或 xcuserdata。
+- 新增 14 项 XCTest（补强后预期各 150 项）与 LogicSmoke；新增 cloud-only Node planning smoke，并复用已编译 LogicSmoke 执行生产 HTTP client -> Gateway -> 小型 Ollama stub -> 待审批，验证协议与安全负向矩阵、不下载权重。首次提交后的静态复审发现有效模型字段可未打开即审批，追加进程内逐 action 参数复核集合：合法 typed Apply 才确认、真实审批和发送独立检查、模拟/关闭/stale 不绕过，Mission 提供下一项直接入口。最终验收须包含补强的最新 run。workflow 新增 syntax/smoke/manifest/JUnit/最终 gate，保留原全矩阵，成功预期 15 项检查。project 只暂存新增源码注册，不包含用户签名或 xcuserdata。
 - README、协议、flow/flowchart、test、release readiness、prompt 索引与详细提示词同步；本地仅非编译静态检查，等待新 main 云端验收。aitrans 只读参考 operation/cancel 思路，无修改/权重/依赖复制。本轮接口/stub 不能替代真实模型质量、视觉多轮智能、实际 Mac/iPad 交互、桌面 E2E、配对/TLS 或签名分发，未宣布发布完成。
 
 ### v0.84 / 首次云端退回与夹具、待办审批投影修复

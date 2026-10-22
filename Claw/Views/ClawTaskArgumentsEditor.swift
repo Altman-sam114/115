@@ -13,6 +13,12 @@ struct ClawTaskArgumentsList: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            if store.pendingModelParameterReviewCount(for: task) > 0 {
+                Text("模型建议尚有 \(store.pendingModelParameterReviewCount(for: task)) 项参数须逐项打开并应用确认，不能仅凭参数格式正确就真实审批。")
+                    .font(.footnote)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             ForEach(task.actions) { action in
                 if ClawTaskArguments.isEditable(action.kind) {
                     let context = ClawTaskArgumentEditorContext(task: task, action: action)
@@ -23,7 +29,7 @@ struct ClawTaskArgumentsList: View {
                             Text(action.kind.title).font(.subheadline.bold())
                             Spacer(minLength: 8)
                             Label(
-                                ClawTaskArguments.issue(in: action) == nil ? "可复核" : "需填写",
+                                ClawTaskArguments.issue(in: action) != nil ? "需填写" : store.requiresModelParameterReview(taskID: task.id, actionID: action.id) ? "需复核确认" : "可复核",
                                 systemImage: ClawTaskArguments.issue(in: action) == nil ? "checkmark.circle" : "pencil.circle"
                             )
                             .font(.caption)
@@ -90,7 +96,7 @@ struct ClawTaskArgumentsEditor: View {
                     if let staleMessage {
                         Text(staleMessage).foregroundStyle(.orange)
                     }
-                    Button("应用参数并撤销旧审批", systemImage: "checkmark.circle") {
+                    Button("应用并确认参数，撤销旧审批", systemImage: "checkmark.circle") {
                         if store.applyTaskArgumentInput(input, context: context) {
                             dismiss()
                         } else {
@@ -99,7 +105,7 @@ struct ClawTaskArgumentsEditor: View {
                     }
                     .frame(minHeight: 44)
                     .disabled(validationIssue != nil || !store.canEditTaskArguments(context))
-                    .accessibilityHint("只更新当前未发送动作并撤销旧审批，不会发送、联网或执行电脑动作")
+                    .accessibilityHint("应用表示你已查看并确认当前实际参数，同时撤销旧审批；不会发送、联网或执行电脑动作")
                 }
             }
             .navigationTitle(context.action.kind.title)

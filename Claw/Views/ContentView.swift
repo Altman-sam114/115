@@ -897,6 +897,19 @@ struct ClawMissionRunPanel: View {
                     .disabled(!store.canEditTaskArguments(context))
                     .accessibilityHint("只打开参数编辑器，应用后仍需重新审批，不会发送任务")
                 }
+            } else if let task = store.clawMobileTasks.first,
+                      task.id == summary.taskID, task.status != .sent,
+                      let action = task.actions.first(where: { store.requiresModelParameterReview(taskID: task.id, actionID: $0.id) }) {
+                let context = ClawTaskArgumentEditorContext(task: task, action: action)
+                Label("模型参数尚有 \(store.pendingModelParameterReviewCount(for: task)) 项待逐项确认。", systemImage: "eye.circle")
+                    .font(.footnote.bold())
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("复核下一项模型参数", systemImage: "slider.horizontal.3") { taskArgumentEditor = context }
+                    .frame(minHeight: 44)
+                    .buttonStyle(SecondaryActionButtonStyle())
+                    .disabled(!store.canEditTaskArguments(context))
+                    .accessibilityHint("打开模型建议的实际执行参数，必须应用确认后才能真实审批；不会发送或执行任务")
             }
 
             ClawMissionRunLiveGatewayHealthStripView(

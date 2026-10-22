@@ -2,11 +2,13 @@
 
 ## v0.85 模型规划合同与真实 HTTP 链路
 
-新增 `ClawModelPlanningTests.swift` 13 项（预期双设备各 149 项）：strict shape/nonce/effects、布尔/数字区分/实际 usage、duplicate escaped key/depth/byte 限制、八种 typed kind 不依赖模型 title/target、allowlist/全人工审批/固定安全参数、未知字段/种类/审批注入/路径/URL/UTF-8、header-only token/固定 HTTP 路径/明文远端拒绝、模型成功只更新计划和用量/零 task/session/event/checkpoint save、缺正文真实派发零调用、Mission 保留模型计划和精确参数、失败无自动 fallback、非法配置零调用、duplicate/cancel/旧请求不覆盖新 operation、command 切回/profile/plan/queue/Mission revision stale、已接受计划失效后不可 queue 或启动。所有异步 fake coordination 与 task 回收必须有界，不删除既有测试。
+新增 `ClawModelPlanningTests.swift` 14 项（补强后预期双设备各 150 项）：strict shape/nonce/effects、布尔/数字区分/实际 usage、duplicate escaped key/depth/byte 限制、八种 typed kind 不依赖模型 title/target、allowlist/全人工审批/固定安全参数、未知字段/种类/审批注入/路径/URL/UTF-8、header-only token/固定 HTTP 路径/明文远端拒绝、模型成功只更新计划和用量/零 task/session/event/checkpoint save、缺正文真实派发零调用、Mission 保留模型计划和精确参数、失败无自动 fallback、非法配置零调用、duplicate/cancel/旧请求不覆盖新 operation、command 切回/profile/plan/queue/Mission revision stale、已接受计划失效后不可 queue 或启动。模型有效预填字段也必须合法 Apply 才清除 pending review，打开/关闭/旧请求/模拟审批不构成绕过，真实审批与发送独立检查；Apply 后还须新审批。所有异步 fake coordination 与 task 回收必须有界，不删除既有测试。
 
 LogicSmoke 覆盖模型 source/typed 路由、固定证据复核尾步、缺参数既有闸门、stale queue 与 duplicate JSON。新增 cloud-only `node Tools/claw-model-planner-smoke.mjs`，真实生产 Swift HTTP transport（复用已编译 LogicSmoke 的 `--planning-http-smoke`）-> 实际 Gateway HTTP 路由 -> 本机小型 Ollama stub -> typed 计划/待审批，验证 header 不转发给模型、固定 system/user/schema/2048 输出预算、实际 token 用量、缺配置/认证/未知字段/重复 key/超限/危险参数、provider malformed/非终态/截断/tool call/error/redirect/超限、容量与同 nonce 重复不得释放槽、timeout/cancel/日志脱敏、无 workspace/执行副作用。只编译一次 LogicSmoke，不下载模型、依赖或大数据。
 
 workflow 保留所有旧检查，新增 planning node syntax/smoke，将底层 outcome 加入 manifest/JUnit/testOutcome/最终失败 gate；成功预计 15 项检查。新增三个 Swift 文件的 project 注册必须排除用户签名配置。最新 main 的双平台 Release、双设备 XCTest、Gateway 双 smoke、fixture、非白屏 PNG/JSON 和结果包 C 复判仍必需。stub 不证明真实模型质量、视觉/多轮自治、实际 Mac/iPad 交互、TLS/配对或签名发布。本地仍禁止 compiler、build、Swift smoke、Gateway/model smoke、node --check 或任何模拟器运行。
+
+首次 run `39838524028` / SHA `7336cdae7a45d07c3a4d5d38b2772b308509aed5` 的 artifact 确认 XCTest 在新 checkpoint fake 的 clear 签名不匹配处编译失败，未运行测试；iPad 受 test host guard 阻断。fixture 必须返回现有 `ClawMissionRunCheckpointClearResult`，而非 WriteResult，不能改生产协议或删除断言迁就测试。生产 HTTP/model smoke 与双平台 Release 已在该 run 通过，但整体 C 退回；需包含逐项参数复核补强的新 main 全量重验。
 
 ## v0.84 最终参数与普通审批
 

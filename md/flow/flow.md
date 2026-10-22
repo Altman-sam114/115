@@ -6,6 +6,8 @@
 
 用户复核模型计划 -> 显式生成任务或 Mission 启动 -> typed kind/inputs，不从模型 title/target 猜动作 -> 客户端固定安全 toolArguments 与既有末步证据复核 -> 既有 allowlist/风险/人工审批 -> 最终参数校验 -> 用户显式发送。模型最多提出八个受支持动作，不能决定审批/权限/安全开关/loop/receipt；缺必需正文仍阻断真实发送。有效模型计划在 Mission 启动保留，command/profile 变化后的旧计划拒绝 queue，不静默换成规则。规则预览与演练保留为单独显式入口。
 
+模型任务入队 -> 每个 editable action 标记待复核 -> 用户打开实际参数并合法 Apply（可原值确认） -> 只清除此项、撤销旧审批 -> 全项确认后再审批/发送。只打开/关闭或旧/非法 Apply 不清除；真实审批和真实发送独立拦截 pending 集合，模拟审批不构成绕过。共享 Mission 提供下一项入口，记录仅进程内，不增加 wire 字段或权限。
+
 同机 Mac 可 loopback HTTP；iPad/远端必须使用可信 HTTPS/WSS 反向代理。未自动安装模型、TLS 或配对。云端生产 Swift HTTP client -> Gateway -> 小型 Ollama stub 检查真实 I/O 和审批闭环，不冒充真实权重推理质量或授权桌面 E2E。v0.84 基线 `263d0213f076ccd4a9e1a3b933d891e552713e31` / run `39829293264` attempt `1` 已完整通过并实际看图，本轮须新的 main artifact 复判。
 
 ## v0.84 最终参数与普通审批

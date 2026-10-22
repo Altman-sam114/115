@@ -160,10 +160,53 @@ final class ClawModelPlanningTests: XCTestCase {
         XCTAssertEqual(task.actions.map(\.kind), [.manageFiles, .runAgentLoop])
         XCTAssertEqual(task.actions[0].toolArguments["writeText"], "Explicit model text")
         XCTAssertTrue(store.clawGatewaySessions.isEmpty)
+        store.approveLatestClawMobileTask()
+        XCTAssertEqual(store.clawMobileTasks.first?.status, .waitingForApproval)
+        let context = ClawTaskArgumentEditorContext(task: task, action: task.actions[0])
+        XCTAssertTrue(store.applyTaskArgumentInput(ClawTaskArgumentInput(action: context.action), context: context))
         store.approveLatestClawMobileTask(); store.sendTask(id: task.id)
         let wire = try JSONDecoder.clawGateway.decode(ClawMobileEnvelope.self, from: Data(store.lastClawMobileEnvelope.utf8))
         XCTAssertEqual(wire.task.status, .sent)
         XCTAssertEqual(wire.task.actions, task.actions)
+    }
+
+    func testModelParameterReviewNeedsExplicitApplyAndSimulationCannotBypassIt() async throws {
+        let store = makeStore()
+        await store.requestModelPlan(transport: PlanningRecorder(additionalShell: true))
+        store.queueClawMobileTaskFromCurrentPlan()
+        let task = try XCTUnwrap(store.clawMobileTasks.first)
+        let context = ClawTaskArgumentEditorContext(task: task, action: task.actions[0])
+        XCTAssertEqual(store.pendingModelParameterReviewCount(for: task), 2)
+        XCTAssertTrue(store.canEditTaskArguments(context))
+        XCTAssertEqual(store.pendingModelParameterReviewCount(for: task), 2, "opening or closing an editor cannot count as review")
+        store.approveLatestClawMobileTask()
+        XCTAssertEqual(store.clawMobileTasks.first?.status, .readyToSend, "explicit simulation remains a rehearsal")
+        store.gatewayDispatchMode = .liveGateway
+        let transport = PlanningDispatchRecorder()
+        await store.sendLatestClawMobileTaskOverLiveGateway(transport: transport)
+        XCTAssertEqual(transport.count, 0)
+        XCTAssertTrue(store.clawGatewaySessions.isEmpty && store.gatewayEvents.isEmpty)
+        let current = try XCTUnwrap(store.clawMobileTasks.first)
+        let currentContext = ClawTaskArgumentEditorContext(task: current, action: current.actions[0])
+        XCTAssertFalse(store.applyTaskArgumentInput(ClawTaskArgumentInput(action: context.action), context: context))
+        XCTAssertEqual(store.pendingModelParameterReviewCount(for: current), 2)
+        XCTAssertTrue(store.applyTaskArgumentInput(ClawTaskArgumentInput(action: currentContext.action), context: currentContext))
+        XCTAssertEqual(store.pendingModelParameterReviewCount(for: current), 1, "one Apply must not confirm another model action")
+        store.approveLatestClawMobileTask()
+        XCTAssertEqual(store.clawMobileTasks.first?.status, .waitingForApproval)
+        let partiallyReviewed = try XCTUnwrap(store.clawMobileTasks.first)
+        let shell = try XCTUnwrap(partiallyReviewed.actions.first { $0.kind == .runShellCommand })
+        let staleShell = ClawTaskArgumentEditorContext(task: current, action: shell)
+        XCTAssertFalse(store.applyTaskArgumentInput(ClawTaskArgumentInput(action: shell), context: staleShell))
+        let shellContext = ClawTaskArgumentEditorContext(task: partiallyReviewed, action: shell)
+        XCTAssertTrue(store.applyTaskArgumentInput(ClawTaskArgumentInput(action: shell), context: shellContext))
+        XCTAssertEqual(store.pendingModelParameterReviewCount(for: partiallyReviewed), 0)
+        XCTAssertEqual(store.clawMobileTasks.first?.status, .waitingForApproval)
+        await store.sendLatestClawMobileTaskOverLiveGateway(transport: transport)
+        XCTAssertEqual(transport.count, 0, "review Apply must still require a fresh ordinary approval")
+        store.approveLatestClawMobileTask()
+        await store.sendLatestClawMobileTaskOverLiveGateway(transport: transport)
+        XCTAssertEqual(transport.count, 1)
     }
 
     func testPlanningFailureDoesNotReplacePlanOrAutoFallback() async {
@@ -284,9 +327,15 @@ private enum PlanningFixture {
         }
         return ["summary": "A validated model plan", "actions": [["kind": kind.rawValue, "goal": "Review the requested task", "inputs": inputs]]]
     }
-    static func data(nonce: String, missingText: Bool = false) throws -> Data {
-        try JSONSerialization.data(withJSONObject: ["controlPlane": ClawModelPlanningRequest.controlPlane, "kind": "planningResponse",
-            "requestNonce": nonce, "proposal": proposal(missingText: missingText), "usage": ["inputTokens": 11, "outputTokens": 22],
+    static func data(nonce: String, missingText: Bool = false, additionalShell: Bool = false) throws -> Data {
+        var value = proposal(missingText: missingText)
+        if additionalShell, var actions = value["actions"] as? [[String: Any]],
+           let shell = proposal(kind: .runShellCommand)["actions"] as? [[String: Any]] {
+            actions += shell
+            value["actions"] = actions
+        }
+        return try JSONSerialization.data(withJSONObject: ["controlPlane": ClawModelPlanningRequest.controlPlane, "kind": "planningResponse",
+            "requestNonce": nonce, "proposal": value, "usage": ["inputTokens": 11, "outputTokens": 22],
             "effects": ["computerActions": false, "taskDispatched": false]])
     }
 }
@@ -297,17 +346,19 @@ private actor PlanningRecorder: ClawModelPlanningTransport {
     let ignoresCancellation: Bool
     let missingText: Bool
     let fails: Bool
+    let additionalShell: Bool
     var continuation: CheckedContinuation<Data, Error>?
     var payload: Data?
-    init(held: Bool = false, ignoresCancellation: Bool = false, missingText: Bool = false, fails: Bool = false) {
+    init(held: Bool = false, ignoresCancellation: Bool = false, missingText: Bool = false, fails: Bool = false, additionalShell: Bool = false) {
         self.held = held; self.ignoresCancellation = ignoresCancellation; self.missingText = missingText; self.fails = fails
+        self.additionalShell = additionalShell
     }
     func response(for request: ClawModelPlanningWireRequest) async throws -> Data {
         count += 1
         if fails { throw URLError(.cannotConnectToHost) }
         let body = try ClawPlanningJSON.object(request.body, maxBytes: 32768)
         guard let nonce = body["requestNonce"] as? String else { throw ClawModelPlanningError.invalidInput }
-        let data = try PlanningFixture.data(nonce: nonce, missingText: missingText)
+        let data = try PlanningFixture.data(nonce: nonce, missingText: missingText, additionalShell: additionalShell)
         if !held { return data }
         payload = data
         return try await withTaskCancellationHandler {
@@ -353,5 +404,5 @@ private final class PlanningCheckpointRecorder: ClawMissionRunCheckpointStore, @
         lock.withLock { saves += 1 }
         return .saved
     }
-    func clear() -> ClawMissionRunCheckpointWriteResult { .cleared }
+    func clear() -> ClawMissionRunCheckpointClearResult { .cleared }
 }

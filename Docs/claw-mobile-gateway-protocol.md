@@ -14,6 +14,8 @@ usage 恰好 inputTokens/outputTokens，值为实际服务报告的 0...1000000 
 
 成功只更新当前计划/来源与短生命周期用量。PhoneAgentStep 持有校验后的 typed proposal，Bridge 不靠模型 title/target 猜 kind，安全参数由客户端固定生成；末尾固定添加既有 `runAgentLoop` 证据复核，模型不能指定其策略。普通 allowlist、风险、敏感数据、最终参数、审批和 sent wire gate 原样保留，缺正文可待补但不能真实发送。command/profile/plan/task/session/continuation revision 或取消使旧请求失效；已接受模型计划的 command/profile 编辑后不可 queue/Mission 启动，不能隐式改回规则。规划状态/用量不持久化，不改变现有 checkpoint、事件或 receipt。
 
+模型任务另有仅进程内、按 task/action ID 记录的待参数复核集合：所有可编辑模型动作初始待复核，只有精确完整快照下的合法 typed Apply 才消除此 action；原值 Apply 可确认已看过的输入，但打开/关闭/非法/stale 请求不能消除。真实审批和真实发送分别检查，模拟审批不能绕过，Apply 后仍撤销旧审批。集合不入 schema/envelope/checkpoint/metadata/日志，规则任务和 continuation 合同不改变。
+
 ## v0.84 普通任务最终参数边界
 
 wire schema 保持 claw.computer.control.v1。Bridge 不再把本机准备/系统能力预览映射成假远端 handler；明确平台阻断项仍保留，空远端动作 task 不可发送。浏览器只生成待审搜索参数，不提供示例 HTML 充当证据；Shell/文件正文/桌面正文与快捷键/收件人与消息正文缺失时必须用户显式填写。

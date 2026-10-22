@@ -741,6 +741,8 @@ final class ClawStore: ObservableObject {
     private var acceptedModelPlanID: UUID?
     private var acceptedModelPlanProfile: String?
     private var acceptedModelPlanCommandRevision: Int?
+    // Model-provided execution fields need an explicit typed Apply before live approval.
+    private var modelParameterReviewsRequired: [UUID: Set<UUID>] = [:]
 
     init(
         model: LocalClawModel? = nil,
@@ -3118,6 +3120,9 @@ final class ClawStore: ObservableObject {
             documents: documents
         )
         clawMobileTasks.insert(task, at: 0)
+        if phoneAgentPlan.source == .configuredModel {
+            modelParameterReviewsRequired[task.id] = Set(task.actions.filter { ClawTaskArguments.isEditable($0.kind) }.map(\.id))
+        }
         lastClawMobileEnvelope = ClawMobileBridge.makeEnvelopeString(task: task, profile: clawGatewayProfile)
         resetGatewayTransportProbeState()
         resetGatewayReadinessState()
@@ -3134,6 +3139,14 @@ final class ClawStore: ObservableObject {
         return true
     }
 
+    func requiresModelParameterReview(taskID: UUID, actionID: UUID) -> Bool {
+        modelParameterReviewsRequired[taskID]?.contains(actionID) == true
+    }
+
+    func pendingModelParameterReviewCount(for task: ClawMobileTask) -> Int {
+        task.actions.filter { requiresModelParameterReview(taskID: task.id, actionID: $0.id) }.count
+    }
+
     @discardableResult
     func applyTaskArgumentInput(_ input: ClawTaskArgumentInput, context: ClawTaskArgumentEditorContext) -> Bool {
         guard canEditTaskArguments(context),
@@ -3146,6 +3159,7 @@ final class ClawStore: ObservableObject {
         updated.status = .waitingForApproval
         ordinaryTaskApprovals.removeValue(forKey: updated.id)
         clawMobileTasks[0] = updated
+        modelParameterReviewsRequired[updated.id]?.remove(action.id)
         lastClawMobileEnvelope = ClawMobileBridge.makeEnvelopeString(task: updated, profile: clawGatewayProfile)
         lastGatewayEvent = "最终参数已更新，旧审批已撤销；请复核后重新审批，不会自动发送。"
         resetGatewayTransportProbeState()
@@ -3440,11 +3454,13 @@ final class ClawStore: ObservableObject {
             guard task.status == .queued || task.status == .waitingForApproval || task.status == .readyToSend else {
                 return
             }
-            if gatewayDispatchMode == .liveGateway, let issue = ClawTaskArguments.issue(in: task) {
+            let inputIssue = ClawTaskArguments.issue(in: task)?.message ??
+                (pendingModelParameterReviewCount(for: task) > 0 ? "模型建议参数尚未逐项打开并应用确认。" : nil)
+            if gatewayDispatchMode == .liveGateway, let issue = inputIssue {
                 ordinaryTaskApprovals.removeValue(forKey: taskID)
                 clawMobileTasks[index].status = .waitingForApproval
                 if clawMobileTasks.first?.id == taskID {
-                    let message = "Live Gateway 未发送：\(issue.message) 请先填写最终参数再审批。"
+                    let message = "Live Gateway 未发送：\(issue) 请先复核最终参数再审批。"
                     lastGatewayEvent = message
                     if autonomousLoop.taskID == taskID {
                         setAutonomousLoop(
@@ -3792,6 +3808,7 @@ final class ClawStore: ObservableObject {
         }
         if candidate.status == .readyToSend || candidate.status == .queued {
             ordinaryTaskApprovals.removeValue(forKey: candidate.id)
+            modelParameterReviewsRequired.removeValue(forKey: candidate.id)
             clawMobileTasks[index].status = .sent
             let task = clawMobileTasks[index]
             let session = ClawGatewayEventStream.makePreparedSession(
@@ -3828,6 +3845,9 @@ final class ClawStore: ObservableObject {
     private func ordinaryLiveDispatchIssue(_ task: ClawMobileTask) -> String? {
         if let issue = ClawTaskArguments.issue(in: task) {
             return "Live Gateway 未发送：\(issue.message) 请在计划与审批中复核最终参数。"
+        }
+        guard pendingModelParameterReviewCount(for: task) == 0 else {
+            return "Live Gateway 未发送：模型建议参数尚未逐项打开并应用确认，请先复核再审批。"
         }
         guard ClawMobileBridge.tokenFingerprint(for: gatewayToken) == clawGatewayProfile.tokenFingerprint else {
             return "Live Gateway 未发送：运行时凭据已变化，请先保存连接配置并重新审批。"

@@ -8,6 +8,10 @@
 
 v0.85 新增显式自托管模型规划：生产 Swift HTTP client -> authenticated Gateway -> 用户已配置同机 Ollama -> typed 计划 -> 既有最终参数/审批主路径；有界请求、取消、stale、schema/来源/用量与无执行副作用。云端使用小型 provider stub 检查真实 I/O，不下载权重。本轮待新 main 云端结果，真实模型质量、实际使用模型服务与真实桌面 E2E 尚未验收。
 
+首次提交后的安全复审补强：模型预填字段格式有效不等于用户已看过，必须逐项 typed Apply 确认后才能真实审批和发送；模拟审批/关闭编辑器不能绕过，仍须普通新审批。最终接受包含此补强的最新 main run，不能用首次 run 的结果替代。
+
+首次 run `39838524028` attempt `1` 已由 artifact 复判退回：真实 HTTP 协议链路和 Release 等通过，但新 XCTest checkpoint fake 的 clear 签名错误导致测试未编译，iPad 缺 test host 停止。修测试签名并补强参数复核后，须最新 main 完整重验，不把首次部分通过当作本轮通过。
+
 | 轮次 | 范围 | 验收门槛 |
 | --- | --- | --- |
 | v0.83 | 按需工作台、未应用输入跨重排保留 | 已通过最新 SHA 的完整 artifact 与实际看图；真实交互仍缺 |

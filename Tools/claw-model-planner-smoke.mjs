@@ -38,7 +38,8 @@ const provider = http.createServer(async (request, response) => {
   if (mode === "malformed") { response.end(`{${marker}`); return; }
   const content = mode === "duplicate" ? '{"summary":"a","summary":"b","actions":[]}' : JSON.stringify(changedProposal ?? proposal);
   response.end(JSON.stringify({ done: mode !== "not-done", done_reason: mode === "truncated" ? "length" : "stop",
-    message: { role: "assistant", content, ...(mode === "tool-call" ? { tool_calls: [{ name: marker }] } : {}) },
+    message: { role: "assistant", content, ...(mode === "tool-call" ? { tool_calls: [{ name: marker }] } : {}),
+      ...(mode === "tool-call-object" ? { tool_calls: { length: 0, name: marker } } : {}) },
     prompt_eval_count: 33, eval_count: 55 }));
 });
 await new Promise((resolve) => provider.listen(0, "127.0.0.1", resolve));
@@ -127,6 +128,11 @@ try {
       });
       expect(response.status === 503 && (await response.json()).errorCode === "planning_not_configured", "invalid model configuration must fail before inference");
     }
+    invalidConfig = { CLAW_PLANNER_ENDPOINT: `http://127.0.0.1:${provider.address().port}/api/chat`, CLAW_PLANNER_MODEL: "" };
+    const noModel = await fetch(`http://127.0.0.1:${configServer.address().port}/claw/planning`, {
+      method: "POST", headers: { "Content-Type": "application/json", "X-Claw-Control-Plane": plane }, body: JSON.stringify(body()),
+    });
+    expect(noModel.status === 503 && (await noModel.json()).errorCode === "planning_not_configured", "missing model name must not trigger any implicit selection or download");
     expect(hits === before, "invalid configuration must not reach any provider");
   } finally { await new Promise((resolve) => configServer.close(resolve)); }
 
@@ -144,7 +150,7 @@ try {
     const prior = hits; rejected(await send()); expect(hits === prior + 1, "invalid output must not trigger model retries");
   }
   changedProposal = undefined;
-  for (mode of ["duplicate", "redirect", "large", "malformed", "not-done", "truncated", "tool-call", "error"]) {
+  for (mode of ["duplicate", "redirect", "large", "malformed", "not-done", "truncated", "tool-call", "tool-call-object", "error"]) {
     const prior = hits; rejected(await send()); expect(hits === prior + 1, "provider failure must neither follow redirects nor retry");
   }
   mode = "hold";

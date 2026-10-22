@@ -24,8 +24,15 @@ enum LogicSmoke {
             guard let task = store.clawMobileTasks.first, task.status == .waitingForApproval,
                   task.actions.count == 9, ClawTaskArguments.issue(in: task) == nil,
                   task.actions.allSatisfy({ $0.approval == .gatewayApproval }),
+                  store.pendingModelParameterReviewCount(for: task) == 7,
                   store.clawGatewaySessions.isEmpty, store.gatewayEvents.isEmpty, store.lastGatewayLiveRequest == nil else {
                 print("Model planning production HTTP client approval gate failed")
+                exit(1)
+            }
+            store.gatewayDispatchMode = .liveGateway
+            store.approveLatestClawMobileTask()
+            guard store.clawMobileTasks.first?.status == .waitingForApproval, store.clawGatewaySessions.isEmpty else {
+                print("Model planning production HTTP client requires explicit parameter review")
                 exit(1)
             }
             print("Claw model planning production HTTP client smoke passed")
