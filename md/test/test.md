@@ -5,6 +5,8 @@ v0.80 云端 XCTest 必须核对模拟 session 仍可重试，live session 即�
 
 ## v0.78 Mac / iPad 验收
 
+CI policy v0.4 增加云端 `ClawWorkspaceScreenshotCheck.swift` 编译/self-test 和实际启动内容闸门：空白图像、状态栏、只有 Claw 或只有 Mission Run 均拒绝，真实 PNG 同时包含两个 marker 才通过。`capture-workspace-evidence.sh` 最多 15 帧、帧间 2 秒，只留最终 PNG；就绪前不会写 success JSON，读取/OCR 错误和超时使平台检查失败。companion JSON 必须恰好为 policy/outcome/attempt，policy=`claw-mission-ocr-v1`、outcome=`success`、attempt 为 1...15 整数；manifest/JUnit/testOutcome/最终失败闸门覆盖 validator，平台结果必须包含 PNG/JSON/xcresult。OCR 原文不写日志或 JSON，C 阶段仍须实际打开截图，不能把 OCR 当成全部 UI 验收。本地不编译或运行这个 validator/脚本，自测与双设备采集只在云端。
+
 本地仅静态检查。云端新增 Catalyst Release build、iPad test-without-building，iOS build 改 Release；iPhone/iPad 测试后 launch 并各保存一张截图。Swift smoke/fixture 包含 Claw/Core/*.swift。平台 outcome 纳入 manifest/JUnit/最终失败门槛，成功时必须有日志、xcresult 与截图。布局测试覆盖窄屏、900pt 边界、NaN/Infinity、辅助大字体和唯一稳定快捷键。真实窗口缩放、分屏/旋转、VoiceOver 与键盘交互仍需人工验收，单元测试不替代这些检查。
 
 

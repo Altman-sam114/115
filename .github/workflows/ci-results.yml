@@ -11,7 +11,7 @@ permissions:
   actions: read
 
 env:
-  CI_POLICY_VERSION: v0.3
+  CI_POLICY_VERSION: v0.4
   PRODUCT_ITERATION: v0.82
   PROJECT_NAME: Claw
   XCODE_PROJECT: Claw.xcodeproj
@@ -132,6 +132,24 @@ jobs:
           set -euo pipefail
           node Tools/claw-gateway-smoke.mjs 2>&1 | tee "$RESULT_DIR/gateway-websocket-smoke.log"
 
+      - name: Workspace screenshot validator
+        id: workspace_screenshot_check
+        continue-on-error: true
+        timeout-minutes: 3
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            mkdir -p .build/SwiftScreenshotModuleCache
+            xcrun swiftc \
+              -swift-version 6 \
+              -sdk "$(xcrun --sdk macosx --show-sdk-path)" \
+              -module-cache-path .build/SwiftScreenshotModuleCache \
+              Tools/ClawWorkspaceScreenshotCheck.swift \
+              -o .build/claw-workspace-screenshot-check
+            .build/claw-workspace-screenshot-check --self-test
+          } 2>&1 | tee "$RESULT_DIR/workspace-screenshot-check.log"
+
       - name: Xcode build
         id: xcode_build
         continue-on-error: true
@@ -207,8 +225,7 @@ jobs:
               test
             xcrun simctl install "$simulator_udid" .derivedData-tests/Build/Products/Debug-iphonesimulator/Claw.app
             xcrun simctl launch "$simulator_udid" com.claw.prototype
-            sleep 2
-            xcrun simctl io "$simulator_udid" screenshot "$RESULT_DIR/iphone-workspace.png"
+            bash Tools/capture-workspace-evidence.sh "$simulator_udid" "$RESULT_DIR/iphone-workspace.png"
           } 2>&1 | tee -a "$RESULT_DIR/xctest.log"
 
       - name: iPad XCTest and workspace launch
@@ -257,8 +274,7 @@ jobs:
               test-without-building
             xcrun simctl install "$simulator_udid" .derivedData-tests/Build/Products/Debug-iphonesimulator/Claw.app
             xcrun simctl launch "$simulator_udid" com.claw.prototype
-            sleep 2
-            xcrun simctl io "$simulator_udid" screenshot "$RESULT_DIR/ipad-workspace.png"
+            bash Tools/capture-workspace-evidence.sh "$simulator_udid" "$RESULT_DIR/ipad-workspace.png"
           } 2>&1 | tee -a "$RESULT_DIR/ipad-xctest.log"
 
       - name: Write CI manifest and summaries
@@ -279,6 +295,7 @@ jobs:
           XCTEST_OUTCOME: ${{ steps.xctest.outcome }}
           CATALYST_BUILD_OUTCOME: ${{ steps.catalyst_build.outcome }}
           IPAD_XCTEST_OUTCOME: ${{ steps.ipad_xctest.outcome }}
+          WORKSPACE_SCREENSHOT_CHECK_OUTCOME: ${{ steps.workspace_screenshot_check.outcome }}
         run: |
           python3 - <<'PY'
           import datetime
@@ -302,6 +319,7 @@ jobs:
               ("xctest", os.environ["XCTEST_OUTCOME"], "ci-results/xctest.log"),
               ("mac-catalyst-release", os.environ["CATALYST_BUILD_OUTCOME"], "ci-results/mac-catalyst-build.log"),
               ("ipad-xctest", os.environ["IPAD_XCTEST_OUTCOME"], "ci-results/ipad-xctest.log"),
+              ("workspace-screenshot-check", os.environ["WORKSPACE_SCREENSHOT_CHECK_OUTCOME"], "ci-results/workspace-screenshot-check.log"),
           ]
 
           xctest_log = result_dir / "xctest.log"
@@ -321,11 +339,26 @@ jobs:
           missing_platform_artifacts = []
           for outcome_key, required in [
               ("CATALYST_BUILD_OUTCOME", ["mac-catalyst-build.log", "MacCatalyst.xcresult"]),
-              ("IPAD_XCTEST_OUTCOME", ["ipad-xctest.log", "ClawIPadTests.xcresult", "ipad-workspace.png"]),
-              ("XCTEST_OUTCOME", ["iphone-workspace.png"]),
+              ("IPAD_XCTEST_OUTCOME", ["ipad-xctest.log", "ClawIPadTests.xcresult", "ipad-workspace.png", "ipad-workspace.json"]),
+              ("XCTEST_OUTCOME", ["iphone-workspace.png", "iphone-workspace.json"]),
           ]:
               if os.environ[outcome_key] == "success":
                   missing_platform_artifacts.extend(name for name in required if not (result_dir / name).exists())
+          for outcome_key, name in [("XCTEST_OUTCOME", "iphone-workspace.json"), ("IPAD_XCTEST_OUTCOME", "ipad-workspace.json")]:
+              if os.environ[outcome_key] == "success" and (result_dir / name).is_file():
+                  try:
+                      evidence = json.loads((result_dir / name).read_text(encoding="utf-8"))
+                      valid = (
+                          set(evidence) == {"policy", "outcome", "attempt"}
+                          and evidence["policy"] == "claw-mission-ocr-v1"
+                          and evidence["outcome"] == "success"
+                          and type(evidence["attempt"]) is int
+                          and 1 <= evidence["attempt"] <= 15
+                      )
+                  except (ValueError, TypeError, OSError):
+                      valid = False
+                  if not valid:
+                      missing_platform_artifacts.append(name + " (invalid readiness evidence)")
           checks.append(("platform-artifacts", "failure" if missing_platform_artifacts else "success", ", ".join(missing_platform_artifacts) or "ci-results"))
 
           def aggregate(names):
@@ -367,7 +400,9 @@ jobs:
               "ipadTestLogPath": "ci-results/ipad-xctest.log",
               "ipadTestResultBundlePath": "ci-results/ClawIPadTests.xcresult",
               "workspaceScreenshots": ["ci-results/iphone-workspace.png", "ci-results/ipad-workspace.png"],
-              "testOutcome": aggregate({"swift-logic-smoke", "swift-gateway-fixture", "gateway-direct-smoke", "gateway-websocket-smoke", "xctest", "xctest-artifacts", "ipad-xctest", "platform-artifacts"}),
+              "workspaceScreenshotEvidence": ["ci-results/iphone-workspace.json", "ci-results/ipad-workspace.json"],
+              "workspaceScreenshotValidationPolicy": "claw-mission-ocr-v1",
+              "testOutcome": aggregate({"swift-logic-smoke", "swift-gateway-fixture", "gateway-direct-smoke", "gateway-websocket-smoke", "xctest", "xctest-artifacts", "ipad-xctest", "platform-artifacts", "workspace-screenshot-check"}),
               "projectSpecificReports": [
                   "ci-results/swift-logic-smoke.log",
                   "ci-results/swift-gateway-fixture.log",
@@ -377,6 +412,7 @@ jobs:
                   "ci-results/mac-catalyst-build.log",
                   "ci-results/ipad-xctest.log",
                   "ci-results/node-check.log",
+                  "ci-results/workspace-screenshot-check.log",
               ],
               "artifactName": os.environ["ARTIFACT_NAME"],
               "checks": [
@@ -462,6 +498,7 @@ jobs:
           CATALYST_BUILD_OUTCOME: ${{ steps.catalyst_build.outcome }}
           IPAD_XCTEST_OUTCOME: ${{ steps.ipad_xctest.outcome }}
           PACKAGE_RESULTS_OUTCOME: ${{ steps.package_results.outcome }}
+          WORKSPACE_SCREENSHOT_CHECK_OUTCOME: ${{ steps.workspace_screenshot_check.outcome }}
         run: |
           python3 - <<'PY'
           import os
@@ -480,6 +517,7 @@ jobs:
               "mac-catalyst-release": os.environ["CATALYST_BUILD_OUTCOME"],
               "ipad-xctest": os.environ["IPAD_XCTEST_OUTCOME"],
               "package-results": os.environ["PACKAGE_RESULTS_OUTCOME"],
+              "workspace-screenshot-check": os.environ["WORKSPACE_SCREENSHOT_CHECK_OUTCOME"],
           }
           failed = {name: outcome for name, outcome in outcomes.items() if outcome != "success"}
           if failed:

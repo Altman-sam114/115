@@ -6,6 +6,8 @@
 
 v0.78 的 Mac Catalyst 与 iPad 共用 planner、bridge、审批与 reducer，不新增 schema/action/artifact。侧栏与键盘只切换本地目的页，布局只重排并保留 scoped focus；运行于 Mac 不代表已获得桌面操作权限，真实动作仍发生于授权 Gateway。
 
+云端客户端启动证据使用独立 CI policy v0.4：检查真实 PNG 中 Claw/Mission Run 内容就绪，最多 15 帧等待，只留最终帧及固定 policy/outcome/attempt 的小 JSON。OCR 原文不写入日志、metadata、envelope 或 artifact；此 JSON 是 CI 结果文件，不是 Gateway artifact/action/schema。C 阶段仍需实际看图，不能将白屏、状态栏或 PNG 文件存在判成客户端可用。
+
 
 Readiness requestNonce 严格使用 [A-Za-z0-9_-]{8,128}；Swift 与 Gateway 一致，连字符和下划线均合法，加号、斜杠、等号仍拒绝。nonce 仅内部绑定，不展示或记录原值。
 

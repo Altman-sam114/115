@@ -6,6 +6,8 @@
 
 最后通过的基线为 `0b9746292f4b67afac09ea36d7df50eb3297d061` / run `38342562083` attempt `1`。v0.82 的 `07a6747fd7acd55779b7d15f35f06a64c19866ae` / run `39799453977` attempt `1` 已下载 `claw-ci-v0.82-main-07a6747fd7ac-run39799453977-attempt1` 复判不通过：manifest/JUnit/日志一致，Release 与 Gateway 检查通过，LogicSmoke/XCTest 因测试夹具接口不匹配未能编译，iPad 复用不完整 test host 安装失败（结果包解压 52 MiB）。本次只修正夹具和缺产物的云端早失败诊断，完整矩阵需新 main run 重验；不能把构建成功等同测试通过。
 
+后续 `7583e9a1a7df7117a6068a8cc8e28c4eaa075275` / run `39801453526` attempt `1` 的未加密结果包已下载（1,148,078 bytes，解压 3.4 MiB）：13 项检查通过、iPhone/iPad 各 118 项 XCTest 零失败、Release/Gateway 回归通过。但 C 阶段实际打开截图发现 iPad 白屏，整体复判退回；不能把自动化全绿当成 UI 通过。现追加 CI policy v0.4 内容就绪闸门和有界真实帧采集，OCR 文本不外显；新 run 截图通过前不进入 v0.83。此轮不改变产品权限或假称已定位白屏根因。
+
 v0.82 将真实 Gateway 与模拟结果彻底分开：同步 live 准备和 async live 发送在 preflight 失败时不调用 transport，显示“未发送，配置待修正”；throw、无有效终态 EOF 和取消只收口当前 session，保留真实部分结果/证据，结果未确认，不模拟执行、不自动重发，也不承诺撤销远端副作用。首个已接受的 task/session 终态不可被尾随错误、重复终态或迟帧改写。异步入口不临时修改用户模式；task/session 与配置/模式 revision 防止旧任务改写新 Mission。显式模拟与模拟 retry 独立保留。生产 WebSocket 在原始 wire 身份校验后绑定本次连接的远端 session，再映射到本地 session；错误 task、切换远端 session 或不匹配 offer 均不入库，收到任何桌面 payload 后不再自动重发。合法 continuation 保留远端 parentSessionID；重连诊断只用固定代码，不写 raw error。
 
 

@@ -1,5 +1,7 @@
 # 项目核心流程文档
 
+云端启动验收：本轮 Debug app 安装/launch -> 最多 15 次实际 simctl 帧 -> 固定 Claw/Mission Run 内容就绪校验 -> 最终 PNG + 固定 readiness JSON -> manifest/JUnit/最终失败闸门 -> C 阶段打开实际截图。只保留最后帧，帧间 2 秒，不打印 OCR 原文；白屏/状态栏/仅导航栏/超时/读取错误均不通过。此链路仅 CI policy v0.4，不触发产品任务、Gateway 或真实电脑动作。
+
 v0.82 将真实 Gateway 与模拟结果彻底分开：同步 live 准备和 async live 发送在 preflight 失败时不调用 transport，显示“未发送，配置待修正”；throw、无有效终态 EOF 和取消只收口当前 session，保留真实部分结果/证据，结果未确认，不模拟执行、不自动重发，也不承诺撤销远端副作用。首个已接受的 task/session 终态不可被尾随错误、重复终态或迟帧改写。异步入口不临时修改用户模式；task/session 与配置/模式 revision 防止旧任务改写新 Mission。显式模拟与模拟 retry 独立保留。生产 WebSocket 在原始 wire 身份校验后绑定本次连接的远端 session，再映射到本地 session；错误 task、切换远端 session 或不匹配 offer 均不入库，收到任何桌面 payload 后不再自动重发。合法 continuation 保留远端 parentSessionID；重连诊断只用固定代码，不写 raw error。
 
 v0.79 普通发送链路：点击时 task ID -> 显式 async live transport -> 审批状态检查 -> sent wire 副本 -> prepared session -> Gateway ordinary sent preflight。Bridge 与 Mission live 开始/审批都使用真实 async 入口；Mission 审批必须绑定原任务，异步完成仅更新匹配的 Mission。重复发送/重新审批 sent 任务不产生新会话或事件；continuation frozen 分支不变。

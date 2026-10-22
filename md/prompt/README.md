@@ -2,6 +2,8 @@
 
 本目录保存每轮 Agent A 写给 Agent B 的详细实现提示词。未来由 Agent X 主控循环时，Agent X 可以要求 Agent A 为每个小轮次生成版本化提示词，但提示词仍由 Agent A 按本目录规则落盘。
 
+本轮用户要求不开子 Agent，同一个 Agent X 串行保留 A/B/C/X 阶段。v0.82 云端启动证据修复见 `v0（核心智能能力）/v0.82（云端启动截图非白屏闸门）.md`：CI policy v0.4 除构建/测试结果，还要求实际首屏内容就绪、最终 PNG/小 JSON 和 C 阶段看图；未通过不得推进已准备的 v0.83 UI 规划。此约束不改产品 wire schema，也不将自审冒充独立 Agent 复判。
+
 ## 角色召唤
 
 - `agenta`、`a:` 或 `A:`：召唤 Agent A。

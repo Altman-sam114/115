@@ -1,5 +1,16 @@
 # 项目流程图
 
+```mermaid
+flowchart LR
+  Launch["云端本轮 app launch"] --> Capture["实际模拟器截图\n最多 15 帧 / 帧间 2 秒 / 仅留最后帧"]
+  Capture --> Ready{"Claw + Mission Run\n正文就绪?"}
+  Ready -->|是| Evidence["最终 PNG + 小 readiness JSON\n不记录 OCR 原文"]
+  Ready -->|未就绪且未超限| Capture
+  Ready -->|超限或读取错误| Fail["CI 失败\n保留诊断和最终帧"]
+  Evidence --> Gate["manifest / JUnit / 最终闸门"]
+  Gate --> Review["C 阶段核对身份并实际打开截图\n不是仅检查文件存在"]
+```
+
 v0.79：普通审批 -> readyToSend -> 显式 live 点击 -> sent wire envelope -> Gateway sent preflight；sent 再审批/发送 -> 拒绝；continuation 仍走 frozen readyToSend + receipt。
 v0.80：模拟 session -> 可模拟 retry；live/未知 session -> 拒绝模拟 retry -> 保留失败证据 -> 新任务审批发送。
 

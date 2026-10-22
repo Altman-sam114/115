@@ -1,5 +1,7 @@
 # Claw iOS Controller Prototype
 
+云端启动截图采用 CI policy v0.4：实际 iPhone/iPad 帧必须通过 Claw + Mission Run 内容就绪检查，再生成小型 readiness JSON；最多 15 帧、帧间 2 秒，仅保留最后一张，失败使整轮失败。OCR 原文不写日志或结果包。结果包复判仍必须打开真实 PNG，截图文件存在不等于界面可用；该检查不改变 App/Gateway 协议，也不替代真实设备交互验收。
+
 v0.82 将真实 Gateway 与模拟结果彻底分开：同步 live 准备和 async live 发送在 preflight 失败时不调用 transport，显示“未发送，配置待修正”；throw、无有效终态 EOF 和取消只收口当前 session，保留真实部分结果/证据，结果未确认，不模拟执行、不自动重发，也不承诺撤销远端副作用。首个已接受的 task/session 终态不可被尾随错误、重复终态或迟帧改写。异步入口不临时修改用户模式；task/session 与配置/模式 revision 防止旧任务改写新 Mission。显式模拟与模拟 retry 独立保留。生产 WebSocket 在原始 wire 身份校验后绑定本次连接的远端 session，再映射到本地 session；错误 task、切换远端 session 或不匹配 offer 均不入库，收到任何桌面 payload 后不再自动重发。合法 continuation 保留远端 parentSessionID；重连诊断只用固定代码，不写 raw error。
 
 v0.79 修复普通任务 live 发送：传输 envelope 的状态与已发送任务保持一致；电脑任务面板及 Mission 开始/审批按钮显式打开 async transport。Mission 审批绑定当前任务，异步结果只更新仍匹配的 Mission。已发送任务不能重新审批/重复发送。续接继续使用冻结 readyToSend 合同。
