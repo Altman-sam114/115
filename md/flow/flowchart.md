@@ -126,7 +126,11 @@ flowchart TD
   M --> SIM["模拟事件流<br/>ClawGatewayEventStream.simulatedEvents"]
   M --> LIVE["WebSocket Live Gateway / Health Strip<br/>URLSessionClawGatewayTransport"]
   LIVE --> LREQ["ClawGatewayLiveRequest<br/>preflight、脱敏 endpoint、transport、token 指纹"]
-  LREQ --> RETRY["bounded retry + ping observe<br/>attempt、reconnect、ping、transport error"]
+  LREQ -->|"preflight通过"| RETRY["bounded retry + ping observe<br/>attempt、reconnect、ping、transport error"]
+  LREQ -->|"配置不满足"| UNSENT["未发送 / 零 transport / 无业务证据"]
+  RETRY -->|"无有效终态的失败、EOF、取消"| UNCONFIRMED["结果未确认 / 保留真实部分证据<br/>不模拟、不自动重发、不承诺远端撤销"]
+  UNSENT --> R
+  UNCONFIRMED --> R
   RETRY --> G["Tools/claw-gateway-server.mjs<br/>校验 token、schema、allowlist、workspace"]
   G --> PREF{"Dispatch Preflight<br/>普通 sent + 敏感 approval/audit 合同<br/>continuation lineage 分支"}
   PREF -->|"普通/continuation 合同通过"| RPLAY{"task replay guard<br/>同一进程内 task.id 是否已接受"}
@@ -150,7 +154,8 @@ flowchart TD
   H --> EVT["ClawGatewayEvent<br/>actionStarted、artifactStored、completed、failed、approvalRequested"]
   SNAP --> EVT
   SIM --> EVT
-  EVT --> R["ClawGatewayEventStream.apply<br/>把事件 reduce 到 session"]
+  EVT --> IDGATE["wire task/远端 session 绑定后映射本地 session<br/>首个终态锁定，拒绝迟帧、错误 offer 与重复终态"]
+  IDGATE --> R["ClawGatewayEventStream.apply<br/>仅更新对应 session；revision 决定是否更新当前展示"]
   ART --> R
   SART --> R
   SMETA --> R

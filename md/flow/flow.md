@@ -1,5 +1,7 @@
 # 项目核心流程文档
 
+v0.82 将真实 Gateway 与模拟结果彻底分开：同步 live 准备和 async live 发送在 preflight 失败时不调用 transport，显示“未发送，配置待修正”；throw、无有效终态 EOF 和取消只收口当前 session，保留真实部分结果/证据，结果未确认，不模拟执行、不自动重发，也不承诺撤销远端副作用。首个已接受的 task/session 终态不可被尾随错误、重复终态或迟帧改写。异步入口不临时修改用户模式；task/session 与配置/模式 revision 防止旧任务改写新 Mission。显式模拟与模拟 retry 独立保留。生产 WebSocket 在原始 wire 身份校验后绑定本次连接的远端 session，再映射到本地 session；错误 task、切换远端 session 或不匹配 offer 均不入库，收到任何桌面 payload 后不再自动重发。合法 continuation 保留远端 parentSessionID；重连诊断只用固定代码，不写 raw error。
+
 v0.79 普通发送链路：点击时 task ID -> 显式 async live transport -> 审批状态检查 -> sent wire 副本 -> prepared session -> Gateway ordinary sent preflight。Bridge 与 Mission live 开始/审批都使用真实 async 入口；Mission 审批必须绑定原任务，异步完成仅更新匹配的 Mission。重复发送/重新审批 sent 任务不产生新会话或事件；continuation frozen 分支不变。
 v0.80 重试链路按 session 来源隔离：只有模拟入口登记的 session 可使用本机模拟 retry；真实 Gateway 失败拒绝模拟重试并保留 events/artifacts/approval 状态。
 
@@ -118,7 +120,7 @@ Agent X 必须停止或暂停的情况包括：总目标已完成、连续 3 轮
 5. bridge 将步骤转换成 `ClawMobileAction`，补充 `toolArguments`、审批级别、敏感数据标记和风险分。
 6. 用户审批后，`sendLatestClawMobileTask()` 根据 `gatewayDispatchMode` 选择：
    - `simulatedEventStream`：本地生成 `ClawGatewayEvent`。
-   - `liveGateway`：准备 WebSocket 请求，endpoint/token 不满足时回退模拟流；客户端默认最多重试 1 次并做一次 ping 观测，从 request、connection state、session、事件和 transport 诊断派生 Live Gateway 连接健康摘要。
+   - `liveGateway`：准备 WebSocket 请求，endpoint/token 不满足时未发送且零 transport；失败/EOF/取消只关闭本地等待并保留真实证据，不回退模拟；客户端默认最多重试 1 次并做一次 ping 观测，从 request、connection state、session、事件和 transport 诊断派生 Live Gateway 连接健康摘要。
 7. 桌面 Gateway 原型 `Tools/claw-gateway-server.mjs` 校验 schema、token、动作白名单和策略。
 8. Gateway 先查进程内 task replay guard：同一 `task.id` 已被接受过时，只写 `task-replay-guard.json` `auditLog`、逐个 action 返回 `actionSkipped` 并结束 session，不调用 action handler。
 9. 正常路径在 `gatewayConnected` 后写入 session 级 `gateway-capability-snapshot.json` `auditLog` artifact，记录 workspace、platform、短 token 指纹、envelope allowlist、策略 allowlist 和 capability 状态，并在 artifact event metadata 上附安全字符串摘要。

@@ -5184,37 +5184,40 @@ final class ClawTests: XCTestCase {
         XCTAssertTrue(store.clawGatewaySessions[0].auditTrail.contains { $0.contains("session.retry") })
     }
 
-    func testLiveGatewayModeFallsBackWhenTokenIsMissing() {
-        let store = ClawStore(autoScanLocalArtifacts: false)
-
-        store.gatewayDispatchMode = .liveGateway
-        store.setGateway(url: "ws://127.0.0.1:18789", token: "")
-        store.phoneAgentCommand = "打开浏览器搜索资料"
-        store.generatePhoneAgentPlan()
-        store.queueClawMobileTaskFromCurrentPlan()
-        store.approveLatestClawMobileTask()
-        store.sendLatestClawMobileTask()
-
-        XCTAssertEqual(store.clawMobileTasks[0].status, .sent)
-        XCTAssertEqual(store.gatewayConnectionState, .completed)
-        XCTAssertEqual(store.lastGatewayLiveRequest?.canAttemptLive, false)
-        XCTAssertTrue(store.gatewayEvents.contains { $0.kind == .fallbackUsed })
-        XCTAssertFalse(store.clawGatewaySessions.isEmpty)
-        XCTAssertGreaterThan(store.clawGatewaySessions[0].results.count, 0)
-        XCTAssertTrue(store.gatewayLiveHealthSummary.hasFallback)
-        XCTAssertFalse(store.gatewayLiveHealthSummary.canAttemptLive)
-        XCTAssertFalse(store.gatewayLiveHealthSummary.detailLine.contains("Authorization"))
-        let strip = store.missionRunLiveGatewayHealthStrip
-        XCTAssertEqual(strip.healthState, "fallback")
-        XCTAssertTrue(strip.hasFallback)
-        XCTAssertFalse(strip.canAttemptLive)
-        XCTAssertFalse(strip.guidance.contains("Authorization"))
-        XCTAssertFalse(strip.status.contains("Authorization"))
-        let control = store.missionRunSummary.controlSnapshot(focusedOn: nil, liveHealth: strip)
-        XCTAssertTrue(control.hasLiveFallback)
-        XCTAssertFalse(control.hasLiveError)
-        XCTAssertEqual(control.liveHealthState, "fallback")
-        XCTAssertFalse((control.liveHealthStatus ?? "").contains("Authorization"))
+    func testLiveGatewayPreflightNeverSimulatesOrCallsTransport() async throws {
+        for (endpoint, token) in [("", "secret"), ("https://invalid", "secret"), ("ws://127.0.0.1:18789", "")] {
+            for asynchronous in [false, true] {
+                let store = makeLiveFailureStore(endpoint: endpoint, token: token)
+                let transport = LiveFailureRecordingTransport(ending: .error)
+                if asynchronous {
+                    await store.sendLatestClawMobileTaskOverLiveGateway(transport: transport)
+                } else {
+                    store.sendLatestClawMobileTask()
+                }
+                XCTAssertEqual(transport.callCount, 0)
+                XCTAssertEqual(store.clawMobileTasks[0].status, .sent)
+                XCTAssertEqual(store.gatewayConnectionState, .notConfigured)
+                XCTAssertEqual(store.lastGatewayLiveRequest?.canAttemptLive, false)
+                assertUnconfirmedLiveSession(store)
+                XCTAssertFalse(store.gatewayLiveHealthSummary.hasGatewayAck)
+                XCTAssertTrue(store.gatewayLiveHealthSummary.compactStatus.contains("未发送"))
+                let strip = store.missionRunLiveGatewayHealthStrip
+                XCTAssertEqual(strip.healthState, "error")
+                XCTAssertFalse(strip.hasFallback)
+                XCTAssertFalse(strip.canAttemptLive)
+                XCTAssertTrue(strip.guidance.contains("未尝试 transport"))
+                let control = store.missionRunSummary.controlSnapshot(focusedOn: nil, liveHealth: strip)
+                XCTAssertFalse(control.hasLiveFallback)
+                XCTAssertTrue(control.hasLiveError)
+                XCTAssertEqual(control.liveHealthState, "error")
+                XCTAssertFalse((control.liveHealthStatus ?? "").contains("Authorization"))
+                let before = store.clawGatewaySessions
+                store.approveLatestClawMobileTask()
+                await store.sendLatestClawMobileTaskOverLiveGateway(transport: transport)
+                XCTAssertEqual(store.clawGatewaySessions, before)
+                XCTAssertEqual(transport.callCount, 0)
+            }
+        }
     }
 
     func testLiveGatewayHealthSummarySanitizesEndpoint() throws {
@@ -5454,7 +5457,7 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(store.gatewayLiveHealthSummary.lastPingSucceeded, false)
     }
 
-    func testLiveGatewayTransportErrorFallsBackWithHealthSummary() async {
+    func testLiveGatewayTransportErrorPreservesUnconfirmedHealthWithoutSimulation() async {
         let store = ClawStore(autoScanLocalArtifacts: false)
 
         store.setGateway(url: "ws://127.0.0.1:18789", token: "paired-secret")
@@ -5465,8 +5468,9 @@ final class ClawTests: XCTestCase {
 
         await store.sendLatestClawMobileTaskOverLiveGateway(transport: SensitiveFailingClawGatewayTransport())
 
-        XCTAssertEqual(store.gatewayConnectionState, .completed)
-        XCTAssertTrue(store.gatewayLiveHealthSummary.hasFallback)
+        XCTAssertEqual(store.gatewayConnectionState, .failed)
+        assertUnconfirmedLiveSession(store)
+        XCTAssertFalse(store.gatewayLiveHealthSummary.hasFallback)
         XCTAssertTrue(store.gatewayLiveHealthSummary.hasError)
         XCTAssertNotNil(store.gatewayLiveHealthSummary.lastTransportErrorSummary)
         for sensitiveFragment in [
@@ -5482,6 +5486,383 @@ final class ClawTests: XCTestCase {
             XCTAssertFalse(store.gatewayLiveHealthSummary.latestEventSummary?.contains(sensitiveFragment) ?? true)
             XCTAssertFalse(store.gatewayLiveHealthSummary.lastTransportErrorSummary?.contains(sensitiveFragment) ?? true)
         }
+    }
+
+    func testLiveGatewayFailureAndEOFKeepExactPartialEvidence() async throws {
+        for partial in [false, true] {
+            for ending in [LiveFailureRecordingTransport.Ending.error, .eof] {
+                let store = makeLiveFailureStore()
+                let transport = LiveFailureRecordingTransport(prefix: partial ? .partial : .none, ending: ending)
+                await store.sendLatestClawMobileTaskOverLiveGateway(transport: transport)
+                XCTAssertEqual(transport.callCount, 1)
+                assertUnconfirmedLiveSession(store, expectedResults: partial ? 2 : 0)
+                XCTAssertEqual(store.gatewayLiveHealthSummary.lastTransportErrorSummary,
+                               ending == .error ? "live_transport_failed" : "live_transport_incomplete")
+                let session = try XCTUnwrap(store.clawGatewaySessions.first)
+                if partial {
+                    let actionEvent = try XCTUnwrap(transport.emittedEvents.first)
+                    XCTAssertEqual(session.results[0].artifacts, actionEvent.artifacts)
+                    XCTAssertEqual(session.results[0].status, .succeeded)
+                    XCTAssertEqual(session.results[0].summary, actionEvent.summary)
+                    XCTAssertEqual(session.results[0].finishedAt, actionEvent.createdAt)
+                    XCTAssertEqual(session.results[1].status, .running)
+                    XCTAssertNil(session.results[1].finishedAt)
+                }
+                XCTAssertEqual(store.gatewayEvents.filter { $0.kind == .sessionCompleted }.count, 1)
+                XCTAssertEqual(store.gatewayEvents.last?.sequence,
+                               (transport.emittedEvents.map(\.sequence).max() ?? 1) + 1)
+                let captured = store.gatewayEvents.map(\.summary).joined() + session.auditTrail.joined() + store.lastGatewayEvent
+                for secret in LiveFailureRecordingTransport.sensitiveMarkers {
+                    XCTAssertFalse(captured.contains(secret))
+                }
+            }
+        }
+    }
+
+    func testLiveGatewayRealTaskCancellationClosesWaitWithoutClaimingRemoteRollback() async throws {
+        for partial in [false, true] {
+            let store = makeLiveFailureStore()
+            let transport = LiveFailureRecordingTransport(prefix: partial ? .partial : .none, ending: .hold)
+            let send = Task { await store.sendLatestClawMobileTaskOverLiveGateway(transport: transport) }
+            let ready = await waitForLiveCondition {
+                transport.callCount == 1 && (!partial || store.clawGatewaySessions.first?.results.count == 2)
+            }
+            XCTAssertTrue(ready)
+            let evidence = store.clawGatewaySessions.first?.results
+            send.cancel()
+            await send.value
+            assertUnconfirmedLiveSession(store, expectedResults: partial ? 2 : 0)
+            XCTAssertEqual(store.clawGatewaySessions.first?.results, evidence)
+            XCTAssertEqual(transport.callCount, 1)
+            XCTAssertEqual(store.gatewayLiveHealthSummary.lastTransportErrorSummary, "live_transport_cancelled")
+            XCTAssertTrue(store.lastGatewayEvent.contains("不代表撤销远端执行"))
+            XCTAssertEqual(store.gatewayEvents.filter { $0.kind == .sessionCompleted }.count, 1)
+            transport.finish(.eof)
+        }
+    }
+
+    func testLiveGatewayFirstAcceptedTerminalIgnoresErrorDuplicateAndLateFrames() async throws {
+        for failed in [false, true] {
+            let store = makeLiveFailureStore()
+            let transport = LiveFailureRecordingTransport(prefix: failed ? .failed : .succeeded, ending: .error)
+            await store.sendLatestClawMobileTaskOverLiveGateway(transport: transport)
+            XCTAssertEqual(transport.callCount, 1)
+            XCTAssertEqual(store.gatewayConnectionState, failed ? .failed : .completed)
+            XCTAssertEqual(store.clawGatewaySessions.first?.status, failed ? .needsAttention : .completed)
+            XCTAssertFalse(store.gatewayLiveHealthSummary.hasFallback)
+            let original = store.clawGatewaySessions
+            let events = store.gatewayEvents
+            let terminal = try XCTUnwrap(events.last)
+            XCTAssertEqual(terminal.summary, "Gateway authoritative terminal")
+            XCTAssertEqual(events.filter { $0.kind == .sessionCompleted }.count, 1)
+            let opposite = ClawGatewayEvent(
+                sessionID: terminal.sessionID, taskID: terminal.taskID,
+                sequence: terminal.sequence + 1, kind: .sessionCompleted,
+                resultStatus: failed ? .succeeded : .failed, summary: "Late opposite terminal"
+            )
+            store.ingestGatewayEvents([opposite])
+            store.ingestGatewayEvents([ClawGatewayEvent(
+                sessionID: terminal.sessionID, taskID: terminal.taskID,
+                sequence: terminal.sequence + 2, kind: .gatewayConnected, summary: "Late progress"
+            )])
+            XCTAssertEqual(store.clawGatewaySessions, original)
+            XCTAssertEqual(store.gatewayEvents, events)
+        }
+    }
+
+    func testLiveGatewayForeignTerminalCannotCompleteOrdinaryOrContinuationDispatch() async throws {
+        for prefix in [LiveFailureRecordingTransport.Prefix.wrongTask, .wrongSession] {
+            for continuation in [false, true] {
+                let store: ClawStore
+                let taskID: UUID
+                if continuation {
+                    (store, taskID) = try makeApprovedContinuationForTransportFailure()
+                } else {
+                    store = makeLiveFailureStore()
+                    taskID = try XCTUnwrap(store.clawMobileTasks.first?.id)
+                }
+                let receipts = store.continuationReceiptCountForTesting
+                let transport = LiveFailureRecordingTransport(prefix: prefix, ending: .eof)
+                await store.sendTaskOverLiveGateway(id: taskID, transport: transport)
+                XCTAssertEqual(transport.callCount, 1)
+                XCTAssertEqual(store.clawGatewaySessions.first?.status, .needsAttention)
+                XCTAssertFalse(store.gatewayLiveHealthSummary.isCompleted)
+                XCTAssertFalse(store.gatewayEvents.contains { $0.summary == "Foreign terminal" })
+                XCTAssertEqual(store.gatewayEvents.filter { $0.taskID == taskID && $0.kind == .sessionCompleted }.count, 1)
+                XCTAssertLessThanOrEqual(store.continuationReceiptCountForTesting, receipts)
+                if continuation {
+                    XCTAssertEqual(store.clawMobileTasks.first?.status, .blocked)
+                    XCTAssertEqual(store.continuationDraft?.state, .blocked)
+                }
+            }
+        }
+    }
+
+    func testLiveGatewayBatchKeepsFirstTerminalAndRejectsLateBusinessEvidence() throws {
+        for failed in [false, true] {
+            let store = makeLiveFailureStore()
+            store.sendLatestClawMobileTask()
+            let session = try XCTUnwrap(store.clawGatewaySessions.first)
+            let action = try XCTUnwrap(store.clawMobileTasks.first?.actions.first)
+            let first = ClawGatewayEvent(
+                sessionID: session.id, taskID: session.taskID, sequence: 2,
+                kind: .sessionCompleted, resultStatus: failed ? .failed : .succeeded,
+                summary: "First batch terminal"
+            )
+            store.ingestGatewayEvents([
+                first,
+                ClawGatewayEvent(
+                    sessionID: session.id, taskID: session.taskID, sequence: 3,
+                    kind: .sessionCompleted, resultStatus: failed ? .succeeded : .failed,
+                    summary: "Opposite batch terminal"
+                ),
+                ClawGatewayEvent(
+                    sessionID: session.id, taskID: session.taskID, sequence: 4,
+                    kind: .actionCompleted, actionID: action.id, actionKind: action.kind,
+                    actionTitle: action.title, resultStatus: .succeeded, summary: "Late action"
+                ),
+                ClawGatewayEvent(
+                    sessionID: session.id, taskID: session.taskID, sequence: 5,
+                    kind: .artifactStored, summary: "Late artifact",
+                    artifacts: [ClawGatewayArtifact(kind: .auditLog, title: "late.json", reference: "gateway://late", summary: "Late")]
+                )
+            ])
+            XCTAssertEqual(store.clawGatewaySessions.first?.status, failed ? .needsAttention : .completed)
+            XCTAssertEqual(store.clawGatewaySessions.first?.results, [])
+            XCTAssertEqual(store.clawGatewaySessions.first?.artifactCount, 0)
+            XCTAssertEqual(store.gatewayEvents.last, first)
+            XCTAssertEqual(store.gatewayEvents.filter { $0.kind == .sessionCompleted }.count, 1)
+        }
+    }
+
+    func testWireSessionBindingValidatesBeforeMappingAndPreservesRemoteOffer() throws {
+        let taskID = UUID()
+        let localID = UUID()
+        let remoteID = UUID()
+        var binding = ClawGatewayWireSessionBinding(taskID: taskID, localSessionID: localID)
+        var event = ClawGatewayEvent(
+            sessionID: remoteID, taskID: UUID(), sequence: 2,
+            kind: .gatewayConnected, summary: "Remote Gateway accepted"
+        )
+        XCTAssertThrowsError(try binding.normalize(ClawGatewayWireEvent(event: event)))
+        XCTAssertNil(binding.remoteSessionID, "A foreign first task must not claim the binding")
+        event.taskID = taskID
+        let offer = ClawGatewayContinuationOffer(
+            contract: ClawContinuationContract.receiptContract,
+            receipt: String(repeating: "r", count: 43), expiresAt: Date.now.addingTimeInterval(300),
+            parentTaskID: taskID, parentSessionID: remoteID, parentAgentTraceArtifactID: UUID(),
+            parentDecisionDigest: "sha256:" + String(repeating: "a", count: 64),
+            parentRound: 0, selectedActionKind: .extractData
+        )
+        var invalidOffer = offer
+        invalidOffer.parentSessionID = localID
+        XCTAssertThrowsError(try binding.normalize(ClawGatewayWireEvent(event: event, continuationOffer: invalidOffer)))
+        XCTAssertNil(binding.remoteSessionID, "An invalid offer must not claim the binding")
+        let mapped = try binding.normalize(ClawGatewayWireEvent(event: event))
+        var expected = event
+        expected.sessionID = localID
+        XCTAssertEqual(mapped.event, expected)
+        XCTAssertEqual(binding.remoteSessionID, remoteID)
+        event.kind = .sessionCompleted
+        event.sequence += 1
+        let terminal = try binding.normalize(ClawGatewayWireEvent(event: event, continuationOffer: offer))
+        XCTAssertEqual(terminal.event.sessionID, localID)
+        XCTAssertNil(terminal.event.resultStatus, "Gateway terminals without resultStatus remain valid")
+        XCTAssertEqual(terminal.continuationOffer, offer)
+        XCTAssertNotEqual(terminal.continuationOffer?.parentSessionID, terminal.event.sessionID)
+        event.sessionID = UUID()
+        XCTAssertThrowsError(try binding.normalize(ClawGatewayWireEvent(event: event)))
+        XCTAssertEqual(binding.remoteSessionID, remoteID, "Rejected sessions must not replace the binding")
+        event.sessionID = remoteID
+        event.taskID = UUID()
+        XCTAssertThrowsError(try binding.normalize(ClawGatewayWireEvent(event: event)))
+        var independent = ClawGatewayWireSessionBinding(taskID: taskID, localSessionID: UUID())
+        event.taskID = taskID
+        event.sessionID = UUID()
+        XCTAssertNoThrow(try independent.normalize(ClawGatewayWireEvent(event: event)))
+        XCTAssertNotEqual(independent.remoteSessionID, binding.remoteSessionID)
+    }
+
+    func testWireSessionMismatchCannotReplacePartialEvidenceOrCreateReceipt() async throws {
+        for mismatch in WireSessionMismatchTransport.Mismatch.allCases {
+            let store = makeLiveFailureStore()
+            let transport = WireSessionMismatchTransport(mismatch: mismatch)
+            await store.sendLatestClawMobileTaskOverLiveGateway(transport: transport)
+            assertUnconfirmedLiveSession(store, expectedResults: 1)
+            let result = try XCTUnwrap(store.clawGatewaySessions.first?.results.first)
+            XCTAssertEqual(result.status, .succeeded)
+            XCTAssertEqual(result.summary, "Accepted remote evidence")
+            XCTAssertEqual(result.artifacts.count, 1)
+            XCTAssertEqual(result.artifacts.first?.reference, "gateway://accepted")
+            XCTAssertFalse(store.gatewayEvents.contains { $0.summary == "Foreign terminal" })
+            XCTAssertEqual(store.continuationReceiptCountForTesting, 0)
+            XCTAssertEqual(store.gatewayLiveHealthSummary.lastTransportErrorSummary, "live_transport_failed")
+        }
+    }
+
+    func testContinuationKeepsRemoteLineageDistinctFromLocalSessionIdentity() async throws {
+        let (store, childTaskID) = try makeApprovedContinuationForTransportFailure()
+        let child = try XCTUnwrap(store.clawMobileTasks.first { $0.id == childTaskID })
+        let lineage = try XCTUnwrap(child.continuationLineage)
+        let localParent = try XCTUnwrap(store.clawGatewaySessions.first { $0.taskID == lineage.parentTaskID })
+        XCTAssertNotEqual(lineage.parentSessionID, localParent.id)
+        await store.sendTaskOverLiveGateway(id: childTaskID, transport: MockClawGatewayTransport())
+        XCTAssertEqual(store.continuationDraft?.state, .sent)
+        XCTAssertEqual(store.clawGatewaySessions.first?.status, .completed)
+    }
+
+    func testLateLiveFailureUpdatesOnlyItsHistoricalSessionAcrossReplacementTasks() async throws {
+        for sendReplacement in [false, true] {
+            for ending in [LiveFailureRecordingTransport.Ending.error, .eof] {
+                let store = makeLiveFailureStore()
+                let taskA = try XCTUnwrap(store.clawMobileTasks.first)
+                let transport = LiveFailureRecordingTransport(prefix: .partial, ending: .hold)
+                let sendA = Task { await store.sendTaskOverLiveGateway(id: taskA.id, transport: transport) }
+                let ready = await waitForLiveCondition { store.clawGatewaySessions.first?.results.count == 2 }
+                XCTAssertTrue(ready)
+                let sessionA = try XCTUnwrap(store.clawGatewaySessions.first)
+                store.phoneAgentCommand = "打开浏览器搜索新任务"
+                store.generatePhoneAgentPlan()
+                store.queueClawMobileTaskFromCurrentPlan()
+                if sendReplacement {
+                    store.approveLatestClawMobileTask()
+                    await store.sendLatestClawMobileTaskOverLiveGateway(transport: OrdinaryDispatchRecordingTransport())
+                }
+                let taskB = try XCTUnwrap(store.clawMobileTasks.first)
+                let sessionB = store.clawGatewaySessions.first { $0.taskID == taskB.id }
+                let eventsB = store.gatewayEvents.filter { $0.taskID == taskB.id }
+                let request = store.lastGatewayLiveRequest
+                let connection = store.gatewayConnectionState
+                let lastEvent = store.lastGatewayEvent
+                let mission = store.missionRunSummary
+                let loop = store.autonomousLoop
+                let focus = store.gatewayTransportProbeReviewFocusForTesting
+                let draft = store.continuationDraft
+                let checkpoint = store.missionRunCheckpointPresentationSummary
+                transport.finish(ending)
+                await sendA.value
+                XCTAssertEqual(store.clawMobileTasks.first, taskB)
+                XCTAssertEqual(store.clawGatewaySessions.first { $0.taskID == taskB.id }, sessionB)
+                XCTAssertEqual(store.gatewayEvents.filter { $0.taskID == taskB.id }, eventsB)
+                XCTAssertEqual(store.lastGatewayLiveRequest, request)
+                XCTAssertEqual(store.gatewayConnectionState, connection)
+                XCTAssertEqual(store.lastGatewayEvent, lastEvent)
+                XCTAssertEqual(store.missionRunSummary, mission)
+                XCTAssertEqual(store.autonomousLoop, loop)
+                XCTAssertEqual(store.gatewayTransportProbeReviewFocusForTesting, focus)
+                XCTAssertEqual(store.continuationDraft, draft)
+                XCTAssertEqual(store.missionRunCheckpointPresentationSummary, checkpoint)
+                let historical = try XCTUnwrap(store.clawGatewaySessions.first { $0.id == sessionA.id })
+                XCTAssertEqual(historical.results, sessionA.results)
+                XCTAssertEqual(historical.status, .needsAttention)
+                let terminal = try XCTUnwrap(store.gatewayEvents.last { $0.sessionID == sessionA.id })
+                XCTAssertEqual(terminal.sequence, 4, "Local closure uses only A's sequence, not B's")
+            }
+        }
+    }
+
+    func testLiveDispatchDoesNotRestoreModeOrPresentationAcrossUserRevisions() async throws {
+        for mutation in 0..<3 {
+            let store = makeLiveFailureStore()
+            // The async entry point must not temporarily mutate this user-owned selection.
+            store.gatewayDispatchMode = .simulatedEventStream
+            let transport = LiveFailureRecordingTransport(ending: .hold)
+            let send = Task { await store.sendLatestClawMobileTaskOverLiveGateway(transport: transport) }
+            let ready = await waitForLiveCondition { transport.callCount == 1 }
+            XCTAssertTrue(ready)
+            XCTAssertEqual(store.gatewayDispatchMode, .simulatedEventStream)
+            switch mutation {
+            case 0:
+                store.gatewayDispatchMode = .liveGateway
+            case 1:
+                store.gatewayDispatchMode = .liveGateway
+                store.gatewayDispatchMode = .simulatedEventStream
+            default:
+                store.setGateway(url: "ws://changed:18789", token: "changed-token")
+            }
+            let mode = store.gatewayDispatchMode
+            let connection = store.gatewayConnectionState
+            let lastEvent = store.lastGatewayEvent
+            let request = store.lastGatewayLiveRequest
+            let mission = store.missionRunSummary
+            transport.finish(.error)
+            await send.value
+            XCTAssertEqual(store.gatewayDispatchMode, mode)
+            XCTAssertEqual(store.gatewayConnectionState, connection)
+            XCTAssertEqual(store.lastGatewayEvent, lastEvent)
+            XCTAssertEqual(store.lastGatewayLiveRequest, request)
+            XCTAssertEqual(store.missionRunSummary, mission)
+            XCTAssertEqual(store.clawGatewaySessions.first?.status, .needsAttention)
+        }
+    }
+
+    func testConfirmedLiveEvidenceRemainsReviewableAfterModeAndProfileChanges() async throws {
+        let store = makeLiveFailureStore()
+        await store.sendLatestClawMobileTaskOverLiveGateway(transport: OrdinaryDispatchRecordingTransport())
+        let session = try XCTUnwrap(store.clawGatewaySessions.first)
+        let mission = store.missionRunSummary
+        XCTAssertEqual(session.status, .completed)
+        XCTAssertGreaterThan(mission.artifactCount, 0)
+        store.gatewayDispatchMode = .simulatedEventStream
+        store.gatewayDispatchMode = .liveGateway
+        store.setGateway(url: store.gatewayURL, token: store.gatewayToken)
+        XCTAssertEqual(store.clawGatewaySessions.first, session)
+        XCTAssertEqual(store.missionRunSummary, mission)
+        XCTAssertTrue(store.gatewayLiveHealthSummary.isCompleted)
+        XCTAssertFalse(store.gatewayPairingDiagnosticsSummary.hasLiveGatewayAck)
+        XCTAssertEqual(store.gatewayPairingDiagnosticsSummary.state, .stale)
+    }
+
+    func testDetachedContinuationFailureCannotMutateCurrentTaskOrCheckpoint() async throws {
+        let (store, taskID) = try makeApprovedContinuationForTransportFailure()
+        let transport = LiveFailureRecordingTransport(ending: .hold)
+        let send = Task { await store.sendTaskOverLiveGateway(id: taskID, transport: transport) }
+        let ready = await waitForLiveCondition { transport.callCount == 1 }
+        XCTAssertTrue(ready)
+        store.gatewayDispatchMode = .simulatedEventStream
+        store.gatewayDispatchMode = .liveGateway
+        let task = store.clawMobileTasks.first
+        let draft = store.continuationDraft
+        let mission = store.missionRunSummary
+        let checkpoint = store.missionRunCheckpointPresentationSummary
+        transport.finish(.error)
+        await send.value
+        XCTAssertEqual(store.clawMobileTasks.first, task)
+        XCTAssertEqual(store.continuationDraft, draft)
+        XCTAssertEqual(store.missionRunSummary, mission)
+        XCTAssertEqual(store.missionRunCheckpointPresentationSummary, checkpoint)
+        XCTAssertEqual(store.clawGatewaySessions.first?.status, .needsAttention)
+    }
+
+    private func makeLiveFailureStore(
+        endpoint: String = "ws://127.0.0.1:18789", token: String = "paired-secret"
+    ) -> ClawStore {
+        let store = ClawStore(autoScanLocalArtifacts: false)
+        store.setGateway(url: endpoint, token: token)
+        store.gatewayDispatchMode = .liveGateway
+        store.phoneAgentCommand = "打开浏览器搜索资料"
+        store.generatePhoneAgentPlan()
+        store.queueClawMobileTaskFromCurrentPlan()
+        store.approveLatestClawMobileTask()
+        return store
+    }
+
+    private func assertUnconfirmedLiveSession(_ store: ClawStore, expectedResults: Int = 0) {
+        XCTAssertEqual(store.clawGatewaySessions.count, 1)
+        XCTAssertEqual(store.clawGatewaySessions.first?.status, .needsAttention)
+        XCTAssertEqual(store.clawGatewaySessions.first?.results.count, expectedResults)
+        if expectedResults == 0 { XCTAssertEqual(store.clawGatewaySessions.first?.artifactCount, 0) }
+        XCTAssertFalse(store.gatewayEvents.contains { $0.kind == .fallbackUsed })
+        XCTAssertFalse(store.gatewayLiveHealthSummary.hasFallback)
+        XCTAssertFalse(store.gatewayLiveHealthSummary.isCompleted)
+        XCTAssertNotEqual(store.missionRunSummary.phaseTitle, ClawAutonomousLoopPhase.completed.title)
+        XCTAssertFalse(store.canRetryLatestGatewayFailures)
+        let terminals = store.gatewayEvents.filter { $0.kind == .sessionCompleted }
+        XCTAssertEqual(terminals.count, 1)
+        XCTAssertEqual(terminals.first?.resultStatus, .failed)
+        XCTAssertNil(terminals.first?.actionID)
+        XCTAssertEqual(terminals.first?.artifacts, [])
+        XCTAssertEqual(terminals.first?.isRetryable, false)
     }
 
     func testLiveGatewaySessionCannotUseSimulatorRetry() async {
@@ -6221,6 +6602,157 @@ private final class ProbeTransportRecorder: @unchecked Sendable, ClawGatewayProb
                 didCloseSocket: true,
                 latencyMilliseconds: 1
             )
+        }
+    }
+}
+
+@MainActor
+private func waitForLiveCondition(_ condition: () -> Bool) async -> Bool {
+    let clock = ContinuousClock()
+    let deadline = clock.now.advanced(by: .seconds(5))
+    while !condition(), clock.now < deadline, !Task.isCancelled { await Task.yield() }
+    return condition()
+}
+
+private struct WireSessionMismatchTransport: ClawGatewayTransport {
+    enum Mismatch: CaseIterable, Sendable { case task, session, offer }
+    let mismatch: Mismatch
+
+    func streamEvents(
+        request: ClawGatewayLiveRequest, envelopeJSON: String, sessionID: UUID, taskID: UUID
+    ) -> AsyncThrowingStream<ClawGatewayWireEvent, Error> {
+        AsyncThrowingStream { stream in
+            do {
+                let envelope = try JSONDecoder.clawGateway.decode(ClawMobileEnvelope.self, from: Data(envelopeJSON.utf8))
+                guard let action = envelope.task.actions.first else {
+                    stream.finish(throwing: ClawGatewayTransportError.invalidEventIdentity)
+                    return
+                }
+                let remoteID = UUID()
+                var binding = ClawGatewayWireSessionBinding(taskID: taskID, localSessionID: sessionID)
+                let accepted = ClawGatewayEvent(
+                    sessionID: remoteID, taskID: taskID, sequence: 2, kind: .actionCompleted,
+                    actionID: action.id, actionKind: action.kind, actionTitle: action.title,
+                    resultStatus: .succeeded, summary: "Accepted remote evidence",
+                    artifacts: [ClawGatewayArtifact(kind: .auditLog, title: "accepted.json", reference: "gateway://accepted", summary: "Accepted")]
+                )
+                let encoder = JSONEncoder()
+                encoder.dateEncodingStrategy = .iso8601
+                let encoded = try encoder.encode(accepted)
+                stream.yield(try binding.normalize(JSONDecoder.clawGateway.decode(ClawGatewayWireEvent.self, from: encoded)))
+                let terminal = ClawGatewayEvent(
+                    sessionID: mismatch == .session ? UUID() : remoteID,
+                    taskID: mismatch == .task ? UUID() : taskID,
+                    sequence: 3, kind: .sessionCompleted, summary: "Foreign terminal"
+                )
+                let offer = ClawGatewayContinuationOffer(
+                    contract: ClawContinuationContract.receiptContract,
+                    receipt: String(repeating: "r", count: 43), expiresAt: Date.now.addingTimeInterval(300),
+                    parentTaskID: terminal.taskID, parentSessionID: mismatch == .offer ? UUID() : terminal.sessionID,
+                    parentAgentTraceArtifactID: UUID(), parentDecisionDigest: "sha256:" + String(repeating: "a", count: 64),
+                    parentRound: 0, selectedActionKind: .extractData
+                )
+                stream.yield(try binding.normalize(ClawGatewayWireEvent(event: terminal, continuationOffer: offer)))
+                stream.finish()
+            } catch {
+                stream.finish(throwing: error)
+            }
+        }
+    }
+}
+
+private final class LiveFailureRecordingTransport: @unchecked Sendable, ClawGatewayTransport {
+    enum Prefix: Sendable { case none, partial, succeeded, failed, wrongTask, wrongSession }
+    enum Ending: Sendable { case error, eof, hold }
+    static let sensitiveMarkers = ["paired-secret", "Authorization: Bearer", "open-sesame", "raw-secret", "raw-token", "/Users/a114514", "/private/tmp", "UNCLASSIFIED_FAILURE_MARKER"]
+    private let prefix: Prefix
+    private let ending: Ending
+    private let lock = NSLock()
+    private var calls = 0
+    private var events: [ClawGatewayEvent] = []
+    private var continuation: AsyncThrowingStream<ClawGatewayWireEvent, Error>.Continuation?
+
+    init(prefix: Prefix = .none, ending: Ending) {
+        self.prefix = prefix
+        self.ending = ending
+    }
+
+    var callCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return calls
+    }
+
+    var emittedEvents: [ClawGatewayEvent] {
+        lock.lock()
+        defer { lock.unlock() }
+        return events
+    }
+
+    func finish(_ ending: Ending) {
+        lock.lock()
+        let active = continuation
+        continuation = nil
+        lock.unlock()
+        if ending == .error {
+            active?.finish(throwing: ClawGatewayTransportError.invalidEndpoint(Self.sensitiveMarkers.joined(separator: " ")))
+        } else {
+            active?.finish()
+        }
+    }
+
+    func streamEvents(
+        request: ClawGatewayLiveRequest, envelopeJSON: String, sessionID: UUID, taskID: UUID
+    ) -> AsyncThrowingStream<ClawGatewayWireEvent, Error> {
+        AsyncThrowingStream { stream in
+            var output: [ClawGatewayEvent] = []
+            if prefix == .partial,
+               let data = envelopeJSON.data(using: .utf8),
+               let envelope = try? JSONDecoder.clawGateway.decode(ClawMobileEnvelope.self, from: data) {
+                for (index, action) in envelope.task.actions.prefix(2).enumerated() {
+                    output.append(ClawGatewayEvent(
+                        sessionID: sessionID, taskID: taskID, sequence: index + 2,
+                        kind: index == 0 ? .actionCompleted : .actionStarted,
+                        actionID: action.id, actionKind: action.kind, actionTitle: action.title,
+                        resultStatus: index == 0 ? .succeeded : .running,
+                        summary: "Real partial evidence \(index)",
+                        artifacts: index == 0 ? [ClawGatewayArtifact(
+                            kind: .auditLog, title: "real-evidence.json", reference: "gateway://real-evidence",
+                            summary: "Real evidence preserved"
+                        )] : []
+                    ))
+                }
+            } else if prefix != .none {
+                output.append(ClawGatewayEvent(
+                    sessionID: prefix == .wrongSession ? UUID() : sessionID,
+                    taskID: prefix == .wrongTask ? UUID() : taskID,
+                    sequence: 2, kind: .sessionCompleted,
+                    resultStatus: prefix == .failed ? .failed : .succeeded,
+                    summary: prefix == .wrongTask || prefix == .wrongSession ? "Foreign terminal" : "Gateway authoritative terminal"
+                ))
+                if prefix == .succeeded || prefix == .failed {
+                    output.append(ClawGatewayEvent(
+                        sessionID: sessionID, taskID: taskID, sequence: 3, kind: .sessionCompleted,
+                        resultStatus: prefix == .failed ? .succeeded : .failed, summary: "Duplicate opposite terminal"
+                    ))
+                }
+            }
+            lock.lock()
+            calls += 1
+            events = output
+            continuation = stream
+            lock.unlock()
+            for event in output { stream.yield(ClawGatewayWireEvent(event: event)) }
+            if ending == .hold {
+                // A bounded fail-safe, not a timing assumption used to release the test.
+                let timeout = Task {
+                    do { try await Task.sleep(nanoseconds: 5_000_000_000) } catch { return }
+                    self.finish(.error)
+                }
+                stream.onTermination = { _ in timeout.cancel() }
+            } else {
+                finish(ending)
+            }
         }
     }
 }

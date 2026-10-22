@@ -12,6 +12,45 @@ enum LogicSmoke {
             }
         }
 
+        do {
+            let taskID = UUID()
+            let localID = UUID()
+            let remoteID = UUID()
+            var binding = ClawGatewayWireSessionBinding(taskID: taskID, localSessionID: localID)
+            var remote = ClawGatewayEvent(
+                sessionID: remoteID, taskID: UUID(), sequence: 2,
+                kind: .gatewayConnected, summary: "Remote event"
+            )
+            let foreign = try? binding.normalize(ClawGatewayWireEvent(event: remote))
+            expect(foreign == nil && binding.remoteSessionID == nil, "foreign task cannot claim the remote binding")
+            remote.taskID = taskID
+            let mapped = try binding.normalize(ClawGatewayWireEvent(event: remote))
+            var expected = remote
+            expected.sessionID = localID
+            expect(mapped.event == expected, "wire mapping changes only the local session identity")
+            let offer = ClawGatewayContinuationOffer(
+                contract: ClawContinuationContract.receiptContract,
+                receipt: String(repeating: "r", count: 43), expiresAt: Date.now.addingTimeInterval(300),
+                parentTaskID: taskID, parentSessionID: remoteID, parentAgentTraceArtifactID: UUID(),
+                parentDecisionDigest: "sha256:" + String(repeating: "a", count: 64),
+                parentRound: 0, selectedActionKind: .extractData
+            )
+            remote.kind = .sessionCompleted
+            let terminal = try binding.normalize(ClawGatewayWireEvent(event: remote, continuationOffer: offer))
+            expect(terminal.event.resultStatus == nil, "normal nil-status terminal stays compatible")
+            expect(terminal.continuationOffer == offer, "continuation lineage keeps its remote parent identity")
+            remote.sessionID = UUID()
+            let mixedSession = try? binding.normalize(ClawGatewayWireEvent(event: remote))
+            expect(mixedSession == nil && binding.remoteSessionID == remoteID, "different remote session cannot replace the binding")
+            remote.sessionID = remoteID
+            var invalidOffer = offer
+            invalidOffer.parentSessionID = localID
+            let mixedOffer = try? binding.normalize(ClawGatewayWireEvent(event: remote, continuationOffer: invalidOffer))
+            expect(mixedOffer == nil, "offer parent must match raw remote identity before mapping")
+        } catch {
+            failures.append("valid remote wire identity was rejected")
+        }
+
         for nonce in ["--------", "________", "aB09-_aB09-_", String(repeating: "-", count: 128)] {
             do {
                 let request = try ClawGatewayReadinessRequest(requestNonce: nonce)
@@ -4204,21 +4243,54 @@ enum LogicSmoke {
         expect(store.clawMobileTasks[0] == sentTaskSnapshot, "sent ordinary task cannot be reapproved")
         expect(store.clawGatewaySessions == sentSessionsSnapshot, "duplicate ordinary send must not create a session")
         expect(store.gatewayEvents == sentEventsSnapshot, "duplicate ordinary send must not append events")
-        expect(store.gatewayEvents.contains { $0.kind == .fallbackUsed }, "live gateway preflight should fallback when not paired")
-        expect(store.gatewayLiveHealthSummary.hasFallback, "live health should mark fallback")
+        let preflightSession = store.clawGatewaySessions[0]
+        expect(store.gatewayEvents.contains { $0.kind == .fallbackUsed } == false, "live preflight must never create fallback")
+        expect(preflightSession.results.isEmpty && preflightSession.artifactCount == 0, "unsent preflight creates no business evidence")
+        expect(preflightSession.status == .needsAttention, "unsent preflight must close local waiting")
+        expect(store.gatewayConnectionState == .notConfigured, "preflight is not a transport execution failure")
+        expect(store.gatewayLiveHealthSummary.hasFallback == false, "live health must not claim simulation")
+        expect(store.gatewayLiveHealthSummary.isCompleted == false, "preflight cannot complete")
+        expect(store.gatewayLiveHealthSummary.hasGatewayAck == false, "preflight cannot imply Gateway ack")
         expect(store.gatewayLiveHealthSummary.canAttemptLive == false, "live health should preserve preflight status")
         expect(store.gatewayLiveHealthSummary.detailLine.contains("Authorization") == false, "live health should not expose headers")
-        let fallbackStrip = store.missionRunLiveGatewayHealthStrip
-        expect(fallbackStrip.hasError, "mission health strip should expose the blocked fallback session error")
-        expect(fallbackStrip.healthState == "error", "mission health strip should prioritize error while preserving fallback evidence")
-        expect(fallbackStrip.hasFallback, "mission health strip should expose fallback")
-        expect(fallbackStrip.guidance.contains("Authorization") == false, "mission health strip should not expose headers")
-        let fallbackControl = store.missionRunSummary.controlSnapshot(focusedOn: nil, liveHealth: fallbackStrip)
-        let fallbackOperator = store.missionRunSummary.operatorStrip(liveHealth: fallbackStrip)
-        expect(fallbackOperator.lanes.contains { $0.id == "live" }, "operator strip should expose live lane with health")
-        expect(fallbackControl.hasLiveFallback, "control snapshot should expose live fallback signal")
-        expect(fallbackControl.liveHealthState == "error", "control snapshot should preserve prioritized live health state")
-        expect((fallbackControl.liveHealthStatus ?? "").contains("Authorization") == false, "control snapshot live status should redact headers")
+        let preflightStrip = store.missionRunLiveGatewayHealthStrip
+        expect(preflightStrip.hasError, "mission health strip should expose configuration needing attention")
+        expect(preflightStrip.healthState == "error", "mission health strip must not claim fallback or completed")
+        expect(preflightStrip.hasFallback == false, "mission health strip must not expose fabricated fallback")
+        expect(preflightStrip.guidance.contains("未尝试 transport"), "preflight guidance distinguishes not sent")
+        expect(preflightStrip.guidance.contains("Authorization") == false, "mission health strip should not expose headers")
+        let preflightControl = store.missionRunSummary.controlSnapshot(focusedOn: nil, liveHealth: preflightStrip)
+        let preflightOperator = store.missionRunSummary.operatorStrip(liveHealth: preflightStrip)
+        expect(preflightOperator.lanes.contains { $0.id == "live" }, "operator strip should expose live lane with health")
+        expect(preflightControl.hasLiveFallback == false, "control snapshot must not claim fallback")
+        expect(preflightControl.liveHealthState == "error", "control snapshot should preserve prioritized live health state")
+        expect((preflightControl.liveHealthStatus ?? "").contains("Authorization") == false, "control snapshot live status should redact headers")
+
+        for partial in [false, true] {
+            let liveFailureStore = ClawStore(autoScanLocalArtifacts: false)
+            liveFailureStore.setGateway(url: "ws://127.0.0.1:18789", token: "smoke-live-secret")
+            liveFailureStore.phoneAgentCommand = "打开浏览器搜索资料"
+            liveFailureStore.generatePhoneAgentPlan()
+            liveFailureStore.queueClawMobileTaskFromCurrentPlan()
+            liveFailureStore.approveLatestClawMobileTask()
+            await liveFailureStore.sendLatestClawMobileTaskOverLiveGateway(transport: LiveFailureSmokeTransport(partial: partial))
+            let session = liveFailureStore.clawGatewaySessions[0]
+            expect(session.status == .needsAttention, "live error must close waiting as unconfirmed")
+            expect(session.results.count == (partial ? 1 : 0), "live error must never fill unknown business results")
+            expect(session.artifactCount == (partial ? 1 : 0), "live error must preserve only received real evidence")
+            if partial {
+                expect(session.results[0].status == .succeeded, "completed real result must remain succeeded")
+                expect(session.results[0].artifacts[0].reference == "gateway://real-smoke", "real artifact must be preserved")
+            }
+            expect(liveFailureStore.gatewayConnectionState == .failed, "live error must not turn completed")
+            expect(liveFailureStore.gatewayLiveHealthSummary.hasFallback == false, "live error cannot simulate fallback")
+            expect(liveFailureStore.gatewayEvents.filter { $0.kind == .sessionCompleted }.count == 1, "live error closes only once")
+            expect(liveFailureStore.gatewayEvents.map(\.summary).joined().contains("RAW_ERROR_MARKER") == false, "raw transport error must not leak")
+            let evidence = liveFailureStore.clawGatewaySessions
+            liveFailureStore.gatewayDispatchMode = .simulatedEventStream
+            liveFailureStore.retryLatestGatewayFailures()
+            expect(liveFailureStore.clawGatewaySessions == evidence, "mode change cannot authorize simulated retry of live evidence")
+        }
 
         let liveProgressStore = ClawStore(autoScanLocalArtifacts: false)
         liveProgressStore.gatewayDispatchMode = .liveGateway
@@ -4495,6 +4567,29 @@ private final class ProbeSmokeTransport: @unchecked Sendable, ClawGatewayProbeTr
                 didCloseSocket: true,
                 latencyMilliseconds: 1
             )
+        }
+    }
+}
+
+private struct LiveFailureSmokeTransport: ClawGatewayTransport {
+    let partial: Bool
+
+    func streamEvents(
+        request: ClawGatewayLiveRequest, envelopeJSON: String, sessionID: UUID, taskID: UUID
+    ) -> AsyncThrowingStream<ClawGatewayWireEvent, Error> {
+        AsyncThrowingStream { continuation in
+            if partial,
+               let data = envelopeJSON.data(using: .utf8),
+               let envelope = try? JSONDecoder.clawGateway.decode(ClawMobileEnvelope.self, from: data),
+               let action = envelope.task.actions.first {
+                continuation.yield(ClawGatewayWireEvent(event: ClawGatewayEvent(
+                    sessionID: sessionID, taskID: taskID, sequence: 2,
+                    kind: .actionCompleted, actionID: action.id, actionKind: action.kind,
+                    actionTitle: action.title, resultStatus: .succeeded, summary: "Real partial smoke evidence",
+                    artifacts: [ClawGatewayArtifact(kind: .auditLog, title: "real.json", reference: "gateway://real-smoke", summary: "Real evidence")]
+                )))
+            }
+            continuation.finish(throwing: ClawGatewayTransportError.invalidEndpoint("RAW_ERROR_MARKER"))
         }
     }
 }

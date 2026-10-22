@@ -10321,7 +10321,9 @@ struct ClawGatewayLiveHealthSummary: Equatable, Codable, Sendable {
         let hasGatewayAck = events.contains(where: isDesktopGatewayAck)
         let hasFallback = connectionState == .fallbackSimulated || events.contains { $0.kind == .fallbackUsed }
         let isCompleted = connectionState == .completed || latestSession?.status == .completed
-        let hasSessionFailure = latestSession?.status == .blocked || events.contains { $0.kind == .actionFailed }
+        let hasSessionFailure = latestSession?.status == .blocked || events.contains {
+            $0.kind == .actionFailed || ($0.kind == .sessionCompleted && $0.resultStatus == .failed)
+        }
         let hasTerminalTransportError = transportDiagnostics.lastErrorSummary != nil &&
             (connectionState == .failed || hasFallback || hasSessionFailure)
         let hasError = connectionState == .failed ||
@@ -10415,7 +10417,7 @@ struct ClawGatewayLiveHealthSummary: Equatable, Codable, Sendable {
         safeEndpoint: String
     ) -> TransportDiagnostics {
         var diagnostics = TransportDiagnostics()
-        for event in events where event.kind == .gatewayConnected || event.kind == .fallbackUsed {
+        for event in events where event.kind == .gatewayConnected || event.kind == .fallbackUsed || event.kind == .sessionCompleted {
             let sanitized = safeSummary(
                 event.summary,
                 rawEndpoint: rawEndpoint,
@@ -10495,6 +10497,9 @@ struct ClawGatewayLiveHealthSummary: Equatable, Codable, Sendable {
     ) -> String {
         guard request != nil else {
             return "尚未准备 Live Gateway 请求。"
+        }
+        if request?.canAttemptLive == false, connectionState == .notConfigured {
+            return "Live Gateway 未发送，配置待修正；未尝试 transport。"
         }
         if hasFallback {
             return hasError ? "Live Gateway 失败后已回退模拟。" : "Live Gateway 已回退模拟。"
@@ -10726,8 +10731,10 @@ extension ClawGatewayLiveHealthSummary {
 
         if hasError {
             healthState = "error"
-            title = "Live Gateway 需复核"
-            guidance = "连接、事件或 transport 异常；先看 Gateway 会话健康，不要自动重试。"
+            title = canAttemptLive ? "Live Gateway 需复核" : "Live Gateway 未发送"
+            guidance = canAttemptLive
+                ? "结果需复核；已收到的真实证据保留，不会模拟执行或自动重发。结束本地等待不代表撤销远端执行。"
+                : "配置待修正，未尝试 transport；不会模拟执行，也没有 Gateway 执行确认。"
             icon = "waveform.path.ecg.rectangle.fill"
             tone = .danger
         } else if hasFallback {

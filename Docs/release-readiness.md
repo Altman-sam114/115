@@ -1,13 +1,19 @@
 # Claw 发布准备清单
 
-评估日期：2026-09-27。目标：Mac/iPad 上可使用、可审计的电脑智能体控制台。当前仍为原型，**不是发布候选版本**。用户授权本次由一个 Agent X 连续迭代，不创建子 agent；规划、实现、云端 artifact 复判分别记录。
+评估日期：2026-10-22。目标：Mac/iPad 上可使用、可审计的电脑智能体控制台。当前仍为原型，**不是发布候选版本**。用户本轮明确授权 Agent X 自主决策和创建子 Agent，按 A 规划 -> B 实现 -> C 云端 artifact 复判 -> X 判断；2026-09-27 的单 Agent 授权仅为历史。
 
 ## 当前轮次
+
+当前基线为 `origin/main` 的 `0b9746292f4b67afac09ea36d7df50eb3297d061`；旧 artifact 已过 retention，新基线 run `38342562083` attempt `1` 已由 Agent C 下载 `claw-ci-v0.81-main-0b9746292f4b-run38342562083-attempt1` 复判通过（13 项 CI、iPhone/iPad 各 106 项 XCTest、双平台 Release 与 Gateway 回归）。v0.82 真实失败隔离实现待最新 commit/run/artifact 验收，不能把基线通过当作本轮通过。
+
+v0.82 将真实 Gateway 与模拟结果彻底分开：同步 live 准备和 async live 发送在 preflight 失败时不调用 transport，显示“未发送，配置待修正”；throw、无有效终态 EOF 和取消只收口当前 session，保留真实部分结果/证据，结果未确认，不模拟执行、不自动重发，也不承诺撤销远端副作用。首个已接受的 task/session 终态不可被尾随错误、重复终态或迟帧改写。异步入口不临时修改用户模式；task/session 与配置/模式 revision 防止旧任务改写新 Mission。显式模拟与模拟 retry 独立保留。生产 WebSocket 在原始 wire 身份校验后绑定本次连接的远端 session，再映射到本地 session；错误 task、切换远端 session 或不匹配 offer 均不入库，收到任何桌面 payload 后不再自动重发。合法 continuation 保留远端 parentSessionID；重连诊断只用固定代码，不写 raw error。
+
 
 | 轮次 | 范围 | 验收门槛 |
 | --- | --- | --- |
 | v0.77 | 修复云端 async 测试编译与 readiness nonce 字符集不一致 | 最新 main 全部 required checks + 下载 artifact 复判 |
 | v0.78 | Mac Catalyst 构建、iPad 方向、按窗口宽度自适应、工作台拆分 | Release Catalyst + iPhone/iPad XCTest + 全量 Gateway 回归 |
+| v0.82 | 普通 live 失败/模拟隔离、partial evidence、终态身份和异步 scope | 全量 12 项失败矩阵 + 原平台/Gateway checks + 最新 artifact C 复判 |
 
 v0.79 聚焦普通任务和 Mission 的真实传输、任务身份绑定与重复发送防护；仅在前轮云端 artifact 通过后提交。本轮仍不代表发布候选。
 

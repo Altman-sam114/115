@@ -656,8 +656,12 @@ final class ClawStore: ObservableObject {
     @Published private(set) var documents: [WorkspaceContext]
     @Published private(set) var skills: [ClawSkill]
     @Published private(set) var automationTargets: [AutomationTarget]
-    @Published var gatewayURL: String
-    @Published var gatewayToken: String
+    @Published var gatewayURL: String {
+        didSet { advanceLiveGatewayPresentationGeneration() }
+    }
+    @Published var gatewayToken: String {
+        didSet { advanceLiveGatewayPresentationGeneration() }
+    }
     @Published private(set) var lastAutomationDraft: String
     @Published private(set) var phoneAgentCapabilities: [PhoneAgentCapability]
     @Published var phoneAgentCommand: String
@@ -668,7 +672,9 @@ final class ClawStore: ObservableObject {
     @Published private(set) var lastClawMobileEnvelope: String
     @Published private(set) var clawGatewaySessions: [ClawGatewaySession]
     @Published private(set) var lastGatewayEvent: String
-    @Published var gatewayDispatchMode: ClawGatewayDispatchMode
+    @Published var gatewayDispatchMode: ClawGatewayDispatchMode {
+        didSet { advanceLiveGatewayPresentationGeneration() }
+    }
     @Published private(set) var gatewayConnectionState: ClawGatewayConnectionState
     @Published private(set) var lastGatewayLiveRequest: ClawGatewayLiveRequest?
     @Published private(set) var gatewayEvents: [ClawGatewayEvent]
@@ -685,6 +691,15 @@ final class ClawStore: ObservableObject {
     private let artifactDirectoryURL: URL
     private let missionRunCheckpointStore: any ClawMissionRunCheckpointStore
     private var gatewayConnectionSessionID: UUID?
+    private var liveGatewayPresentationGeneration = 0
+    private var liveGatewaySessionGenerations: [UUID: Int] = [:]
+    private struct DetachedLivePresentation {
+        let session: ClawGatewaySession
+        let request: ClawGatewayLiveRequest?
+        let events: [ClawGatewayEvent]
+        let connectionState: ClawGatewayConnectionState
+    }
+    private var detachedLivePresentations: [UUID: DetachedLivePresentation] = [:]
     private var simulatedGatewaySessionIDs: Set<UUID>
     private var continuationReceipts: [String: ContinuationReceiptEntry]
     private var continuationApprovalRecords: [UUID: ClawContinuationApprovalRecord]
@@ -1829,8 +1844,10 @@ final class ClawStore: ObservableObject {
                 $0.id == sessionID && $0.taskID == task.id
             }
         }
-        let session = exactSession ?? clawGatewaySessions.first { $0.taskID == task.id }
-        let liveRequest: ClawGatewayLiveRequest? = lastGatewayLiveRequest.flatMap { request in
+        let candidateSession = exactSession ?? clawGatewaySessions.first { $0.taskID == task.id }
+        let detached = candidateSession.flatMap { detachedLivePresentations[$0.id] }
+        let session = detached?.session ?? candidateSession
+        let liveRequest: ClawGatewayLiveRequest? = detached?.request ?? lastGatewayLiveRequest.flatMap { request in
             guard request.taskID == task.id else {
                 return nil
             }
@@ -1840,7 +1857,9 @@ final class ClawStore: ObservableObject {
             return request.sessionID == session.id ? request : nil
         }
         let events: [ClawGatewayEvent]
-        if let session {
+        if let detached {
+            events = detached.events
+        } else if let session {
             events = gatewayEvents.filter {
                 $0.sessionID == session.id && $0.taskID == task.id
             }
@@ -1853,7 +1872,7 @@ final class ClawStore: ObservableObject {
             session: session,
             liveRequest: liveRequest,
             events: events,
-            connectionState: session?.id == gatewayConnectionSessionID ? gatewayConnectionState : .idle
+            connectionState: detached?.connectionState ?? (session?.id == gatewayConnectionSessionID ? gatewayConnectionState : .idle)
         )
     }
 
@@ -2972,8 +2991,11 @@ final class ClawStore: ObservableObject {
 
     func ingestGatewayWireEvents(_ wireEvents: [ClawGatewayWireEvent]) {
         for wireEvent in wireEvents {
-            captureContinuationOffer(wireEvent.continuationOffer, for: wireEvent.event)
+            guard canAcceptGatewayEvent(wireEvent.event) else { continue }
             ingestGatewayEvents([wireEvent.event])
+            if canPresentGatewayEvent(wireEvent.event) {
+                captureContinuationOffer(wireEvent.continuationOffer, for: wireEvent.event)
+            }
         }
     }
 
@@ -3307,10 +3329,8 @@ final class ClawStore: ObservableObject {
     }
 
     func simulateSendLatestClawMobileTask() {
-        let previousMode = gatewayDispatchMode
-        gatewayDispatchMode = .simulatedEventStream
-        sendLatestClawMobileTask()
-        gatewayDispatchMode = previousMode
+        guard let taskID = clawMobileTasks.first?.id else { return }
+        sendTask(id: taskID, mode: .simulatedEventStream)
     }
 
     func sendLatestClawMobileTask() {
@@ -3319,11 +3339,15 @@ final class ClawStore: ObservableObject {
     }
 
     func sendTask(id taskID: UUID) {
+        sendTask(id: taskID, mode: gatewayDispatchMode)
+    }
+
+    private func sendTask(id taskID: UUID, mode: ClawGatewayDispatchMode) {
         guard clawMobileTasks.first(where: { $0.id == taskID })?.continuationLineage == nil else {
             lastGatewayEvent = "可信续接必须通过 live transport 显式发送；同步入口不会消费 receipt。"
             return
         }
-        guard let dispatch = beginGatewaySession(taskID: taskID, mode: gatewayDispatchMode) else {
+        guard let dispatch = beginGatewaySession(taskID: taskID, mode: mode) else {
             return
         }
 
@@ -3342,7 +3366,6 @@ final class ClawStore: ObservableObject {
             prepareLiveGatewayRequest(
                 task: dispatch.task,
                 sessionID: dispatch.sessionID,
-                fallbackToSimulation: dispatch.task.continuationLineage == nil,
                 envelopeJSON: dispatch.envelopeJSON
             )
         }
@@ -3359,19 +3382,11 @@ final class ClawStore: ObservableObject {
         id taskID: UUID,
         transport: T = URLSessionClawGatewayTransport()
     ) async {
-        let previousMode = gatewayDispatchMode
-        gatewayDispatchMode = .liveGateway
         if let task = clawMobileTasks.first(where: { $0.id == taskID }),
            task.continuationLineage != nil {
-            guard task.status == .readyToSend else {
-                gatewayDispatchMode = previousMode
-                return
-            }
-            guard validateContinuationApproval(for: task),
-                  let frozenEnvelope = frozenContinuationEnvelopes[taskID] else {
-                gatewayDispatchMode = previousMode
-                return
-            }
+            guard task.status == .readyToSend,
+                  validateContinuationApproval(for: task),
+                  let frozenEnvelope = frozenContinuationEnvelopes[taskID] else { return }
             let preflight = ClawGatewayLiveClient.makeRequest(
                 task: task,
                 profile: clawGatewayProfile,
@@ -3380,150 +3395,156 @@ final class ClawStore: ObservableObject {
                 sessionID: UUID()
             )
             guard preflight.canAttemptLive else {
-                gatewayConnectionState = .notConfigured
-                lastGatewayEvent = "可信续接 live preflight 未通过；receipt 保持冻结且未发送。"
-                gatewayDispatchMode = previousMode
+                if clawMobileTasks.first?.id == taskID {
+                    gatewayConnectionState = .notConfigured
+                    lastGatewayEvent = "可信续接 live preflight 未通过；receipt 保持冻结且未发送。"
+                }
                 return
             }
         }
-        guard let dispatch = beginGatewaySession(taskID: taskID, mode: .liveGateway) else {
-            gatewayDispatchMode = previousMode
-            return
-        }
+        guard let dispatch = beginGatewaySession(taskID: taskID, mode: .liveGateway),
+              let request = prepareLiveGatewayRequest(
+                task: dispatch.task,
+                sessionID: dispatch.sessionID,
+                envelopeJSON: dispatch.envelopeJSON
+              ), request.canAttemptLive else { return }
 
-        guard let request = prepareLiveGatewayRequest(
-            task: dispatch.task,
-            sessionID: dispatch.sessionID,
-            fallbackToSimulation: false,
-            envelopeJSON: dispatch.envelopeJSON
-        ) else {
-            gatewayDispatchMode = previousMode
-            return
-        }
-
-        guard request.canAttemptLive else {
-            if dispatch.task.continuationLineage != nil {
-                failContinuationTransport(
-                    task: dispatch.task,
-                    sessionID: dispatch.sessionID,
-                    sequence: 2,
-                    diagnostic: "live_preflight_failed"
-                )
-            } else {
-                fallbackLatestSessionToSimulatedEvents(
-                    task: dispatch.task,
-                    sessionID: dispatch.sessionID,
-                    reason: request.preflightMessage,
-                    startingSequence: 2
-                )
-            }
-            gatewayDispatchMode = previousMode
-            return
-        }
-
-        var receivedGatewayCompletion = false
-        var gatewayCompletionFailed = false
         do {
-            if gatewayConnectionSessionID == dispatch.sessionID {
+            try Task.checkCancellation()
+            if ownsLiveGatewayPresentation(taskID: taskID, sessionID: dispatch.sessionID) {
                 gatewayConnectionState = .streaming
             }
             let stream = transport.streamEvents(
                 request: request,
                 envelopeJSON: dispatch.envelopeJSON,
                 sessionID: dispatch.sessionID,
-                taskID: dispatch.task.id
+                taskID: taskID
             )
             for try await wireEvent in stream {
-                captureContinuationOffer(wireEvent.continuationOffer, for: wireEvent.event)
-                ingestGatewayEvents([wireEvent.event])
-                if wireEvent.event.kind == .sessionCompleted {
-                    receivedGatewayCompletion = true
-                    gatewayCompletionFailed = gatewayCompletionFailed || wireEvent.event.resultStatus == .failed
-                }
-            }
-            if dispatch.task.continuationLineage != nil {
-                if gatewayCompletionFailed {
-                    markContinuationTransportFailed(taskID: dispatch.task.id)
-                } else if receivedGatewayCompletion {
-                    markContinuationTransportSucceeded(taskID: dispatch.task.id)
-                } else {
-                    failContinuationTransport(
-                        task: dispatch.task,
-                        sessionID: dispatch.sessionID,
-                        sequence: gatewayEvents.map(\.sequence).max().map { $0 + 1 } ?? 2,
-                        diagnostic: "live_transport_incomplete"
-                    )
-                }
-            }
-        } catch {
-            if gatewayConnectionSessionID == dispatch.sessionID {
-                gatewayConnectionState = .failed
-            }
-            let safeError = ClawGatewayLiveClient.safeTransportErrorSummary(
-                error.localizedDescription,
-                request: request
-            )
-            if dispatch.task.continuationLineage != nil {
-                if receivedGatewayCompletion {
-                    if gatewayCompletionFailed {
-                        markContinuationTransportFailed(taskID: dispatch.task.id)
-                    } else {
-                        markContinuationTransportSucceeded(taskID: dispatch.task.id)
+                try Task.checkCancellation()
+                let event = wireEvent.event
+                guard event.taskID == taskID, event.sessionID == dispatch.sessionID,
+                      canAcceptGatewayEvent(event) else { continue }
+                ingestGatewayWireEvents([wireEvent])
+                if event.kind == .sessionCompleted {
+                    if dispatch.task.continuationLineage != nil {
+                        let failed = clawGatewaySessions.first { $0.id == dispatch.sessionID }?.status != .completed
+                        if failed {
+                            markContinuationTransportFailed(taskID: taskID)
+                        } else if ownsLiveGatewayPresentation(taskID: taskID, sessionID: dispatch.sessionID) {
+                            markContinuationTransportSucceeded(taskID: taskID)
+                        }
                     }
-                } else {
-                    failContinuationTransport(
-                        task: dispatch.task,
-                        sessionID: dispatch.sessionID,
-                        sequence: gatewayEvents.map(\.sequence).max().map { $0 + 1 } ?? 2,
-                        diagnostic: "live_transport_failed"
-                    )
+                    // The first accepted terminal owns the outcome, not trailing frames or socket errors.
+                    return
                 }
-            } else {
-                fallbackLatestSessionToSimulatedEvents(
-                    task: dispatch.task,
-                    sessionID: dispatch.sessionID,
-                    reason: error.localizedDescription,
-                    startingSequence: gatewayEvents.map(\.sequence).max().map { $0 + 1 } ?? 2,
-                    transportErrorSummary: safeError
-                )
             }
+            finishLiveGatewayLocally(
+                task: dispatch.task, sessionID: dispatch.sessionID,
+                failure: Task.isCancelled ? .cancelled : .incomplete
+            )
+        } catch {
+            finishLiveGatewayLocally(
+                task: dispatch.task, sessionID: dispatch.sessionID,
+                failure: Task.isCancelled || error is CancellationError ? .cancelled : .transport
+            )
         }
-
-        gatewayDispatchMode = previousMode
     }
 
-    private func failContinuationTransport(
-        task: ClawMobileTask,
-        sessionID: UUID,
-        sequence: Int,
-        diagnostic: String
-    ) {
-        gatewayConnectionState = .failed
-        markContinuationTransportFailed(taskID: task.id)
-        ingestGatewayEvents([
-            ClawGatewayEvent(
-                sessionID: sessionID,
-                taskID: task.id,
-                sequence: sequence,
-                kind: .sessionCompleted,
-                resultStatus: .failed,
-                summary: "可信续接失败（\(diagnostic)）；receipt 已作废，不会自动重连、重发或模拟执行。",
-                isRetryable: false
+    private enum LiveGatewayFailure: String {
+        case preflight = "live_preflight_failed"
+        case transport = "live_transport_failed"
+        case incomplete = "live_transport_incomplete"
+        case cancelled = "live_transport_cancelled"
+    }
+
+    private func ownsLiveGatewayPresentation(taskID: UUID, sessionID: UUID) -> Bool {
+        clawMobileTasks.first?.id == taskID && gatewayConnectionSessionID == sessionID &&
+            liveGatewaySessionGenerations[sessionID] == liveGatewayPresentationGeneration
+    }
+
+    private func advanceLiveGatewayPresentationGeneration() {
+        if let sessionID = gatewayConnectionSessionID,
+           liveGatewaySessionGenerations[sessionID] == liveGatewayPresentationGeneration,
+           let session = clawGatewaySessions.first(where: { $0.id == sessionID }) {
+            // Preserve facts already presented; detached transports may update history, not this projection.
+            detachedLivePresentations[sessionID] = DetachedLivePresentation(
+                session: session,
+                request: lastGatewayLiveRequest?.sessionID == sessionID ? lastGatewayLiveRequest : nil,
+                events: gatewayEvents.filter { $0.sessionID == sessionID && $0.taskID == session.taskID },
+                connectionState: gatewayConnectionState
             )
-        ])
+        }
+        liveGatewayPresentationGeneration += 1
+    }
+
+    private func canAcceptGatewayEvent(_ event: ClawGatewayEvent) -> Bool {
+        guard clawGatewaySessions.contains(where: {
+            $0.id == event.sessionID && $0.taskID == event.taskID
+        }) else { return false }
+        // Simulated sessions retain their explicit retry contract; live terminals are immutable.
+        return liveGatewaySessionGenerations[event.sessionID] == nil || !gatewayEvents.contains {
+            $0.sessionID == event.sessionID && $0.taskID == event.taskID && $0.kind == .sessionCompleted
+        }
+    }
+
+    private func canPresentGatewayEvent(_ event: ClawGatewayEvent) -> Bool {
+        guard clawMobileTasks.first?.id == event.taskID else { return false }
+        if liveGatewaySessionGenerations[event.sessionID] != nil {
+            return ownsLiveGatewayPresentation(taskID: event.taskID, sessionID: event.sessionID)
+        }
+        return true
+    }
+
+    private func finishLiveGatewayLocally(
+        task: ClawMobileTask, sessionID: UUID, failure: LiveGatewayFailure
+    ) {
+        let nextSequence = (gatewayEvents.filter {
+            $0.taskID == task.id && $0.sessionID == sessionID
+        }.map(\.sequence).max() ?? 0) + 1
+        let summary: String
+        if failure == .preflight {
+            summary = "Live Gateway 未发送，配置待修正（\(failure.rawValue)）；未尝试 transport，不会模拟执行。"
+        } else {
+            summary = "Live Gateway 结果未确认；已收到的真实证据保留，不会模拟执行或自动重发。transportError=\(failure.rawValue) 结束本地等待不代表撤销远端执行。"
+        }
+        let event = ClawGatewayEvent(
+            sessionID: sessionID, taskID: task.id, sequence: nextSequence,
+            kind: .sessionCompleted, resultStatus: .failed,
+            summary: summary, isRetryable: false
+        )
+        guard canAcceptGatewayEvent(event) else { return }
+        let ownsPresentation = ownsLiveGatewayPresentation(taskID: task.id, sessionID: sessionID)
+        ingestGatewayEvents([event])
+        if failure == .preflight, ownsPresentation {
+            gatewayConnectionState = .notConfigured
+            persistMissionRunCheckpointIfNeeded()
+        }
+        if task.continuationLineage != nil {
+            markContinuationTransportFailed(taskID: task.id)
+        }
     }
 
     private func markContinuationTransportFailed(taskID: UUID) {
-        gatewayConnectionState = .failed
-        if let index = clawMobileTasks.firstIndex(where: { $0.id == taskID }) {
+        let ownsPresentation = clawGatewaySessions.first(where: { $0.taskID == taskID }).map {
+            ownsLiveGatewayPresentation(taskID: taskID, sessionID: $0.id)
+        } ?? false
+        if ownsPresentation {
+            gatewayConnectionState = .failed
+        }
+        if (ownsPresentation || clawMobileTasks.first?.id != taskID),
+           let index = clawMobileTasks.firstIndex(where: { $0.id == taskID }) {
             clawMobileTasks[index].status = .blocked
         }
-        if var draft = continuationDraft, draft.childTaskID == taskID {
+        if ownsPresentation,
+           var draft = continuationDraft, draft.childTaskID == taskID {
             draft.state = .blocked
             draft.updatedAt = Date()
             continuationDraft = draft
         }
-        persistMissionRunCheckpointIfNeeded()
+        if ownsPresentation {
+            persistMissionRunCheckpointIfNeeded()
+        }
     }
 
     private func markContinuationTransportSucceeded(taskID: UUID) {
@@ -3605,7 +3626,6 @@ final class ClawStore: ObservableObject {
     private func prepareLiveGatewayRequest(
         task: ClawMobileTask,
         sessionID: UUID,
-        fallbackToSimulation: Bool,
         envelopeJSON: String? = nil
     ) -> ClawGatewayLiveRequest? {
         let envelope = envelopeJSON ?? ClawMobileBridge.makeEnvelopeString(task: task, profile: clawGatewayProfile)
@@ -3623,6 +3643,7 @@ final class ClawStore: ObservableObject {
         )
         lastGatewayLiveRequest = request
         gatewayConnectionSessionID = sessionID
+        liveGatewaySessionGenerations[sessionID] = liveGatewayPresentationGeneration
         gatewayConnectionState = request.canAttemptLive ? .awaitingGateway : .notConfigured
         let liveEvent = ClawGatewayLiveClient.liveRequestPreparedEvent(
             task: task,
@@ -3632,44 +3653,12 @@ final class ClawStore: ObservableObject {
         )
         ingestGatewayEvents([liveEvent])
 
-        if request.canAttemptLive == false, fallbackToSimulation {
-            fallbackLatestSessionToSimulatedEvents(
-                task: task,
-                sessionID: sessionID,
-                reason: request.preflightMessage,
-                startingSequence: 2
-            )
-        } else if let latest = clawGatewaySessions.first {
-            lastGatewayEvent = ClawGatewayLiveClient.requestSummary(request, session: latest)
+        if !request.canAttemptLive {
+            finishLiveGatewayLocally(task: task, sessionID: sessionID, failure: .preflight)
+        } else if let session = clawGatewaySessions.first(where: { $0.id == sessionID && $0.taskID == task.id }) {
+            lastGatewayEvent = ClawGatewayLiveClient.requestSummary(request, session: session)
         }
-
         return request
-    }
-
-    private func fallbackLatestSessionToSimulatedEvents(
-        task: ClawMobileTask,
-        sessionID: UUID,
-        reason: String,
-        startingSequence: Int,
-        transportErrorSummary: String? = nil
-    ) {
-        if gatewayConnectionSessionID == sessionID {
-            gatewayConnectionState = .fallbackSimulated
-        }
-        let fallbackEvent = ClawGatewayLiveClient.fallbackEvent(
-            task: task,
-            sessionID: sessionID,
-            reason: reason,
-            sequence: startingSequence,
-            transportErrorSummary: transportErrorSummary
-        )
-        let events = ClawGatewayEventStream.simulatedEvents(
-            task: task,
-            profile: clawGatewayProfile,
-            sessionID: sessionID,
-            startingSequence: startingSequence + 1
-        )
-        ingestGatewayEvents([fallbackEvent] + events)
     }
 
     func ingestGatewayEvents(_ events: [ClawGatewayEvent]) {
@@ -3682,7 +3671,11 @@ final class ClawStore: ObservableObject {
         var acceptedEvents: [ClawGatewayEvent] = []
 
         for event in orderedEvents {
-            guard let sessionIndex = clawGatewaySessions.firstIndex(where: {
+            if liveGatewaySessionGenerations[event.sessionID] != nil,
+               acceptedEvents.contains(where: { $0.sessionID == event.sessionID && $0.kind == .sessionCompleted }) {
+                continue
+            }
+            guard canAcceptGatewayEvent(event), let sessionIndex = clawGatewaySessions.firstIndex(where: {
                 $0.id == event.sessionID && $0.taskID == event.taskID
             }) else {
                 continue
@@ -3706,14 +3699,14 @@ final class ClawStore: ObservableObject {
             return $0.createdAt < $1.createdAt
         }
 
-        if let event = acceptedEvents.last,
+        if let event = acceptedEvents.last(where: canPresentGatewayEvent),
            let eventSession = clawGatewaySessions.first(where: { $0.id == event.sessionID }) {
             if event.sessionID == gatewayConnectionSessionID {
                 if event.kind == .sessionCompleted {
                     gatewayConnectionState = eventSession.status == .completed ? .completed : .failed
                 } else if event.kind == .fallbackUsed {
                     gatewayConnectionState = .fallbackSimulated
-                } else if gatewayDispatchMode == .liveGateway,
+                } else if liveGatewaySessionGenerations[event.sessionID] != nil,
                           isLiveGatewayProgressEvent(event),
                           gatewayConnectionState != .fallbackSimulated,
                           gatewayConnectionState != .failed {
@@ -3726,7 +3719,7 @@ final class ClawStore: ObservableObject {
         }
 
         let currentTaskID = clawMobileTasks.first?.id
-        if acceptedEvents.contains(where: { $0.taskID == currentTaskID }) {
+        if acceptedEvents.contains(where: { $0.taskID == currentTaskID && canPresentGatewayEvent($0) }) {
             persistMissionRunCheckpointIfNeeded()
         }
     }
@@ -3752,6 +3745,7 @@ final class ClawStore: ObservableObject {
     ) {
         guard let offer,
               event.kind == .sessionCompleted,
+              event.resultStatus != .failed,
               offer.hasValidShape,
               offer.expiresAt > Date(),
               offer.expiresAt.timeIntervalSinceNow <= 600,
@@ -3760,6 +3754,7 @@ final class ClawStore: ObservableObject {
               let session = clawGatewaySessions.first(where: {
                   $0.id == event.sessionID && $0.taskID == offer.parentTaskID
               }),
+              session.status == .completed,
               let review = ClawAgentTraceReviewSummary.latest(from: session),
               review.latestArtifactID == offer.parentAgentTraceArtifactID,
               review.continuationEligibility == .ready(offer.selectedActionKind) else {
@@ -4214,8 +4209,12 @@ final class ClawStore: ObservableObject {
         )
         let connectionMatchesSession = gatewayConnectionSessionID == nil ||
             gatewayConnectionSessionID == resolution.session?.id
+        let presentationMatchesRevision = resolution.session.map {
+            liveGatewaySessionGenerations[$0.id] == nil ||
+                liveGatewaySessionGenerations[$0.id] == liveGatewayPresentationGeneration
+        } ?? true
         let isCurrentScope = requestMatchesTask && requestMatchesSession &&
-            requestMatchesProfile && connectionMatchesSession
+            requestMatchesProfile && connectionMatchesSession && presentationMatchesRevision
         let hasStaleRequest = request != nil && isCurrentScope == false
         let hasStaleConnection = gatewayConnectionSessionID != nil &&
             gatewayConnectionSessionID != resolution.session?.id
@@ -4538,7 +4537,9 @@ final class ClawStore: ObservableObject {
     ) async {
         prepareAutonomousLoopDispatch(task, mode: .liveGateway)
         await sendTaskOverLiveGateway(id: task.id, transport: transport)
-        guard autonomousLoop.taskID == task.id, clawGatewaySessions.first?.taskID == task.id else { return }
+        guard autonomousLoop.taskID == task.id, clawMobileTasks.first?.id == task.id,
+              let session = clawGatewaySessions.first, session.taskID == task.id,
+              ownsLiveGatewayPresentation(taskID: task.id, sessionID: session.id) else { return }
         updateAutonomousLoopFromLatestGatewaySession()
     }
 
@@ -4578,10 +4579,14 @@ final class ClawStore: ObservableObject {
                 appendCheckpoint: "loop.completed succeeded=\(session.succeededCount) artifacts=\(session.artifactCount)"
             )
         case .needsAttention:
+            let liveUnconfirmed = liveGatewaySessionGenerations[session.id] != nil
+            let notSent = liveUnconfirmed && lastGatewayLiveRequest?.sessionID == session.id &&
+                lastGatewayLiveRequest?.canAttemptLive == false
             setAutonomousLoop(
                 phase: .needsAttention,
-                statusLine: "Gateway 返回失败或待确认结果，需要复核后再继续。",
-                lastDecision: "失败 \(session.failedCount) 个，可重试 \(session.retryableCount) 个。",
+                statusLine: notSent ? "Live Gateway 未发送，先修正连接配置。" :
+                    (liveUnconfirmed ? "Live Gateway 结果需复核；保留已收到的真实证据，不会模拟执行或自动重发。" : "Gateway 返回失败或待确认结果，需要复核后再继续。"),
+                lastDecision: liveUnconfirmed ? "结束本地等待不代表撤销远端执行；请核对 Gateway 与已有证据。" : "失败 \(session.failedCount) 个，可重试 \(session.retryableCount) 个。",
                 requiresUserApproval: true,
                 taskID: session.taskID,
                 sessionID: session.id,
@@ -6384,7 +6389,7 @@ enum ClawGatewayLiveClient {
             taskID: task.id,
             sequence: sequence,
             kind: .liveRequestPrepared,
-            summary: "\(request.preflightMessage) endpoint=\(request.endpoint) actions=\(request.actionCount) bytes=\(request.bodyBytes)"
+            summary: "\(request.preflightMessage) endpoint=\(ClawGatewayLiveRequest.safeEndpointDisplay(request.endpoint)) actions=\(request.actionCount) bytes=\(request.bodyBytes)"
         )
     }
 
@@ -6462,7 +6467,7 @@ enum ClawGatewayLiveClient {
         session: \(session.id.uuidString)
         status: \(session.status.title)
         mode: \(ClawGatewayDispatchMode.liveGateway.title)
-        endpoint: \(request.endpoint)
+        endpoint: \(ClawGatewayLiveRequest.safeEndpointDisplay(request.endpoint))
         preflight: \(request.preflightMessage)
         actions: \(request.actionCount)
         """
@@ -6518,6 +6523,34 @@ private final class ClawGatewayReadinessSocketCloser: @unchecked Sendable {
         }
         didClose = true
         socket.cancel(with: reason, reason: nil)
+    }
+}
+
+struct ClawGatewayWireSessionBinding {
+    let taskID: UUID
+    let localSessionID: UUID
+    private(set) var remoteSessionID: UUID?
+
+    init(taskID: UUID, localSessionID: UUID) {
+        self.taskID = taskID
+        self.localSessionID = localSessionID
+    }
+
+    mutating func normalize(_ wireEvent: ClawGatewayWireEvent) throws -> ClawGatewayWireEvent {
+        let event = wireEvent.event
+        guard event.taskID == taskID,
+              remoteSessionID == nil || remoteSessionID == event.sessionID else {
+            throw ClawGatewayTransportError.invalidEventIdentity
+        }
+        if let offer = wireEvent.continuationOffer,
+           offer.parentTaskID != event.taskID || offer.parentSessionID != event.sessionID {
+            throw ClawGatewayTransportError.invalidContinuationOffer
+        }
+        remoteSessionID = event.sessionID
+        var localEvent = event
+        localEvent.sessionID = localSessionID
+        // Receipt lineage remains remote; only the event projects into the local Store session.
+        return ClawGatewayWireEvent(event: localEvent, continuationOffer: wireEvent.continuationOffer)
     }
 }
 
@@ -6681,6 +6714,7 @@ struct URLSessionClawGatewayTransport: ClawGatewayTransport, ClawGatewayProbeTra
                 do {
                     while attempt <= maxAttempts, Task.isCancelled == false {
                         var receivedDesktopEvent = false
+                        var identity = ClawGatewayWireSessionBinding(taskID: taskID, localSessionID: sessionID)
                         let socket = URLSession.shared.webSocketTask(with: urlRequest(for: url, request: request))
                         do {
                             socket.resume()
@@ -6710,35 +6744,11 @@ struct URLSessionClawGatewayTransport: ClawGatewayTransport, ClawGatewayProbeTra
                                 @unknown default:
                                     continue
                                 }
-                                let decoded = try JSONDecoder.clawGateway.decode(ClawGatewayWireEvent.self, from: data)
-                                if let offer = decoded.continuationOffer,
-                                   offer.parentTaskID != decoded.event.taskID ||
-                                   offer.parentSessionID != decoded.event.sessionID {
-                                    throw ClawGatewayTransportError.invalidContinuationOffer
-                                }
-                                guard decoded.event.taskID == taskID else {
-                                    throw ClawGatewayTransportError.invalidEventIdentity
-                                }
-                                var event = decoded.event
+                                // Any desktop payload ends the pre-response retry window, including invalid identity.
                                 receivedDesktopEvent = true
-                                if event.sessionID != sessionID {
-                                    event = ClawGatewayEvent(
-                                        id: event.id,
-                                        sessionID: sessionID,
-                                        taskID: taskID,
-                                        sequence: event.sequence,
-                                        kind: event.kind,
-                                        actionID: event.actionID,
-                                        actionKind: event.actionKind,
-                                        actionTitle: event.actionTitle,
-                                        resultStatus: event.resultStatus,
-                                        summary: event.summary,
-                                        artifacts: event.artifacts,
-                                        isRetryable: event.isRetryable,
-                                        retryCount: event.retryCount,
-                                        createdAt: event.createdAt
-                                    )
-                                }
+                                let decoded = try JSONDecoder.clawGateway.decode(ClawGatewayWireEvent.self, from: data)
+                                let normalized = try identity.normalize(decoded)
+                                var event = normalized.event
                                 if event.sequence <= 0 {
                                     event.sequence = nextSequence
                                     nextSequence += 1
@@ -6747,7 +6757,7 @@ struct URLSessionClawGatewayTransport: ClawGatewayTransport, ClawGatewayProbeTra
                                 }
                                 continuation.yield(ClawGatewayWireEvent(
                                     event: event,
-                                    continuationOffer: decoded.continuationOffer
+                                    continuationOffer: normalized.continuationOffer
                                 ))
                                 if event.kind == .sessionCompleted {
                                     socket.cancel(with: .normalClosure, reason: nil)
@@ -6763,10 +6773,6 @@ struct URLSessionClawGatewayTransport: ClawGatewayTransport, ClawGatewayProbeTra
                             let canRetry = attempt < maxAttempts && receivedDesktopEvent == false
                             if canRetry {
                                 attempt += 1
-                                let safeError = ClawGatewayLiveClient.safeTransportErrorSummary(
-                                    error.localizedDescription,
-                                    request: request
-                                )
                                 continuation.yield(ClawGatewayWireEvent(event:
                                     ClawGatewayLiveClient.liveTransportProgressEvent(
                                         taskID: taskID,
@@ -6775,7 +6781,7 @@ struct URLSessionClawGatewayTransport: ClawGatewayTransport, ClawGatewayProbeTra
                                         attempt: attempt,
                                         reconnectCount: attempt - 1,
                                         pingStatus: "skipped",
-                                        transportErrorSummary: safeError,
+                                        transportErrorSummary: "live_transport_retry",
                                         willRetry: true
                                     )
                                 ))

@@ -38,6 +38,10 @@ v0.77 首次云端复判发现 Simulator 的 readiness duplicate fixture 在 1 �
 - 云端失败时，Agent B 根据结果包中的 failure summary、manifest 和日志路径，在 `main` 上追加修复 commit 后重新 push。
 - push、CI 查询和 artifact 验收必须使用仓库授权的 GitHub 账号 `Altman-sam114`；不得使用其他账号伪装完成。
 
+## v0.82 真实失败隔离矩阵
+
+云端 XCTest 覆盖未审批/重复派发、空或非 ws/wss endpoint/缺 token 的同步与 async preflight 零调用、立即错误、部分 succeeded+artifact/running 后错误、空/partial EOF、真实 Task.cancel() 的空/partial 等待、有界 recorder、首个成功/失败终态后的错误及同批/跨批重复终态/迟帧、错 task/session terminal、生产 wire helper 首帧合法绑定/错误首帧不占绑定/跨帧远端 session 不变/错误 offer 拒绝/合法 remote→local 映射/partial 证据保留/无 receipt 入库、continuation 远端/本地 session ID 区分及 revision 后 task/checkpoint 不变、A/B 未发送/已发送交错、mode 切换及切回同 enum/profile revision，以及 Mission/health/probe/readiness/checkpoint 回归。每条 live 失败必须无 fallback/模拟业务结果，保留实际证据，只一次无 action/artifact 的固定脱敏收口；取消不承诺撤销远端动作。LogicSmoke 覆盖同步 preflight、立即和 partial 失败、重复派发与显式模拟/retry 隔离。所有异步等待先求值再断言，禁止 async autoclosure。本地只做 diff/YAML 非编译检查，完整业务结果只来自最新 main 的云端 artifact。
+
 ## Agent X 循环下的验证规则
 
 - Agent X 只负责主控调度和轮次判断，不替代 Agent A/B/C 的职责。
