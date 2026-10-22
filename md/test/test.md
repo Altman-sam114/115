@@ -2,7 +2,9 @@
 
 ## v0.84 最终参数与普通审批
 
-云端新增 10 项 XCTest（预期双设备各 135 项）：七种可编辑 kind 的固定参数/安全常量、未知 key/错误文案不回显、UTF-8/路径/URL 边界、未应用和非法输入零任务/快照副作用、只改一个 action/撤销审批、同步和 async 缺参数真实发送零 transport/session/event、编辑后须新审批且 wire 精确一致/单次发送、连接及 runtime token revision 撤销、旧任务/状态/continuation 拒绝、Mission 缺参数不误报派发，以及原英文 scope 意图不依赖假本机 handler。废除旧 placeholder/pwd/自动桌面正文与提交键断言，替换为显式缺输入和远端路由断言；旧终态、取消、部分证据、continuation 等回归保留。
+云端新增 11 项 XCTest（修复后预期双设备各 136 项）：七种可编辑 kind 的固定参数/安全常量、未知 key/错误文案不回显、UTF-8/路径/URL 边界、未应用和非法输入零任务/快照副作用、只改一个 action/撤销审批、同步和 async 缺参数真实发送零 transport/session/event、编辑后须新审批且 wire 精确一致/单次发送、连接及 runtime token revision 撤销、旧任务/状态/continuation 拒绝、Mission 缺参数不误报派发，以及原英文 scope 意图不依赖假本机 handler。废除旧 placeholder/pwd/自动桌面正文与提交键断言，替换为显式缺输入和远端路由断言；旧终态、取消、部分证据、continuation 等回归保留。
+
+首次 run `39822763413` attempt `1` / SHA `c89277813852fb3be07ec0613ea8061acde948be` 的 manifest/JUnit/日志确认 13 项检查中四项失败，双设备各 135 项测试、6 个断言失败，不能通过 C 验收。修复补专门六状态预检测试：pending/无结果和 waitingForApproval 人工 gate 保留，running/succeeded 不重复审批、failed/skipped 阻断，task/session/request 不被投影更改；LogicSmoke 保留原 readyCount > 0 并确认就绪来自已有远端结果。旧 probe stale 测试使用明确 browser 远端意图，session/request mutation 前先显式填写参数并断言 mutation 确实发生，全部 stale/ping/close/零 application message 断言不变。共享 smoke helper 使用完整固定桌面 action（不依赖 base 有该 kind），先确认进入 action pipeline 再验证所有失败与精确写入断言。continue-on-error 图标不作成功证据，底层 outcome、最新 JUnit/日志和最终 gate 才是验收依据。
 
 LogicSmoke 补缺输入零派发 -> typed Apply -> 待重新审批 -> 精确 wire/只发一次的实际 Store 路径。已有连接 preflight 夹具必须显式提供最终参数，不能用业务参数缺口绕过 v0.82 preflight 断言。Swift Gateway fixture self-test 检查文件缺正文与 desktop inputPreview 不作执行源。
 

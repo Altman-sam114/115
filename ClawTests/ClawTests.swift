@@ -250,7 +250,10 @@ final class ClawTests: XCTestCase {
     }
 
     func testEnglishRulePlanKeepsDesktopIntentWithoutLocalFakeExecutions() {
-        for command in ["Mission A collect browser evidence", "Mission B prepare a fresh report"] {
+        for command in [
+            "Mission A collect browser evidence", "Mission B prepare a fresh report",
+            "prepare browser evidence for a new Mission scope", "collect browser evidence for a new mission scope"
+        ] {
             let plan = PhoneAgentPlanner.makePlan(command: command, capabilities: ClawStore.defaultPhoneAgentCapabilities)
             let task = ClawMobileBridge.makeTask(from: plan, profile: ClawStore.defaultClawGatewayProfile, selectedSkill: nil, documents: [])
             XCTAssertFalse(task.actions.isEmpty)
@@ -797,7 +800,7 @@ final class ClawTests: XCTestCase {
         XCTAssertFalse(duplicateProbe)
         XCTAssertEqual(recorder.callCount, 1)
 
-        store.phoneAgentCommand = "prepare a new Mission scope"
+        store.phoneAgentCommand = "prepare browser evidence for a new Mission scope"
         store.generatePhoneAgentPlan()
         store.queueClawMobileTaskFromCurrentPlan()
         XCTAssertEqual(store.gatewayTransportProbeSummary.state, .ready)
@@ -829,7 +832,7 @@ final class ClawTests: XCTestCase {
     func testExplicitTransportProbeBindingMatrixDropsStaleResults() async throws {
         let mutations: [(String, @MainActor (ClawStore) -> Void)] = [
             ("task-and-mission-scope", { store in
-                store.phoneAgentCommand = "new mission scope"
+                store.phoneAgentCommand = "collect browser evidence for a new mission scope"
                 store.generatePhoneAgentPlan()
                 store.queueClawMobileTaskFromCurrentPlan()
             }),
@@ -841,6 +844,8 @@ final class ClawTests: XCTestCase {
                 store.approveLatestClawMobileTask()
                 if let taskID = store.clawMobileTasks.first?.id {
                     store.sendTask(id: taskID)
+                    XCTAssertEqual(store.clawGatewaySessions.first?.taskID, taskID)
+                    XCTAssertEqual(store.lastGatewayLiveRequest?.taskID, taskID)
                 }
             }),
             ("review-focus-generation", { store in
@@ -864,6 +869,12 @@ final class ClawTests: XCTestCase {
                 store = continuation.0
             } else {
                 store = makeProbeStore(endpoint: "ws://gateway.example.test", token: "probe-secret")
+            }
+            if label == "session-task-request-revision" {
+                reviewAllFinalArguments(in: store)
+                XCTAssertNil(store.clawMobileTasks.first.flatMap { ClawTaskArguments.issue(in: $0) })
+                XCTAssertTrue(store.clawGatewaySessions.isEmpty)
+                XCTAssertNil(store.lastGatewayLiveRequest)
             }
             let scopeID = try XCTUnwrap(store.missionRunSummary.missionScopeID)
             let focus = ClawMissionRunReviewFocus(scopeID: scopeID, reviewKind: "agent-trace")
@@ -1639,6 +1650,47 @@ final class ClawTests: XCTestCase {
         XCTAssertFalse(visibleText.contains("provenance-secret"))
         XCTAssertFalse(visibleText.contains("commandLine"))
         XCTAssertFalse(visibleText.contains("pwd"))
+    }
+
+    func testActionPreflightSeparatesApprovalPolicyFromOutstandingGatewayGate() throws {
+        for status in ClawGatewayActionResultStatus.allCases {
+            let store = makeFinalArgumentStore()
+            reviewAllFinalArguments(in: store)
+            let task = try XCTUnwrap(store.clawMobileTasks.first)
+            let action = try XCTUnwrap(task.actions.first { $0.kind == .manageFiles })
+            let before = try XCTUnwrap(store.missionRunSummary.actionPreflightItems.first { $0.id == action.id.uuidString })
+            XCTAssertNotEqual(action.approval, .automatic)
+            XCTAssertTrue(before.requiresHumanAction)
+            XCTAssertFalse(before.isReady)
+
+            store.gatewayDispatchMode = .liveGateway
+            store.approveLatestClawMobileTask()
+            store.sendTask(id: task.id)
+            let session = try XCTUnwrap(store.clawGatewaySessions.first)
+            let request = try XCTUnwrap(store.lastGatewayLiveRequest)
+            let eventKind: ClawGatewayEventKind
+            switch status {
+            case .pending, .running: eventKind = .actionStarted
+            case .succeeded: eventKind = .actionCompleted
+            case .failed: eventKind = .actionFailed
+            case .skipped: eventKind = .actionSkipped
+            case .waitingForApproval: eventKind = .approvalRequested
+            }
+            store.ingestGatewayEvents([ClawGatewayEvent(
+                sessionID: session.id, taskID: task.id, sequence: 2,
+                kind: eventKind, actionID: action.id, actionKind: action.kind,
+                actionTitle: action.title, resultStatus: status, summary: "Preflight state fixture"
+            )])
+            let item = try XCTUnwrap(store.missionRunSummary.actionPreflightItems.first { $0.id == action.id.uuidString })
+            XCTAssertTrue(item.hasResult, status.rawValue)
+            XCTAssertEqual(item.requiresHumanAction, status == .pending || status == .waitingForApproval, status.rawValue)
+            XCTAssertEqual(item.isReady, status == .running || status == .succeeded, status.rawValue)
+            XCTAssertEqual(item.isBlocked, status == .failed || status == .skipped, status.rawValue)
+            XCTAssertEqual(item.approvalTitle, action.approval.title)
+            XCTAssertEqual(store.clawMobileTasks.first?.status, .sent)
+            XCTAssertEqual(store.clawGatewaySessions.count, 1)
+            XCTAssertEqual(store.lastGatewayLiveRequest, request)
+        }
     }
 
     func testMissionRunSummaryDerivesReviewPriorityQueue() throws {

@@ -14,7 +14,7 @@
 ## 当前状态
 
 - 项目方向：OpenClaw 式电脑接管智能体，iPhone 作为控制台，桌面 Claw Gateway 作为执行端。
-- 最后完整通过的基线：`91886b1edc84e6921ffaa30edcc973de264ac79e` / run `39814219315` attempt `1`，artifact `claw-ci-v0.83-main-91886b1edc84-run39814219315-attempt1` 已下载并由单实例 C 阶段复判通过：14 项检查、双设备各 125 项 XCTest、Release/LogicSmoke/fixture/Gateway、四个 xcresult、两份第 1 帧 readiness JSON 与实际非白屏 PNG 一致（1,882,069 bytes / 解压 4.3 MiB）。v0.84 最终执行参数与普通审批绑定现待新 main 提交和云端验收，历史 SHA/run 不是当前证据。
+- 最后完整通过的基线：`91886b1edc84e6921ffaa30edcc973de264ac79e` / run `39814219315` attempt `1`，artifact `claw-ci-v0.83-main-91886b1edc84-run39814219315-attempt1` 已下载并由单实例 C 阶段复判通过：14 项检查、双设备各 125 项 XCTest、Release/LogicSmoke/fixture/Gateway、四个 xcresult、两份第 1 帧 readiness JSON 与实际非白屏 PNG 一致（1,882,069 bytes / 解压 4.3 MiB）。v0.84 首次 SHA `c89277813852fb3be07ec0613ea8061acde948be` / run `39822763413` attempt `1` 失败，当前同版本修复须新 main 云端验收；历史 SHA/run 不是当前通过证据。
 - 当前 schema：`claw.computer.control.v1`。
 - 当前核心闭环：用户自然语言任务 -> `PhoneAgentPlanner` -> `ClawMobileTask` -> `ClawMobileEnvelope` -> 模拟事件流或带有界重连/ping 可观测性和进程内 task replay guard 的 WebSocket Gateway -> `ClawGatewayEvent` -> session reducer -> Mission Run / Approval Fast Lane 审批快车道 / Control Snapshot 控制态势快照 / Operator Strip / Loop 继续态势 / Mac Agent Readiness Board 就绪看板 / Mac Gateway Action Preflight Matrix 动作预检矩阵 / Mac Agent Evidence Coverage Map 证据覆盖图 / Mac Agent Next Step Deck 下一步候选卡组 / Mac Agent Run Timeline 执行时间线 / Mac Agent Continuation Gate 继续闸门 / Mac Agent Review Radar 复核雷达 / Mac Agent Handoff Brief 人工交接简报 / Focus Context 聚焦上下文 / Review Detail Dock / Review Trail 复核路径 / Approval Queue 审批队列 / Payload Safety Ledger 载荷安全账本 / Artifact 证据索引 / 复核态势摘要 / 复核优先队列 / 复核聚焦详情 / Live Gateway 连接健康 / Artifact metadata 复核摘要 / 文件变更安全复核摘要 / Shell 命令安全复核摘要 / 提取完整性复核摘要 / 浏览器控制计划和策略诊断复核摘要 / 草稿最终提交安全和桌面策略诊断复核摘要 / Gateway 能力复核摘要 / Accessibility 信号质量复核摘要 / Replay Guard 复核摘要 / AgentTrace handoff 复核 UI / iPad 多栏工作台展示和审批。v0.66 工作区实现进一步加入父 safe decision -> 短时单次 receipt -> 显式 draft/queue/approve/freeze/send -> 全新 child selected action + `runAgentLoop` 的受限跨 task 续接；v0.71 在同一闸门上加入 `extractData` 的 goal/outputPath typed editor，固定 schema/source/completeness 与 exact-key/byte/path 校验；v0.72 在同一 presentation/store 边界加入固定优先级 Smart Operator Action Rail，历史 v0.72 `origin/main` commit `bcf87c8c50f70d3d4157ec41a83333e62cd1ecdc` 已由 run `32631022162` attempt `1` 的 Agent C artifact 复判通过。
 - 当前 Smart Operator Action Rail：从既有 continuation/primary/resume/review metadata 按固定优先级派生单一用户显式入口；compact 与 regular 共享 summary/view/dispatcher，stale 或 scope mismatch 返回 disabled/none，不新增 Gateway action 或协议字段。历史 v0.72 `origin/main` commit `bcf87c8c50f70d3d4157ec41a83333e62cd1ecdc` 对应 run `32631022162` attempt `1`，artifact `claw-ci-v0.2-main-bcf87c8c50f7-run32631022162-attempt1` 已由 Agent C 复判通过。
@@ -23,6 +23,15 @@
 - 当前主要遗留：v0.66 完整负向/action/六种 kind/UI 对称测试矩阵、v0.67 最新云端 artifact 验收与 `manageFiles` 编辑器完整 LogicSmoke/负向覆盖、完整 macOS Accessibility bridge、Playwright/browser-use 兼容控制器、跨重启/跨进程多轮状态、live Gateway 后台保活/真实心跳协议/配对、完整 artifact 内容复核体验。
 
 ## 历史记录
+
+### v0.84 / 首次云端退回与夹具、待办审批投影修复
+日期：2026-10-22
+
+- 单实例 C 阶段核对 `c89277813852fb3be07ec0613ea8061acde948be` / run `39822763413` attempt `1`，artifact `claw-ci-v0.84-main-c89277813852-run39822763413-attempt1` 的 manifest、13 项 JUnit/摘要和实际主日志一致：LogicSmoke、WebSocket smoke、双设备 XCTest 失败；iPhone/iPad 各 135 项测试、6 个断言失败，集中在三个方法。Release/fixture/direct 等通过不代表整体通过，continue-on-error 图标不能替代底层 outcome。
+- 为避免默认下载 127,779,653 bytes 结果包，选择性 ZIP range 下载约 588 KiB 的关键日志/manifest/JUnit/摘要和四个 xcresult Info.plist，缓存 1.7 MiB；完整 xcresult 和截图未作本次失败验收，不冒充已检查。
+- 修复固定 approval policy 永久计为待办的问题：running/succeeded 不再重复要求同次审批，pending/无结果和 waitingForApproval 仍保留闸门，failed/skipped 仍阻断；计数改为就绪/已处理，不授权重复发送，真实发送 gate 不变。新增专门六状态 XCTest，预期各 136 项，LogicSmoke 保留并强化原就绪断言。
+- 两个 probe stale 夹具改为明确 browser 远端意图，session/request revision 前显式填写最终参数并确认实际创建会话；不再依赖本机假 action 或缺参拒绝来假测 stale。共享 direct/WebSocket helper 自带完整 desktop action，并断言进入 action pipeline，保留缺参脱敏失败、keys-only 无 preview 粘贴、后续合法精确写入和无 fallback 文件断言。
+- 同步 README、协议、flow/flowchart、test、release readiness 与版本化提示词。本地仅非编译静态检查；需 main 追加修复提交后完整云端重验，不提前进入 v0.85。用户签名/xcuserdata/旧 prompt 保留、aitrans 未修改，发布级总目标未完成。
 
 ### v0.84 / 最终执行参数与普通审批绑定
 日期：2026-10-22

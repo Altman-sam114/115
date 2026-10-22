@@ -6,7 +6,7 @@
 
 最新通过基线是 v0.83 `91886b1edc84e6921ffaa30edcc973de264ac79e` / run `39814219315` attempt `1`，artifact `claw-ci-v0.83-main-91886b1edc84-run39814219315-attempt1` 已完成单实例 C 复判：精确 manifest/JUnit/主日志、14 项检查、双设备各 125 项 XCTest、双平台 Release、LogicSmoke/fixture/Gateway、四个 xcresult，以及实际打开的非白屏 PNG/第 1 帧 readiness JSON 一致。压缩 1,882,069 bytes，解压 4.3 MiB。历史失败见 update_log，不再作为当前状态。
 
-v0.84 从 UI 转向最终执行参数：移除危险默认正文/命令和伪 HTML、本机步骤假远端路由；新增 typed 编辑和普通审批摘要绑定，真实发送前缺参数/配置变更拒绝，Gateway 移除文件和桌面自然语言兜底。本轮新增测试等待最新 main 云端结果，不以基线通过替代本轮通过。
+v0.84 从 UI 转向最终执行参数：移除危险默认正文/命令和伪 HTML、本机步骤假远端路由；新增 typed 编辑和普通审批摘要绑定，真实发送前缺参数/配置变更拒绝，Gateway 移除文件和桌面自然语言兜底。首次 SHA `c89277813852fb3be07ec0613ea8061acde948be` / run `39822763413` attempt `1` 失败，manifest/JUnit/日志确认 LogicSmoke、WebSocket smoke 和双设备 XCTest 未通过。同版本修复当前待办审批投影、probe 最终参数/远端 scope 夹具和完整桌面 smoke 夹具，新增六状态回归；新 main 云端验收前不进入 v0.85，不以历史绿灯或 step 图标替代结果包。
 
 | 轮次 | 范围 | 验收门槛 |
 | --- | --- | --- |

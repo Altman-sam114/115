@@ -5,7 +5,11 @@ import path from "node:path";
 export function makeFinalInputEnvelope(base, marker) {
   const result = JSON.parse(JSON.stringify(base));
   const file = result.task.actions.find((action) => action.kind === "manageFiles");
-  const desktop = result.task.actions.find((action) => action.kind === "operateDesktopApp");
+  if (!file) throw new Error("Final input fixture requires a complete file action");
+  const desktop = {
+    kind: "operateDesktopApp", target: "Desktop Apps", approval: "gatewayApproval",
+    sourceSurface: "clawGateway", handlesSensitiveData: true,
+  };
   const clone = (action, args) => ({
     ...action, id: crypto.randomUUID(), title: "Final input provenance fixture",
     instruction: marker, inputPreview: marker, toolArguments: args,
@@ -35,6 +39,7 @@ export function makeFinalInputEnvelope(base, marker) {
 
 export async function assertFinalInputEvidence(events, envelope, marker, label) {
   const expect = (condition, message) => { if (!condition) throw new Error(`${label}: ${message}`); };
+  expect(events.some((event) => event.kind === "gatewayConnected"), "fixture must pass envelope validation and reach the action pipeline");
   const invalid = envelope.task.actions.slice(0, -2);
   for (const action of invalid) {
     const scoped = events.filter((event) => event.actionID === action.id);

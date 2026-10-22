@@ -8,6 +8,8 @@
 
 Gateway 文件缺结构化路径/正文和桌面缺显式输入 -> 固定 action-bound redacted auditLog + failed/non-retryable -> 无业务文件/桌面动作 -> 继续后续合法 action。桌面粘贴不读取 inputPreview，显式正文保留首尾空白。Swift fixture 和共享 direct/WebSocket 小矩阵覆盖此边界；Gateway 其他既有 handler 合同及真实桌面 E2E 仍需后续完整统一，不把该切片称为模型智能或发布完成。
 
+action 结果按 actionID 回到预检 -> 无结果/pending 沿用审批策略；waitingForApproval 仍人工确认；running/succeeded 不再把固定审批 policy 当成尚未处理的审批；failed/skipped 仍阻断。就绪/已处理计数只是复核状态，不允许重复发送，也不更改普通审批 gate。首次 v0.84 artifact 的 LogicSmoke/WebSocket/双设备 XCTest 失败后，同版本追加上述投影修复及显式远端 probe/完整桌面 smoke 夹具；新 main 的完整云端复判前不得推进下一版本。
+
 ## v0.83 任务主路径与按需复核
 
 PhoneAgentView 持有本机详情/展开 state 和仅进程内的续接 editor input -> 按实际宽度选择 compact/workbench -> 两者复用 Command、Mission 概况与四个详情区。Mission 始终保留唯一 Smart Rail、阶段/审批/风险/结果、简洁健康条、失败说明和当前续接编辑；“证据复核”显示 scoped focus/优先项/详细 rows，高级 metadata projector 只在显式展开时构建。计划/任务审批、会话/日志、连接/权限分区显示，envelope 原文默认收起。

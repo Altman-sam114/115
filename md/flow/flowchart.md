@@ -17,6 +17,9 @@ flowchart TD
   Gateway --> Required{"文件/桌面显式结构化输入?"}
   Required -->|否| Audit["固定脱敏审计失败\n不使用 instruction/inputPreview 兜底"]
   Required -->|是| Existing["原受控 handler\n无新增权限"]
+  Existing --> Preflight["actionID 关联结果 -> 只读预检\nrunning/succeeded 就绪或已处理"]
+  Audit --> Blocked["失败/跳过仍阻断\n不自动重试"]
+  Preflight --> Gate["pending/无结果沿用审批要求\nwaitingForApproval 仍需人工\n不授权重复发送"]
 ```
 
 ```mermaid

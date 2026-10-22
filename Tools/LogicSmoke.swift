@@ -1147,6 +1147,12 @@ enum LogicSmoke {
         expect(actionPreflight.totalCount == missionSummary.actionPreflightItems.count, "action preflight should mirror summary item count")
         expect(actionPreflight.items.map(\.rank) == actionPreflight.items.map(\.rank).sorted(), "action preflight should preserve action order")
         expect(actionPreflight.readyCount > 0, "action preflight should count ready actions")
+        let acknowledgedActionIDs = Set((missionStore.clawGatewaySessions.first?.results ?? [])
+            .filter { $0.status == .succeeded || $0.status == .running }
+            .map { $0.actionID.uuidString })
+        let acknowledgedPreflightItems = actionPreflight.items.filter { acknowledgedActionIDs.contains($0.id) }
+        expect(!acknowledgedPreflightItems.isEmpty, "preflight fixture must include acknowledged remote actions, not local fake handlers")
+        expect(acknowledgedPreflightItems.allSatisfy { $0.isReady && !$0.requiresHumanAction && !$0.isBlocked }, "acknowledged actions must not retain an outstanding approval gate")
         expect(actionPreflight.humanActionCount > 0, "action preflight should surface human gates")
         expect(actionPreflight.requiresHumanAction, "action preflight should require human review")
         expect(actionPreflight.primaryReviewKind != nil, "action preflight should point to a primary review")

@@ -12,6 +12,8 @@ Gateway 独立加强两个执行源边界：manageFiles 必须显式提供字符
 
 普通任务初次 wire envelope 必须为 sent，Store 在创建会话前生成同 identity/actions 的 sent 副本；续接仍为独立 frozen readyToSend + receipt。审批不得把 sent/blocked 普通任务变回可发送。UI 显式 live 点击捕获 task ID 并调用 async transport，不在生命周期隐式发送。
 
+动作预检仅派生客户端 presentation：静态 action.approval 与当前 result 分开；pending/无结果沿用审批要求，waitingForApproval 保留人工闸门，running/succeeded 不重复要求同次审批，failed/skipped 保留阻断。“就绪/已处理”不授权重复发送，不改变 envelope、普通最终审批记录或 continuation receipt 合同。测试 probe 的 request/session revision 夹具须先显式填写最终参数，不能借缺参数跳过真正的 scope 变更。
+
 ## Mac / iPad 客户端边界
 
 v0.83 只重构客户端展示：两种布局共用按需详情 selector，主动作和续接编辑保留在 Mission 概况；复核 dock 只负责 scoped 证据与高级诊断，不重复可执行主动作。健康条保留状态/失败及原有本地 focus 同步，完整 probe/readiness/checkpoint 放到连接区，仍只在用户显式点击时联网。高级诊断和 envelope 默认收起，不改变任何数据编码或派发。

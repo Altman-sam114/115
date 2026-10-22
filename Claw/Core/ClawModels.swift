@@ -6425,23 +6425,23 @@ extension ClawMissionRunSummary {
             icon = "list.bullet.rectangle.portrait.fill"
         } else if requiresHumanAction {
             title = "Action 预检等待人工"
-            status = "\(humanActionCount) 项需人工 · \(readyCount)/\(items.count) 可派发"
+            status = "\(humanActionCount) 项需人工 · \(readyCount)/\(items.count) 就绪/已处理"
             guidance = primaryItem.map { "先确认 \($0.title)：\($0.guidance)" } ?? "先处理人工确认 action。"
             icon = "person.crop.circle.badge.checkmark"
         } else if hasMetadataGap {
             title = "Action 预检 metadata 待同步"
-            status = "\(metadataPendingCount) 项待同步 · \(readyCount)/\(items.count) 可派发"
+            status = "\(metadataPendingCount) 项待同步 · \(readyCount)/\(items.count) 就绪/已处理"
             guidance = primaryItem.map { "等待 \($0.title) metadata 后再复核结果。" } ?? "等待 Gateway metadata 后再复核 action 结果。"
             icon = "doc.badge.clock"
         } else if degradedCount > 0 {
             title = "Action 预检需抽查"
-            status = "\(degradedCount) 项降级 · \(readyCount)/\(items.count) 可派发"
+            status = "\(degradedCount) 项降级 · \(readyCount)/\(items.count) 就绪/已处理"
             guidance = primaryItem.map { "抽查 \($0.title)：\($0.guidance)" } ?? "抽查降级 action。"
             icon = "exclamationmark.magnifyingglass"
         } else {
             title = "Action 预检矩阵"
-            status = "\(readyCount)/\(items.count) 项可派发"
-            guidance = "所有 action 只展示结构化预检状态；仍需用户明确发送或继续。"
+            status = "\(readyCount)/\(items.count) 项就绪/已处理"
+            guidance = "就绪包含 Gateway 已处理的动作，不代表可重复发送；新的执行仍需显式审批和发送。"
             icon = "list.bullet.rectangle"
         }
 

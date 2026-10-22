@@ -2304,9 +2304,12 @@ final class ClawStore: ObservableObject {
         return task.actions.enumerated().map { offset, action in
             let result = resultsByActionID[action.id]
             let resultHasMetadata = hasMetadata(result)
-            let requiresHumanAction = action.approval == .userConfirmation ||
-                action.approval == .gatewayApproval ||
-                result?.status == .waitingForApproval
+            let approvalPolicyRequiresHuman = action.approval == .userConfirmation ||
+                action.approval == .gatewayApproval
+            // Approval policy is not an outstanding gate once Gateway has started or finished an action.
+            let requiresHumanAction = result.map {
+                $0.status == .waitingForApproval || ($0.status == .pending && approvalPolicyRequiresHuman)
+            } ?? approvalPolicyRequiresHuman
             let isBlocked = action.approval == .blocked ||
                 result?.status == .failed ||
                 result?.status == .skipped
