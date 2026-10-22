@@ -617,8 +617,8 @@ final class ClawTests: XCTestCase {
         let configurations = [
             ("", "probe-token"),
             ("http://gateway.example.test", "probe-token"),
-            ("ws://gateway.example.test", ""),
-            ("ws://gateway.example.test", "   ")
+            ("wss://gateway.example.test", ""),
+            ("wss://gateway.example.test", "   ")
         ]
 
         for (endpoint, token) in configurations {
@@ -640,7 +640,7 @@ final class ClawTests: XCTestCase {
 
     func testExplicitTransportProbeSendsOnlyOnePingAndKeepsTaskHealthSeparate() async throws {
         let store = ClawStore(autoScanLocalArtifacts: false)
-        store.setGateway(url: "ws://127.0.0.1:18789/private-marker?token=hidden", token: "probe-secret")
+        store.setGateway(url: "ws://127.0.0.1:18789/private-marker", token: "probe-secret")
         store.generatePhoneAgentPlan()
         store.queueClawMobileTaskFromCurrentPlan()
         let recorder = ProbeTransportRecorder(outcome: .success)
@@ -689,7 +689,7 @@ final class ClawTests: XCTestCase {
         ]
         for (outcome, diagnostic) in outcomes {
             let store = ClawStore(autoScanLocalArtifacts: false)
-            store.setGateway(url: "wss://gateway.example.test/v1?marker=private-marker", token: "probe-secret")
+            store.setGateway(url: "wss://gateway.example.test/v1/private-marker", token: "probe-secret")
             store.generatePhoneAgentPlan()
             store.queueClawMobileTaskFromCurrentPlan()
             let recorder = ProbeTransportRecorder(outcome: outcome)
@@ -716,7 +716,7 @@ final class ClawTests: XCTestCase {
 
     func testExplicitTransportProbeUsesWSSOnceAndKeepsAllMissionStateUntouched() async {
         let store = makeProbeStore(
-            endpoint: "wss://gateway.example.test/v1?marker=private-marker",
+            endpoint: "wss://gateway.example.test/v1/private-marker",
             token: "probe-secret"
         )
         let reviewFocus = store.missionRunSummary.missionScopeID.map {
@@ -769,7 +769,7 @@ final class ClawTests: XCTestCase {
     }
 
     func testExplicitTransportProbeUsesRealTaskCancellationDiagnosticAndClosesOnce() async {
-        let store = makeProbeStore(endpoint: "ws://gateway.example.test", token: "probe-secret")
+        let store = makeProbeStore(endpoint: "wss://gateway.example.test", token: "probe-secret")
         let recorder = ProbeTransportRecorder(outcome: .waitForRelease)
         let probeTask = Task {
             await store.probeLiveGatewayTransport(transport: recorder)
@@ -868,7 +868,7 @@ final class ClawTests: XCTestCase {
                 let continuation = try makeManageFilesContinuationDraft()
                 store = continuation.0
             } else {
-                store = makeProbeStore(endpoint: "ws://gateway.example.test", token: "probe-secret")
+                store = makeProbeStore(endpoint: "wss://gateway.example.test", token: "probe-secret")
             }
             if label == "session-task-request-revision" {
                 reviewAllFinalArguments(in: store)
@@ -905,6 +905,40 @@ final class ClawTests: XCTestCase {
             XCTAssertEqual(recorder.applicationMessageCount, 0)
             XCTAssertEqual(recorder.closeCount, 1)
         }
+    }
+
+    func testConnectionDraftAndClearInvalidateFrozenContinuationWithoutSending() async throws {
+        let store = try makeTrustedContinuationProbeStore()
+        XCTAssertTrue(store.updateContinuationExtractionArguments(extractionGoal: "Review only", outputPath: "reports/review.json"))
+        let draft = try XCTUnwrap(store.continuationDraft)
+        let child = try XCTUnwrap(store.queueContinuationDraft(id: draft.id))
+        store.approveTask(id: child)
+        XCTAssertEqual(store.frozenContinuationEnvelopeCountForTesting, 1)
+        XCTAssertEqual(store.continuationApprovalRecordCountForTesting, 1)
+        let sessions = store.clawGatewaySessions
+        let events = store.gatewayEvents
+        let originalURL = store.gatewayURL
+        store.gatewayURL = "wss://replacement.example.test"
+        XCTAssertTrue(store.gatewayHasUnappliedChanges)
+        XCTAssertEqual(store.frozenContinuationEnvelopeCountForTesting, 0)
+        XCTAssertEqual(store.continuationApprovalRecordCountForTesting, 0)
+        XCTAssertEqual(store.continuationDraft?.state, .stale)
+        let transport = OrdinaryDispatchRecordingTransport()
+        await store.sendTaskOverLiveGateway(id: child, transport: transport)
+        XCTAssertTrue(transport.envelopes.isEmpty)
+        XCTAssertEqual(store.clawGatewaySessions, sessions)
+        XCTAssertEqual(store.gatewayEvents, events)
+        store.gatewayURL = originalURL
+        XCTAssertFalse(store.gatewayHasUnappliedChanges)
+        store.approveTask(id: child)
+        await store.sendTaskOverLiveGateway(id: child, transport: transport)
+        XCTAssertTrue(transport.envelopes.isEmpty)
+        XCTAssertEqual(store.frozenContinuationEnvelopeCountForTesting, 0)
+        XCTAssertTrue(store.clearSavedGatewayConfiguration())
+        XCTAssertTrue(store.gatewayToken.isEmpty && store.clawGatewayProfile.endpoint.isEmpty)
+        XCTAssertEqual(store.continuationReceiptCountForTesting, 0)
+        XCTAssertEqual(store.clawGatewaySessions, sessions)
+        XCTAssertEqual(store.gatewayEvents, events)
     }
 
     func testExplicitTransportProbeBindingIncludesContinuationReceiptAndLineageFingerprint() throws {
@@ -1226,7 +1260,7 @@ final class ClawTests: XCTestCase {
     func testClawMobileEnvelopeRedactsToken() throws {
         let store = ClawStore(autoScanLocalArtifacts: false)
 
-        store.setGateway(url: "ws://10.0.0.9:18789", token: "super-secret-token")
+        store.setGateway(url: "wss://10.0.0.9:18789", token: "super-secret-token")
         store.queueClawMobileTaskFromCurrentPlan()
 
         XCTAssertFalse(store.lastClawMobileEnvelope.contains("super-secret-token"))
@@ -1235,7 +1269,7 @@ final class ClawTests: XCTestCase {
 
         let data = try XCTUnwrap(store.lastClawMobileEnvelope.data(using: .utf8))
         let envelope = try JSONDecoder.clawGateway.decode(ClawMobileEnvelope.self, from: data)
-        XCTAssertEqual(envelope.gateway.endpoint, "ws://10.0.0.9:18789")
+        XCTAssertEqual(envelope.gateway.endpoint, "wss://10.0.0.9:18789")
         XCTAssertNotEqual(envelope.gateway.tokenFingerprint, "super-secret-token")
         XCTAssertTrue(envelope.auditRequired)
     }
@@ -1243,7 +1277,7 @@ final class ClawTests: XCTestCase {
     func testLiveGatewayRequestUsesBearerTokenOutsideEnvelope() throws {
         let store = ClawStore(autoScanLocalArtifacts: false)
 
-        store.setGateway(url: "ws://10.0.0.9:18789", token: "super-secret-token")
+        store.setGateway(url: "wss://10.0.0.9:18789", token: "super-secret-token")
         store.queueClawMobileTaskFromCurrentPlan()
 
         let task = try XCTUnwrap(store.clawMobileTasks.first)
@@ -6537,7 +6571,7 @@ final class ClawTests: XCTestCase {
             checkpointStore: checkpointStore
         )
         store.setGateway(
-            url: "wss://gateway.example.test/v1?private-marker=hidden",
+            url: "wss://gateway.example.test/v1/private-marker",
             token: "readiness-secret"
         )
         store.generatePhoneAgentPlan()
@@ -6611,7 +6645,7 @@ final class ClawTests: XCTestCase {
             staleDidStart,
             "stale readiness fixture must start within the bound"
         )
-        store.setGateway(url: "ws://new-gateway.example.test", token: "new-readiness-secret")
+        store.setGateway(url: "wss://new-gateway.example.test", token: "new-readiness-secret")
         staleFake.release()
         let staleDidClose = await staleFake.waitForClose(timeoutNanoseconds: 1_000_000_000)
         XCTAssertTrue(
@@ -6892,7 +6926,7 @@ private func makeProbeStore(endpoint: String, token: String) -> ClawStore {
 @MainActor
 private func makeTrustedContinuationProbeStore() throws -> ClawStore {
     let store = ClawStore(autoScanLocalArtifacts: false)
-    store.setGateway(url: "ws://gateway.example.test", token: "continuation-probe-secret")
+    store.setGateway(url: "wss://gateway.example.test", token: "continuation-probe-secret")
     store.phoneAgentCommand = "打开浏览器采集证据后提取结构化数据"
     store.generatePhoneAgentPlan()
     store.queueClawMobileTaskFromCurrentPlan()

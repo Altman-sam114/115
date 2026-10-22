@@ -6,16 +6,10 @@ struct ClawModelPlanningWireRequest: Sendable {
     let body: Data
 
     static func make(_ request: ClawModelPlanningRequest, profile: ClawGatewayProfile, token: String) throws -> Self {
-        let token = token.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !token.isEmpty, !token.contains("\r"), !token.contains("\n"),
+        guard ClawGatewayConfiguration.isValidToken(token),
               ClawMobileBridge.tokenFingerprint(for: token) == profile.tokenFingerprint,
-              var url = URLComponents(string: profile.endpoint), url.user == nil, url.password == nil,
-              url.query == nil, url.fragment == nil, let host = url.host, !host.isEmpty,
-              url.scheme == "ws" || url.scheme == "wss" else { throw ClawModelPlanningError.configuration }
-        // An unencrypted remote Gateway must not receive either text or its bearer credential.
-        guard url.scheme == "wss" || ["localhost", "127.0.0.1", "::1", "[::1]"].contains(host.lowercased()) else {
-            throw ClawModelPlanningError.configuration
-        }
+              let endpoint = ClawGatewayConfiguration.validatedEndpoint(profile.endpoint),
+              var url = URLComponents(string: endpoint) else { throw ClawModelPlanningError.configuration }
         url.scheme = url.scheme == "wss" ? "https" : "http"
         url.path = "/claw/planning"
         guard let target = url.url else { throw ClawModelPlanningError.configuration }

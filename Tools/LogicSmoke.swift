@@ -47,6 +47,53 @@ enum LogicSmoke {
         }
 
         do {
+            let pair = try ClawGatewayConfiguration(endpoint: "wss://gateway.example.test/socket", token: "configuration-smoke-token")
+            let roundTrip = try ClawGatewayConfiguration.decodeSecretRecord(pair.encodedSecretRecord())
+            expect(roundTrip == pair, "secret record must preserve a single endpoint/credential pair")
+            for endpoint in ["ws://gateway.example.test", "wss://user:password@gateway.example.test", "wss://gateway.example.test?token=hidden", "ws://localhost.example.test"] {
+                expect(ClawGatewayConfiguration.validatedEndpoint(endpoint) == nil, "unsafe origin must be rejected before credential use")
+            }
+            let memory = GatewayConfigurationSmokeStore()
+            let checkpoint = ClawInMemoryMissionRunCheckpointStore()
+            let connection = ClawStore(autoScanLocalArtifacts: false, checkpointStore: checkpoint, gatewayConfigurationStore: memory)
+            expect(connection.gatewayURL.isEmpty && connection.gatewayToken.isEmpty, "fresh connection must not use a hardcoded LAN host or production Keychain")
+            connection.gatewayURL = pair.endpoint
+            connection.gatewayToken = pair.token
+            expect(connection.gatewayHasUnappliedChanges && !connection.gatewayConfigurationIsReady, "connection form is a draft until explicitly saved")
+            expect(connection.saveGatewayConfiguration(), "explicit fake-store save should succeed")
+            expect(memory.saveCount == 1 && memory.pair == pair, "save should publish one atomic pair")
+            let restored = ClawStore(autoScanLocalArtifacts: false, checkpointStore: checkpoint, gatewayConfigurationStore: memory)
+            expect(restored.gatewayConfigurationIsReady && restored.gatewayConfigurationState == .restored, "new instance should restore only the connection")
+            expect(restored.clawMobileTasks.isEmpty && restored.clawGatewaySessions.isEmpty && restored.gatewayEvents.isEmpty && restored.lastGatewayLiveRequest == nil, "credential restoration must not restore or send a mission")
+            expect(checkpoint.saveCount == 0, "connection-only changes must not write execution checkpoints")
+            connection.phoneAgentCommand = "打开浏览器搜索资料"
+            connection.generatePhoneAgentPlan()
+            connection.queueClawMobileTaskFromCurrentPlan()
+            connection.gatewayDispatchMode = .liveGateway
+            connection.approveLatestClawMobileTask()
+            connection.gatewayURL = "wss://replacement.example.test"
+            connection.gatewayToken = "new-configuration-smoke-token"
+            let transport = FinalArgumentSmokeTransport()
+            await connection.sendLatestClawMobileTaskOverLiveGateway(transport: transport)
+            let probe = ProbeSmokeTransport()
+            let probeResult = await connection.probeLiveGatewayTransport(transport: probe)
+            let readiness = ClawGatewayReadinessTransportFake()
+            let readinessResult = await connection.requestGatewayReadiness(transport: readiness)
+            expect(!probeResult && !readinessResult && probe.callCount == 0 && readiness.callCount == 0, "dirty pair must not reach control transports")
+            expect(transport.envelopes.isEmpty && connection.clawGatewaySessions.isEmpty && connection.gatewayEvents.isEmpty, "dirty pair must be rejected before session creation")
+            memory.failSave = true
+            expect(!connection.saveGatewayConfiguration() && memory.pair == pair, "failed save must not replace the applied pair")
+            connection.discardGatewayConfigurationDraft()
+            expect(connection.gatewayConfigurationIsReady, "discard should restore the applied pair without network")
+            await connection.sendLatestClawMobileTaskOverLiveGateway(transport: transport)
+            expect(transport.envelopes.isEmpty, "restoring a connection must not resurrect an approval")
+            expect(connection.clearSavedGatewayConfiguration() && memory.pair == nil, "clear should remove only the local pair")
+            expect(connection.gatewayToken.isEmpty && !connection.gatewayConfigurationIsReady, "clear must drop runtime credentials")
+        } catch {
+            failures.append("valid connection configuration contract failed")
+        }
+
+        do {
             let taskID = UUID()
             let localID = UUID()
             let remoteID = UUID()
@@ -294,7 +341,7 @@ enum LogicSmoke {
 
         let readinessStore = ClawStore(autoScanLocalArtifacts: false)
         readinessStore.setGateway(
-            url: "wss://gateway.example.test/v1?private-marker=hidden",
+            url: "wss://gateway.example.test/v1/private-marker",
             token: "readiness-secret"
         )
         readinessStore.generatePhoneAgentPlan()
@@ -336,7 +383,7 @@ enum LogicSmoke {
             staleReadinessDidStart,
             "stale readiness fixture must start within the bound"
         )
-        readinessStore.setGateway(url: "ws://new-gateway.example.test", token: "new-readiness-secret")
+        readinessStore.setGateway(url: "wss://new-gateway.example.test", token: "new-readiness-secret")
         staleFake.release()
         let staleReadinessDidClose = await staleFake.waitForClose(timeoutNanoseconds: 1_000_000_000)
         expect(
@@ -402,8 +449,8 @@ enum LogicSmoke {
         for (endpoint, token) in [
             ("", "probe-token"),
             ("http://gateway.example.test", "probe-token"),
-            ("ws://gateway.example.test", ""),
-            ("ws://gateway.example.test", "   ")
+            ("wss://gateway.example.test", ""),
+            ("wss://gateway.example.test", "   ")
         ] {
             let invalidStore = ClawStore(autoScanLocalArtifacts: false)
             invalidStore.setGateway(url: endpoint, token: token)
@@ -476,7 +523,7 @@ enum LogicSmoke {
         expect(store.gatewayTransportProbeSummary(for: probeReviewFocus).guidance.contains("配对") == true, "probe guidance should distinguish reachability from pairing")
 
         let wssStore = ClawStore(autoScanLocalArtifacts: false)
-        wssStore.setGateway(url: "wss://gateway.example.test/v1?marker=private-marker", token: "probe-secret")
+        wssStore.setGateway(url: "wss://gateway.example.test/v1/private-marker", token: "probe-secret")
         wssStore.generatePhoneAgentPlan()
         wssStore.queueClawMobileTaskFromCurrentPlan()
         let wssTransport = ProbeSmokeTransport()
@@ -488,7 +535,7 @@ enum LogicSmoke {
         expect(wssStore.gatewayTransportProbeSummary.endpoint.contains("?") == false, "wss summary should redact query")
 
         let failedProbeStore = ClawStore(autoScanLocalArtifacts: false)
-        failedProbeStore.setGateway(url: "wss://gateway.example.test/v1?marker=private-marker", token: "probe-secret")
+        failedProbeStore.setGateway(url: "wss://gateway.example.test/v1/private-marker", token: "probe-secret")
         failedProbeStore.generatePhoneAgentPlan()
         failedProbeStore.queueClawMobileTaskFromCurrentPlan()
         let failedProbeTransport = ProbeSmokeTransport(outcome: .timeout)
@@ -517,7 +564,7 @@ enum LogicSmoke {
             (ProbeSmokeTransport.Outcome.pingFailure, "probe_ping_failed")
         ] {
             let failureStore = ClawStore(autoScanLocalArtifacts: false)
-            failureStore.setGateway(url: "ws://gateway.example.test", token: "probe-secret")
+            failureStore.setGateway(url: "wss://gateway.example.test", token: "probe-secret")
             failureStore.generatePhoneAgentPlan()
             failureStore.queueClawMobileTaskFromCurrentPlan()
             let failureTransport = ProbeSmokeTransport(outcome: outcome)
@@ -529,7 +576,7 @@ enum LogicSmoke {
         }
 
         let cancellationStore = ClawStore(autoScanLocalArtifacts: false)
-        cancellationStore.setGateway(url: "ws://gateway.example.test", token: "probe-secret")
+        cancellationStore.setGateway(url: "wss://gateway.example.test", token: "probe-secret")
         cancellationStore.generatePhoneAgentPlan()
         cancellationStore.queueClawMobileTaskFromCurrentPlan()
         let cancellationTransport = ProbeSmokeTransport(outcome: .waitForRelease)
@@ -548,7 +595,7 @@ enum LogicSmoke {
         expect(cancellationTransport.bodyBytes == [0] && cancellationTransport.applicationMessageCount == 0, "cancelled probe should not send envelope")
 
         let duplicateStore = ClawStore(autoScanLocalArtifacts: false)
-        duplicateStore.setGateway(url: "ws://gateway.example.test", token: "probe-secret")
+        duplicateStore.setGateway(url: "wss://gateway.example.test", token: "probe-secret")
         duplicateStore.generatePhoneAgentPlan()
         duplicateStore.queueClawMobileTaskFromCurrentPlan()
         let duplicateTransport = ProbeSmokeTransport(outcome: .waitForRelease)
@@ -567,7 +614,7 @@ enum LogicSmoke {
         expect(duplicateTransport.closeCount == 1, "duplicate in-flight probe should close one socket")
 
         let staleStore = ClawStore(autoScanLocalArtifacts: false)
-        staleStore.setGateway(url: "ws://gateway.example.test", token: "probe-secret")
+        staleStore.setGateway(url: "wss://gateway.example.test", token: "probe-secret")
         staleStore.generatePhoneAgentPlan()
         staleStore.queueClawMobileTaskFromCurrentPlan()
         let staleScope = staleStore.missionRunSummary.missionScopeID.map {
@@ -590,7 +637,7 @@ enum LogicSmoke {
         expect(staleTransport.callCount == 1 && staleTransport.pingCount == 1 && staleTransport.closeCount == 1, "stale probe should have one bounded transport call")
 
         let mismatchStore = ClawStore(autoScanLocalArtifacts: false)
-        mismatchStore.setGateway(url: "ws://gateway.example.test", token: "probe-secret")
+        mismatchStore.setGateway(url: "wss://gateway.example.test", token: "probe-secret")
         mismatchStore.generatePhoneAgentPlan()
         mismatchStore.queueClawMobileTaskFromCurrentPlan()
         if let mismatchScope = mismatchStore.missionRunSummary.missionScopeID {
@@ -4790,4 +4837,18 @@ private struct ModelPlanningSmokeTransport: ClawModelPlanningTransport {
             "usage": ["inputTokens": 11, "outputTokens": 22], "effects": ["computerActions": false, "taskDispatched": false]
         ])
     }
+}
+
+private final class GatewayConfigurationSmokeStore: @unchecked Sendable, ClawGatewayConfigurationStore {
+    var pair: ClawGatewayConfiguration?
+    var failSave = false
+    private(set) var saveCount = 0
+    func load() -> ClawGatewayConfigurationLoadResult { pair.map { .loaded($0) } ?? .none }
+    func save(_ configuration: ClawGatewayConfiguration) -> ClawGatewayConfigurationWriteResult {
+        saveCount += 1
+        guard !failSave else { return .failed }
+        pair = configuration
+        return .saved
+    }
+    func clear() -> ClawGatewayConfigurationClearResult { pair = nil; return .cleared }
 }

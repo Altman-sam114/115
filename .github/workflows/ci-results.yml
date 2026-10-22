@@ -12,7 +12,7 @@ permissions:
 
 env:
   CI_POLICY_VERSION: v0.4
-  PRODUCT_ITERATION: v0.85
+  PRODUCT_ITERATION: v0.86
   PROJECT_NAME: Claw
   XCODE_PROJECT: Claw.xcodeproj
   XCODE_SCHEME: Claw
@@ -96,7 +96,7 @@ jobs:
               -swift-version 6 \
               -sdk "$sdk_path" \
               -module-cache-path .build/SwiftModuleCache \
-              Claw/Core/*.swift Claw/Services/ClawStore.swift Claw/Services/ClawModelPlanningTransport.swift Tools/LogicSmoke.swift \
+              Claw/Core/*.swift Claw/Services/ClawStore.swift Claw/Services/ClawModelPlanningTransport.swift Claw/Services/ClawGatewayKeychainStore.swift Tools/LogicSmoke.swift \
               -o .build/claw-logic-smoke
             .build/claw-logic-smoke
           } 2>&1 | tee "$RESULT_DIR/swift-logic-smoke.log"

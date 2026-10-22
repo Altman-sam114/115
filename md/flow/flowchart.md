@@ -1,5 +1,26 @@
 # 项目流程图
 
+v0.86 连接保存与隔离：Keychain 只恢复连接，不恢复任务；生产连接统一 WSS/精确 loopback WS，无 credentials/query/fragment。测试默认 no-op，不读真实 Keychain。
+
+```mermaid
+flowchart TD
+  Start[启动读取本机 Keychain 单条 pair] --> Valid{版本/shape/地址/token 合法?}
+  Valid -->|是| Applied[只应用连接 不联网/恢复任务]
+  Valid -->|缺失/损坏/不可用| Local[空配置或保留原 pair 固定提示]
+  Edit[编辑地址或 Token 草稿] --> Revoke[撤销旧审批/模型/续接冻结授权]
+  Revoke --> Dirty[dirty: 模型/probe/readiness/live/continuation 零调用]
+  Dirty --> Save[用户显式保存]
+  Save --> Strict[共享安全 origin/header 校验]
+  Strict --> Write[单条 Keychain 原子更新 仅本设备]
+  Write -->|成功| Applied
+  Write -->|失败| Keep[保留旧 pair 草稿不可发送]
+  Applied --> Click[另行复核/审批/显式请求]
+  Click --> Transport[独立 transport 再验配置 无 redirect/cookie/cache]
+  Clear[用户确认清除] --> Delete{本机存储清除成功?}
+  Delete -->|是| Drop[清运行时 pair/旧授权 不撤销远端动作]
+  Delete -->|否| Keep
+```
+
 ```mermaid
 flowchart TD
   Click["显式请求模型计划\n只发送本次任务文本"] --> Auth["固定 HTTP 路径 + header-only token\n远端必须 HTTPS / WSS"]

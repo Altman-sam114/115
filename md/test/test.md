@@ -1,5 +1,15 @@
 # 测试规范
 
+## v0.86 安全连接与草稿隔离
+
+云端新增 `ClawGatewayConfigurationTests.swift` 14 项及一项冻结 continuation 集成回归，预期双设备各 165 项。覆盖 WSS/精确 loopback、userinfo/query/fragment/端口/控制字符/反斜线/UTF-8/大小/header 注入、严格版本/未知字段/重复 escaped key/16 KiB secret record、自身最大合法编码 round trip、默认 no-op/空配置、原子 fake save/重启只恢复连接、save/load/clear failure 和不写明文 fallback、显式重读/还原草稿、完整 pair dirty guard 与旧普通/续接授权不可复活。地址或 token 单独/一起变化及非法 token 均须模型/probe/readiness/live 零 transport，普通/续接零新 session/event/artifact；返回同值仍需重新审批。
+
+真实 Keychain 测试只在云端 XCTest 的随机 `app.claw.gateway.connection.test.<UUID>` service 下运行，检查一条 record 的 create/update/reopen、WhenUnlockedThisDeviceOnly/非同步属性、损坏记录 fail closed 且不静默删除、显式 delete/idempotence；不得读写/清除 production service、用户 Keychain 或 aitrans。默认 Store/LogicSmoke 只用 no-op/注入 fake。生产 WebSocket 三入口另做 unsafe origin/header 前置拒绝测试，不打开 socket；无 redirect/cookie/cache 的真实远端运行、Mac 签名/锁屏行为仍须专门验收，不冒充已测。
+
+旧成功 probe/readiness 夹具迁移为合法 WSS 或 loopback 无 query 路径，保留旧独立敏感 endpoint 脱敏和 stale/receipt/审批/失败断言，并新增完整非法地址矩阵；不删除原断言、不放松安全 gate。LogicSmoke 回归安全配置、只读恢复、失败原 pair 保留、dirty 零调用和还原不恢复审批；cloud swiftc 同时编译 Keychain adapter，不在本机编译或调用真实 Keychain。
+
+保留 15 项 CI 全矩阵、生产模型 HTTP + 21 个 provider fixture 请求、双平台 Release/双设备 XCTest、四个 xcresult 和实际非白屏 PNG/JSON。v0.85 `edab5a9` / run `39841407261` attempt `1` 已完整复判通过，但不能替代本轮结果。所有 Swift/UI/业务验证只在新 main GitHub Actions 执行；本地仍仅 git/diff/YAML/plist/文本检查，不运行任何编译、smoke、node --check 或模拟器。
+
 ## v0.85 模型规划合同与真实 HTTP 链路
 
 新增 `ClawModelPlanningTests.swift` 14 项（补强后预期双设备各 150 项）：strict shape/nonce/effects、布尔/数字区分/实际 usage、duplicate escaped key/depth/byte 限制、八种 typed kind 不依赖模型 title/target、allowlist/全人工审批/固定安全参数、未知字段/种类/审批注入/路径/URL/UTF-8、header-only token/固定 HTTP 路径/明文远端拒绝、模型成功只更新计划和用量/零 task/session/event/checkpoint save、缺正文真实派发零调用、Mission 保留模型计划和精确参数、失败无自动 fallback、非法配置零调用、duplicate/cancel/旧请求不覆盖新 operation、command 切回/profile/plan/queue/Mission revision stale、已接受计划失效后不可 queue 或启动。模型有效预填字段也必须合法 Apply 才清除 pending review，打开/关闭/旧请求/模拟审批不构成绕过，真实审批与发送独立检查；Apply 后还须新审批。所有异步 fake coordination 与 task 回收必须有界，不删除既有测试。

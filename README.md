@@ -1,5 +1,17 @@
 # Claw iOS Controller Prototype
 
+## 安全连接与未保存草稿（v0.86）
+
+Mac Catalyst、iPad、iPhone 共用“连接与模型”的网关配置。输入地址与 Token 后，必须显式“保存到本机 Keychain”；两者以一条版本化记录原子更新，解锁时可读、仅本设备、不 iCloud 同步，不写 UserDefaults/普通文件或明文 fallback。保存失败保留原已应用连接，草稿不会成为运行时配置。没有保存过的设备从空配置开始，不再默认指向硬编码私网主机。
+
+启动只读取连接，**不联网、不恢复任务/审批/receipt、不自动请求模型或发送**。可以明确还原当前进程的未保存更改，或确认后重新读取 Keychain；清除本机连接也需确认，存储清除成功后才移除运行时凭据并撤销旧授权，失败明确提示。清除不是撤销远端 Token，也不能停止已发送的电脑动作。Keychain 暂不可用/记录损坏时不应用内容、不自动删除，可解锁后显式重读。
+
+模型 HTTP、普通任务、transport probe、readiness 和 continuation 统一拒绝不安全地址：远端只能 WSS，明文 WS 仅 `localhost`、`127.0.0.1` 或 `::1`；不接受 userinfo、query、fragment、控制字符、反斜线、非法端口或超限。Token 为 1–4096 字节可见 ASCII，无空格/控制字符；只在合法请求 header 使用。生产 WebSocket 使用无 cookie/cache 的短生命周期 session，拒绝重定向。历史明文私网示例不再适用于真实客户端，远端需自行配置可信 TLS 反向代理。
+
+只要连接表单与当前已应用的完整 pair 不同，所有真实入口拒绝调用 transport，普通/续接发送在创建 session 前停止；不会把新 Token 发往旧地址，也不只用短指纹判等。编辑切回、保存或重读不恢复旧审批、模型计划或冻结续接授权，必须重新复核。`setGateway` 是不持久化的内部应用/测试入口，生产 UI 只走验证后的存储 API；测试默认 no-op，不访问生产 Keychain。
+
+v0.85 基线 `edab5a9a6feb6598e9122122fe549951f02c1d6b` / run `39841407261` attempt `1` 已完成 artifact 复判：15 项检查、双设备各 150 项测试、实际两张非白屏截图及 21 个模型协议 fixture 请求通过。v0.86 代码与新增测试仍须新 main 云端结果包复判；Keychain 不等于配对/设备信任，未完成真实模型、授权桌面 E2E、实机锁屏和签名分发验收。
+
 ## 自托管模型规划（v0.85）
 
 Mac/iPad/iPhone 共享“请求自托管模型计划”入口。它向已保存的 Gateway 请求一次真实推理；规则预览与演练仍是单独的显式入口，不冒充模型，也不会在模型失败后自动回退。模型仅收到本次任务文本与固定动作 schema，不收到屏幕、文件、历史会话、Gateway token 或 receipt。成功只更新待审计划及服务实际报告的 token 计数，不生成任务或执行电脑动作。
@@ -39,7 +51,7 @@ Gateway 文件 handler 缺少结构化路径或正文时只产出固定脱敏审
 
 Mac Catalyst / iPad / iPhone 共用“输入、Mission 概况、按需详情”：主动作、风险/审批/结果计数、失败说明和续接编辑保持可见；详情按“计划与审批、证据复核、会话与事件、连接与权限”切换。高级 metadata 诊断及 envelope 默认收起，原有审计组件仍可显式查看，不再默认在左右栏重复铺开。详情、展开状态和未应用的续接输入由父 View 持有，重排不覆盖输入；新草稿/父 scope 会重新绑定，旧 Apply 按钮不能改写新草稿。临时输入不进入 checkpoint、envelope、日志或 artifact，只有显式“应用参数”仍走原 typed Store API。
 
-当前规划器仍是规则预览，界面明确标注未接入推理模型。结果来源依据匹配 task/session 的固定 channel 和 Gateway ack 显示，不从当前发送设置反推；Live 事件已接收不等于真实动作成功。本文后续 v0.69/v0.72 等入口位置为历史说明，v0.83 起单一 Smart Rail 位于共享 Mission 概况，复核 dock 不再重复主动作。协议、审批、receipt、allowlist 和真实桌面权限不变，尚不是发布候选版本。
+v0.83 的本机规划器是规则预览，v0.85 起另有显式自托管模型入口，两者来源不混同。结果来源依据匹配 task/session 的固定 channel 和 Gateway ack 显示，不从当前发送设置反推；Live 事件已接收不等于真实动作成功。本文后续 v0.69/v0.72 等入口位置为历史说明，v0.83 起单一 Smart Rail 位于共享 Mission 概况，复核 dock 不再重复主动作。协议、审批、receipt、allowlist 和真实桌面权限不变，尚不是发布候选版本。
 
 云端启动截图采用 CI policy v0.4：实际 iPhone/iPad 帧必须通过 Claw + Mission Run 内容就绪检查，再生成小型 readiness JSON；最多 15 帧、帧间 2 秒，仅保留最后一张，失败使整轮失败。OCR 原文不写日志或结果包。结果包复判仍必须打开真实 PNG，截图文件存在不等于界面可用；该检查不改变 App/Gateway 协议，也不替代真实设备交互验收。
 

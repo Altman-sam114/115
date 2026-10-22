@@ -335,24 +335,7 @@ struct AutomationCenterView: View {
         VStack(alignment: .leading, spacing: 12) {
             SectionHeader(title: "Claw 电脑网关", icon: "network")
 
-            VStack(alignment: .leading, spacing: 10) {
-                TextField("Gateway URL", text: $store.gatewayURL)
-                    .textInputAutocapitalization(.never)
-                    .keyboardType(.URL)
-                    .textFieldStyle(.roundedBorder)
-
-                SecureField("Gateway Token", text: $store.gatewayToken)
-                    .textFieldStyle(.roundedBorder)
-
-                Button {
-                    store.setGateway(url: store.gatewayURL, token: store.gatewayToken)
-                } label: {
-                    Label("保存网关配置", systemImage: "checkmark.seal.fill")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(PrimaryActionButtonStyle())
-            }
-            .panelCard()
+            ClawGatewayConfigurationView()
 
             VStack(spacing: 10) {
                 ForEach(store.automationTargets) { target in

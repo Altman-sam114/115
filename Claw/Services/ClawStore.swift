@@ -657,19 +657,12 @@ final class ClawStore: ObservableObject {
     @Published private(set) var skills: [ClawSkill]
     @Published private(set) var automationTargets: [AutomationTarget]
     @Published var gatewayURL: String {
-        didSet {
-            invalidateModelPlanning()
-            ordinaryTaskApprovals.removeAll()
-            advanceLiveGatewayPresentationGeneration()
-        }
+        didSet { invalidateGatewayConfigurationAuthorization() }
     }
     @Published var gatewayToken: String {
-        didSet {
-            invalidateModelPlanning()
-            ordinaryTaskApprovals.removeAll()
-            advanceLiveGatewayPresentationGeneration()
-        }
+        didSet { invalidateGatewayConfigurationAuthorization() }
     }
+    @Published private(set) var gatewayConfigurationState: ClawGatewayConfigurationState = .notSaved
     @Published private(set) var lastAutomationDraft: String
     @Published private(set) var phoneAgentCapabilities: [PhoneAgentCapability]
     @Published var phoneAgentCommand: String {
@@ -707,6 +700,8 @@ final class ClawStore: ObservableObject {
 
     private let artifactDirectoryURL: URL
     private let missionRunCheckpointStore: any ClawMissionRunCheckpointStore
+    private let gatewayConfigurationStore: any ClawGatewayConfigurationStore
+    private var appliedGatewayToken = ""
     private var gatewayConnectionSessionID: UUID?
     private var liveGatewayPresentationGeneration = 0
     private var liveGatewaySessionGenerations: [UUID: Int] = [:]
@@ -748,7 +743,8 @@ final class ClawStore: ObservableObject {
         model: LocalClawModel? = nil,
         artifactDirectoryURL: URL = ModelArtifactStore.defaultDirectoryURL(),
         autoScanLocalArtifacts: Bool = true,
-        checkpointStore: any ClawMissionRunCheckpointStore = ClawNoopMissionRunCheckpointStore()
+        checkpointStore: any ClawMissionRunCheckpointStore = ClawNoopMissionRunCheckpointStore(),
+        gatewayConfigurationStore: any ClawGatewayConfigurationStore = ClawNoopGatewayConfigurationStore()
     ) {
         let resolvedModel = model ?? ClawStore.defaultModel
         let capabilities = ClawStore.defaultPhoneAgentCapabilities
@@ -756,6 +752,7 @@ final class ClawStore: ObservableObject {
         self.model = resolvedModel
         self.artifactDirectoryURL = artifactDirectoryURL
         self.missionRunCheckpointStore = checkpointStore
+        self.gatewayConfigurationStore = gatewayConfigurationStore
         self.validation = LocalArtifactValidator.validate(
             manifest: resolvedModel.artifactManifest,
             presentFiles: []
@@ -767,7 +764,7 @@ final class ClawStore: ObservableObject {
         self.documents = ClawStore.defaultDocuments
         self.skills = ClawStore.defaultSkills
         self.automationTargets = ClawStore.defaultAutomationTargets
-        self.gatewayURL = "ws://192.168.1.12:18789"
+        self.gatewayURL = ""
         self.gatewayToken = ""
         self.lastAutomationDraft = "尚未生成自动化 payload。"
         self.phoneAgentCapabilities = capabilities
@@ -818,6 +815,7 @@ final class ClawStore: ObservableObject {
         if autoScanLocalArtifacts {
             scanLocalArtifacts()
         }
+        reloadSavedGatewayConfiguration()
         loadMissionRunCheckpoint()
     }
 
@@ -1261,7 +1259,7 @@ final class ClawStore: ObservableObject {
             return nil
         }
         let endpoint = clawGatewayProfile.endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
-        let token = gatewayToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        let token = gatewayConfigurationIsReady ? appliedGatewayToken : ""
         let parts = [
             task.id.uuidString,
             task.status.rawValue,
@@ -1396,13 +1394,13 @@ final class ClawStore: ObservableObject {
             task: task,
             profile: clawGatewayProfile,
             envelopeJSON: "",
-            rawToken: gatewayToken,
+            rawToken: gatewayConfigurationIsReady ? appliedGatewayToken : "",
             sessionID: resolution.session?.id
         )
         if task.status == .blocked {
             request.canAttemptLive = false
         }
-        request.canAttemptLive = request.canAttemptLive && isValidProbeEndpoint(request.endpoint)
+        request.canAttemptLive = request.canAttemptLive && gatewayConfigurationIsReady
         let digestParts = [
             task.id.uuidString,
             task.status.rawValue,
@@ -1454,15 +1452,7 @@ final class ClawStore: ObservableObject {
     }
 
     private func isValidProbeEndpoint(_ endpoint: String) -> Bool {
-        guard let components = URLComponents(string: endpoint),
-              let scheme = components.scheme?.lowercased(),
-              scheme == "ws" || scheme == "wss",
-              components.host?.isEmpty == false,
-              components.user == nil,
-              components.password == nil else {
-            return false
-        }
-        return true
+        ClawGatewayConfiguration.validatedEndpoint(endpoint) != nil
     }
 
     private func resetGatewayTransportProbeState(
@@ -2796,7 +2786,7 @@ final class ClawStore: ObservableObject {
 
     func draftAutomationPayload(for target: AutomationTarget) {
         let prompt = selectedSkill?.promptTemplate ?? "请根据当前任务生成 Claw 电脑接管计划。"
-        let cleanGatewayURL = gatewayURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanGatewayURL = ClawGatewayLiveRequest.safeEndpointDisplay(clawGatewayProfile.endpoint)
         let destination = target.channel == .clawGateway ? cleanGatewayURL : target.endpoint
         lastAutomationDraft = """
         channel: \(target.channel.title)
@@ -2811,18 +2801,100 @@ final class ClawStore: ObservableObject {
         """
     }
 
+    var gatewayHasUnappliedChanges: Bool {
+        gatewayURL != clawGatewayProfile.endpoint ||
+            gatewayToken != appliedGatewayToken
+    }
+
+    var gatewayConfigurationIsReady: Bool {
+        !gatewayHasUnappliedChanges &&
+            (try? ClawGatewayConfiguration(endpoint: clawGatewayProfile.endpoint, token: appliedGatewayToken)) != nil &&
+            ClawMobileBridge.tokenFingerprint(for: appliedGatewayToken) == clawGatewayProfile.tokenFingerprint
+    }
+
+    @discardableResult
+    func saveGatewayConfiguration() -> Bool {
+        let configuration: ClawGatewayConfiguration
+        do {
+            configuration = try ClawGatewayConfiguration(endpoint: gatewayURL, token: gatewayToken)
+        } catch {
+            gatewayConfigurationState = .invalidInput((error as? ClawGatewayConfigurationError) ?? .invalidRecord)
+            return false
+        }
+        switch gatewayConfigurationStore.save(configuration) {
+        case .saved:
+            setGateway(url: configuration.endpoint, token: configuration.token)
+            gatewayConfigurationState = .saved
+            return true
+        case .failed:
+            gatewayConfigurationState = .saveFailed
+        case .unavailable:
+            gatewayConfigurationState = .unavailable
+        }
+        return false
+    }
+
+    func reloadSavedGatewayConfiguration() {
+        switch gatewayConfigurationStore.load() {
+        case .loaded(let configuration):
+            setGateway(url: configuration.endpoint, token: configuration.token)
+            gatewayConfigurationState = .restored
+        case .none:
+            setGateway(url: "", token: "")
+            gatewayConfigurationState = .notSaved
+        case .invalid:
+            gatewayConfigurationState = .invalidRecord
+        case .unavailable:
+            gatewayConfigurationState = .unavailable
+        }
+    }
+
+    func discardGatewayConfigurationDraft() {
+        gatewayURL = clawGatewayProfile.endpoint
+        gatewayToken = appliedGatewayToken
+    }
+
+    @discardableResult
+    func clearSavedGatewayConfiguration() -> Bool {
+        switch gatewayConfigurationStore.clear() {
+        case .cleared:
+            setGateway(url: "", token: "")
+            gatewayConfigurationState = .cleared
+            return true
+        case .failed:
+            gatewayConfigurationState = .clearFailed
+        case .unavailable:
+            gatewayConfigurationState = .unavailable
+        }
+        return false
+    }
+
+    private func invalidateGatewayConfigurationAuthorization() {
+        invalidateModelPlanning()
+        ordinaryTaskApprovals.removeAll()
+        advanceLiveGatewayPresentationGeneration()
+        gatewayTransportProbeGeneration &+= 1
+        gatewayReadinessGeneration &+= 1
+        cancelGatewayReadinessTransport()
+        invalidateContinuationAuthorization(reason: .profileChanged)
+    }
+
+    // Apply in memory only; production UI must first use the validated durable save API.
     func setGateway(url: String, token: String) {
-        gatewayURL = url
+        gatewayURL = url.trimmingCharacters(in: .whitespacesAndNewlines)
         gatewayToken = token
+        appliedGatewayToken = token
         clawGatewayProfile.endpoint = url.trimmingCharacters(in: .whitespacesAndNewlines)
         clawGatewayProfile.tokenFingerprint = ClawMobileBridge.tokenFingerprint(for: token)
+        gatewayConfigurationState = .volatile
+        continuationReceipts.removeAll()
         invalidateContinuationAuthorization(reason: .profileChanged)
         resetGatewayTransportProbeState()
         resetGatewayReadinessState()
         automationTargets = automationTargets.map { target in
             var updated = target
             if updated.channel == .clawGateway {
-                updated.isConfigured = url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                updated.isConfigured = gatewayConfigurationIsReady
             }
             return updated
         }
@@ -2847,7 +2919,7 @@ final class ClawStore: ObservableObject {
         let wire: ClawModelPlanningWireRequest
         do {
             request = try ClawModelPlanningRequest(command: phoneAgentCommand)
-            guard gatewayURL.trimmingCharacters(in: .whitespacesAndNewlines) == clawGatewayProfile.endpoint else {
+            guard gatewayConfigurationIsReady else {
                 throw ClawModelPlanningError.configuration
             }
             wire = try ClawModelPlanningWireRequest.make(request, profile: clawGatewayProfile, token: gatewayToken)
@@ -2918,8 +2990,7 @@ final class ClawStore: ObservableObject {
             phoneAgentPlan.command == phoneAgentCommand.trimmingCharacters(in: .whitespacesAndNewlines) &&
             acceptedModelPlanCommandRevision == modelPlanningCommandRevision &&
             acceptedModelPlanProfile == canonicalProfileDigest(clawGatewayProfile) &&
-            gatewayURL.trimmingCharacters(in: .whitespacesAndNewlines) == clawGatewayProfile.endpoint &&
-            ClawMobileBridge.tokenFingerprint(for: gatewayToken) == clawGatewayProfile.tokenFingerprint
+            gatewayConfigurationIsReady
     }
 
     private func modelPlanningBinding() -> String {
@@ -3445,6 +3516,10 @@ final class ClawStore: ObservableObject {
             return
         }
         let task = clawMobileTasks[index]
+        if gatewayHasUnappliedChanges && (gatewayDispatchMode == .liveGateway || task.continuationLineage != nil) {
+            lastGatewayEvent = "Live Gateway 未审批：连接草稿尚未保存，请先保存连接并重新审批。"
+            return
+        }
         guard task.blockedCount == 0 else {
             clawMobileTasks[index].status = .blocked
             persistMissionRunCheckpointIfNeeded()
@@ -3779,6 +3854,10 @@ final class ClawStore: ObservableObject {
             return nil
         }
         let candidate = clawMobileTasks[index]
+        if mode == .liveGateway && gatewayHasUnappliedChanges {
+            lastGatewayEvent = "Live Gateway 未发送：连接草稿尚未保存，不会把新凭据发送到旧地址。"
+            return nil
+        }
         let envelopeJSON: String
         if candidate.continuationLineage != nil {
             if candidate.status == .sent {
@@ -3843,6 +3922,9 @@ final class ClawStore: ObservableObject {
     }
 
     private func ordinaryLiveDispatchIssue(_ task: ClawMobileTask) -> String? {
+        guard !gatewayHasUnappliedChanges else {
+            return "Live Gateway 未发送：连接草稿尚未保存，请先保存连接并重新审批。"
+        }
         if let issue = ClawTaskArguments.issue(in: task) {
             return "Live Gateway 未发送：\(issue.message) 请在计划与审批中复核最终参数。"
         }
@@ -4435,9 +4517,8 @@ final class ClawStore: ObservableObject {
         let profileTokenFingerprint = clawGatewayProfile.tokenFingerprint == "unset"
             ? "unset"
             : clawGatewayProfile.tokenFingerprint
-        let tokenConfigured = profileTokenFingerprint != "unset" &&
-            gatewayToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-        let isWebSocket = profileEndpoint.hasPrefix("ws://") || profileEndpoint.hasPrefix("wss://")
+        let tokenConfigured = profileTokenFingerprint != "unset" && gatewayConfigurationIsReady
+        let isWebSocket = ClawGatewayConfiguration.validatedEndpoint(profileEndpoint) != nil
         let health = gatewayLiveHealthSummary
         let request = lastGatewayLiveRequest
         let requestMatchesTask = request?.taskID == task.id
@@ -4482,8 +4563,8 @@ final class ClawStore: ObservableObject {
             guidance = "当前只允许 WebSocket endpoint；不会因为地址存在就尝试恢复。"
         } else if tokenConfigured == false {
             state = .tokenMissing
-            status = "endpoint 已配置，但缺少运行时 token。"
-            guidance = "只显示 token 指纹状态；运行时 token 缺失时不能发送或恢复。"
+            status = gatewayHasUnappliedChanges ? "连接草稿尚未保存，不能发起真实请求。" : "endpoint 已配置，但缺少合法运行时 token。"
+            guidance = "请先保存或还原连接草稿；完整已应用配置与凭据不匹配时不能发送或恢复。"
         } else if hasStaleScope {
             state = requestMatchesTask ? .stale : .mismatched
             status = requestMatchesTask ? "旧 live request 与当前配置或 session 不一致。" : "live request 属于其他 task。"
@@ -4651,6 +4732,7 @@ final class ClawStore: ObservableObject {
     private func liveGatewayProfileDigest() -> String {
         ClawContinuationContract.sha256([
             clawGatewayProfile.endpoint,
+            ClawContinuationContract.sha256(gatewayURL),
             clawGatewayProfile.tokenFingerprint,
             ClawMobileBridge.tokenFingerprint(for: gatewayToken),
             clawGatewayProfile.deviceName,
@@ -6604,15 +6686,15 @@ enum ClawGatewayLiveClient {
         sessionID: UUID? = nil
     ) -> ClawGatewayLiveRequest {
         let endpoint = profile.endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
-        let isWebSocket = endpoint.hasPrefix("ws://") || endpoint.hasPrefix("wss://")
-        let trimmedToken = rawToken.trimmingCharacters(in: .whitespacesAndNewlines)
-        let hasToken = profile.tokenFingerprint != "unset" && trimmedToken.isEmpty == false
+        let isWebSocket = ClawGatewayConfiguration.validatedEndpoint(endpoint) != nil
+        let hasToken = ClawGatewayConfiguration.isValidToken(rawToken) &&
+            profile.tokenFingerprint != "unset" && ClawMobileBridge.tokenFingerprint(for: rawToken) == profile.tokenFingerprint
         let canAttemptLive = endpoint.isEmpty == false && isWebSocket && hasToken
         let preflight: String
         if endpoint.isEmpty {
             preflight = "未配置桌面 Gateway endpoint。"
         } else if isWebSocket == false {
-            preflight = "Gateway endpoint 必须使用 ws:// 或 wss://。"
+            preflight = "Gateway endpoint 必须为 WSS 或 loopback ws://，且不含账号、query 或 fragment。"
         } else if hasToken == false {
             preflight = "缺少配对 token，只能生成请求预览。"
         } else {
@@ -6624,8 +6706,8 @@ enum ClawGatewayLiveClient {
             "X-Claw-Schema": "claw.computer.control.v1",
             "X-Claw-Token-Fingerprint": profile.tokenFingerprint
         ]
-        if trimmedToken.isEmpty == false {
-            headers["Authorization"] = "Bearer \(trimmedToken)"
+        if canAttemptLive {
+            headers["Authorization"] = "Bearer \(rawToken)"
         }
 
         return ClawGatewayLiveRequest(
@@ -6818,6 +6900,13 @@ struct ClawGatewayWireSessionBinding {
     }
 }
 
+private final class ClawGatewayNoRedirectDelegate: NSObject, URLSessionTaskDelegate, Sendable {
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+        completionHandler(nil)
+    }
+}
+
 struct URLSessionClawGatewayTransport: ClawGatewayTransport, ClawGatewayProbeTransport, ClawGatewayReadinessTransport {
     var retryPolicy: ClawGatewayTransportRetryPolicy
 
@@ -6825,19 +6914,28 @@ struct URLSessionClawGatewayTransport: ClawGatewayTransport, ClawGatewayProbeTra
         self.retryPolicy = retryPolicy
     }
 
+    private func makeSession() -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpShouldSetCookies = false
+        configuration.urlCache = nil
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        return URLSession(configuration: configuration, delegate: ClawGatewayNoRedirectDelegate(), delegateQueue: nil)
+    }
+
     func probeTransport(
         request: ClawGatewayLiveRequest,
         timeoutNanoseconds: UInt64
     ) async throws -> ClawGatewayTransportProbeResult {
         guard request.canAttemptLive,
-              let url = URL(string: request.endpoint),
-              let scheme = url.scheme?.lowercased(),
-              scheme == "ws" || scheme == "wss",
-              url.host?.isEmpty == false else {
+              let endpoint = ClawGatewayConfiguration.validatedEndpoint(request.endpoint),
+              let url = URL(string: endpoint),
+              ClawGatewayConfiguration.isValidAuthorizationHeader(request.headers["Authorization"]) else {
             throw ClawGatewayTransportProbeError.invalidConfiguration
         }
 
-        let socket = URLSession.shared.webSocketTask(with: urlRequest(for: url, request: request))
+        let session = makeSession()
+        defer { session.invalidateAndCancel() }
+        let socket = session.webSocketTask(with: urlRequest(for: url, request: request))
         socket.resume()
         defer {
             socket.cancel(with: .normalClosure, reason: nil)
@@ -6886,14 +6984,15 @@ struct URLSessionClawGatewayTransport: ClawGatewayTransport, ClawGatewayProbeTra
         request: ClawGatewayReadinessTransportRequest,
         timeoutNanoseconds: UInt64
     ) async throws -> ClawGatewayReadinessTransportResult {
-        guard let url = URL(string: request.endpoint),
-              let scheme = url.scheme?.lowercased(),
-              scheme == "ws" || scheme == "wss",
-              url.host?.isEmpty == false else {
+        guard let endpoint = ClawGatewayConfiguration.validatedEndpoint(request.endpoint),
+              let url = URL(string: endpoint),
+              ClawGatewayConfiguration.isValidAuthorizationHeader(request.headers["Authorization"]) else {
             throw ClawGatewayReadinessTransportError.invalidConfiguration
         }
 
-        let socket = URLSession.shared.webSocketTask(with: readinessURLRequest(for: url, request: request))
+        let session = makeSession()
+        defer { session.invalidateAndCancel() }
+        let socket = session.webSocketTask(with: readinessURLRequest(for: url, request: request))
         let closer = ClawGatewayReadinessSocketCloser(socket: socket)
         socket.resume()
         defer {
@@ -6963,7 +7062,10 @@ struct URLSessionClawGatewayTransport: ClawGatewayTransport, ClawGatewayProbeTra
         taskID: UUID
     ) -> AsyncThrowingStream<ClawGatewayWireEvent, Error> {
         AsyncThrowingStream { continuation in
-            guard let url = URL(string: request.endpoint) else {
+            guard request.canAttemptLive,
+                  let endpoint = ClawGatewayConfiguration.validatedEndpoint(request.endpoint),
+                  let url = URL(string: endpoint),
+                  ClawGatewayConfiguration.isValidAuthorizationHeader(request.headers["Authorization"]) else {
                 continuation.finish(throwing: ClawGatewayTransportError.invalidEndpoint(request.endpoint))
                 return
             }
@@ -6973,13 +7075,15 @@ struct URLSessionClawGatewayTransport: ClawGatewayTransport, ClawGatewayProbeTra
             let maxAttempts = isContinuationTask ? 1 : retryPolicy.maxAttempts
 
             let task = Task {
+                let session = makeSession()
+                defer { session.invalidateAndCancel() }
                 var nextSequence = 2
                 var attempt = 1
                 do {
                     while attempt <= maxAttempts, Task.isCancelled == false {
                         var receivedDesktopEvent = false
                         var identity = ClawGatewayWireSessionBinding(taskID: taskID, localSessionID: sessionID)
-                        let socket = URLSession.shared.webSocketTask(with: urlRequest(for: url, request: request))
+                        let socket = session.webSocketTask(with: urlRequest(for: url, request: request))
                         do {
                             socket.resume()
                             try await socket.send(.string(envelopeJSON))
@@ -7118,8 +7222,8 @@ enum ClawGatewayTransportError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .invalidEndpoint(let endpoint):
-            return "Invalid Claw Gateway endpoint: \(endpoint)"
+        case .invalidEndpoint:
+            return "Invalid Claw Gateway endpoint"
         case .invalidContinuationOffer:
             return "Invalid continuation offer identity"
         case .invalidEventIdentity:
@@ -7586,7 +7690,7 @@ extension ClawStore {
     ]
 
     nonisolated static let defaultClawGatewayProfile = ClawGatewayProfile(
-        endpoint: "ws://192.168.1.12:18789",
+        endpoint: "",
         deviceName: "Claw Controller iPhone",
         securityMode: .mutualApproval,
         tokenFingerprint: "unset",
