@@ -4586,7 +4586,7 @@ private struct LiveFailureSmokeTransport: ClawGatewayTransport {
                     sessionID: sessionID, taskID: taskID, sequence: 2,
                     kind: .actionCompleted, actionID: action.id, actionKind: action.kind,
                     actionTitle: action.title, resultStatus: .succeeded, summary: "Real partial smoke evidence",
-                    artifacts: [ClawGatewayArtifact(kind: .auditLog, title: "real.json", reference: "gateway://real-smoke", summary: "Real evidence")]
+                    artifacts: [ClawGatewayArtifact(kind: .auditLog, title: "real.json", reference: "gateway://real-smoke", isRedacted: true)]
                 )))
             }
             continuation.finish(throwing: ClawGatewayTransportError.invalidEndpoint("RAW_ERROR_MARKER"))

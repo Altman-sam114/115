@@ -14,7 +14,7 @@
 ## 当前状态
 
 - 项目方向：OpenClaw 式电脑接管智能体，iPhone 作为控制台，桌面 Claw Gateway 作为执行端。
-- 本轮真实基线：`origin/main` / `0b9746292f4b67afac09ea36d7df50eb3297d061`，基线新 run `38342562083` attempt `1` 已经 Agent C 结果包复判通过；当前 v0.82 diff 尚待新 main push/云端验收。以下 v0.72 SHA/run 均为历史锚点，不代表当前 latest main。
+- 最后通过的真实基线：`0b9746292f4b67afac09ea36d7df50eb3297d061` / run `38342562083` attempt `1`。v0.82 main `07a6747fd7acd55779b7d15f35f06a64c19866ae` / run `39799453977` attempt `1` 的结果包复判不通过，现追加测试夹具修复；新 commit/run 待验收。以下 v0.72 SHA/run 均为历史锚点，不代表当前 latest main。
 - 当前 schema：`claw.computer.control.v1`。
 - 当前核心闭环：用户自然语言任务 -> `PhoneAgentPlanner` -> `ClawMobileTask` -> `ClawMobileEnvelope` -> 模拟事件流或带有界重连/ping 可观测性和进程内 task replay guard 的 WebSocket Gateway -> `ClawGatewayEvent` -> session reducer -> Mission Run / Approval Fast Lane 审批快车道 / Control Snapshot 控制态势快照 / Operator Strip / Loop 继续态势 / Mac Agent Readiness Board 就绪看板 / Mac Gateway Action Preflight Matrix 动作预检矩阵 / Mac Agent Evidence Coverage Map 证据覆盖图 / Mac Agent Next Step Deck 下一步候选卡组 / Mac Agent Run Timeline 执行时间线 / Mac Agent Continuation Gate 继续闸门 / Mac Agent Review Radar 复核雷达 / Mac Agent Handoff Brief 人工交接简报 / Focus Context 聚焦上下文 / Review Detail Dock / Review Trail 复核路径 / Approval Queue 审批队列 / Payload Safety Ledger 载荷安全账本 / Artifact 证据索引 / 复核态势摘要 / 复核优先队列 / 复核聚焦详情 / Live Gateway 连接健康 / Artifact metadata 复核摘要 / 文件变更安全复核摘要 / Shell 命令安全复核摘要 / 提取完整性复核摘要 / 浏览器控制计划和策略诊断复核摘要 / 草稿最终提交安全和桌面策略诊断复核摘要 / Gateway 能力复核摘要 / Accessibility 信号质量复核摘要 / Replay Guard 复核摘要 / AgentTrace handoff 复核 UI / iPad 多栏工作台展示和审批。v0.66 工作区实现进一步加入父 safe decision -> 短时单次 receipt -> 显式 draft/queue/approve/freeze/send -> 全新 child selected action + `runAgentLoop` 的受限跨 task 续接；v0.71 在同一闸门上加入 `extractData` 的 goal/outputPath typed editor，固定 schema/source/completeness 与 exact-key/byte/path 校验；v0.72 在同一 presentation/store 边界加入固定优先级 Smart Operator Action Rail，历史 v0.72 `origin/main` commit `bcf87c8c50f70d3d4157ec41a83333e62cd1ecdc` 已由 run `32631022162` attempt `1` 的 Agent C artifact 复判通过。
 - 当前 Smart Operator Action Rail：从既有 continuation/primary/resume/review metadata 按固定优先级派生单一用户显式入口；compact 与 regular 共享 summary/view/dispatcher，stale 或 scope mismatch 返回 disabled/none，不新增 Gateway action 或协议字段。历史 v0.72 `origin/main` commit `bcf87c8c50f70d3d4157ec41a83333e62cd1ecdc` 对应 run `32631022162` attempt `1`，artifact `claw-ci-v0.2-main-bcf87c8c50f7-run32631022162-attempt1` 已由 Agent C 复判通过。
@@ -23,6 +23,14 @@
 - 当前主要遗留：v0.66 完整负向/action/六种 kind/UI 对称测试矩阵、v0.67 最新云端 artifact 验收与 `manageFiles` 编辑器完整 LogicSmoke/负向覆盖、完整 macOS Accessibility bridge、Playwright/browser-use 兼容控制器、跨重启/跨进程多轮状态、live Gateway 后台保活/真实心跳协议/配对、完整 artifact 内容复核体验。
 
 ## 历史记录
+
+### v0.82 / 云端测试夹具接口修复
+日期：2026-10-22
+
+- 单实例 C 阶段下载复判 run `39799453977` attempt `1` 的 `claw-ci-v0.82-main-07a6747fd7ac-run39799453977-attempt1`（49,362,699 bytes，解压 52 MiB）：manifest SHA/run/attempt、JUnit 12 项 / 3 项失败和主日志一致；Release iOS/Catalyst、Gateway fixture/direct/WebSocket 通过，但 LogicSmoke 与 XCTest 编译失败，不能验收 v0.82。
+- 根因是新增夹具把 event 的 `summary` 误传给 artifact、遗漏必填 `isRedacted`，以及引用不存在的 `hasLiveGatewayAck`。修正为现有 artifact initializer 和 `hasGatewayAck`，保留全部失败隔离、partial evidence、身份与脱敏断言，不改生产接口迁就测试。
+- iPad `test-without-building` 在共享 test host 缺少 executable 时先输出固定诊断并失败，不再启动模拟器产生无效安装报告；正常 iPhone/iPad 验证、截图、结果包门槛不变。
+- 修正本轮授权记录：用户要求不开子 Agent，由同一个 Agent X 串行规划、实现、复判；不声称独立审查。仅运行本地非编译静态检查，所有业务验证等待新 main run；签名、Xcode 用户文件和旧 prompt 保留，aitrans 未修改。
 
 ### v0.82 / 真实 Gateway 失败与模拟结果隔离
 日期：2026-10-22

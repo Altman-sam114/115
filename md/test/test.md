@@ -40,6 +40,8 @@ v0.77 首次云端复判发现 Simulator 的 readiness duplicate fixture 在 1 �
 
 ## v0.82 真实失败隔离矩阵
 
+首次云端 run `39799453977` 因新增测试夹具接口不匹配而未运行 LogicSmoke/XCTest；追加修复使用 `ClawGatewayArtifact(..., isRedacted: true)` 和现有 `hasGatewayAck` 字段，不能删除对应断言。iPad 复用测试产物前检查 test host executable，缺失则保留固定失败日志，不启动无效安装。全量检查仍需新 main artifact 重验；用户本轮要求单 Agent 串行阶段，不开子 Agent。
+
 云端 XCTest 覆盖未审批/重复派发、空或非 ws/wss endpoint/缺 token 的同步与 async preflight 零调用、立即错误、部分 succeeded+artifact/running 后错误、空/partial EOF、真实 Task.cancel() 的空/partial 等待、有界 recorder、首个成功/失败终态后的错误及同批/跨批重复终态/迟帧、错 task/session terminal、生产 wire helper 首帧合法绑定/错误首帧不占绑定/跨帧远端 session 不变/错误 offer 拒绝/合法 remote→local 映射/partial 证据保留/无 receipt 入库、continuation 远端/本地 session ID 区分及 revision 后 task/checkpoint 不变、A/B 未发送/已发送交错、mode 切换及切回同 enum/profile revision，以及 Mission/health/probe/readiness/checkpoint 回归。每条 live 失败必须无 fallback/模拟业务结果，保留实际证据，只一次无 action/artifact 的固定脱敏收口；取消不承诺撤销远端动作。LogicSmoke 覆盖同步 preflight、立即和 partial 失败、重复派发与显式模拟/retry 隔离。所有异步等待先求值再断言，禁止 async autoclosure。本地只做 diff/YAML 非编译检查，完整业务结果只来自最新 main 的云端 artifact。
 
 ## Agent X 循环下的验证规则

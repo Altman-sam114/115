@@ -5624,7 +5624,7 @@ final class ClawTests: XCTestCase {
                 ClawGatewayEvent(
                     sessionID: session.id, taskID: session.taskID, sequence: 5,
                     kind: .artifactStored, summary: "Late artifact",
-                    artifacts: [ClawGatewayArtifact(kind: .auditLog, title: "late.json", reference: "gateway://late", summary: "Late")]
+                    artifacts: [ClawGatewayArtifact(kind: .auditLog, title: "late.json", reference: "gateway://late", isRedacted: true)]
                 )
             ])
             XCTAssertEqual(store.clawGatewaySessions.first?.status, failed ? .needsAttention : .completed)
@@ -5809,7 +5809,7 @@ final class ClawTests: XCTestCase {
         XCTAssertEqual(store.clawGatewaySessions.first, session)
         XCTAssertEqual(store.missionRunSummary, mission)
         XCTAssertTrue(store.gatewayLiveHealthSummary.isCompleted)
-        XCTAssertFalse(store.gatewayPairingDiagnosticsSummary.hasLiveGatewayAck)
+        XCTAssertFalse(store.gatewayPairingDiagnosticsSummary.hasGatewayAck)
         XCTAssertEqual(store.gatewayPairingDiagnosticsSummary.state, .stale)
     }
 
@@ -6634,7 +6634,7 @@ private struct WireSessionMismatchTransport: ClawGatewayTransport {
                     sessionID: remoteID, taskID: taskID, sequence: 2, kind: .actionCompleted,
                     actionID: action.id, actionKind: action.kind, actionTitle: action.title,
                     resultStatus: .succeeded, summary: "Accepted remote evidence",
-                    artifacts: [ClawGatewayArtifact(kind: .auditLog, title: "accepted.json", reference: "gateway://accepted", summary: "Accepted")]
+                    artifacts: [ClawGatewayArtifact(kind: .auditLog, title: "accepted.json", reference: "gateway://accepted", isRedacted: true)]
                 )
                 let encoder = JSONEncoder()
                 encoder.dateEncodingStrategy = .iso8601
@@ -6718,7 +6718,7 @@ private final class LiveFailureRecordingTransport: @unchecked Sendable, ClawGate
                         summary: "Real partial evidence \(index)",
                         artifacts: index == 0 ? [ClawGatewayArtifact(
                             kind: .auditLog, title: "real-evidence.json", reference: "gateway://real-evidence",
-                            summary: "Real evidence preserved"
+                            isRedacted: true
                         )] : []
                     ))
                 }
