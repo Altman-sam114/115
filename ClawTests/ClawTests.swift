@@ -920,14 +920,15 @@ final class ClawTests: XCTestCase {
         let originalURL = store.gatewayURL
         store.gatewayURL = "wss://replacement.example.test"
         XCTAssertTrue(store.gatewayHasUnappliedChanges)
+        XCTAssertEqual(store.continuationReceiptCountForTesting, 0)
         XCTAssertEqual(store.frozenContinuationEnvelopeCountForTesting, 0)
         XCTAssertEqual(store.continuationApprovalRecordCountForTesting, 0)
         XCTAssertEqual(store.continuationDraft?.state, .stale)
         let transport = OrdinaryDispatchRecordingTransport()
         await store.sendTaskOverLiveGateway(id: child, transport: transport)
         XCTAssertTrue(transport.envelopes.isEmpty)
-        XCTAssertEqual(store.clawGatewaySessions, sessions)
-        XCTAssertEqual(store.gatewayEvents, events)
+        XCTAssertTrue(store.clawGatewaySessions == sessions, "Editing a connection must not create a session")
+        XCTAssertTrue(store.gatewayEvents == events, "Editing a connection must not create events")
         store.gatewayURL = originalURL
         XCTAssertFalse(store.gatewayHasUnappliedChanges)
         store.approveTask(id: child)
@@ -937,8 +938,8 @@ final class ClawTests: XCTestCase {
         XCTAssertTrue(store.clearSavedGatewayConfiguration())
         XCTAssertTrue(store.gatewayToken.isEmpty && store.clawGatewayProfile.endpoint.isEmpty)
         XCTAssertEqual(store.continuationReceiptCountForTesting, 0)
-        XCTAssertEqual(store.clawGatewaySessions, sessions)
-        XCTAssertEqual(store.gatewayEvents, events)
+        XCTAssertTrue(store.clawGatewaySessions == sessions, "Clearing a connection must not create a session")
+        XCTAssertTrue(store.gatewayEvents == events, "Clearing a connection must not create events")
     }
 
     func testExplicitTransportProbeBindingIncludesContinuationReceiptAndLineageFingerprint() throws {

@@ -7,7 +7,7 @@ flowchart TD
   Start[启动读取本机 Keychain 单条 pair] --> Valid{版本/shape/地址/token 合法?}
   Valid -->|是| Applied[只应用连接 不联网/恢复任务]
   Valid -->|缺失/损坏/不可用| Local[空配置或保留原 pair 固定提示]
-  Edit[编辑地址或 Token 草稿] --> Revoke[撤销旧审批/模型/续接冻结授权]
+  Edit[编辑地址或 Token 草稿] --> Revoke[撤销旧审批/模型/续接冻结授权/receipt]
   Revoke --> Dirty[dirty: 模型/probe/readiness/live/continuation 零调用]
   Dirty --> Save[用户显式保存]
   Save --> Strict[共享安全 origin/header 校验]

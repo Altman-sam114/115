@@ -4,9 +4,9 @@
 
 wire schema/action/artifact/readiness/planning 合同不变。生产客户端将 endpoint/token 作为一条版本化 Keychain record 保存（固定 service/account、WhenUnlockedThisDeviceOnly、非 synchronizable）；不进入 envelope、checkpoint、普通文件、日志或 metadata。默认测试/preview store 是 no-op；真实 Keychain 测试仅使用随机 test service。启动只恢复连接配置，不创建任务、会话、事件或 artifact，不恢复审批/receipt，不隐式联网。
 
-客户端共用地址和 header 输入验证：WSS 或精确 loopback WS，地址最多 2048 UTF-8 bytes、合法 host/port，无 userinfo/query/fragment/控制字符/反斜线；Token 为 1...4096 可见 ASCII bytes，无空格/控制字符。模型 HTTP、live envelope、probe、readiness、底层生产 WebSocket 都先验证；非法 live request 不附 Authorization。WebSocket session 为 ephemeral、无 cookie/cache、拒绝 redirect；Gateway 自己的服务端 policy 仍独立负责，保存 Keychain 不表示配对或授权。
+客户端共用地址和 header 输入验证：WSS 或精确 loopback WS，地址最多 2048 UTF-8 bytes、合法 host/port，无 userinfo/query/fragment/控制字符/反斜线；Token 为 1...4096 可见 ASCII bytes，无空格/控制字符。模型 HTTP、live envelope、probe、readiness、底层生产 WebSocket 都先验证原地址，不能先 trim 丢失 CR/LF；非法 live request 不附 Authorization。WebSocket session 为 ephemeral、无 cookie/cache、拒绝 redirect；Gateway 自己的服务端 policy 仍独立负责，保存 Keychain 不表示配对或授权。
 
-UI 地址/凭据为草稿，profile 与独立内存 token 为已应用 pair；完整 token 比较，不以短指纹替代凭据相等。dirty pair 阻断所有真实请求，普通和 continuation 在 session 创建前停止。字段 revision 撤销普通审批/有效模型计划/续接冻结授权，并使旧异步结果过期；即使改回同值也不能复活旧审批。成功持久化后才应用新 pair，写失败保留旧 pair 且不自动回退/重试。显式重读/还原草稿只操作本机；清除成功才清运行时 pair 和旧续接凭据，失败保留原值。清除不会停止既有远端动作或撤销远端 Token。
+UI 地址/凭据为草稿，profile 与独立内存 token 为已应用 pair；完整 token 比较，不以短指纹替代凭据相等。dirty pair 阻断所有真实请求，普通和 continuation 在 session 创建前停止。字段 revision 撤销普通审批/有效模型计划/续接冻结授权与旧 receipt，并使旧异步结果过期；即使改回同值也不能复活旧审批。成功持久化后才应用新 pair，写失败保留旧 pair 且不自动回退/重试。显式重读/还原草稿只操作本机；清除成功才清运行时 pair 和旧续接凭据，失败保留原值。清除不会停止既有远端动作或撤销远端 Token。
 
 内部 `setGateway` 仅应用内存，用于 validated save/load 和测试夹具，不是生产保存入口。历史带 query/明文远端的 fixture 可以用于拒绝/脱敏测试，但不能被 transport 接受；已有 clean-invalid 的诊断会话仍可展示未发送，dirty 连接则连 session 也不创建。真实 TLS 部署、设备信任/可撤销配对、锁屏/签名分发访问需另外验收。
 

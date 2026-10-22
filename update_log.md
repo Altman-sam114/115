@@ -27,6 +27,8 @@
 ### v0.86 / 安全连接保存与草稿隔离
 日期：2026-10-22
 
+- 首次 C 退回：`c0698041a0e08b745359b4d9d9c23d3baa099371` / run `39849006621` attempt `1`，artifact `claw-ci-v0.86-main-c0698041a0e0-run39849006621-attempt1` 总计 107,330,139 bytes，未整包下载；通过 ZIP range 仅下载 591,139 bytes 的 manifest/JUnit/摘要/关键日志/四份 xcresult Info，缓存 664 KiB。身份一致，14 项中 XCTest/iPad 两项失败，双设备各执行 165 项、各 14 个断言失败（四个方法）；其他构建/smoke 通过不代表整体通过。完整 xcresult/截图未下载或验收。
+- 同版本修复：未签名 simulator host 导致真实 Keychain 返回 -34018，云端改为 build-for-testing 一次后只给临时 simulator host 加隔离 CLAWCITEST ad-hoc entitlement 并核验签名，再双设备 test-without-building；不需要 Apple 账号，不改生产工程/团队/Release 签名，不跳过 Keychain 断言。Live request 不在共享 validator 前 trim 原地址，堵住 CR/LF 预处理绕过；任意地址/凭据编辑即移除旧 continuation receipt，不能改回同值再审批。新增 receipt 为零断言；新回归的数组等价检查改固定失败文案以免大段假数据膨胀日志，断言不减弱。Keychain 读取改用 LAContext.interactionNotAllowed，移除弃用 API 警告。修复仍须新 main 全量重验，不能推进 v0.87。
 - 上轮 v0.85 最新精确 artifact/日志/实际 PNG 已完整通过 C 复判，为有效进展；本轮选择发布必需的真实连接身份和凭据安全，而非继续增加看板。用户要求不开子 Agent，仍单实例串行 A/B/C/X，不冒充独立审查。
 - 新 Core 连接合同与生产 Keychain adapter：endpoint/token 单条版本化 record 原子更新、严格 duplicate key/16 KiB/字段/地址/header 校验、WhenUnlockedThisDeviceOnly、非 iCloud 同步，不写普通文件/UserDefaults/明文 fallback。默认测试/preview no-op，App 显式注入生产存储，移除硬编码私网默认值。启动只读取连接，不联网、不恢复任务/审批/receipt、不写执行 checkpoint。
 - 表单与已应用完整 pair 分离，dirty 的模型/probe/readiness/live/continuation 全部零 transport，普通/续接在 session 前拒绝；编辑切回仍使旧模型/审批/续接冻结授权失效。成功存储后才应用新 pair，失败保留旧配置。共享保存/重读/还原/确认清除 UI、44pt/VoiceOver；清除成功才移除运行时 pair/旧授权/receipt，不宣称撤销远端 Token 或动作。

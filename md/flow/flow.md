@@ -4,11 +4,13 @@
 
 App 启动 -> 注入生产 Keychain adapter -> 读取一条 endpoint/token record -> 严格版本/shape/duplicate key/16 KiB/地址/header 校验 -> 仅应用本机连接；缺失从空配置开始，损坏/不可用固定提示，不联网、不恢复任务/审批/receipt、不写 checkpoint 或明文 fallback。默认测试/preview 的 no-op 不读真实 Keychain。
 
-用户编辑草稿 -> 立即撤销旧普通审批、有效模型计划与续接冻结授权、使异步 generation 过期 -> dirty pair 对所有真实入口 fail closed -> 显式保存 -> WSS/精确 loopback WS、2048-byte 地址、无 credentials/query/fragment/控制字符/非法端口、1...4096 可见 ASCII token -> SecItemUpdate 或首次 Add 一条完整 pair -> 仅成功后替换已应用配置。失败保留旧 pair；还原草稿不读写存储，不复活旧审批。完整 token 内存绑定而非短指纹判等。
+用户编辑草稿 -> 立即撤销旧普通审批、有效模型计划与续接冻结授权/receipt、使异步 generation 过期 -> dirty pair 对所有真实入口 fail closed -> 显式保存 -> WSS/精确 loopback WS、2048-byte 地址、无 credentials/query/fragment/控制字符/非法端口、1...4096 可见 ASCII token -> SecItemUpdate 或首次 Add 一条完整 pair -> 仅成功后替换已应用配置。失败保留旧 pair；还原草稿不读写存储，不复活旧审批。完整 token 内存绑定而非短指纹判等。
 
 确认重读只替换本机连接、不联网；确认清除 -> Keychain 成功后才清运行时 pair/旧授权/receipt -> 不撤销远端 token 或已发送动作。模型、probe、readiness、普通 live 与 continuation live 统一 dirty 检查；普通/续接在 session 创建前拒绝 dirty，clean-invalid 保留原未发送诊断。底层生产 WebSocket 再验 origin/header，ephemeral session 无 cookie/cache 且拒绝 redirect；不扩大 Gateway action、权限或 wire schema。
 
 v0.85 基线 `edab5a9a6feb6598e9122122fe549951f02c1d6b` / run `39841407261` attempt `1` 的精确 artifact 已复判通过 15 项/各 150 项 XCTest、21 个模型 fixture 请求和实际两张非白屏图。v0.86 新代码/测试须新 main 云端 artifact；真实模型质量、桌面 E2E、Mac/iPad 实际交互、锁屏/签名分发仍未完成。
+
+v0.86 首次 cloud C 退回后，同版本修复原地址在 trim 前验证、任意连接编辑撤销旧 receipt；云端 XCTest 先 build-for-testing 一次，再仅给临时 simulator host 签隔离 CI entitlement 并核验，双设备 test-without-building。真实 Keychain 断言不跳过，生产签名不变；最新 main artifact 通过前不推进。
 
 ## v0.85 自托管模型规划主路径
 

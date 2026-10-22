@@ -2872,6 +2872,7 @@ final class ClawStore: ObservableObject {
     private func invalidateGatewayConfigurationAuthorization() {
         invalidateModelPlanning()
         ordinaryTaskApprovals.removeAll()
+        continuationReceipts.removeAll()
         advanceLiveGatewayPresentationGeneration()
         gatewayTransportProbeGeneration &+= 1
         gatewayReadinessGeneration &+= 1
@@ -6685,7 +6686,7 @@ enum ClawGatewayLiveClient {
         rawToken: String = "",
         sessionID: UUID? = nil
     ) -> ClawGatewayLiveRequest {
-        let endpoint = profile.endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
+        let endpoint = profile.endpoint
         let isWebSocket = ClawGatewayConfiguration.validatedEndpoint(endpoint) != nil
         let hasToken = ClawGatewayConfiguration.isValidToken(rawToken) &&
             profile.tokenFingerprint != "unset" && ClawMobileBridge.tokenFingerprint(for: rawToken) == profile.tokenFingerprint

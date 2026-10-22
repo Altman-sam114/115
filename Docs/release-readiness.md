@@ -8,6 +8,8 @@
 
 v0.86 补发布必需的单条 Keychain endpoint/token 原子存储、只恢复连接不恢复任务、显式保存/重读/还原/清除、dirty 全入口零调用、旧授权失效与统一安全 origin/header/无 redirect transport。新增 15 项测试，预期双设备各 165 项；默认 fake/no-op 不访问真实用户 Keychain，实际 Keychain 测试仅随机 namespace。新 main 云端 artifact 尚待产生，不把旧基线当作本轮通过。
 
+v0.86 首次 run `39849006621` / SHA `c0698041a0e08b745359b4d9d9c23d3baa099371` 的精确 artifact 已复判退回：双设备各 165 项、14 个断言失败，涉及无签名测试宿主的 Keychain -34018、Live request 先 trim 丢失 CR/LF，以及改回连接后旧续接 receipt 可重新审批。仅选择性下载必要证据（591,139 bytes / 664 KiB），没有验收完整 xcresult 或截图。追加云端临时 simulator ad-hoc 测试 entitlement、原地址先验证和编辑即撤销 receipt；保留原断言，等待新 main 完整重验。临时签名不是生产分发签名，也不是 Keychain 实机锁屏验收。
+
 v0.85 的真实模型请求接口已通过协议与安全合同，但 cloud provider 仍是小型 stub，不下载模型权重，不证明真实模型质量、证据/视觉多轮智能或实际桌面 E2E。v0.86 的本机 secret 存储不等于配对、可撤销设备信任或真实 Mac/iPad 交互验收。
 
 | 轮次 | 范围 | 验收门槛 |

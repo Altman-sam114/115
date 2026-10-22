@@ -223,6 +223,31 @@ jobs:
             )"
             echo "Using iPhone simulator $simulator_udid."
             xcrun simctl bootstatus "$simulator_udid" -b
+            # Build once, then sign only the disposable simulator host for real Keychain tests.
+            /usr/bin/xcodebuild \
+              -project "$XCODE_PROJECT" \
+              -scheme "$XCODE_SCHEME" \
+              -configuration Debug \
+              -destination "platform=iOS Simulator,id=$simulator_udid" \
+              -derivedDataPath .derivedData-tests \
+              CODE_SIGNING_ALLOWED=NO \
+              build-for-testing
+            test_host=.derivedData-tests/Build/Products/Debug-iphonesimulator/Claw.app
+            [[ "$GITHUB_ACTIONS" == true && "$RUNNER_OS" == macOS ]]
+            [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$test_host/Info.plist")" == com.claw.prototype ]]
+            /usr/bin/codesign --force --deep --sign - \
+              --entitlements Tools/ci-simulator-keychain.entitlements \
+              --generate-entitlement-der "$test_host"
+            /usr/bin/codesign --verify --deep --strict "$test_host"
+            /usr/bin/codesign -d --entitlements :- "$test_host" 2>/dev/null | python3 -c '
+            import plistlib, sys
+            entitlements = plistlib.load(sys.stdin.buffer)
+            expected = "CLAWCITEST.com.claw.prototype"
+            assert entitlements.get("application-identifier") == expected
+            assert entitlements.get("keychain-access-groups") == [expected]
+            assert entitlements.get("get-task-allow") is True
+            print("Disposable cloud simulator host has the isolated CI Keychain entitlement.")
+            '
             /usr/bin/xcodebuild \
               -project "$XCODE_PROJECT" \
               -scheme "$XCODE_SCHEME" \
@@ -234,7 +259,7 @@ jobs:
               -test-timeouts-enabled YES \
               -maximum-test-execution-time-allowance 120 \
               CODE_SIGNING_ALLOWED=NO \
-              test
+              test-without-building
             xcrun simctl install "$simulator_udid" .derivedData-tests/Build/Products/Debug-iphonesimulator/Claw.app
             xcrun simctl launch "$simulator_udid" com.claw.prototype
             bash Tools/capture-workspace-evidence.sh "$simulator_udid" "$RESULT_DIR/iphone-workspace.png"

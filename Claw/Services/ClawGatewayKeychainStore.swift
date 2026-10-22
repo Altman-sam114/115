@@ -1,4 +1,5 @@
 import Foundation
+import LocalAuthentication
 import Security
 
 struct ClawGatewayKeychainStore: ClawGatewayConfigurationStore {
@@ -24,7 +25,9 @@ struct ClawGatewayKeychainStore: ClawGatewayConfigurationStore {
 
     func load() -> ClawGatewayConfigurationLoadResult {
         var query = query
-        query[kSecUseAuthenticationUI as String] = kSecUseAuthenticationUIFail
+        let context = LAContext()
+        context.interactionNotAllowed = true
+        query[kSecUseAuthenticationContext as String] = context
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         var item: CFTypeRef?
