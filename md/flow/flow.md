@@ -12,6 +12,8 @@ v0.85 基线 `edab5a9a6feb6598e9122122fe549951f02c1d6b` / run `39841407261` atte
 
 v0.86 首次 cloud C 退回后，同版本修复原地址在 trim 前验证、任意连接编辑撤销旧 receipt；云端 XCTest 先 build-for-testing 一次，再仅给临时 simulator host 签隔离 CI entitlement 并核验，双设备 test-without-building。真实 Keychain 断言不跳过，生产签名不变；最新 main artifact 通过前不推进。
 
+第二次 v0.86 C 退回后，CI 签名输出使用 plistlib.loads(read())；云端 simulator Debug 禁用 debug-dylib stub并内到外签名，签名/entitlement 验证成功才写 ready marker，缺 marker 时 iPad 提前阻断。该 run 未执行业务用例，不将底层构建成功当测试通过。
+
 ## v0.85 自托管模型规划主路径
 
 用户显式请求 -> 捕获 command/profile/plan/task/session/continuation revision -> header-only token 的独立 HTTP `/claw/planning` -> Gateway 强制认证/严格 JSON/固定预算与容量 -> 仅同机、显式配置的 Ollama `/api/chat` -> 固定 schema、system/user 分离、一次推理 -> Node 校验 proposal -> Swift same nonce/strict shape/effects=false/typed inputs 校验 -> 只更新模型来源的计划和实际用量。任何失败不回退规则/模拟，不生成 task/session/event/artifact，不写 workspace/replay/checkpoint；取消/旧 scope 结果丢弃，远端计算是否已停止不作保证。

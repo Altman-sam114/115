@@ -1,5 +1,7 @@
 # 项目流程图
 
+云端 simulator 测试：build-for-testing 一次 -> 由内到外临时 ad-hoc 签名 -> bytes 解析 entitlement 并核验 -> ready marker -> 双设备 test-without-building；缺少可执行体或 marker 时 iPad 提前失败，不绕过真实 Keychain 用例。此为 CI 打包边界，不是生产签名/发布。
+
 v0.86 连接保存与隔离：Keychain 只恢复连接，不恢复任务；生产连接统一 WSS/精确 loopback WS，无 credentials/query/fragment。测试默认 no-op，不读真实 Keychain。
 
 ```mermaid

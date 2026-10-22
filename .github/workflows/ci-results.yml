@@ -231,23 +231,33 @@ jobs:
               -destination "platform=iOS Simulator,id=$simulator_udid" \
               -derivedDataPath .derivedData-tests \
               CODE_SIGNING_ALLOWED=NO \
+              ENABLE_DEBUG_DYLIB=NO \
               build-for-testing
             test_host=.derivedData-tests/Build/Products/Debug-iphonesimulator/Claw.app
             [[ "$GITHUB_ACTIONS" == true && "$RUNNER_OS" == macOS ]]
             [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$test_host/Info.plist")" == com.claw.prototype ]]
-            /usr/bin/codesign --force --deep --sign - \
+            # Nested code is signed inside-out; root-level debug libraries are not covered by --deep signing.
+            while IFS= read -r -d '' library; do
+              /usr/bin/codesign --force --sign - "$library"
+              /usr/bin/codesign --verify --strict "$library"
+            done < <(find "$test_host" -type f -name '*.dylib' -print0)
+            while IFS= read -r -d '' test_bundle; do
+              /usr/bin/codesign --force --sign - "$test_bundle"
+            done < <(find "$test_host" -depth -type d -name '*.xctest' -print0)
+            /usr/bin/codesign --force --sign - \
               --entitlements Tools/ci-simulator-keychain.entitlements \
               --generate-entitlement-der "$test_host"
             /usr/bin/codesign --verify --deep --strict "$test_host"
             /usr/bin/codesign -d --entitlements :- "$test_host" 2>/dev/null | python3 -c '
             import plistlib, sys
-            entitlements = plistlib.load(sys.stdin.buffer)
+            entitlements = plistlib.loads(sys.stdin.buffer.read())
             expected = "CLAWCITEST.com.claw.prototype"
             assert entitlements.get("application-identifier") == expected
             assert entitlements.get("keychain-access-groups") == [expected]
             assert entitlements.get("get-task-allow") is True
             print("Disposable cloud simulator host has the isolated CI Keychain entitlement.")
             '
+            printf '%s\n' 'simulator-keychain-host-v1' > .derivedData-tests/.ci-simulator-keychain-ready
             /usr/bin/xcodebuild \
               -project "$XCODE_PROJECT" \
               -scheme "$XCODE_SCHEME" \
@@ -275,8 +285,9 @@ jobs:
           : > "$RESULT_DIR/ipad-xctest.log"
           {
             # A failed test build cannot supply a runnable iPad test host.
-            if [[ ! -x .derivedData-tests/Build/Products/Debug-iphonesimulator/Claw.app/Claw ]]; then
-              echo "iPad validation blocked: the shared simulator test host executable is missing. See xctest.log."
+            if [[ ! -x .derivedData-tests/Build/Products/Debug-iphonesimulator/Claw.app/Claw ||
+                  ! -f .derivedData-tests/.ci-simulator-keychain-ready ]]; then
+              echo "iPad validation blocked: the shared simulator test host executable or verified CI Keychain signature is missing. See xctest.log."
               exit 1
             fi
             echo "Discovering an available iPad simulator on the cloud runner."

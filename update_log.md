@@ -27,6 +27,8 @@
 ### v0.86 / 安全连接保存与草稿隔离
 日期：2026-10-22
 
+- 第二次 C 退回：`287518ca1193f7bd5ff3c9530daff785ef056466` / run `39854053390` attempt `1`，artifact `claw-ci-v0.86-main-287518ca1193-run39854053390-attempt1` 共 47,668,466 bytes，仅选择必要证据 241,604 bytes（缓存 464 KiB，含三份 root 数据）。manifest/JUnit/摘要/日志身份一致，14 项中双设备测试两项失败。Debug build-for-testing 成功，iPhone 因 Python 3.15 的 plistlib.load 读取不可 seek 管道异常，在测试启动前中止；iPad 随后宿主 launchd 启动失败。本 run 没有执行 165 项用例，也没有 UI 截图验收，不能称业务修复/Keychain 通过。
+- 第二次同版本 CI 修复：签名输出改 plistlib.loads(read())；仅云端 simulator Debug 构建禁用 debug-dylib stub，显式由内到外签名 dylib/测试 bundle/host，再逐项核验；未完成签名和 entitlement 验证不生成 ready marker，iPad 立即阻断而非无效启动。日志证明此前存在 root-level debug/preview dylib，但未拿到系统底层崩溃解码，不能把动态库包装风险称为已证实的唯一 launchd 根因；最终由新云端执行证明。不改生产代码、签名、测试断言或验收门槛。两次失败发生在不同机制，保留停止审计，不无限重试。
 - 首次 C 退回：`c0698041a0e08b745359b4d9d9c23d3baa099371` / run `39849006621` attempt `1`，artifact `claw-ci-v0.86-main-c0698041a0e0-run39849006621-attempt1` 总计 107,330,139 bytes，未整包下载；通过 ZIP range 仅下载 591,139 bytes 的 manifest/JUnit/摘要/关键日志/四份 xcresult Info，缓存 664 KiB。身份一致，14 项中 XCTest/iPad 两项失败，双设备各执行 165 项、各 14 个断言失败（四个方法）；其他构建/smoke 通过不代表整体通过。完整 xcresult/截图未下载或验收。
 - 同版本修复：未签名 simulator host 导致真实 Keychain 返回 -34018，云端改为 build-for-testing 一次后只给临时 simulator host 加隔离 CLAWCITEST ad-hoc entitlement 并核验签名，再双设备 test-without-building；不需要 Apple 账号，不改生产工程/团队/Release 签名，不跳过 Keychain 断言。Live request 不在共享 validator 前 trim 原地址，堵住 CR/LF 预处理绕过；任意地址/凭据编辑即移除旧 continuation receipt，不能改回同值再审批。新增 receipt 为零断言；新回归的数组等价检查改固定失败文案以免大段假数据膨胀日志，断言不减弱。Keychain 读取改用 LAContext.interactionNotAllowed，移除弃用 API 警告。修复仍须新 main 全量重验，不能推进 v0.87。
 - 上轮 v0.85 最新精确 artifact/日志/实际 PNG 已完整通过 C 复判，为有效进展；本轮选择发布必需的真实连接身份和凭据安全，而非继续增加看板。用户要求不开子 Agent，仍单实例串行 A/B/C/X，不冒充独立审查。

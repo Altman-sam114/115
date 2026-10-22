@@ -14,6 +14,8 @@ v0.85 基线 `edab5a9a6feb6598e9122122fe549951f02c1d6b` / run `39841407261` atte
 
 v0.86 首次云端结果已退回同版本修复（run `39849006621`）：原地址 CR/LF 必须在 trim 前拒绝，连接编辑必须同时撤销旧 receipt，不能改回同值再审批。云端真实 Keychain 测试宿主仅作一次性 ad-hoc entitlement 签名，Release/工程/用户签名保持不变；不跳过失败断言，不把临时测试签名当作可分发 App。最新修复仍待完整云端 artifact，详见发布准备清单。
 
+v0.86 第二次 run `39854053390` 仍退回：runner Python 3.15 的管道 plist 读取失败，iPhone 未执行测试，iPad 宿主随后启动失败，不能称修复已通过。CI 追加 bytes plist 读取、临时 simulator 内层代码签名/单执行体构建与签名 ready 闸门；失败不跳过真实 Keychain 或减少测试，生产签名不变。
+
 ## 自托管模型规划（v0.85）
 
 Mac/iPad/iPhone 共享“请求自托管模型计划”入口。它向已保存的 Gateway 请求一次真实推理；规则预览与演练仍是单独的显式入口，不冒充模型，也不会在模型失败后自动回退。模型仅收到本次任务文本与固定动作 schema，不收到屏幕、文件、历史会话、Gateway token 或 receipt。成功只更新待审计划及服务实际报告的 token 计数，不生成任务或执行电脑动作。

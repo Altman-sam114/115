@@ -12,6 +12,8 @@
 
 首次 run `39849006621` 的精确 manifest/JUnit/日志确认双设备各 165 项、各 14 个断言失败，不能通过。修复不得跳过真实 Keychain：云端 Debug build-for-testing 一次后，用 `Tools/ci-simulator-keychain.entitlements` 仅对临时 simulator host ad-hoc 签名，校验 application-identifier、隔离 group 和 get-task-allow，再双设备 test-without-building；不改生产团队、工程或 Release 签名，不需证书/Apple 账号。校验前不得 trim 原地址而抹去 CR/LF；编辑连接须同时使 receipt 失效，增加 receipt=0 断言。数组等价检查保留但用固定失败文案，避免假数据膨胀日志。LAContext 禁止隐式认证交互。完整云端矩阵和实际截图仍必须，旧失败包仅选择性读取必要证据，不冒充完整结果包验收。
 
+第二次 run `39854053390` / `287518ca1193f7bd5ff3c9530daff785ef056466` 的 manifest/JUnit/日志确认双设备测试失败；iPhone 在 Python 3.15 plistlib.load 不支持 seek 的管道处中止，iPad 宿主未启动，没有 165 项执行结果。CI 改为 plistlib.loads(sys.stdin.buffer.read())，仅云端 simulator Debug 设置 ENABLE_DEBUG_DYLIB=NO，并对 dylib/测试 bundle/host 内到外签名核验；ready marker 只在全部验证后写，缺少时 iPad 提前失败。测试断言、双设备矩阵、截图/结果包门槛不减弱，不在本机执行。
+
 ## v0.85 模型规划合同与真实 HTTP 链路
 
 新增 `ClawModelPlanningTests.swift` 14 项（补强后预期双设备各 150 项）：strict shape/nonce/effects、布尔/数字区分/实际 usage、duplicate escaped key/depth/byte 限制、八种 typed kind 不依赖模型 title/target、allowlist/全人工审批/固定安全参数、未知字段/种类/审批注入/路径/URL/UTF-8、header-only token/固定 HTTP 路径/明文远端拒绝、模型成功只更新计划和用量/零 task/session/event/checkpoint save、缺正文真实派发零调用、Mission 保留模型计划和精确参数、失败无自动 fallback、非法配置零调用、duplicate/cancel/旧请求不覆盖新 operation、command 切回/profile/plan/queue/Mission revision stale、已接受计划失效后不可 queue 或启动。模型有效预填字段也必须合法 Apply 才清除 pending review，打开/关闭/旧请求/模拟审批不构成绕过，真实审批与发送独立检查；Apply 后还须新审批。所有异步 fake coordination 与 task 回收必须有界，不删除既有测试。
