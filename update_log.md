@@ -14,7 +14,7 @@
 ## 当前状态
 
 - 项目方向：OpenClaw 式电脑接管智能体，iPhone 作为控制台，桌面 Claw Gateway 作为执行端。
-- 最后完整通过的基线：`91886b1edc84e6921ffaa30edcc973de264ac79e` / run `39814219315` attempt `1`，artifact `claw-ci-v0.83-main-91886b1edc84-run39814219315-attempt1` 已下载并由单实例 C 阶段复判通过：14 项检查、双设备各 125 项 XCTest、Release/LogicSmoke/fixture/Gateway、四个 xcresult、两份第 1 帧 readiness JSON 与实际非白屏 PNG 一致（1,882,069 bytes / 解压 4.3 MiB）。v0.84 首次 SHA `c89277813852fb3be07ec0613ea8061acde948be` / run `39822763413` attempt `1` 失败，当前同版本修复须新 main 云端验收；历史 SHA/run 不是当前通过证据。
+- 最后完整通过的基线：v0.84 `263d0213f076ccd4a9e1a3b933d891e552713e31` / run `39829293264` attempt `1`，artifact `claw-ci-v0.84-main-263d0213f076-run39829293264-attempt1` 已下载并由单实例 C 阶段复判通过：14 项检查、双设备各 136 项 XCTest、Release/LogicSmoke/fixture/Gateway、四个 xcresult Info/root 数据文件完整、两份第 1 帧 readiness JSON 与实际非白屏 PNG 一致（1,912,515 bytes / 解压 4.4 MiB）。本机无 xcresulttool，未独立解码二进制对象；Catalyst runner Metal 路径警告保留。v0.85 新模型规划主路径待新 main 云端验收，基线通过不替代本轮证据。
 - 当前 schema：`claw.computer.control.v1`。
 - 当前核心闭环：用户自然语言任务 -> `PhoneAgentPlanner` -> `ClawMobileTask` -> `ClawMobileEnvelope` -> 模拟事件流或带有界重连/ping 可观测性和进程内 task replay guard 的 WebSocket Gateway -> `ClawGatewayEvent` -> session reducer -> Mission Run / Approval Fast Lane 审批快车道 / Control Snapshot 控制态势快照 / Operator Strip / Loop 继续态势 / Mac Agent Readiness Board 就绪看板 / Mac Gateway Action Preflight Matrix 动作预检矩阵 / Mac Agent Evidence Coverage Map 证据覆盖图 / Mac Agent Next Step Deck 下一步候选卡组 / Mac Agent Run Timeline 执行时间线 / Mac Agent Continuation Gate 继续闸门 / Mac Agent Review Radar 复核雷达 / Mac Agent Handoff Brief 人工交接简报 / Focus Context 聚焦上下文 / Review Detail Dock / Review Trail 复核路径 / Approval Queue 审批队列 / Payload Safety Ledger 载荷安全账本 / Artifact 证据索引 / 复核态势摘要 / 复核优先队列 / 复核聚焦详情 / Live Gateway 连接健康 / Artifact metadata 复核摘要 / 文件变更安全复核摘要 / Shell 命令安全复核摘要 / 提取完整性复核摘要 / 浏览器控制计划和策略诊断复核摘要 / 草稿最终提交安全和桌面策略诊断复核摘要 / Gateway 能力复核摘要 / Accessibility 信号质量复核摘要 / Replay Guard 复核摘要 / AgentTrace handoff 复核 UI / iPad 多栏工作台展示和审批。v0.66 工作区实现进一步加入父 safe decision -> 短时单次 receipt -> 显式 draft/queue/approve/freeze/send -> 全新 child selected action + `runAgentLoop` 的受限跨 task 续接；v0.71 在同一闸门上加入 `extractData` 的 goal/outputPath typed editor，固定 schema/source/completeness 与 exact-key/byte/path 校验；v0.72 在同一 presentation/store 边界加入固定优先级 Smart Operator Action Rail，历史 v0.72 `origin/main` commit `bcf87c8c50f70d3d4157ec41a83333e62cd1ecdc` 已由 run `32631022162` attempt `1` 的 Agent C artifact 复判通过。
 - 当前 Smart Operator Action Rail：从既有 continuation/primary/resume/review metadata 按固定优先级派生单一用户显式入口；compact 与 regular 共享 summary/view/dispatcher，stale 或 scope mismatch 返回 disabled/none，不新增 Gateway action 或协议字段。历史 v0.72 `origin/main` commit `bcf87c8c50f70d3d4157ec41a83333e62cd1ecdc` 对应 run `32631022162` attempt `1`，artifact `claw-ci-v0.2-main-bcf87c8c50f7-run32631022162-attempt1` 已由 Agent C 复判通过。
@@ -23,6 +23,16 @@
 - 当前主要遗留：v0.66 完整负向/action/六种 kind/UI 对称测试矩阵、v0.67 最新云端 artifact 验收与 `manageFiles` 编辑器完整 LogicSmoke/负向覆盖、完整 macOS Accessibility bridge、Playwright/browser-use 兼容控制器、跨重启/跨进程多轮状态、live Gateway 后台保活/真实心跳协议/配对、完整 artifact 内容复核体验。
 
 ## 历史记录
+
+### v0.85 / 自托管模型规划主路径
+日期：2026-10-22
+
+- 上轮修复与最新 run `39829293264` 已完成精确 artifact/日志/实际看图复判，属于有效进展；本轮不新增看板，转向真实推理请求和 typed 动作计划。
+- 新独立 HTTP `claw.gateway.planning.v1` 控制面：强制非空 Gateway token、只发送本次文本与固定 schema、同机显式配置的 Ollama `/api/chat`、一次推理/无 redirect/重试/下载、固定输出与容量/超时预算、断连取消和固定脱敏错误，不进入任何电脑执行 pipeline。
+- 新 Core 合同和独立 Swift HTTP transport，严格 nonce/shape/duplicate key/类型/字节/路径/URL 与八类 typed inputs；模型不能指定审批/风险/权限/安全开关或 loop。模型步骤不再靠标题/target 推断 kind，固定安全 toolArguments 与证据复核尾步沿用 Bridge/allowlist/最终参数/普通审批；缺正文仍不能真实发送。
+- Store 规划 operation 绑定 command/profile/plan/task/session/continuation revision；成功只更新来源明确的待审计划和实际用量，失败不自动生成规则/模拟结果，取消和旧 scope 丢弃。Mission 启动保留有效模型计划，command/profile 编辑后的旧计划不能 queue 或启动。共享 Mac/iPad/iPhone 主入口有显式数据去向、请求/取消/失败、来源和用量，不在生命周期联网。
+- 新增 13 项 XCTest（预期各 149 项）与 LogicSmoke；新增 cloud-only Node planning smoke，并复用已编译 LogicSmoke 执行生产 HTTP client -> Gateway -> 小型 Ollama stub -> 待审批，验证协议与安全负向矩阵、不下载权重。workflow 新增 syntax/smoke/manifest/JUnit/最终 gate，保留原全矩阵，成功预期 15 项检查。project 只暂存新增源码注册，不包含用户签名或 xcuserdata。
+- README、协议、flow/flowchart、test、release readiness、prompt 索引与详细提示词同步；本地仅非编译静态检查，等待新 main 云端验收。aitrans 只读参考 operation/cancel 思路，无修改/权重/依赖复制。本轮接口/stub 不能替代真实模型质量、视觉多轮智能、实际 Mac/iPad 交互、桌面 E2E、配对/TLS 或签名分发，未宣布发布完成。
 
 ### v0.84 / 首次云端退回与夹具、待办审批投影修复
 日期：2026-10-22

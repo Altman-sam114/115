@@ -658,20 +658,31 @@ final class ClawStore: ObservableObject {
     @Published private(set) var automationTargets: [AutomationTarget]
     @Published var gatewayURL: String {
         didSet {
+            invalidateModelPlanning()
             ordinaryTaskApprovals.removeAll()
             advanceLiveGatewayPresentationGeneration()
         }
     }
     @Published var gatewayToken: String {
         didSet {
+            invalidateModelPlanning()
             ordinaryTaskApprovals.removeAll()
             advanceLiveGatewayPresentationGeneration()
         }
     }
     @Published private(set) var lastAutomationDraft: String
     @Published private(set) var phoneAgentCapabilities: [PhoneAgentCapability]
-    @Published var phoneAgentCommand: String
+    @Published var phoneAgentCommand: String {
+        didSet {
+            if phoneAgentCommand != oldValue {
+                modelPlanningCommandRevision &+= 1
+                invalidateModelPlanning()
+            }
+        }
+    }
     @Published private(set) var phoneAgentPlan: PhoneAgentPlan
+    @Published private(set) var modelPlanningPhase: ClawModelPlanningPhase = .idle
+    @Published private(set) var modelPlanningUsage: ClawModelPlanningUsage?
     @Published private(set) var phoneAgentExecutionLog: String
     @Published private(set) var clawGatewayProfile: ClawGatewayProfile
     @Published private(set) var clawMobileTasks: [ClawMobileTask]
@@ -724,6 +735,12 @@ final class ClawStore: ObservableObject {
     private var gatewayReadinessStateBindingDigest: String?
     private var missionRunCheckpoint: ClawMissionRunCheckpoint?
     private var lastMissionRunCheckpointAttempt: ClawMissionRunCheckpoint?
+    private var modelPlanningTask: Task<Data, Error>?
+    private var modelPlanningGeneration = 0
+    private var modelPlanningCommandRevision = 0
+    private var acceptedModelPlanID: UUID?
+    private var acceptedModelPlanProfile: String?
+    private var acceptedModelPlanCommandRevision: Int?
 
     init(
         model: LocalClawModel? = nil,
@@ -2810,6 +2827,7 @@ final class ClawStore: ObservableObject {
     }
 
     func generatePhoneAgentPlan() {
+        invalidateModelPlanning()
         let trimmed = phoneAgentCommand.trimmingCharacters(in: .whitespacesAndNewlines)
         let command = trimmed.isEmpty ? "接管电脑，打开浏览器完成资料收集并整理结果" : trimmed
         phoneAgentCommand = command
@@ -2821,24 +2839,121 @@ final class ClawStore: ObservableObject {
         lastClawMobileEnvelope = "Claw 电脑接管计划已更新，可生成 computer-control envelope。"
     }
 
+    func requestModelPlan<T: ClawModelPlanningTransport>(transport: T = URLSessionClawModelPlanningTransport()) async {
+        guard modelPlanningTask == nil else { return }
+        let request: ClawModelPlanningRequest
+        let wire: ClawModelPlanningWireRequest
+        do {
+            request = try ClawModelPlanningRequest(command: phoneAgentCommand)
+            guard gatewayURL.trimmingCharacters(in: .whitespacesAndNewlines) == clawGatewayProfile.endpoint else {
+                throw ClawModelPlanningError.configuration
+            }
+            wire = try ClawModelPlanningWireRequest.make(request, profile: clawGatewayProfile, token: gatewayToken)
+        } catch {
+            modelPlanningPhase = .failed((error as? ClawModelPlanningError) ?? .configuration)
+            return
+        }
+        modelPlanningGeneration &+= 1
+        let generation = modelPlanningGeneration
+        let binding = modelPlanningBinding()
+        modelPlanningPhase = .requesting
+        modelPlanningUsage = nil
+        acceptedModelPlanID = nil
+        acceptedModelPlanProfile = nil
+        acceptedModelPlanCommandRevision = nil
+        let task = Task { try await transport.response(for: wire) }
+        modelPlanningTask = task
+        defer { if modelPlanningGeneration == generation { modelPlanningTask = nil } }
+        do {
+            let data = try await withTaskCancellationHandler {
+                try await task.value
+            } onCancel: { task.cancel() }
+            try Task.checkCancellation()
+            guard !task.isCancelled, modelPlanningGeneration == generation else { return }
+            guard modelPlanningBinding() == binding else {
+                modelPlanningPhase = .stale
+                return
+            }
+            let response = try ClawModelPlanningResponse.decode(data, nonce: request.nonce)
+            phoneAgentPlan = response.proposal.plan(command: request.command)
+            acceptedModelPlanID = phoneAgentPlan.id
+            acceptedModelPlanProfile = canonicalProfileDigest(clawGatewayProfile)
+            acceptedModelPlanCommandRevision = modelPlanningCommandRevision
+            modelPlanningUsage = response.usage
+            modelPlanningPhase = .ready
+            phoneAgentExecutionLog = "自托管模型计划已校验，尚未生成、审批或发送电脑任务。"
+        } catch {
+            guard modelPlanningGeneration == generation else { return }
+            if Task.isCancelled || task.isCancelled || error is CancellationError {
+                modelPlanningPhase = .cancelled
+            } else if modelPlanningBinding() != binding {
+                modelPlanningPhase = .stale
+            } else {
+                modelPlanningPhase = .failed((error as? ClawModelPlanningError) ?? .transport)
+            }
+        }
+    }
+
+    func cancelModelPlanning() {
+        guard modelPlanningTask != nil else { return }
+        invalidateModelPlanning()
+        modelPlanningPhase = .cancelled
+    }
+
+    private func invalidateModelPlanning() {
+        modelPlanningGeneration &+= 1
+        modelPlanningTask?.cancel()
+        modelPlanningTask = nil
+        acceptedModelPlanID = nil
+        acceptedModelPlanProfile = nil
+        acceptedModelPlanCommandRevision = nil
+        modelPlanningUsage = nil
+        if modelPlanningPhase != .idle { modelPlanningPhase = .stale }
+    }
+
+    private var hasCurrentModelPlan: Bool {
+        phoneAgentPlan.source == .configuredModel && acceptedModelPlanID == phoneAgentPlan.id &&
+            phoneAgentPlan.command == phoneAgentCommand.trimmingCharacters(in: .whitespacesAndNewlines) &&
+            acceptedModelPlanCommandRevision == modelPlanningCommandRevision &&
+            acceptedModelPlanProfile == canonicalProfileDigest(clawGatewayProfile) &&
+            gatewayURL.trimmingCharacters(in: .whitespacesAndNewlines) == clawGatewayProfile.endpoint &&
+            ClawMobileBridge.tokenFingerprint(for: gatewayToken) == clawGatewayProfile.tokenFingerprint
+    }
+
+    private func modelPlanningBinding() -> String {
+        let task = clawMobileTasks.first
+        let session = clawGatewaySessions.first
+        return ClawContinuationContract.sha256([
+            String(modelPlanningCommandRevision), ClawContinuationContract.sha256(phoneAgentCommand), phoneAgentPlan.id.uuidString,
+            canonicalProfileDigest(clawGatewayProfile), task.map(canonicalTaskDigest) ?? "none",
+            session?.id.uuidString ?? "none", String(session?.updatedAt.timeIntervalSinceReferenceDate ?? 0),
+            String(gatewayEvents.count), autonomousLoop.phase.rawValue, autonomousLoop.taskID?.uuidString ?? "none",
+            continuationAuthorizationFingerprint()
+        ].joined(separator: "|"))
+    }
+
     func startAutonomousComputerTakeover(maxIterations: Int = 3) {
-        prepareAutonomousComputerTakeover(maxIterations: maxIterations)
+        guard prepareAutonomousComputerTakeover(maxIterations: maxIterations) else { return }
         updateAutonomousLoopAfterTaskQueued()
     }
 
     func startAutonomousComputerTakeoverOverLiveGateway<T: ClawGatewayTransport>(
         maxIterations: Int = 3, transport: T = URLSessionClawGatewayTransport()
     ) async {
-        prepareAutonomousComputerTakeover(maxIterations: maxIterations)
+        guard prepareAutonomousComputerTakeover(maxIterations: maxIterations) else { return }
         updateAutonomousLoopAfterTaskQueued(dispatchWhenReady: false)
         guard let task = clawMobileTasks.first, task.status == .queued || task.status == .readyToSend else { return }
         await dispatchAutonomousLoopTaskOverLiveGateway(task, transport: transport)
     }
 
-    private func prepareAutonomousComputerTakeover(maxIterations: Int) {
+    private func prepareAutonomousComputerTakeover(maxIterations: Int) -> Bool {
+        if phoneAgentPlan.source == .configuredModel && !hasCurrentModelPlan {
+            modelPlanningPhase = .stale
+            return false
+        }
         let trimmed = phoneAgentCommand.trimmingCharacters(in: .whitespacesAndNewlines)
         let command = trimmed.isEmpty ? "接管电脑，打开浏览器完成资料收集并整理结果" : trimmed
-        phoneAgentCommand = command
+        if phoneAgentPlan.source == .rules { phoneAgentCommand = command }
         setAutonomousLoop(
             phase: .planning,
             iteration: 1,
@@ -2853,8 +2968,9 @@ final class ClawStore: ObservableObject {
             appendCheckpoint: "loop.start command=\(command)"
         )
 
-        generatePhoneAgentPlan()
+        if phoneAgentPlan.source == .rules { generatePhoneAgentPlan() }
         queueClawMobileTaskFromCurrentPlan()
+        return true
     }
 
     func approveAndContinueAutonomousLoop() {
@@ -2990,6 +3106,11 @@ final class ClawStore: ObservableObject {
     }
 
     func queueClawMobileTaskFromCurrentPlan() {
+        if phoneAgentPlan.source == .configuredModel && !hasCurrentModelPlan {
+            modelPlanningPhase = .stale
+            return
+        }
+        if modelPlanningTask != nil { cancelModelPlanning() }
         let task = ClawMobileBridge.makeTask(
             from: phoneAgentPlan,
             profile: clawGatewayProfile,
@@ -5581,6 +5702,7 @@ enum ClawMobileBridge {
         step: PhoneAgentStep,
         plan: PhoneAgentPlan
     ) -> [String: String] {
+        if let proposal = step.modelProposal { return proposal.arguments() }
         switch kind {
         case .runAgentLoop:
             return [
@@ -5677,6 +5799,7 @@ enum ClawMobileBridge {
     }
 
     private static func actionKind(for step: PhoneAgentStep) -> ClawMobileActionKind {
+        if let proposal = step.modelProposal { return proposal.kind }
         if step.isAllowedOnIOS == false {
             guard step.runMode == .gatewayOnly else {
                 return .blockedUnsupported

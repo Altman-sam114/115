@@ -2,6 +2,18 @@
 
 ```mermaid
 flowchart TD
+  Click["显式请求模型计划\n只发送本次任务文本"] --> Auth["固定 HTTP 路径 + header-only token\n远端必须 HTTPS / WSS"]
+  Auth --> Budget["Gateway 认证 / schema / 容量 / 超时\n不进入执行 pipeline"]
+  Budget --> Model["显式配置的同机 Ollama\n一次推理 / 无重试或 redirect"]
+  Model --> Validate{"Node + Swift 校验\nnonce / typed inputs / effects=false"}
+  Validate -->|失败或 stale| Stop["固定失败或丢弃\n不模拟、不自动换规则、不执行"]
+  Validate -->|通过| Plan["模型计划 + 实际用量\n不创建执行状态"]
+  Plan --> Review["用户复核 / 显式生成任务\ntyped kind + 固定安全参数和证据复核尾步"]
+  Review --> Existing["既有 allowlist / 最终参数 / 审批\n用户显式 sent 发送"]
+```
+
+```mermaid
+flowchart TD
   Intent["自然语言 -> 规则预览"] --> Route{"远端动作或明确阻断项?"}
   Route -->|否| Preview["本机能力仅预览\n无远端动作 blocked"]
   Route -->|是| Task["Gateway task\n无占位正文/命令/伪 HTML"]

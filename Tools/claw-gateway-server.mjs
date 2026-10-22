@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 import { spawn } from "node:child_process";
+import { handleModelPlanning } from "./claw-model-planner.mjs";
 
 const DEFAULT_PORT = 18789;
 const SCHEMA_VERSION = "claw.computer.control.v1";
@@ -135,11 +136,15 @@ Environment:
                          Set to 1 to allow read-only macOS Accessibility summaries
   CLAW_ALLOW_DESKTOP_CONTROL
                          Set to 1 to allow macOS app focus/paste/key actions
+  CLAW_PLANNER_ENDPOINT   Explicit loopback Ollama HTTP /api/chat endpoint
+  CLAW_PLANNER_MODEL      An already installed model name; never auto-downloads
+  CLAW_PLANNER_TIMEOUT_MS Optional planning budget, 100...30000 ms (default 30000)
   CLAW_DESKTOP_APP_ALLOWLIST
                          Comma-separated app names allowed for desktop control
   CLAW_DESKTOP_KEY_ALLOWLIST
                          Comma-separated key chords allowed for desktop control
 
+Planning uses authenticated POST /claw/planning and never executes a task.
 This is a local desktop Gateway prototype. It validates a Claw envelope over
 WebSocket and streams ClawGatewayEvent JSON back to the iOS controller. It writes
 artifact files into the configured workspace. Shell, screen capture, and desktop
@@ -219,7 +224,15 @@ if (process.argv.includes("--emit-events")) {
   process.exit(0);
 }
 
-const server = http.createServer((request, response) => {
+const server = http.createServer(async (request, response) => {
+  if (request.url === "/claw/planning") {
+    await handleModelPlanning(request, response, {
+      authorize: () => assertAuthorized(request, { ...options, requireToken: true }),
+      parseJSON: (text) => parseStrictJSONText(text).value,
+    });
+    if (options.once) server.close();
+    return;
+  }
   response.writeHead(426, { "Content-Type": "application/json" });
   response.end(JSON.stringify({ error: "websocket_required" }));
 });

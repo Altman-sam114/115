@@ -1,5 +1,26 @@
 # Claw iOS Controller Prototype
 
+## 自托管模型规划（v0.85）
+
+Mac/iPad/iPhone 共享“请求自托管模型计划”入口。它向已保存的 Gateway 请求一次真实推理；规则预览与演练仍是单独的显式入口，不冒充模型，也不会在模型失败后自动回退。模型仅收到本次任务文本与固定动作 schema，不收到屏幕、文件、历史会话、Gateway token 或 receipt。成功只更新待审计划及服务实际报告的 token 计数，不生成任务或执行电脑动作。
+
+桌面需自行安装 Ollama 并准备模型；Claw 不下载模型，也不读取 aitrans 的模型或凭据。在桌面本地配置（占位值需替换，不要提交 token）：
+
+```sh
+CLAW_GATEWAY_TOKEN='<private-local-token>' \
+CLAW_PLANNER_ENDPOINT='http://127.0.0.1:11434/api/chat' \
+CLAW_PLANNER_MODEL='<already-installed-model-name>' \
+node Tools/claw-gateway-server.mjs
+```
+
+规划必须有非空 Gateway token；Ollama endpoint 只接受同机 HTTP `/api/chat`，无 userinfo/query/fragment。Mac 同机可使用 `ws://127.0.0.1:18789`；iPad/远端客户端必须经可信 HTTPS/WSS 反向代理连接 Gateway，并转发 `/claw/planning` 和 Authorization header，不允许把任务文字与凭据直接发送到明文远端 ws。当前未实现自动 TLS 或配对。Ollama 自身的模型/联网配置由桌面用户管理；同机 endpoint 不证明模型绝不访问其自有云服务。
+
+流程：请求模型 -> 严格校验最多八个 typed 动作 -> 固定追加既有证据复核步骤 -> 人工查看计划 -> 显式生成任务 -> 复核最终参数 -> 审批 -> 显式发送。模型不能指定 approval、风险、权限、安全开关、envelope 或 receipt；未知字段/种类、路径逃逸、URL credentials、超限与错误响应拒绝。未知正文/收件人可留空，真实发送仍由 v0.84 gate 阻断，不补占位内容。Mission 启动保留同一 command/profile 的有效模型计划，旧计划失效后不会偷偷改用规则。
+
+单次规划最多两个并发、30 秒服务预算、2048 输出 token 预算；`CLAW_PLANNER_TIMEOUT_MS` 可显式设为 100...30000。无自动重试/redirect/工具调用，取消只停止等待并尽力中止计算，不承诺撤销已开始的推理。模型计划和用量只在内存，不进入 checkpoint、metadata 或日志。原本机 Core ML 模型页面仍是未安装占位状态，不与 Gateway Ollama 混同。
+
+云端新增真实 HTTP 请求链路 smoke：生产 Swift transport -> Gateway -> 小型 Ollama 协议 stub -> typed 计划 -> 待审批；无需下载权重。该测试证明协议与安全边界，不证明真实模型质量或真实桌面操作。官方参考：[Ollama Chat API](https://docs.ollama.com/api/chat)、[Structured Outputs](https://docs.ollama.com/capabilities/structured-outputs)。
+
 ## 最终执行参数（v0.84）
 
 动作预检区分固定审批策略与当前待办：无结果/pending 仍需原审批，waitingForApproval 必须人工确认；Gateway 已开始或完成的动作不再重复计为待审批，失败/跳过仍阻断。“就绪/已处理”不是再次发送授权，不改变最终参数/审批/真实发送闸门。首次 v0.84 云端失败已退回同版本修复，最新结果以对应 main artifact 为准，不能依据 continue-on-error 的 step 图标宣称通过。

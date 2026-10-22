@@ -22,6 +22,9 @@
 		2B000001000000000000000D /* PhoneAgentWorkbenchLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B000010000000000000000F /* PhoneAgentWorkbenchLayout.swift */; };
 		2B000001000000000000000E /* ClawTaskArguments.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B0000100000000000000010 /* ClawTaskArguments.swift */; };
 		2B000001000000000000000F /* ClawTaskArgumentsEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B0000100000000000000011 /* ClawTaskArgumentsEditor.swift */; };
+		2B0000010000000000000010 /* ClawModelPlanning.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B0000100000000000000012 /* ClawModelPlanning.swift */; };
+		2B0000010000000000000011 /* ClawModelPlanningTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B0000100000000000000013 /* ClawModelPlanningTransport.swift */; };
+		2B0000010000000000000012 /* ClawModelPlanningTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B0000100000000000000014 /* ClawModelPlanningTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -52,6 +55,9 @@
 		2B000010000000000000000F /* PhoneAgentWorkbenchLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneAgentWorkbenchLayout.swift; sourceTree = "<group>"; };
 		2B0000100000000000000010 /* ClawTaskArguments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClawTaskArguments.swift; sourceTree = "<group>"; };
 		2B0000100000000000000011 /* ClawTaskArgumentsEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClawTaskArgumentsEditor.swift; sourceTree = "<group>"; };
+		2B0000100000000000000012 /* ClawModelPlanning.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClawModelPlanning.swift; sourceTree = "<group>"; };
+		2B0000100000000000000013 /* ClawModelPlanningTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClawModelPlanningTransport.swift; sourceTree = "<group>"; };
+		2B0000100000000000000014 /* ClawModelPlanningTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClawModelPlanningTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -107,6 +113,7 @@
 				2B0000100000000000000002 /* ClawModels.swift */,
 				2B000010000000000000000B /* ClawWorkspaceLayout.swift */,
 				2B0000100000000000000010 /* ClawTaskArguments.swift */,
+				2B0000100000000000000012 /* ClawModelPlanning.swift */,
 				2B000010000000000000000A /* MainTab.swift */,
 			);
 			path = Core;
@@ -116,6 +123,7 @@
 			isa = PBXGroup;
 			children = (
 				2B0000100000000000000003 /* ClawStore.swift */,
+				2B0000100000000000000013 /* ClawModelPlanningTransport.swift */,
 				2B0000100000000000000005 /* ClawShortcuts.swift */,
 			);
 			path = Services;
@@ -138,6 +146,7 @@
 			isa = PBXGroup;
 			children = (
 				2B0000100000000000000007 /* ClawTests.swift */,
+				2B0000100000000000000014 /* ClawModelPlanningTests.swift */,
 			);
 			path = ClawTests;
 			sourceTree = "<group>";
@@ -257,6 +266,8 @@
 				2B0000010000000000000004 /* ContentView.swift in Sources */,
 				2B000001000000000000000E /* ClawTaskArguments.swift in Sources */,
 				2B000001000000000000000F /* ClawTaskArgumentsEditor.swift in Sources */,
+				2B0000010000000000000010 /* ClawModelPlanning.swift in Sources */,
+				2B0000010000000000000011 /* ClawModelPlanningTransport.swift in Sources */,
 				2B000001000000000000000D /* PhoneAgentWorkbenchLayout.swift in Sources */,
 				2B000001000000000000000C /* PhoneAgentCompactLayout.swift in Sources */,
 				2B000001000000000000000B /* PhoneAgentView.swift in Sources */,
@@ -272,6 +283,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				2B0000010000000000000007 /* ClawTests.swift in Sources */,
+				2B0000010000000000000012 /* ClawModelPlanningTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

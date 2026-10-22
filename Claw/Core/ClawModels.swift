@@ -508,6 +508,7 @@ struct PhoneAgentStep: Identifiable, Equatable, Sendable {
     var requiresUserConfirmation: Bool
     var isAllowedOnIOS: Bool
     var rationale: String
+    var modelProposal: ClawModelPlannedAction?
 
     init(
         id: UUID = UUID(),
@@ -518,7 +519,8 @@ struct PhoneAgentStep: Identifiable, Equatable, Sendable {
         runMode: PhoneAgentRunMode,
         requiresUserConfirmation: Bool,
         isAllowedOnIOS: Bool,
-        rationale: String
+        rationale: String,
+        modelProposal: ClawModelPlannedAction? = nil
     ) {
         self.id = id
         self.title = title
@@ -529,6 +531,7 @@ struct PhoneAgentStep: Identifiable, Equatable, Sendable {
         self.requiresUserConfirmation = requiresUserConfirmation
         self.isAllowedOnIOS = isAllowedOnIOS
         self.rationale = rationale
+        self.modelProposal = modelProposal
     }
 }
 
@@ -539,6 +542,7 @@ struct PhoneAgentPlan: Identifiable, Equatable, Sendable {
     var steps: [PhoneAgentStep]
     var blockedNotes: [String]
     var createdAt: Date
+    var source: ClawPlanSource
 
     init(
         id: UUID = UUID(),
@@ -546,7 +550,8 @@ struct PhoneAgentPlan: Identifiable, Equatable, Sendable {
         summary: String,
         steps: [PhoneAgentStep],
         blockedNotes: [String] = [],
-        createdAt: Date = Date()
+        createdAt: Date = Date(),
+        source: ClawPlanSource = .rules
     ) {
         self.id = id
         self.command = command
@@ -554,6 +559,7 @@ struct PhoneAgentPlan: Identifiable, Equatable, Sendable {
         self.steps = steps
         self.blockedNotes = blockedNotes
         self.createdAt = createdAt
+        self.source = source
     }
 
     var confirmationCount: Int {

@@ -496,7 +496,7 @@ struct PhoneAgentCommandPanel: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Label("规则规划预览，尚未接入推理模型", systemImage: "info.circle")
+            Label(store.phoneAgentPlan.source.title, systemImage: "info.circle")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -506,6 +506,40 @@ struct PhoneAgentCommandPanel: View {
                 .padding(12)
                 .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
 
+            VStack(alignment: .leading, spacing: 8) {
+                Button {
+                    Task {
+                        await store.requestModelPlan()
+                        if store.modelPlanningPhase == .ready { onSelectDetail(.plan) }
+                    }
+                } label: {
+                    Label("请求自托管模型计划", systemImage: "sparkles")
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .buttonStyle(PrimaryActionButtonStyle())
+                .disabled(store.modelPlanningPhase == .requesting)
+                .accessibilityHint("经已配置 Gateway 发送本次任务文本至其 Ollama 服务；不发送屏幕、文件或历史，不生成、审批或执行电脑任务")
+
+                if store.modelPlanningPhase == .requesting {
+                    HStack {
+                        ProgressView()
+                        Button("停止规划等待") { store.cancelModelPlanning() }
+                            .frame(minHeight: 44)
+                            .accessibilityHint("只停止规划请求，不自动重试；不承诺撤销已开始的远端计算")
+                    }
+                }
+                Text(store.modelPlanningPhase.message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let usage = store.modelPlanningUsage {
+                    Text(usage.title)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
             HStack(spacing: 10) {
                 Button {
                     store.generatePhoneAgentPlan()
@@ -514,7 +548,7 @@ struct PhoneAgentCommandPanel: View {
                     Label("预览规则计划", systemImage: "list.bullet.rectangle.portrait.fill")
                         .frame(maxWidth: .infinity, minHeight: 44)
                 }
-                .buttonStyle(PrimaryActionButtonStyle())
+                .buttonStyle(SecondaryActionButtonStyle())
 
                 Button {
                     store.simulatePhoneAgentExecution()
@@ -4713,6 +4747,9 @@ struct PhoneAgentPlanPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             SectionHeader(title: "执行计划", icon: "checklist")
+            Text(store.phoneAgentPlan.source.title)
+                .font(.caption.bold())
+                .foregroundStyle(.secondary)
 
             HStack(spacing: 10) {
                 PhoneAgentSummaryPill(value: "\(store.phoneAgentPlan.executableStepCount)", label: "可执行")

@@ -4,6 +4,33 @@ import Foundation
 enum LogicSmoke {
     @MainActor
     static func main() async {
+        if CommandLine.arguments.contains("--planning-http-smoke") {
+            let environment = ProcessInfo.processInfo.environment
+            guard let endpoint = environment["CLAW_PLANNING_SMOKE_ENDPOINT"], let token = environment["CLAW_PLANNING_SMOKE_TOKEN"] else {
+                print("Model planning HTTP fixture configuration missing")
+                exit(1)
+            }
+            let store = ClawStore(autoScanLocalArtifacts: false)
+            store.setGateway(url: endpoint, token: token)
+            store.phoneAgentCommand = "Build a reviewable plan for this explicit cloud fixture"
+            await store.requestModelPlan()
+            guard store.modelPlanningPhase == .ready, store.phoneAgentPlan.source == .configuredModel,
+                  store.modelPlanningUsage?.inputTokens == 33, store.modelPlanningUsage?.outputTokens == 55,
+                  store.clawMobileTasks.isEmpty, store.clawGatewaySessions.isEmpty, store.gatewayEvents.isEmpty else {
+                print("Model planning production HTTP client contract failed")
+                exit(1)
+            }
+            store.queueClawMobileTaskFromCurrentPlan()
+            guard let task = store.clawMobileTasks.first, task.status == .waitingForApproval,
+                  task.actions.count == 9, ClawTaskArguments.issue(in: task) == nil,
+                  task.actions.allSatisfy({ $0.approval == .gatewayApproval }),
+                  store.clawGatewaySessions.isEmpty, store.gatewayEvents.isEmpty, store.lastGatewayLiveRequest == nil else {
+                print("Model planning production HTTP client approval gate failed")
+                exit(1)
+            }
+            print("Claw model planning production HTTP client smoke passed")
+            return
+        }
         var failures: [String] = []
 
         func expect(_ condition: @autoclosure () -> Bool, _ message: String) {
@@ -68,6 +95,29 @@ enum LogicSmoke {
         }
 
         let store = ClawStore(autoScanLocalArtifacts: false)
+        do {
+            let modelStore = ClawStore(autoScanLocalArtifacts: false)
+            modelStore.setGateway(url: "ws://127.0.0.1:18789", token: "smoke-planning-token")
+            modelStore.phoneAgentCommand = "请帮我完成这个目标"
+            await modelStore.requestModelPlan(transport: ModelPlanningSmokeTransport())
+            expect(modelStore.modelPlanningPhase == .ready && modelStore.phoneAgentPlan.source == .configuredModel, "validated model response must have an explicit source")
+            expect(modelStore.clawMobileTasks.isEmpty && modelStore.clawGatewaySessions.isEmpty && modelStore.gatewayEvents.isEmpty, "planning must not create execution state")
+            expect(modelStore.modelPlanningUsage?.outputTokens == 22, "planning must preserve actual provider usage")
+            let plan = modelStore.phoneAgentPlan
+            modelStore.gatewayDispatchMode = .liveGateway
+            modelStore.startAutonomousComputerTakeover()
+            expect(modelStore.phoneAgentPlan == plan, "Mission must not silently replace the model plan with keyword rules")
+            expect(modelStore.clawMobileTasks.first?.actions.map(\.kind) == [.manageFiles, .runAgentLoop], "model actions must route by typed kind, with a fixed evidence review tail")
+            modelStore.approveLatestClawMobileTask()
+            let transport = FinalArgumentSmokeTransport()
+            await modelStore.sendLatestClawMobileTaskOverLiveGateway(transport: transport)
+            expect(transport.envelopes.isEmpty && modelStore.clawGatewaySessions.isEmpty, "missing model text cannot bypass final input approval")
+            modelStore.phoneAgentCommand = "另一个目标"
+            let count = modelStore.clawMobileTasks.count
+            modelStore.queueClawMobileTaskFromCurrentPlan()
+            expect(modelStore.clawMobileTasks.count == count && modelStore.modelPlanningPhase == .stale, "stale model plans must not queue")
+            expect((try? ClawPlanningJSON.object(Data("{\"a\":1,\"a\":2}".utf8), maxBytes: 100)) == nil, "planning JSON must reject duplicate object keys")
+        }
         do {
             let finalStore = ClawStore(autoScanLocalArtifacts: false)
             finalStore.setGateway(url: "ws://127.0.0.1:18789", token: "smoke-final-token")
@@ -4719,5 +4769,18 @@ private final class FinalArgumentSmokeTransport: @unchecked Sendable, ClawGatewa
             )))
             stream.finish()
         }
+    }
+}
+
+private struct ModelPlanningSmokeTransport: ClawModelPlanningTransport {
+    func response(for request: ClawModelPlanningWireRequest) async throws -> Data {
+        let body = try ClawPlanningJSON.object(request.body, maxBytes: 32768)
+        guard let nonce = body["requestNonce"] as? String else { throw ClawModelPlanningError.invalidInput }
+        return try JSONSerialization.data(withJSONObject: [
+            "controlPlane": ClawModelPlanningRequest.controlPlane, "kind": "planningResponse", "requestNonce": nonce,
+            "proposal": ["summary": "A model protocol fixture, not real inference", "actions": [["kind": "manageFiles",
+                "goal": "Write a user-reviewed note", "inputs": ["path": "notes/model.txt", "text": ""]]]],
+            "usage": ["inputTokens": 11, "outputTokens": 22], "effects": ["computerActions": false, "taskDispatched": false]
+        ])
     }
 }

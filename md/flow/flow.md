@@ -1,5 +1,13 @@
 # 项目核心流程文档
 
+## v0.85 自托管模型规划主路径
+
+用户显式请求 -> 捕获 command/profile/plan/task/session/continuation revision -> header-only token 的独立 HTTP `/claw/planning` -> Gateway 强制认证/严格 JSON/固定预算与容量 -> 仅同机、显式配置的 Ollama `/api/chat` -> 固定 schema、system/user 分离、一次推理 -> Node 校验 proposal -> Swift same nonce/strict shape/effects=false/typed inputs 校验 -> 只更新模型来源的计划和实际用量。任何失败不回退规则/模拟，不生成 task/session/event/artifact，不写 workspace/replay/checkpoint；取消/旧 scope 结果丢弃，远端计算是否已停止不作保证。
+
+用户复核模型计划 -> 显式生成任务或 Mission 启动 -> typed kind/inputs，不从模型 title/target 猜动作 -> 客户端固定安全 toolArguments 与既有末步证据复核 -> 既有 allowlist/风险/人工审批 -> 最终参数校验 -> 用户显式发送。模型最多提出八个受支持动作，不能决定审批/权限/安全开关/loop/receipt；缺必需正文仍阻断真实发送。有效模型计划在 Mission 启动保留，command/profile 变化后的旧计划拒绝 queue，不静默换成规则。规则预览与演练保留为单独显式入口。
+
+同机 Mac 可 loopback HTTP；iPad/远端必须使用可信 HTTPS/WSS 反向代理。未自动安装模型、TLS 或配对。云端生产 Swift HTTP client -> Gateway -> 小型 Ollama stub 检查真实 I/O 和审批闭环，不冒充真实权重推理质量或授权桌面 E2E。v0.84 基线 `263d0213f076ccd4a9e1a3b933d891e552713e31` / run `39829293264` attempt `1` 已完整通过并实际看图，本轮须新的 main artifact 复判。
+
 ## v0.84 最终参数与普通审批
 
 自然语言 -> 明确标注的规则计划（含英文 browser/report 等规则） -> 本机步骤仅预览、远端/消息草稿/明确阻断项生成 task；无远端动作 blocked -> 用户显式打开父级参数 sheet -> 固定 typed 参数校验 -> Apply 精确匹配当前 task/action，修改一个动作、撤销旧审批 -> 用户重新审批最终 task/profile 摘要 -> 用户显式真实发送 -> 再验参数/审批/凭据 -> sent envelope -> Gateway 独立 policy/handler 校验。失败不创建客户端 session/event/artifact、不调用 transport，Mission 留在待处理而非假称已发送。显式模拟仍可演练不完整参数，不授权缺参数的真实动作。

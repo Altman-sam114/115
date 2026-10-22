@@ -1,5 +1,13 @@
 # 测试规范
 
+## v0.85 模型规划合同与真实 HTTP 链路
+
+新增 `ClawModelPlanningTests.swift` 13 项（预期双设备各 149 项）：strict shape/nonce/effects、布尔/数字区分/实际 usage、duplicate escaped key/depth/byte 限制、八种 typed kind 不依赖模型 title/target、allowlist/全人工审批/固定安全参数、未知字段/种类/审批注入/路径/URL/UTF-8、header-only token/固定 HTTP 路径/明文远端拒绝、模型成功只更新计划和用量/零 task/session/event/checkpoint save、缺正文真实派发零调用、Mission 保留模型计划和精确参数、失败无自动 fallback、非法配置零调用、duplicate/cancel/旧请求不覆盖新 operation、command 切回/profile/plan/queue/Mission revision stale、已接受计划失效后不可 queue 或启动。所有异步 fake coordination 与 task 回收必须有界，不删除既有测试。
+
+LogicSmoke 覆盖模型 source/typed 路由、固定证据复核尾步、缺参数既有闸门、stale queue 与 duplicate JSON。新增 cloud-only `node Tools/claw-model-planner-smoke.mjs`，真实生产 Swift HTTP transport（复用已编译 LogicSmoke 的 `--planning-http-smoke`）-> 实际 Gateway HTTP 路由 -> 本机小型 Ollama stub -> typed 计划/待审批，验证 header 不转发给模型、固定 system/user/schema/2048 输出预算、实际 token 用量、缺配置/认证/未知字段/重复 key/超限/危险参数、provider malformed/非终态/截断/tool call/error/redirect/超限、容量与同 nonce 重复不得释放槽、timeout/cancel/日志脱敏、无 workspace/执行副作用。只编译一次 LogicSmoke，不下载模型、依赖或大数据。
+
+workflow 保留所有旧检查，新增 planning node syntax/smoke，将底层 outcome 加入 manifest/JUnit/testOutcome/最终失败 gate；成功预计 15 项检查。新增三个 Swift 文件的 project 注册必须排除用户签名配置。最新 main 的双平台 Release、双设备 XCTest、Gateway 双 smoke、fixture、非白屏 PNG/JSON 和结果包 C 复判仍必需。stub 不证明真实模型质量、视觉/多轮自治、实际 Mac/iPad 交互、TLS/配对或签名发布。本地仍禁止 compiler、build、Swift smoke、Gateway/model smoke、node --check 或任何模拟器运行。
+
 ## v0.84 最终参数与普通审批
 
 云端新增 11 项 XCTest（修复后预期双设备各 136 项）：七种可编辑 kind 的固定参数/安全常量、未知 key/错误文案不回显、UTF-8/路径/URL 边界、未应用和非法输入零任务/快照副作用、只改一个 action/撤销审批、同步和 async 缺参数真实发送零 transport/session/event、编辑后须新审批且 wire 精确一致/单次发送、连接及 runtime token revision 撤销、旧任务/状态/continuation 拒绝、Mission 缺参数不误报派发，以及原英文 scope 意图不依赖假本机 handler。废除旧 placeholder/pwd/自动桌面正文与提交键断言，替换为显式缺输入和远端路由断言；旧终态、取消、部分证据、continuation 等回归保留。

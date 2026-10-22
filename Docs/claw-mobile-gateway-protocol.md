@@ -1,5 +1,19 @@
 # Claw Computer-Control Gateway 协议草案
 
+## v0.85 自托管模型规划控制面
+
+独立 HTTP `POST /claw/planning`，要求 `Content-Type: application/json`、`X-Claw-Control-Plane: claw.gateway.planning.v1` 和非空、匹配的 Authorization bearer；拒绝 `X-Claw-Schema`。这不是 `claw.computer.control.v1` envelope，不进入 workspace/replay/continuation/session/event/artifact/handler。原 WebSocket 执行/readiness 协议保持不变。客户端只从已保存 Gateway origin 派生固定路径，无 userinfo/query/fragment，不跟随 redirect；除 loopback ws->http 外必须 wss->https，不能向明文远端传 token 和任务。
+
+request 恰好四字段：`controlPlane`、`kind=planningRequest`、8...128 字节 base64url `requestNonce`、非空且最多 4096 UTF-8 bytes 的 `command`。仅发送本次文本，不携带 task/session/receipt、屏幕、文件或历史。Node 严格 JSON 拒绝重复键，body 上限 32768 bytes；无模型配置/认证/输入校验失败零推理请求。
+
+Gateway 只使用桌面配置的 `CLAW_PLANNER_ENDPOINT`（loopback HTTP、固定 `/api/chat`、无凭据/query/fragment）和 `CLAW_PLANNER_MODEL`。Ollama 非流式请求包含固定 system/user 分离、固定 JSON schema、`num_predict=2048`、`num_ctx=8192`、temperature=0，无工具调用/redirect/自动重试/模型下载。整体预算默认 30000ms，可显式缩短至 100ms，最多两个进行中的 nonce；重复进行中 nonce 不能释放别人的容量槽。取消/断连尽力 abort，不保证远端计算已停止；模型的真实来源和 Ollama 自有网络设置仍须用户确认。
+
+response 恰好六字段：相同 controlPlane、`kind=planningResponse`、同 nonce、`proposal`、`usage`、`effects`。proposal 恰好 summary/actions，summary/goal 各非空且 <=500 UTF-8 bytes，actions 1...8，每项恰好 kind/goal/inputs；inputs 精确字段：observeScreen `{}`，controlBrowser `{mode,app,target}`，manageFiles `{path,text}`，runShellCommand `{command}`，operateDesktopApp `{app,text,keys}`，extractData `{path}`，composeMessage/composeEmail `{recipient,text}`。每值 <=4096 UTF-8 bytes、无 NUL；mode 仅 search/url，非空 path 必须安全 workspace 相对路径，extract path <=500 bytes，非空 url 必须 http(s) 且无 credentials。禁止额外字段、未知 kind、approval/风险/权限/loop/envelope/receipt。服务 proposal 上限 32768 bytes，客户端响应上限 65536 bytes，双方检查 schema 与安全约束。
+
+usage 恰好 inputTokens/outputTokens，值为实际服务报告的 0...1000000 整数或 null；不推测费用。effects 恰好 `computerActions=false`、`taskDispatched=false`，Swift 同时拒绝数字 0 假冒布尔值、未知字段、重复键、nonce 错误与超限。错误只返回 controlPlane/kind=planningError/errorCode 固定枚举，不回显 body、raw error、token 或 nonce。
+
+成功只更新当前计划/来源与短生命周期用量。PhoneAgentStep 持有校验后的 typed proposal，Bridge 不靠模型 title/target 猜 kind，安全参数由客户端固定生成；末尾固定添加既有 `runAgentLoop` 证据复核，模型不能指定其策略。普通 allowlist、风险、敏感数据、最终参数、审批和 sent wire gate 原样保留，缺正文可待补但不能真实发送。command/profile/plan/task/session/continuation revision 或取消使旧请求失效；已接受模型计划的 command/profile 编辑后不可 queue/Mission 启动，不能隐式改回规则。规划状态/用量不持久化，不改变现有 checkpoint、事件或 receipt。
+
 ## v0.84 普通任务最终参数边界
 
 wire schema 保持 claw.computer.control.v1。Bridge 不再把本机准备/系统能力预览映射成假远端 handler；明确平台阻断项仍保留，空远端动作 task 不可发送。浏览器只生成待审搜索参数，不提供示例 HTML 充当证据；Shell/文件正文/桌面正文与快捷键/收件人与消息正文缺失时必须用户显式填写。
