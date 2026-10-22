@@ -3603,7 +3603,13 @@ function shellCommandSafetyMetadata(action, config, details = {}) {
 }
 
 async function manageFilesAction(action, index, config) {
-  const requestedPath = action.toolArguments?.writePath || `managed-file-${index + 1}.txt`;
+  const args = action.toolArguments || {};
+  if (typeof args.writePath !== "string" || !args.writePath.trim() ||
+      typeof args.writeText !== "string" || !args.writeText.trim() ||
+      Buffer.byteLength(args.writePath, "utf8") > 4096 || Buffer.byteLength(args.writeText, "utf8") > 32768) {
+    return structuredInputBlockedResult(action, index, config);
+  }
+  const requestedPath = args.writePath;
   let markerPath;
   try {
     markerPath = safeWorkspacePath(config.sessionWorkspace, requestedPath);
@@ -3649,15 +3655,7 @@ async function manageFilesAction(action, index, config) {
     }
     throw error;
   }
-  const content =
-    action.toolArguments?.writeText ||
-    [
-      "Claw Gateway file action",
-      `action=${action.title}`,
-      `target=${action.target}`,
-      `instruction=${action.instruction}`,
-      `toolArguments=${JSON.stringify(action.toolArguments || {})}`,
-    ].join("\n");
+  const content = args.writeText;
   try {
     await writeWorkspaceTextFile(config.sessionWorkspace, markerPath, content);
   } catch (error) {
@@ -4185,11 +4183,14 @@ function desktopPolicyDiagnostics(action, details = {}) {
 
 async function desktopAppAction(action, index, config) {
   const args = action.toolArguments || {};
-  const targetApp = String(args.targetApp || action.target || "").trim();
+  const targetApp = typeof args.targetApp === "string" ? args.targetApp.trim() : "";
   const finalSubmitRequiresApproval = args.finalSubmitRequiresApproval !== "false";
   const captureBeforeAfter = args.captureBeforeAfter !== "false";
-  const pasteText = desktopPasteText(action, args);
+  const pasteText = desktopPasteText(args);
   const requestedKeys = parseDesktopKeySequence(args.keySequence || args.keyChords || args.shortcutSequence);
+  if (!targetApp || (!pasteText && requestedKeys.length === 0)) {
+    return structuredInputBlockedResult(action, index, config);
+  }
   const keyPlan = planDesktopKeys(requestedKeys, finalSubmitRequiresApproval, config.desktopKeyAllowlist);
   const beforeWindows = captureBeforeAfter ? await collectWindowMetadata(config) : [];
   const basePayload = {
@@ -4391,16 +4392,38 @@ async function desktopAppAction(action, index, config) {
   };
 }
 
-function desktopPasteText(action, args) {
+function desktopPasteText(args) {
   const candidates = [
     args.pasteText,
     args.draftText,
     args.messageText,
     args.textToPaste,
     args.text,
-    action.inputPreview,
   ];
-  return String(candidates.find((value) => typeof value === "string" && value.trim()) || "").trim();
+  return String(candidates.find((value) => typeof value === "string" && value.trim()) || "");
+}
+
+async function structuredInputBlockedResult(action, index, config) {
+  const metadata = {
+    mode: "structured-input-required",
+    actionKind: action.kind,
+    policyDiagnostic: "structured-arguments-required",
+    executionAttempted: "false",
+    resultStatus: "failed",
+    safetyFlags: "metadata-only,action-bound,tool-arguments-omitted,instruction-omitted,input-preview-omitted,no-business-side-effects",
+  };
+  const artifact = await writeArtifact(
+    "auditLog",
+    `structured-input-blocked-${index + 1}.json`,
+    {
+      mode: "structured-input-required",
+      actionKind: action.kind,
+      reason: "structured_arguments_required",
+      safety: { executionAttempted: false, businessFileWritten: false, instruction: "omitted", inputPreview: "omitted", toolArguments: "omitted" },
+    },
+    true, config, metadata,
+  );
+  return { status: "failed", summary: "Gateway blocked missing or invalid structured execution input", artifacts: [artifact], isRetryable: false };
 }
 
 function parseDesktopKeySequence(value) {

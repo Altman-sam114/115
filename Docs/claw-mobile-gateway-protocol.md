@@ -1,5 +1,15 @@
 # Claw Computer-Control Gateway 协议草案
 
+## v0.84 普通任务最终参数边界
+
+wire schema 保持 claw.computer.control.v1。Bridge 不再把本机准备/系统能力预览映射成假远端 handler；明确平台阻断项仍保留，空远端动作 task 不可发送。浏览器只生成待审搜索参数，不提供示例 HTML 充当证据；Shell/文件正文/桌面正文与快捷键/收件人与消息正文缺失时必须用户显式填写。
+
+客户端 `ClawTaskArguments` 对当前支持 kind 使用固定 key、安全常量和字符串上限；拒绝空必需输入、未知 key、超长 UTF-8、workspace 绝对/逃逸路径、含账号密码或非法协议的 URL。普通编辑器上下文绑定完整 task/action 快照，只允许最新未发送、非 blocked、非 continuation、没有 session 的任务；合法 Apply 只改一个 action，撤销普通审批并恢复 waitingForApproval。未应用字段仅在父级 sheet 内存，Apply 后才进入 toolArguments。参数原文不进入 metadata、checkpoint、日志或 accessibility 摘要，验证错误为固定文案。
+
+普通审批以最终 readyToSend task 和 profile 的 canonical 摘要保存在进程内；连接字段/运行时 token 修改即撤销，token 与已保存指纹不一致也拒绝。真实发送先复核参数及审批，失败零 transport/session/event/artifact；有效普通任务仍使用 sent wire 状态。模拟不触发真实执行，不能用未完整参数的演练审批绕过该闸门。continuation 的 readyToSend + receipt/frozen 合同保持独立不变。
+
+Gateway 独立加强两个执行源边界：manageFiles 必须显式提供字符串 writePath/writeText，缺失/错误类型/空内容/超限只写 action-bound、redacted auditLog（mode=structured-input-required，executionAttempted=false，非重试失败），不写业务文件；operateDesktopApp 不再回退 action.target/inputPreview，缺少目标或显式正文/键序列时同样拒绝。固定审计不回显 instruction/preview/参数，后续合法 action 仍继续。既有路径、symlink、allowlist、最终提交闸门不变。客户端统一严格合同不等于已完成所有旧 Gateway handler 的通用 validator 迁移，也不代表真实动作成功。
+
 普通任务初次 wire envelope 必须为 sent，Store 在创建会话前生成同 identity/actions 的 sent 副本；续接仍为独立 frozen readyToSend + receipt。审批不得把 sent/blocked 普通任务变回可发送。UI 显式 live 点击捕获 task ID 并调用 async transport，不在生命周期隐式发送。
 
 ## Mac / iPad 客户端边界

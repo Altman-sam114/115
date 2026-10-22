@@ -657,10 +657,16 @@ final class ClawStore: ObservableObject {
     @Published private(set) var skills: [ClawSkill]
     @Published private(set) var automationTargets: [AutomationTarget]
     @Published var gatewayURL: String {
-        didSet { advanceLiveGatewayPresentationGeneration() }
+        didSet {
+            ordinaryTaskApprovals.removeAll()
+            advanceLiveGatewayPresentationGeneration()
+        }
     }
     @Published var gatewayToken: String {
-        didSet { advanceLiveGatewayPresentationGeneration() }
+        didSet {
+            ordinaryTaskApprovals.removeAll()
+            advanceLiveGatewayPresentationGeneration()
+        }
     }
     @Published private(set) var lastAutomationDraft: String
     @Published private(set) var phoneAgentCapabilities: [PhoneAgentCapability]
@@ -701,6 +707,11 @@ final class ClawStore: ObservableObject {
     }
     private var detachedLivePresentations: [UUID: DetachedLivePresentation] = [:]
     private var simulatedGatewaySessionIDs: Set<UUID>
+    private struct OrdinaryTaskApproval {
+        let taskDigest: String
+        let profileDigest: String
+    }
+    private var ordinaryTaskApprovals: [UUID: OrdinaryTaskApproval] = [:]
     private var continuationReceipts: [String: ContinuationReceiptEntry]
     private var continuationApprovalRecords: [UUID: ClawContinuationApprovalRecord]
     private var frozenContinuationEnvelopes: [UUID: String]
@@ -2989,6 +3000,45 @@ final class ClawStore: ObservableObject {
         persistMissionRunCheckpointIfNeeded()
     }
 
+    func canEditTaskArguments(_ context: ClawTaskArgumentEditorContext) -> Bool {
+        guard let current = clawMobileTasks.first,
+              current == context.task, current.continuationLineage == nil,
+              current.status == .queued || current.status == .waitingForApproval || current.status == .readyToSend,
+              current.actions.contains(context.action), context.action.approval != .blocked,
+              ClawTaskArguments.isEditable(context.action.kind),
+              !clawGatewaySessions.contains(where: { $0.taskID == current.id }) else { return false }
+        return true
+    }
+
+    @discardableResult
+    func applyTaskArgumentInput(_ input: ClawTaskArgumentInput, context: ClawTaskArgumentEditorContext) -> Bool {
+        guard canEditTaskArguments(context),
+              let index = clawMobileTasks[0].actions.firstIndex(where: { $0.id == context.action.id }) else { return false }
+        var action = context.action
+        action.toolArguments = input.arguments(for: action.kind)
+        guard ClawTaskArguments.issue(in: action) == nil else { return false }
+        var updated = clawMobileTasks[0]
+        updated.actions[index] = action
+        updated.status = .waitingForApproval
+        ordinaryTaskApprovals.removeValue(forKey: updated.id)
+        clawMobileTasks[0] = updated
+        lastClawMobileEnvelope = ClawMobileBridge.makeEnvelopeString(task: updated, profile: clawGatewayProfile)
+        lastGatewayEvent = "最终参数已更新，旧审批已撤销；请复核后重新审批，不会自动发送。"
+        resetGatewayTransportProbeState()
+        resetGatewayReadinessState()
+        if autonomousLoop.taskID == updated.id {
+            setAutonomousLoop(
+                phase: .waitingForUserApproval,
+                statusLine: "最终执行参数已更新，需要重新审批。",
+                lastDecision: "旧审批已撤销；不会自动发送。",
+                requiresUserApproval: true,
+                appendCheckpoint: "loop.arguments updated"
+            )
+        }
+        persistMissionRunCheckpointIfNeeded()
+        return true
+    }
+
     func ingestGatewayWireEvents(_ wireEvents: [ClawGatewayWireEvent]) {
         for wireEvent in wireEvents {
             guard canAcceptGatewayEvent(wireEvent.event) else { continue }
@@ -3266,7 +3316,31 @@ final class ClawStore: ObservableObject {
             guard task.status == .queued || task.status == .waitingForApproval || task.status == .readyToSend else {
                 return
             }
-            clawMobileTasks[index].status = .readyToSend
+            if gatewayDispatchMode == .liveGateway, let issue = ClawTaskArguments.issue(in: task) {
+                ordinaryTaskApprovals.removeValue(forKey: taskID)
+                clawMobileTasks[index].status = .waitingForApproval
+                if clawMobileTasks.first?.id == taskID {
+                    let message = "Live Gateway 未发送：\(issue.message) 请先填写最终参数再审批。"
+                    lastGatewayEvent = message
+                    if autonomousLoop.taskID == taskID {
+                        setAutonomousLoop(
+                            phase: .waitingForUserApproval, statusLine: message,
+                            lastDecision: "参数不完整，尚未审批或发送。", requiresUserApproval: true,
+                            appendCheckpoint: "loop.approval arguments_required"
+                        )
+                    }
+                }
+                persistMissionRunCheckpointIfNeeded()
+                return
+            }
+            var approved = task
+            approved.status = .readyToSend
+            approved.destinationGateway = clawGatewayProfile.endpoint
+            ordinaryTaskApprovals[taskID] = OrdinaryTaskApproval(
+                taskDigest: canonicalTaskDigest(approved),
+                profileDigest: canonicalProfileDigest(clawGatewayProfile)
+            )
+            clawMobileTasks[index] = approved
             lastClawMobileEnvelope = ClawMobileBridge.makeEnvelopeString(
                 task: clawMobileTasks[index],
                 profile: clawGatewayProfile
@@ -3583,12 +3657,17 @@ final class ClawStore: ObservableObject {
                 lastClawMobileEnvelope = ClawMobileBridge.makeEnvelopeString(task: candidate, profile: clawGatewayProfile)
                 return nil
             }
+            if mode == .liveGateway, let issue = ordinaryLiveDispatchIssue(candidate) {
+                lastGatewayEvent = issue
+                return nil
+            }
             // Ordinary Gateway preflight accepts only sent; continuation retains its frozen readyToSend envelope.
             var wireTask = candidate
             wireTask.status = .sent
             envelopeJSON = ClawMobileBridge.makeEnvelopeString(task: wireTask, profile: clawGatewayProfile)
         }
         if candidate.status == .readyToSend || candidate.status == .queued {
+            ordinaryTaskApprovals.removeValue(forKey: candidate.id)
             clawMobileTasks[index].status = .sent
             let task = clawMobileTasks[index]
             let session = ClawGatewayEventStream.makePreparedSession(
@@ -3618,6 +3697,22 @@ final class ClawStore: ObservableObject {
                 continuationApprovalRecords.removeValue(forKey: task.id)
             }
             return (task, session.id, mode, envelopeJSON)
+        }
+        return nil
+    }
+
+    private func ordinaryLiveDispatchIssue(_ task: ClawMobileTask) -> String? {
+        if let issue = ClawTaskArguments.issue(in: task) {
+            return "Live Gateway 未发送：\(issue.message) 请在计划与审批中复核最终参数。"
+        }
+        guard ClawMobileBridge.tokenFingerprint(for: gatewayToken) == clawGatewayProfile.tokenFingerprint else {
+            return "Live Gateway 未发送：运行时凭据已变化，请先保存连接配置并重新审批。"
+        }
+        guard task.blockedCount == 0, task.status == .readyToSend,
+              let approval = ordinaryTaskApprovals[task.id],
+              approval.taskDigest == canonicalTaskDigest(task),
+              approval.profileDigest == canonicalProfileDigest(clawGatewayProfile) else {
+            return "Live Gateway 未发送：最终任务或 Gateway 配置尚未获当前审批，请重新审批。"
         }
         return nil
     }
@@ -4527,7 +4622,7 @@ final class ClawStore: ObservableObject {
     }
 
     private func dispatchAutonomousLoopTask(_ task: ClawMobileTask) {
-        prepareAutonomousLoopDispatch(task, mode: gatewayDispatchMode)
+        guard prepareAutonomousLoopDispatch(task, mode: gatewayDispatchMode) else { return }
         sendTask(id: task.id)
         updateAutonomousLoopFromLatestGatewaySession()
     }
@@ -4535,7 +4630,7 @@ final class ClawStore: ObservableObject {
     private func dispatchAutonomousLoopTaskOverLiveGateway<T: ClawGatewayTransport>(
         _ task: ClawMobileTask, transport: T
     ) async {
-        prepareAutonomousLoopDispatch(task, mode: .liveGateway)
+        guard prepareAutonomousLoopDispatch(task, mode: .liveGateway) else { return }
         await sendTaskOverLiveGateway(id: task.id, transport: transport)
         guard autonomousLoop.taskID == task.id, clawMobileTasks.first?.id == task.id,
               let session = clawGatewaySessions.first, session.taskID == task.id,
@@ -4543,7 +4638,19 @@ final class ClawStore: ObservableObject {
         updateAutonomousLoopFromLatestGatewaySession()
     }
 
-    private func prepareAutonomousLoopDispatch(_ task: ClawMobileTask, mode: ClawGatewayDispatchMode) {
+    private func prepareAutonomousLoopDispatch(_ task: ClawMobileTask, mode: ClawGatewayDispatchMode) -> Bool {
+        if mode == .liveGateway, task.continuationLineage == nil,
+           let issue = ordinaryLiveDispatchIssue(task) {
+            lastGatewayEvent = issue
+            setAutonomousLoop(
+                phase: .waitingForUserApproval,
+                statusLine: issue,
+                lastDecision: "未创建会话，请填写最终参数并重新审批。",
+                requiresUserApproval: true,
+                appendCheckpoint: "loop.dispatch arguments_or_approval_required"
+            )
+            return false
+        }
         setAutonomousLoop(
             phase: .dispatching,
             runMode: mode,
@@ -4553,6 +4660,7 @@ final class ClawStore: ObservableObject {
             taskID: task.id,
             appendCheckpoint: "loop.dispatch mode=\(mode.rawValue) actions=\(task.actions.count)"
         )
+        return true
     }
 
     private func updateAutonomousLoopFromLatestGatewaySession() {
@@ -4685,7 +4793,7 @@ enum PhoneAgentPlanner {
         let request = cleanCommand.isEmpty ? "接管电脑，完成资料收集、整理和交付" : cleanCommand
         var steps: [PhoneAgentStep] = [
             PhoneAgentStep(
-                title: "解析 LLM 指令",
+                title: "规则解析任务目标",
                 instruction: "把自然语言拆成目标、应用、输入、输出、风险等级和需要审批的动作。",
                 target: "Claw Controller",
                 surface: .clawRuntime,
@@ -4702,7 +4810,8 @@ enum PhoneAgentPlanner {
                 "接管", "电脑", "桌面", "屏幕", "观察", "看一下", "截图", "识别", "当前窗口", "定位按钮",
                 "浏览器", "网页", "网站", "搜索", "文件", "文件夹", "终端", "shell", "命令", "脚本",
                 "代码", "运行", "测试", "app", "软件", "窗口", "点击", "输入", "粘贴", "复制",
-                "slack", "微信", "钉钉", "飞书", "notion", "excel"
+                "slack", "微信", "钉钉", "飞书", "notion", "excel",
+                "browser", "search", "file", "folder", "terminal", "desktop", "screen", "observe", "window", "extract", "report", "test"
             ]
         )
 
@@ -4721,7 +4830,7 @@ enum PhoneAgentPlanner {
             )
         }
 
-        if containsAny(normalized, ["浏览器", "网页", "网站", "搜索", "google", "safari", "chrome", "打开链接", "竞品", "资料"]) {
+        if containsAny(normalized, ["浏览器", "网页", "网站", "搜索", "google", "safari", "chrome", "打开链接", "竞品", "资料", "browser", "search", "website"]) {
             steps.append(
                 PhoneAgentStep(
                     title: "控制桌面浏览器",
@@ -4736,7 +4845,7 @@ enum PhoneAgentPlanner {
             )
         }
 
-        if containsAny(normalized, ["文件", "文件夹", "下载", "上传", "整理", "导出", "pdf", "csv", "表格", "excel", "numbers"]) {
+        if containsAny(normalized, ["文件", "文件夹", "下载", "上传", "整理", "导出", "pdf", "csv", "表格", "excel", "numbers", "file", "folder"]) {
             steps.append(
                 PhoneAgentStep(
                     title: "管理桌面文件",
@@ -4751,7 +4860,7 @@ enum PhoneAgentPlanner {
             )
         }
 
-        if containsAny(normalized, ["终端", "shell", "命令", "脚本", "代码", "运行", "python", "node", "git", "安装", "构建", "测试"]) {
+        if containsAny(normalized, ["终端", "shell", "命令", "脚本", "代码", "运行", "python", "node", "git", "安装", "构建", "测试", "terminal", "test"]) {
             steps.append(
                 PhoneAgentStep(
                     title: "执行受控 Shell",
@@ -4766,7 +4875,7 @@ enum PhoneAgentPlanner {
             )
         }
 
-        if containsAny(normalized, ["app", "软件", "桌面", "窗口", "点击", "输入", "粘贴", "复制", "slack", "微信", "钉钉", "飞书", "notion", "excel"]) {
+        if containsAny(normalized, ["app", "软件", "桌面", "窗口", "点击", "输入", "粘贴", "复制", "slack", "微信", "钉钉", "飞书", "notion", "excel", "desktop", "window"]) {
             steps.append(
                 PhoneAgentStep(
                     title: "操作桌面应用",
@@ -4781,7 +4890,7 @@ enum PhoneAgentPlanner {
             )
         }
 
-        if containsAny(normalized, ["整理", "提取", "抽取", "表格", "csv", "数据", "价格", "功能", "结果", "总结", "清单", "报告", "导出"]) {
+        if containsAny(normalized, ["整理", "提取", "抽取", "表格", "csv", "数据", "价格", "功能", "结果", "总结", "清单", "报告", "导出", "extract", "data", "summary", "report"]) {
             steps.append(
                 PhoneAgentStep(
                     title: "提取结构化结果",
@@ -5337,8 +5446,10 @@ enum ClawMobileBridge {
         selectedSkill: ClawSkill?,
         documents: [WorkspaceContext]
     ) -> ClawMobileTask {
-        let actions = plan.steps.map { step in
-            makeAction(
+        let actions = plan.steps.compactMap { step -> ClawMobileAction? in
+            // Local preparation and unimplemented mobile capabilities remain plan-only.
+            guard step.isAllowedOnIOS == false || step.surface == .clawGateway || step.surface == .composeController else { return nil }
+            return makeAction(
                 from: step,
                 plan: plan,
                 profile: profile,
@@ -5349,7 +5460,7 @@ enum ClawMobileBridge {
         let blockedCount = actions.filter { $0.approval == .blocked }.count
         let approvalCount = actions.filter { $0.approval == .userConfirmation || $0.approval == .gatewayApproval }.count
         let status: ClawTaskStatus
-        if blockedCount > 0 {
+        if blockedCount > 0 || actions.isEmpty {
             status = .blocked
         } else if approvalCount > 0 {
             status = .waitingForApproval
@@ -5357,7 +5468,9 @@ enum ClawMobileBridge {
             status = .queued
         }
         let riskScore = min(actions.map(riskWeight(for:)).reduce(0, +), 100)
-        let summary = "Claw 电脑任务包含 \(actions.count) 个动作，\(approvalCount) 个审批点，\(blockedCount) 个被策略或平台边界阻断动作。"
+        let summary = actions.isEmpty
+            ? "本计划只有本机能力预览，没有 Gateway 可执行动作；不会发送或宣称已执行。"
+            : "Gateway 任务包含 \(actions.count) 个动作，\(approvalCount) 个审批点，\(blockedCount) 个阻断项；本机准备步骤不发送。"
 
         return ClawMobileTask(
             command: plan.command,
@@ -5488,9 +5601,8 @@ enum ClawMobileBridge {
             ]
         case .runShellCommand:
             return [
-                "shellCommand": "pwd",
-                "cwdPolicy": "workspaceOnly",
-                "dryRunReason": "LLM natural-language shell instructions are never executed directly; Gateway may replace this after explicit user approval."
+                "shellCommand": "",
+                "cwdPolicy": "workspaceOnly"
             ]
         case .controlBrowser:
             return [
@@ -5499,23 +5611,22 @@ enum ClawMobileBridge {
                 "openInBrowser": "true",
                 "searchQuery": plan.command,
                 "searchURLTemplate": "https://www.google.com/search?q={query}",
-                "captureTrace": "true",
-                "html": "<html><head><title>Claw Browser Task</title></head><body><main>Replace this placeholder with approved browser snapshot HTML.</main></body></html>"
+                "captureTrace": "true"
             ]
         case .manageFiles:
             return [
+                "operation": "writeText",
                 "workspaceOnly": "true",
-                "requestedTarget": step.target,
                 "writePath": "claw-output/summary.txt",
-                "writeText": "Claw Gateway workspace write placeholder. Replace with approved task output."
+                "writeText": ""
             ]
         case .operateDesktopApp:
             return [
                 "targetApp": desktopAppTarget(for: plan.command),
                 "automationMode": "accessibility",
                 "inputMode": "typeOrPaste",
-                "draftText": "Claw prepared result for: \(plan.command)",
-                "keySequence": "command+k,return",
+                "draftText": "",
+                "keySequence": "",
                 "finalSubmitRequiresApproval": "true",
                 "captureBeforeAfter": "true"
             ]
@@ -5526,6 +5637,13 @@ enum ClawMobileBridge {
                 "schema": "title:string,source:string,summary:string,confidence:number",
                 "outputPath": "claw-output/extracted-data.json",
                 "validateCompleteness": "true"
+            ]
+        case .composeMessage, .composeEmail:
+            return [
+                "recipientOrChannel": "",
+                "deliverySurface": "messageDraft",
+                "draftText": "",
+                "finalSubmitRequiresApproval": "true"
             ]
         default:
             return [:]

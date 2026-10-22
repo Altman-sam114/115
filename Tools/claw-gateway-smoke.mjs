@@ -5,6 +5,7 @@ import fs from "node:fs/promises";
 import http from "node:http";
 import net from "node:net";
 import path from "node:path";
+import { makeFinalInputEnvelope, assertFinalInputEvidence } from "./claw-final-input-smoke-fixture.mjs";
 
 const port = Number(process.env.CLAW_GATEWAY_SMOKE_PORT || 18879);
 const token = "smoke-token";
@@ -1305,7 +1306,24 @@ expect(unknownActionEvents[0].actionID === undefined && unknownActionEvents[0].a
 expect(!unknownActionEvents.some((event) => event.kind === "actionStarted" || event.kind === "sessionCompleted"), "unknown websocket action must not enter a session");
 expect(!JSON.stringify(unknownActionEvents).includes(unsupportedMarker), "unknown websocket action error leaked the raw kind");
 
-console.log(`Claw Gateway smoke passed (${events.length + firstReplayEvents.length + replayGuardEvents.length + shellIdentityEvents.length + shellProvenanceEvents.length + browserRedirectEvents.length + agentLoopPolicyEvents.length + continuationParentEvents.length + successfulContinuationEvents.length + failedContinuationEvents.length + unsupportedHandlerEvents.length + unknownActionEvents.length} events)`);
+const finalInputPort = port + 10;
+const finalInputServer = spawn(process.execPath, ["Tools/claw-gateway-server.mjs", "--once"], {
+  env: { ...process.env, ...gatewayPolicyDefaults(), CLAW_GATEWAY_HOST: host, CLAW_GATEWAY_PORT: String(finalInputPort), CLAW_GATEWAY_TOKEN: token, CLAW_WORKSPACE: ".build/claw-gateway-final-input-websocket", CLAW_ALLOW_DESKTOP_CONTROL: "0", CLAW_ALLOW_WINDOW_METADATA: "0" },
+  stdio: ["ignore", "pipe", "pipe"],
+});
+let finalInputOutput = "";
+finalInputServer.stdout.on("data", (chunk) => { finalInputOutput += chunk.toString("utf8"); });
+finalInputServer.stderr.on("data", (chunk) => { finalInputOutput += chunk.toString("utf8"); });
+let finalInputEvents = [];
+try {
+  await waitFor(() => finalInputOutput.includes("Claw Gateway listening"), 3000, () => finalInputOutput);
+  const finalInputMarker = `never-execute-preview-${crypto.randomUUID()}`;
+  const finalInputEnvelope = makeFinalInputEnvelope(makeEnvelope(token, finalInputPort), finalInputMarker);
+  finalInputEvents = await connectAndCollectEvents({ host, port: finalInputPort, token, envelope: finalInputEnvelope });
+  await assertFinalInputEvidence(finalInputEvents, finalInputEnvelope, finalInputMarker, "websocket final input");
+} finally { finalInputServer.kill(); }
+
+console.log(`Claw Gateway smoke passed (${events.length + firstReplayEvents.length + replayGuardEvents.length + shellIdentityEvents.length + shellProvenanceEvents.length + browserRedirectEvents.length + agentLoopPolicyEvents.length + continuationParentEvents.length + successfulContinuationEvents.length + failedContinuationEvents.length + unsupportedHandlerEvents.length + unknownActionEvents.length + finalInputEvents.length} events)`);
 
 function makeContinuationParentEnvelope(rawToken, endpointPort) {
   const endpoint = `ws://${host}:${endpointPort}`;

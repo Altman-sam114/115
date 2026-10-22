@@ -173,6 +173,19 @@ enum ClawGatewayEventFixture {
         statusObject["task"] = statusTask
         let unknownStatusRejected = (try? JSONDecoder().decode(ClawMobileEnvelope.self, from: JSONSerialization.data(withJSONObject: statusObject))) == nil
         let events = makeEvents(for: envelope, sessionID: UUID())
+        let invalidFile = ClawMobileAction(
+            kind: .manageFiles, title: "Missing structured input", target: "omitted",
+            instruction: "must-not-become-file-content", approval: .gatewayApproval,
+            sourceSurface: .clawGateway, handlesSensitiveData: true,
+            inputPreview: "must-not-become-file-content", toolArguments: ["writePath": "notes/missing.txt"]
+        )
+        let invalidFileArtifacts = artifacts(for: invalidFile, index: 0, allowedActionKinds: [.manageFiles], status: .failed)
+        let invalidDesktop = ClawMobileAction(
+            kind: .operateDesktopApp, title: "Missing typed desktop input", target: "omitted",
+            instruction: "must-not-become-paste", approval: .gatewayApproval,
+            sourceSurface: .clawGateway, handlesSensitiveData: true,
+            inputPreview: "must-not-become-paste", toolArguments: ["targetApp": "TextEdit"]
+        )
         let failed = events.first {
             $0.actionID == unsupportedAction.id &&
             $0.kind == .actionFailed &&
@@ -263,6 +276,12 @@ enum ClawGatewayEventFixture {
             as: UTF8.self
         )
         guard
+            resultStatus(for: invalidFile, allowedActionKinds: [.manageFiles]) == .failed,
+            invalidFileArtifacts.count == 1,
+            invalidFileArtifacts.first?.kind == .auditLog,
+            invalidFileArtifacts.first?.metadata?["mode"] == "structured-input-required",
+            invalidFileArtifacts.first?.isRedacted == true,
+            resultStatus(for: invalidDesktop, allowedActionKinds: [.operateDesktopApp]) == .failed,
             statusFailures.allSatisfy(dispatchPreflightFailureMatches),
             dispatchPreflightFailureMatches(forgedApprovalFailure),
             missingStatusRejected,
@@ -488,6 +507,7 @@ enum ClawGatewayEventFixture {
         guard gatewayHandlerSupportedKinds.contains(action.kind.rawValue) else {
             return .failed
         }
+        if structuredInputMissing(for: action) { return .failed }
 
         switch action.kind {
         case .runShellCommand:
@@ -523,6 +543,17 @@ enum ClawGatewayEventFixture {
         status: ClawGatewayActionResultStatus
     ) -> [ClawGatewayArtifact] {
         let suffix = index + 1
+        if status == .failed, structuredInputMissing(for: action) {
+            return [artifact(
+                .auditLog, "fixture-structured-input-blocked-\(suffix).json", redacted: true,
+                metadata: [
+                    "mode": "structured-input-required", "actionKind": action.kind.rawValue,
+                    "policyDiagnostic": "structured-arguments-required", "executionAttempted": "false",
+                    "resultStatus": "failed",
+                    "safetyFlags": "metadata-only,action-bound,tool-arguments-omitted,instruction-omitted,input-preview-omitted,no-business-side-effects"
+                ]
+            )]
+        }
         if status == .skipped {
             return [
                 artifact(
@@ -567,6 +598,21 @@ enum ClawGatewayEventFixture {
             return [artifact(.messageDraft, "fixture-draft-\(suffix).txt", redacted: true)]
         case .analyzeLocalContext, .requestPermission, .extractData, .readContacts, .createReminder, .scheduleNotification, .openExternalURL, .runShortcut, .speechCapture, .backgroundRefresh, .desktopHandoff, .auditLog, .blockedUnsupported:
             return [artifact(.auditLog, "fixture-audit-\(suffix).json", redacted: action.handlesSensitiveData)]
+        }
+    }
+
+    private static func structuredInputMissing(for action: ClawMobileAction) -> Bool {
+        let args = action.toolArguments
+        func nonempty(_ key: String) -> Bool { args[key]?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false }
+        switch action.kind {
+        case .manageFiles:
+            return !nonempty("writePath") || !nonempty("writeText") ||
+                (args["writePath"]?.utf8.count ?? 0) > 4_096 || (args["writeText"]?.utf8.count ?? 0) > 32_768
+        case .operateDesktopApp:
+            return !nonempty("targetApp") ||
+                !["pasteText", "draftText", "messageText", "textToPaste", "text", "keySequence", "keyChords", "shortcutSequence"].contains(where: nonempty)
+        default:
+            return false
         }
     }
 

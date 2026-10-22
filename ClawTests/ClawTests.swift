@@ -4,6 +4,262 @@ import Foundation
 
 @MainActor
 final class ClawTests: XCTestCase {
+    func testTypedFinalInputsBuildOnlyFixedExecutionFields() {
+        let kinds: [ClawMobileActionKind] = [.controlBrowser, .manageFiles, .runShellCommand, .operateDesktopApp, .extractData, .composeMessage, .composeEmail]
+        for kind in kinds {
+            var action = makeFinalArgumentAction(kind)
+            let input = validFinalInput(action)
+            action.toolArguments = input.arguments(for: kind)
+            XCTAssertNil(ClawTaskArguments.issue(in: action), kind.rawValue)
+            XCTAssertFalse(action.toolArguments.keys.contains("instruction"))
+            XCTAssertFalse(action.toolArguments.keys.contains("html"))
+            if kind == .runShellCommand { XCTAssertTrue(action.toolArguments == ["shellCommand": "pwd", "cwdPolicy": "workspaceOnly"]) }
+            if kind == .manageFiles { XCTAssertEqual(action.toolArguments["operation"], "writeText") }
+            if kind == .operateDesktopApp || kind == .composeMessage || kind == .composeEmail {
+                XCTAssertEqual(action.toolArguments["finalSubmitRequiresApproval"], "true")
+            }
+            action.toolArguments["untrusted-extra-field"] = "must-not-appear-in-a-diagnostic"
+            let issue = ClawTaskArguments.issue(in: action)
+            XCTAssertEqual(issue, .invalidShape)
+            XCTAssertFalse(issue?.message.contains("must-not-appear") == true)
+        }
+    }
+
+    func testFinalArgumentValidatorRejectsUnsafePathsURLsAndUTF8Lengths() {
+        var file = makeFinalArgumentAction(.manageFiles)
+        var input = validFinalInput(file)
+        for path in ["", "/private/output.txt", "../output.txt", "a/../output.txt", "~/output.txt", "a\\output.txt", "a//output.txt", "a/./output.txt", "a/", " a.txt", "a\n.txt"] {
+            input.filePath = path
+            file.toolArguments = input.arguments(for: file.kind)
+            XCTAssertNotNil(ClawTaskArguments.issue(in: file))
+        }
+        input.filePath = "reports/result.txt"
+        input.fileText = String(repeating: "中", count: 1_366)
+        file.toolArguments = input.arguments(for: file.kind)
+        XCTAssertEqual(ClawTaskArguments.issue(in: file), .inputTooLong)
+        var browser = makeFinalArgumentAction(.controlBrowser)
+        input = validFinalInput(browser)
+        input.browserMode = .url
+        for url in ["example.com", "file:///private/file", "javascript:alert(1)", "https://user:secret@example.com", "https://", "https://example.com\n"] {
+            input.browserTarget = url
+            browser.toolArguments = input.arguments(for: browser.kind)
+            XCTAssertNotNil(ClawTaskArguments.issue(in: browser))
+        }
+        input.browserTarget = "https://example.com/docs?topic=claw"
+        browser.toolArguments = input.arguments(for: browser.kind)
+        XCTAssertNil(ClawTaskArguments.issue(in: browser))
+        browser.toolArguments["searchQuery"] = "conflicting destination"
+        XCTAssertEqual(ClawTaskArguments.issue(in: browser), .invalidShape)
+        var extraction = makeFinalArgumentAction(.extractData)
+        input = validFinalInput(extraction)
+        input.extractionGoal = String(repeating: "中", count: 167)
+        extraction.toolArguments = input.arguments(for: extraction.kind)
+        XCTAssertEqual(ClawTaskArguments.issue(in: extraction), .inputTooLong)
+    }
+
+    func testUnappliedAndInvalidFinalInputNeverChangesTaskOrCheckpoint() throws {
+        let checkpoint = ClawInMemoryMissionRunCheckpointStore()
+        let store = ClawStore(autoScanLocalArtifacts: false, checkpointStore: checkpoint)
+        store.phoneAgentCommand = "写入文件"
+        store.generatePhoneAgentPlan()
+        store.queueClawMobileTaskFromCurrentPlan()
+        let task = try XCTUnwrap(store.clawMobileTasks.first)
+        let action = try XCTUnwrap(task.actions.first { $0.kind == .manageFiles })
+        let context = ClawTaskArgumentEditorContext(task: task, action: action)
+        let before = probeSideEffectSnapshot(store, reviewFocus: nil)
+        let saves = checkpoint.saveCount
+        var input = validFinalInput(action)
+        let retained = input
+        for width in [320.0, 899, 900, 1200] {
+            _ = ClawWorkspaceLayout.usesReviewColumn(width: width, accessibilitySize: false)
+            XCTAssertTrue(input == retained)
+            XCTAssertTrue(store.canEditTaskArguments(context))
+        }
+        XCTAssertTrue(probeSideEffectSnapshot(store, reviewFocus: nil) == before)
+        input.filePath = "../must-not-write.txt"
+        XCTAssertFalse(store.applyTaskArgumentInput(input, context: context))
+        XCTAssertTrue(probeSideEffectSnapshot(store, reviewFocus: nil) == before)
+        XCTAssertEqual(checkpoint.saveCount, saves)
+    }
+
+    func testFinalParameterApplyRevokesApprovalAndOnlyChangesOneAction() throws {
+        let store = makeFinalArgumentStore()
+        store.approveLatestClawMobileTask()
+        let task = try XCTUnwrap(store.clawMobileTasks.first)
+        let action = try XCTUnwrap(task.actions.first { $0.kind == .manageFiles })
+        let context = ClawTaskArgumentEditorContext(task: task, action: action)
+        let input = validFinalInput(action)
+        XCTAssertTrue(store.applyTaskArgumentInput(input, context: context))
+        let updated = try XCTUnwrap(store.clawMobileTasks.first)
+        XCTAssertEqual(updated.id, task.id)
+        XCTAssertEqual(updated.actions.map(\.id), task.actions.map(\.id))
+        XCTAssertEqual(updated.status, .waitingForApproval)
+        XCTAssertTrue(updated.actions.first { $0.id == action.id }?.toolArguments == input.arguments(for: .manageFiles))
+        XCTAssertTrue(updated.actions.filter { $0.id != action.id } == task.actions.filter { $0.id != action.id })
+        XCTAssertTrue(store.clawGatewaySessions.isEmpty && store.gatewayEvents.isEmpty)
+        let before = probeSideEffectSnapshot(store, reviewFocus: nil)
+        XCTAssertFalse(store.applyTaskArgumentInput(input, context: context))
+        XCTAssertTrue(probeSideEffectSnapshot(store, reviewFocus: nil) == before)
+    }
+
+    func testLiveMissingFinalInputHasZeroTransportSessionsAndEvents() async throws {
+        for asynchronous in [false, true] {
+            let store = makeFinalArgumentStore()
+            store.gatewayDispatchMode = .liveGateway
+            store.approveLatestClawMobileTask()
+            XCTAssertEqual(store.clawMobileTasks.first?.status, .waitingForApproval)
+            let before = store.clawMobileTasks
+            let transport = OrdinaryDispatchRecordingTransport()
+            if asynchronous {
+                await store.sendLatestClawMobileTaskOverLiveGateway(transport: transport)
+            } else {
+                store.sendLatestClawMobileTask()
+            }
+            XCTAssertTrue(transport.envelopes.isEmpty)
+            XCTAssertTrue(store.clawGatewaySessions.isEmpty && store.gatewayEvents.isEmpty)
+            XCTAssertNil(store.lastGatewayLiveRequest)
+            XCTAssertEqual(store.clawMobileTasks, before)
+            XCTAssertTrue(store.lastGatewayEvent.contains("未发送"))
+        }
+    }
+
+    func testEditedFinalInputRequiresFreshApprovalAndExactWirePayload() async throws {
+        let store = makeFinalArgumentStore()
+        store.approveLatestClawMobileTask()
+        let task = try XCTUnwrap(store.clawMobileTasks.first)
+        let action = try XCTUnwrap(task.actions.first { $0.kind == .manageFiles })
+        let context = ClawTaskArgumentEditorContext(task: task, action: action)
+        let input = validFinalInput(action)
+        XCTAssertTrue(store.applyTaskArgumentInput(input, context: context))
+        let transport = OrdinaryDispatchRecordingTransport()
+        await store.sendLatestClawMobileTaskOverLiveGateway(transport: transport)
+        XCTAssertTrue(transport.envelopes.isEmpty)
+        XCTAssertTrue(store.clawGatewaySessions.isEmpty)
+        store.approveLatestClawMobileTask()
+        await store.sendLatestClawMobileTaskOverLiveGateway(transport: transport)
+        XCTAssertEqual(transport.envelopes.count, 1)
+        let data = try XCTUnwrap(transport.envelopes.first?.data(using: .utf8))
+        let wire = try JSONDecoder.clawGateway.decode(ClawMobileEnvelope.self, from: data)
+        XCTAssertEqual(wire.task.status, .sent)
+        XCTAssertTrue(wire.task.actions.first { $0.id == action.id }?.toolArguments == input.arguments(for: .manageFiles))
+        XCTAssertTrue(wire.task.actions.allSatisfy { ClawTaskArguments.remoteKinds.contains($0.kind) })
+        await store.sendLatestClawMobileTaskOverLiveGateway(transport: transport)
+        XCTAssertEqual(transport.envelopes.count, 1)
+        XCTAssertFalse(store.canEditTaskArguments(context))
+    }
+
+    func testOrdinaryApprovalBindsGatewayConfigurationAndRuntimeTokenRevision() async throws {
+        for editRuntimeToken in [false, true] {
+            let store = makeLiveFailureStore()
+            let transport = OrdinaryDispatchRecordingTransport()
+            if editRuntimeToken {
+                store.gatewayToken = "temporary-token"
+                store.gatewayToken = "paired-secret"
+            } else {
+                store.setGateway(url: "ws://127.0.0.1:18789", token: "paired-secret")
+            }
+            await store.sendLatestClawMobileTaskOverLiveGateway(transport: transport)
+            XCTAssertTrue(transport.envelopes.isEmpty)
+            XCTAssertTrue(store.clawGatewaySessions.isEmpty && store.gatewayEvents.isEmpty)
+            store.approveLatestClawMobileTask()
+            await store.sendLatestClawMobileTaskOverLiveGateway(transport: transport)
+            XCTAssertEqual(transport.envelopes.count, 1)
+        }
+    }
+
+    func testFinalEditorRejectsReplacementTaskStatusAndTrustedContinuation() throws {
+        let store = makeFinalArgumentStore()
+        let task = try XCTUnwrap(store.clawMobileTasks.first)
+        let action = try XCTUnwrap(task.actions.first { $0.kind == .manageFiles })
+        let context = ClawTaskArgumentEditorContext(task: task, action: action)
+        store.approveLatestClawMobileTask()
+        XCTAssertFalse(store.canEditTaskArguments(context))
+        store.queueClawMobileTaskFromCurrentPlan()
+        let before = probeSideEffectSnapshot(store, reviewFocus: nil)
+        XCTAssertFalse(store.applyTaskArgumentInput(validFinalInput(action), context: context))
+        XCTAssertTrue(probeSideEffectSnapshot(store, reviewFocus: nil) == before)
+        let (continuationStore, childID) = try makeApprovedContinuationForTransportFailure()
+        let child = try XCTUnwrap(continuationStore.clawMobileTasks.first { $0.id == childID })
+        let childAction = try XCTUnwrap(child.actions.first)
+        let continuationContext = ClawTaskArgumentEditorContext(task: child, action: childAction)
+        let trustedBefore = probeSideEffectSnapshot(continuationStore, reviewFocus: nil)
+        XCTAssertFalse(continuationStore.applyTaskArgumentInput(validFinalInput(childAction), context: continuationContext))
+        XCTAssertTrue(probeSideEffectSnapshot(continuationStore, reviewFocus: nil) == trustedBefore)
+    }
+
+    func testMissionMissingParametersNeverClaimsDispatchOrConsumesApproval() async throws {
+        let store = ClawStore(autoScanLocalArtifacts: false)
+        store.setGateway(url: "ws://127.0.0.1:18789", token: "paired-secret")
+        store.gatewayDispatchMode = .liveGateway
+        store.phoneAgentCommand = "写入文件"
+        let transport = OrdinaryDispatchRecordingTransport()
+        await store.startAutonomousComputerTakeoverOverLiveGateway(transport: transport)
+        await store.approveAndContinueAutonomousLoopOverLiveGateway(transport: transport)
+        XCTAssertEqual(store.autonomousLoop.phase, .waitingForUserApproval)
+        XCTAssertTrue(store.autonomousLoop.statusLine.contains("未发送"))
+        XCTAssertTrue(transport.envelopes.isEmpty)
+        XCTAssertTrue(store.clawGatewaySessions.isEmpty && store.gatewayEvents.isEmpty)
+        let task = try XCTUnwrap(store.clawMobileTasks.first)
+        let action = try XCTUnwrap(task.actions.first { $0.kind == .manageFiles })
+        XCTAssertTrue(store.applyTaskArgumentInput(validFinalInput(action), context: ClawTaskArgumentEditorContext(task: task, action: action)))
+        await store.approveAndContinueAutonomousLoopOverLiveGateway(transport: transport)
+        XCTAssertEqual(transport.envelopes.count, 1)
+        XCTAssertEqual(store.autonomousLoop.taskID, task.id)
+    }
+
+    private func makeFinalArgumentAction(_ kind: ClawMobileActionKind) -> ClawMobileAction {
+        ClawMobileAction(kind: kind, title: "Final input fixture", target: "Gateway", instruction: "Never an executable input", approval: .gatewayApproval, sourceSurface: .clawGateway, handlesSensitiveData: true, inputPreview: "omitted")
+    }
+
+    private func validFinalInput(_ action: ClawMobileAction) -> ClawTaskArgumentInput {
+        var input = ClawTaskArgumentInput(action: action)
+        input.browserApp = "Safari"
+        input.browserGoal = "Review public documentation"
+        input.browserTarget = "Claw public documentation"
+        input.filePath = "reports/final.txt"
+        input.fileText = "Explicitly reviewed final text"
+        input.shellCommand = "pwd"
+        input.desktopApp = "TextEdit"
+        input.desktopText = "Explicitly reviewed desktop text"
+        input.desktopKeys = ""
+        input.extractionGoal = "Extract the source and summary"
+        input.extractionPath = "reports/extracted.json"
+        input.recipient = "reviewed-recipient"
+        input.messageBody = "Explicitly reviewed draft text"
+        return input
+    }
+
+    private func makeFinalArgumentStore() -> ClawStore {
+        let store = ClawStore(autoScanLocalArtifacts: false)
+        store.setGateway(url: "ws://127.0.0.1:18789", token: "paired-secret")
+        store.phoneAgentCommand = "写入文件"
+        store.generatePhoneAgentPlan()
+        store.queueClawMobileTaskFromCurrentPlan()
+        return store
+    }
+
+    private func reviewAllFinalArguments(in store: ClawStore) {
+        let ids = store.clawMobileTasks.first?.actions.filter { ClawTaskArguments.isEditable($0.kind) }.map(\.id) ?? []
+        for id in ids {
+            guard let task = store.clawMobileTasks.first, let action = task.actions.first(where: { $0.id == id }) else {
+                XCTFail("Missing final argument fixture action")
+                return
+            }
+            XCTAssertTrue(store.applyTaskArgumentInput(validFinalInput(action), context: ClawTaskArgumentEditorContext(task: task, action: action)))
+        }
+    }
+
+    func testEnglishRulePlanKeepsDesktopIntentWithoutLocalFakeExecutions() {
+        for command in ["Mission A collect browser evidence", "Mission B prepare a fresh report"] {
+            let plan = PhoneAgentPlanner.makePlan(command: command, capabilities: ClawStore.defaultPhoneAgentCapabilities)
+            let task = ClawMobileBridge.makeTask(from: plan, profile: ClawStore.defaultClawGatewayProfile, selectedSkill: nil, documents: [])
+            XCTAssertFalse(task.actions.isEmpty)
+            XCTAssertTrue(task.actions.allSatisfy { ClawTaskArguments.remoteKinds.contains($0.kind) })
+            XCTAssertNil(ClawTaskArguments.issue(in: task))
+            XCTAssertEqual(task.status, .waitingForApproval)
+        }
+    }
+
     func testWorkspaceDetailNavigationContract() {
         XCTAssertEqual(ClawWorkspaceDetailSection.allCases, [.plan, .review, .events, .connection])
         XCTAssertEqual(Set(ClawWorkspaceDetailSection.allCases.map(\.id)).count, 4)
@@ -852,8 +1108,10 @@ final class ClawTests: XCTestCase {
         XCTAssertTrue(task.actions.contains { $0.kind == .extractData && $0.toolArguments["outputPath"] == "claw-output/extracted-data.json" })
         XCTAssertTrue(task.actions.contains { $0.kind == .operateDesktopApp && $0.approval == .gatewayApproval })
         XCTAssertTrue(task.actions.contains { $0.kind == .operateDesktopApp && $0.toolArguments["targetApp"] == "Slack" })
-        XCTAssertTrue(task.actions.contains { $0.kind == .operateDesktopApp && $0.toolArguments["draftText"]?.contains("Claw prepared result") == true })
-        XCTAssertTrue(task.actions.contains { $0.kind == .operateDesktopApp && $0.toolArguments["keySequence"] == "command+k,return" })
+        XCTAssertTrue(task.actions.contains { $0.kind == .operateDesktopApp && $0.toolArguments["draftText"] == "" })
+        XCTAssertTrue(task.actions.contains { $0.kind == .operateDesktopApp && $0.toolArguments["keySequence"] == "" })
+        XCTAssertTrue(task.actions.allSatisfy { $0.toolArguments["html"] == nil })
+        XCTAssertTrue(task.actions.allSatisfy { ClawTaskArguments.remoteKinds.contains($0.kind) })
         XCTAssertTrue(task.actions.contains { $0.kind == .composeMessage && $0.approval == .userConfirmation })
         XCTAssertGreaterThan(task.riskScore, 0)
         XCTAssertEqual(task.status, .waitingForApproval)
@@ -889,15 +1147,16 @@ final class ClawTests: XCTestCase {
         let desktop = try XCTUnwrap(task.actions.first { $0.kind == .operateDesktopApp })
         XCTAssertEqual(desktop.toolArguments["targetApp"], "Slack")
         XCTAssertEqual(desktop.toolArguments["finalSubmitRequiresApproval"], "true")
-        XCTAssertTrue(desktop.toolArguments["draftText"]?.contains(plan.command) == true)
-        XCTAssertEqual(desktop.toolArguments["keySequence"], "command+k,return")
+        XCTAssertEqual(desktop.toolArguments["draftText"], "")
+        XCTAssertEqual(desktop.toolArguments["keySequence"], "")
+        XCTAssertEqual(ClawTaskArguments.issue(in: desktop), .missingInput)
 
         let envelope = ClawMobileBridge.makeEnvelope(task: task, profile: ClawStore.defaultClawGatewayProfile)
         XCTAssertTrue(envelope.auditRequired)
         XCTAssertTrue(envelope.approvalSummary.contains("userOrGatewayApprovals"))
     }
 
-    func testClawMobileSensitiveAutomaticActionRequiresApproval() {
+    func testLocalSensitiveCapabilityCannotPretendToBeAGatewayExecution() {
         let plan = PhoneAgentPlan(
             command: "从授权联系人中确认同事信息",
             summary: "Deterministic sensitive automatic action fixture",
@@ -924,12 +1183,10 @@ final class ClawTests: XCTestCase {
             documents: ClawStore.defaultDocuments
         )
 
-        XCTAssertTrue(task.actions.contains {
-            $0.kind == .readContacts &&
-                $0.handlesSensitiveData &&
-                $0.approval == .userConfirmation
-        })
-        XCTAssertEqual(task.status, .waitingForApproval)
+        XCTAssertTrue(task.actions.isEmpty)
+        XCTAssertEqual(task.status, .blocked)
+        XCTAssertEqual(ClawTaskArguments.issue(in: task), .unsupportedAction)
+        XCTAssertTrue(plan.steps.contains { $0.surface == .systemFramework })
     }
 
     func testClawMobileGatewayActionWhitelistBlocksDisallowedActions() {
@@ -3929,6 +4186,7 @@ final class ClawTests: XCTestCase {
         store.setGateway(url: "ws://127.0.0.1:18789", token: "paired-token")
         store.phoneAgentCommand = "打开浏览器搜索资料并发到 Slack"
         store.startAutonomousComputerTakeover()
+        reviewAllFinalArguments(in: store)
         store.approveAndContinueAutonomousLoop()
 
         let summary = store.missionRunSummary
@@ -4030,7 +4288,9 @@ final class ClawTests: XCTestCase {
 
         XCTAssertTrue(task.actions.contains { $0.kind == .runShellCommand && $0.approval == .gatewayApproval })
         XCTAssertTrue(task.actions.contains { $0.kind == .manageFiles && $0.approval == .gatewayApproval })
-        XCTAssertTrue(task.actions.contains { $0.kind == .runShellCommand && $0.toolArguments["shellCommand"] == "pwd" })
+        XCTAssertTrue(task.actions.contains { $0.kind == .runShellCommand && $0.toolArguments["shellCommand"] == "" })
+        XCTAssertTrue(task.actions.contains { $0.kind == .manageFiles && $0.toolArguments["writeText"] == "" })
+        XCTAssertTrue(task.actions.contains { $0.kind == .manageFiles && $0.toolArguments["operation"] == "writeText" })
         XCTAssertTrue(task.actions.contains { $0.kind == .manageFiles && $0.toolArguments["workspaceOnly"] == "true" })
         XCTAssertTrue(task.actions.contains { $0.kind == .manageFiles && $0.toolArguments["writePath"] == "claw-output/summary.txt" })
         XCTAssertEqual(task.status, .waitingForApproval)

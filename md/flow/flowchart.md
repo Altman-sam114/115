@@ -2,6 +2,25 @@
 
 ```mermaid
 flowchart TD
+  Intent["自然语言 -> 规则预览"] --> Route{"远端动作或明确阻断项?"}
+  Route -->|否| Preview["本机能力仅预览\n无远端动作 blocked"]
+  Route -->|是| Task["Gateway task\n无占位正文/命令/伪 HTML"]
+  Task --> Form["用户打开父级最终参数 sheet\n重排保留输入，关闭不应用"]
+  Form --> Apply{"typed 参数 + task/action 快照匹配?"}
+  Apply -->|否| Reject["拒绝\n不改变任务或授权"]
+  Apply -->|是| Update["仅修改一个 action\n撤销旧审批 -> waitingForApproval"]
+  Update --> Approve["用户审批最终 task/profile 摘要"]
+  Approve --> Send{"用户显式 Live 发送\n参数/审批/凭据再次匹配?"}
+  Send -->|否| NoSend["未发送\n零 transport/session/event/artifact"]
+  Send -->|是| Wire["普通 sent envelope"]
+  Wire --> Gateway["Gateway 独立 allowlist/workspace/最终提交闸门"]
+  Gateway --> Required{"文件/桌面显式结构化输入?"}
+  Required -->|否| Audit["固定脱敏审计失败\n不使用 instruction/inputPreview 兜底"]
+  Required -->|是| Existing["原受控 handler\n无新增权限"]
+```
+
+```mermaid
+flowchart TD
   Parent["PhoneAgentView\n详情/展开/未应用输入的父级 state"] --> Layout{"实际宽度 + 大字体"}
   Layout --> Compact["compact 单栏"]
   Layout --> Wide["workbench 双栏"]

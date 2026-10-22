@@ -1,5 +1,13 @@
 # 项目核心流程文档
 
+## v0.84 最终参数与普通审批
+
+自然语言 -> 明确标注的规则计划（含英文 browser/report 等规则） -> 本机步骤仅预览、远端/消息草稿/明确阻断项生成 task；无远端动作 blocked -> 用户显式打开父级参数 sheet -> 固定 typed 参数校验 -> Apply 精确匹配当前 task/action，修改一个动作、撤销旧审批 -> 用户重新审批最终 task/profile 摘要 -> 用户显式真实发送 -> 再验参数/审批/凭据 -> sent envelope -> Gateway 独立 policy/handler 校验。失败不创建客户端 session/event/artifact、不调用 transport，Mission 留在待处理而非假称已发送。显式模拟仍可演练不完整参数，不授权缺参数的真实动作。
+
+不再注入浏览器示例 HTML、默认 pwd、占位文件正文、自然语言桌面正文或默认提交键；观察/搜索/提取目标和安全路径是待审参数，不代表已有真实证据。参数列表和 Mission 缺口入口在 compact/workbench 共享；sheet 属于父 View，重排保留未应用输入，新任务/审批变化使旧 sheet 过期，关闭不应用。Apply 后的真实内容进入 toolArguments/envelope，但未应用表单和审批摘要都不进持久化、metadata 或日志。连接字段/token 编辑撤销普通审批，continuation 不接受此编辑器。
+
+Gateway 文件缺结构化路径/正文和桌面缺显式输入 -> 固定 action-bound redacted auditLog + failed/non-retryable -> 无业务文件/桌面动作 -> 继续后续合法 action。桌面粘贴不读取 inputPreview，显式正文保留首尾空白。Swift fixture 和共享 direct/WebSocket 小矩阵覆盖此边界；Gateway 其他既有 handler 合同及真实桌面 E2E 仍需后续完整统一，不把该切片称为模型智能或发布完成。
+
 ## v0.83 任务主路径与按需复核
 
 PhoneAgentView 持有本机详情/展开 state 和仅进程内的续接 editor input -> 按实际宽度选择 compact/workbench -> 两者复用 Command、Mission 概况与四个详情区。Mission 始终保留唯一 Smart Rail、阶段/审批/风险/结果、简洁健康条、失败说明和当前续接编辑；“证据复核”显示 scoped focus/优先项/详细 rows，高级 metadata projector 只在显式展开时构建。计划/任务审批、会话/日志、连接/权限分区显示，envelope 原文默认收起。

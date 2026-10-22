@@ -4,31 +4,20 @@
 
 ## 当前轮次
 
-当前已通过基线：`0a8d9c463651d3daf8436635388c9c36c69352aa` / run `39805029958` attempt `1`，`claw-ci-v0.82-main-0a8d9c463651-run39805029958-attempt1` 已下载复判：14 项零失败 JUnit、双设备各 118 项 XCTest、Release/Gateway/validator、四个 xcresult/两份 JSON/实际 PNG 一致。iPhone 第 1 帧、iPad 第 2 帧内容就绪，已看图确认非白屏（1,916,885 bytes / 解压 4.1 MiB）。以下 v0.82 首次失败记录为历史定位，不再是最新状态。
+最新通过基线是 v0.83 `91886b1edc84e6921ffaa30edcc973de264ac79e` / run `39814219315` attempt `1`，artifact `claw-ci-v0.83-main-91886b1edc84-run39814219315-attempt1` 已完成单实例 C 复判：精确 manifest/JUnit/主日志、14 项检查、双设备各 125 项 XCTest、双平台 Release、LogicSmoke/fixture/Gateway、四个 xcresult，以及实际打开的非白屏 PNG/第 1 帧 readiness JSON 一致。压缩 1,882,069 bytes，解压 4.3 MiB。历史失败见 update_log，不再作为当前状态。
 
-当前 v0.83 整理主路径与按需复核：保留单一主动作、审批风险/失败/续接，把重复 metadata 看板放入高级区，父级保留详情、展开和未应用输入并防止跨 scope 误用。规则规划和执行来源明确标注，wire/审批/receipt/权限不变。本轮代码与新增测试等待新 main run，不以基线通过代替本轮通过，也未完成真实模型、最终参数或发布门槛。
-
-最后通过的基线为 `0b9746292f4b67afac09ea36d7df50eb3297d061` / run `38342562083` attempt `1`。v0.82 的 `07a6747fd7acd55779b7d15f35f06a64c19866ae` / run `39799453977` attempt `1` 已下载 `claw-ci-v0.82-main-07a6747fd7ac-run39799453977-attempt1` 复判不通过：manifest/JUnit/日志一致，Release 与 Gateway 检查通过，LogicSmoke/XCTest 因测试夹具接口不匹配未能编译，iPad 复用不完整 test host 安装失败（结果包解压 52 MiB）。本次只修正夹具和缺产物的云端早失败诊断，完整矩阵需新 main run 重验；不能把构建成功等同测试通过。
-
-后续 `7583e9a1a7df7117a6068a8cc8e28c4eaa075275` / run `39801453526` attempt `1` 的未加密结果包已下载（1,148,078 bytes，解压 3.4 MiB）：13 项检查通过、iPhone/iPad 各 118 项 XCTest 零失败、Release/Gateway 回归通过。但 C 阶段实际打开截图发现 iPad 白屏，整体复判退回；不能把自动化全绿当成 UI 通过。现追加 CI policy v0.4 内容就绪闸门和有界真实帧采集，OCR 文本不外显；新 run 截图通过前不进入 v0.83。此轮不改变产品权限或假称已定位白屏根因。
-
-v0.82 将真实 Gateway 与模拟结果彻底分开：同步 live 准备和 async live 发送在 preflight 失败时不调用 transport，显示“未发送，配置待修正”；throw、无有效终态 EOF 和取消只收口当前 session，保留真实部分结果/证据，结果未确认，不模拟执行、不自动重发，也不承诺撤销远端副作用。首个已接受的 task/session 终态不可被尾随错误、重复终态或迟帧改写。异步入口不临时修改用户模式；task/session 与配置/模式 revision 防止旧任务改写新 Mission。显式模拟与模拟 retry 独立保留。生产 WebSocket 在原始 wire 身份校验后绑定本次连接的远端 session，再映射到本地 session；错误 task、切换远端 session 或不匹配 offer 均不入库，收到任何桌面 payload 后不再自动重发。合法 continuation 保留远端 parentSessionID；重连诊断只用固定代码，不写 raw error。
-
+v0.84 从 UI 转向最终执行参数：移除危险默认正文/命令和伪 HTML、本机步骤假远端路由；新增 typed 编辑和普通审批摘要绑定，真实发送前缺参数/配置变更拒绝，Gateway 移除文件和桌面自然语言兜底。本轮新增测试等待最新 main 云端结果，不以基线通过替代本轮通过。
 
 | 轮次 | 范围 | 验收门槛 |
 | --- | --- | --- |
-| v0.77 | 修复云端 async 测试编译与 readiness nonce 字符集不一致 | 最新 main 全部 required checks + 下载 artifact 复判 |
-| v0.78 | Mac Catalyst 构建、iPad 方向、按窗口宽度自适应、工作台拆分 | Release Catalyst + iPhone/iPad XCTest + 全量 Gateway 回归 |
-| v0.82 | 普通 live 失败/模拟隔离、partial evidence、终态身份和异步 scope | 全量 12 项失败矩阵 + 原平台/Gateway checks + 最新 artifact C 复判 |
-| v0.83 | 共享任务主路径、按需复核、未应用输入跨重排保留与 scope 防护 | 新 presentation/editor 回归 + 全量平台/Gateway/非白屏证据 + 最新 artifact C 复判 |
-
-v0.79 聚焦普通任务和 Mission 的真实传输、任务身份绑定与重复发送防护；仅在前轮云端 artifact 通过后提交。本轮仍不代表发布候选。
+| v0.83 | 按需工作台、未应用输入跨重排保留 | 已通过最新 SHA 的完整 artifact 与实际看图；真实交互仍缺 |
+| v0.84 | 最终参数、普通审批绑定、Gateway 执行源 | 新 typed/Store/fixture/direct/WebSocket 矩阵 + 全量平台/非白屏证据 + 最新 artifact C 复判 |
 
 ## 发布门槛
 
 1. **可重复构建**：共享 scheme，iOS Release/Catalyst Release 云端构建，最新 main 的 manifest/run/attempt 精确匹配；不存在被 continue-on-error 掩盖的失败。
 2. **真实智能规划**：`PhoneAgentPlanner` 当前按关键词生成固定步骤，`ClawStore.defaultModel` 是 placeholder。必须接入经过用户配置的真实推理后端，具备超时、取消、schema 校验、提示注入隔离、费用/用量可见性和失败回退。没有模型服务或经过校验的本地 runtime，不能宣传已达到 OpenClaw 能力。
-3. **真实参数与结果**：当前 bridge 中 browser HTML / writeText 存在示例占位内容。真实模式必须拒绝未填写的执行参数，用户审查的是最终结构化参数，结果必须区分模拟/dry-run/真实执行。
+3. **真实参数与结果**：v0.84 移除 bridge 示例 HTML/正文/命令并增加最终参数和普通审批闸门，仍需本轮云端结果包及真实交互验收。所有旧 Gateway handler 的统一参数校验和实际结果复核仍需继续推进；模拟、dry-run、Live 事件与真实成功不能混淆。
 4. **桌面执行边界**：真正操作仍由桌面 Gateway 完成；Catalyst 客户端不能绕过 gateway allowlist、workspace、审批和最终提交确认。完整 Accessibility 输入/点击和浏览器控制器需要专项端到端验证。
 5. **Mac/iPad 体验**：窗口缩放、iPad 分屏/横竖屏、大字体、键盘、VoiceOver、网络中断和恢复；重排不自动发任务、不丢失审批上下文。自动测试和截图不能替代真实授权桌面的人工交互验收。
 6. **凭据与连接**：生产环境需要安全凭据存储、可撤销配对、TLS 与设备信任模型；readiness attestation 只报告能力，不能被当成配对或授权。

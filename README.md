@@ -1,5 +1,15 @@
 # Claw iOS Controller Prototype
 
+## 最终执行参数（v0.84）
+
+规则计划只把桌面动作、受控消息草稿和明确阻断项放进 Gateway task；解析、审计和未实现的手机系统能力仍是计划预览，不冒充已经执行，没有远端动作时任务保持 blocked。补齐 browser/report 等英文规则意图，但仍不是推理模型。
+
+浏览器不再附带伪造 HTML；Shell 命令、文件正文、桌面输入/快捷键、消息收件人和正文不再自动猜测或填占位内容。在“计划与审批”的最终参数列表逐项打开编辑器；Mission 会直接提示下一项缺失参数。父级 sheet 在宽窄布局重排时保持输入，关闭不应用；应用只更新当前未发送普通 task 的一个 action，并撤销旧审批。参数原文仅供用户明确打开复核，未应用输入只在内存，应用后进入最终 toolArguments/envelope，不复制到 checkpoint、metadata 或日志。
+
+真实发送前重复验证固定字段、UTF-8 上限、相对路径/URL、安全开关、最终 task/profile 审批摘要和运行时凭据。参数缺失、stale 编辑器或配置变化时不创建 session/event、不调用 transport；填写后必须重新审批并显式发送。模拟仍是独立演练，不能绕过真实参数闸门。普通审批只在进程内保存摘要，不是 Gateway 配对凭据；continuation 继续使用原 receipt/frozen 协议，不能用普通编辑器改写。
+
+Gateway 文件 handler 缺少结构化路径或正文时只产出固定脱敏审计失败，不再将 instruction 写成文件；桌面粘贴只从 toolArguments 取显式正文，不回退 inputPreview，也不猜测目标 App。桌面键盘、最终提交、Shell、workspace、浏览器 allowlist 仍独立检查。本轮不新增执行权限或 wire schema，真实模型、桌面 E2E、配对/TLS 与签名分发仍是发布缺口。
+
 ## 当前工作台（v0.83）
 
 Mac Catalyst / iPad / iPhone 共用“输入、Mission 概况、按需详情”：主动作、风险/审批/结果计数、失败说明和续接编辑保持可见；详情按“计划与审批、证据复核、会话与事件、连接与权限”切换。高级 metadata 诊断及 envelope 默认收起，原有审计组件仍可显式查看，不再默认在左右栏重复铺开。详情、展开状态和未应用的续接输入由父 View 持有，重排不覆盖输入；新草稿/父 scope 会重新绑定，旧 Apply 按钮不能改写新草稿。临时输入不进入 checkpoint、envelope、日志或 artifact，只有显式“应用参数”仍走原 typed Store API。

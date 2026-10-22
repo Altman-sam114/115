@@ -69,6 +69,40 @@ enum LogicSmoke {
 
         let store = ClawStore(autoScanLocalArtifacts: false)
         do {
+            let finalStore = ClawStore(autoScanLocalArtifacts: false)
+            finalStore.setGateway(url: "ws://127.0.0.1:18789", token: "smoke-final-token")
+            finalStore.phoneAgentCommand = "写入文件"
+            finalStore.generatePhoneAgentPlan()
+            finalStore.queueClawMobileTaskFromCurrentPlan()
+            finalStore.approveLatestClawMobileTask()
+            let transport = FinalArgumentSmokeTransport()
+            await finalStore.sendLatestClawMobileTaskOverLiveGateway(transport: transport)
+            expect(transport.envelopes.isEmpty && finalStore.clawGatewaySessions.isEmpty && finalStore.gatewayEvents.isEmpty, "missing final file input must have zero real dispatch effects")
+            if let task = finalStore.clawMobileTasks.first, let file = task.actions.first(where: { $0.kind == .manageFiles }) {
+                expect(task.actions.allSatisfy { ClawTaskArguments.remoteKinds.contains($0.kind) }, "local preparation must not masquerade as a Gateway handler")
+                expect(file.toolArguments["writeText"] == "", "bridge must not invent file content")
+                let context = ClawTaskArgumentEditorContext(task: task, action: file)
+                var input = ClawTaskArgumentInput(action: file)
+                input.filePath = "../blocked.txt"
+                input.fileText = "Explicitly reviewed smoke content"
+                expect(!finalStore.applyTaskArgumentInput(input, context: context), "unsafe final path must be rejected without changing the task")
+                expect(finalStore.clawMobileTasks.first == task, "invalid final input must preserve approval/task state")
+                input.filePath = "reports/final-smoke.txt"
+                expect(finalStore.applyTaskArgumentInput(input, context: context), "explicit valid final input should apply")
+                expect(finalStore.clawMobileTasks.first?.status == .waitingForApproval, "applying final input must revoke old approval")
+                await finalStore.sendLatestClawMobileTaskOverLiveGateway(transport: transport)
+                expect(transport.envelopes.isEmpty, "edited final input must not reuse the old approval")
+                finalStore.approveLatestClawMobileTask()
+                await finalStore.sendLatestClawMobileTaskOverLiveGateway(transport: transport)
+                expect(transport.envelopes.count == 1, "freshly approved final input should dispatch once")
+                if let body = transport.envelopes.first?.data(using: .utf8),
+                   let wire = try? JSONDecoder.clawGateway.decode(ClawMobileEnvelope.self, from: body) {
+                    expect(wire.task.actions.first(where: { $0.id == file.id })?.toolArguments == input.arguments(for: .manageFiles), "wire must contain exactly the reviewed final file input")
+                } else { failures.append("final input wire fixture must decode") }
+                expect(!finalStore.applyTaskArgumentInput(input, context: context), "sent/stale final input editor must be rejected")
+            } else { failures.append("final input file fixture must be present") }
+        }
+        do {
             let tasks = store.clawMobileTasks
             let sessions = store.clawGatewaySessions
             let events = store.gatewayEvents
@@ -545,11 +579,11 @@ enum LogicSmoke {
         expect(
             store.clawMobileTasks[0].actions.contains {
                 $0.kind == .operateDesktopApp &&
-                $0.toolArguments["draftText"]?.contains("Claw prepared result") == true &&
-                $0.toolArguments["keySequence"] == "command+k,return" &&
+                $0.toolArguments["draftText"] == "" &&
+                $0.toolArguments["keySequence"] == "" &&
                 $0.toolArguments["finalSubmitRequiresApproval"] == "true"
             },
-            "desktop app operation should include structured draft, safe keys, and final submit gate"
+            "desktop app operation must await explicit draft/keys and retain the final submit gate"
         )
         expect(store.clawMobileTasks[0].actions.contains { $0.kind == .composeMessage }, "Claw task should include message composition")
         expect(store.clawMobileTasks[0].approvalCount > 0, "computer takeover should include approval gates")
@@ -4282,6 +4316,19 @@ enum LogicSmoke {
         store.setGateway(url: "ws://127.0.0.1:18789", token: "")
         store.gatewayDispatchMode = .liveGateway
         store.queueClawMobileTaskFromCurrentPlan()
+        let finalActionIDs = store.clawMobileTasks[0].actions.filter { ClawTaskArguments.isEditable($0.kind) }.map(\.id)
+        for id in finalActionIDs {
+            let task = store.clawMobileTasks[0]
+            if let action = task.actions.first(where: { $0.id == id }) {
+                var input = ClawTaskArgumentInput(action: action)
+                input.fileText = "Explicitly reviewed preflight file content"
+                input.desktopText = "Explicitly reviewed preflight desktop content"
+                input.recipient = "explicit-smoke-recipient"
+                input.messageBody = "Explicitly reviewed preflight message content"
+                input.shellCommand = "pwd"
+                expect(store.applyTaskArgumentInput(input, context: ClawTaskArgumentEditorContext(task: task, action: action)), "preflight fixture needs explicitly reviewed final parameters")
+            }
+        }
         store.approveLatestClawMobileTask()
         store.sendLatestClawMobileTask()
         expect(store.lastGatewayLiveRequest?.canAttemptLive == false, "live gateway should require a paired token")
@@ -4640,6 +4687,31 @@ private struct LiveFailureSmokeTransport: ClawGatewayTransport {
                 )))
             }
             continuation.finish(throwing: ClawGatewayTransportError.invalidEndpoint("RAW_ERROR_MARKER"))
+        }
+    }
+}
+
+private final class FinalArgumentSmokeTransport: @unchecked Sendable, ClawGatewayTransport {
+    private let lock = NSLock()
+    private var recorded: [String] = []
+    var envelopes: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return recorded
+    }
+
+    func streamEvents(
+        request: ClawGatewayLiveRequest, envelopeJSON: String, sessionID: UUID, taskID: UUID
+    ) -> AsyncThrowingStream<ClawGatewayWireEvent, Error> {
+        lock.lock()
+        recorded.append(envelopeJSON)
+        lock.unlock()
+        return AsyncThrowingStream { stream in
+            stream.yield(ClawGatewayWireEvent(event: ClawGatewayEvent(
+                sessionID: sessionID, taskID: taskID, sequence: 2, kind: .sessionCompleted,
+                resultStatus: .succeeded, summary: "Final parameter transport fixture completed"
+            )))
+            stream.finish()
         }
     }
 }

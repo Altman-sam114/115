@@ -20,6 +20,8 @@
 		2B000001000000000000000B /* PhoneAgentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B000010000000000000000D /* PhoneAgentView.swift */; };
 		2B000001000000000000000C /* PhoneAgentCompactLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B000010000000000000000E /* PhoneAgentCompactLayout.swift */; };
 		2B000001000000000000000D /* PhoneAgentWorkbenchLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B000010000000000000000F /* PhoneAgentWorkbenchLayout.swift */; };
+		2B000001000000000000000E /* ClawTaskArguments.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B0000100000000000000010 /* ClawTaskArguments.swift */; };
+		2B000001000000000000000F /* ClawTaskArgumentsEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B0000100000000000000011 /* ClawTaskArgumentsEditor.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -48,6 +50,8 @@
 		2B000010000000000000000D /* PhoneAgentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneAgentView.swift; sourceTree = "<group>"; };
 		2B000010000000000000000E /* PhoneAgentCompactLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneAgentCompactLayout.swift; sourceTree = "<group>"; };
 		2B000010000000000000000F /* PhoneAgentWorkbenchLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneAgentWorkbenchLayout.swift; sourceTree = "<group>"; };
+		2B0000100000000000000010 /* ClawTaskArguments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClawTaskArguments.swift; sourceTree = "<group>"; };
+		2B0000100000000000000011 /* ClawTaskArgumentsEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClawTaskArgumentsEditor.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -102,6 +106,7 @@
 			children = (
 				2B0000100000000000000002 /* ClawModels.swift */,
 				2B000010000000000000000B /* ClawWorkspaceLayout.swift */,
+				2B0000100000000000000010 /* ClawTaskArguments.swift */,
 				2B000010000000000000000A /* MainTab.swift */,
 			);
 			path = Core;
@@ -120,6 +125,7 @@
 			isa = PBXGroup;
 			children = (
 				2B0000100000000000000004 /* ContentView.swift */,
+				2B0000100000000000000011 /* ClawTaskArgumentsEditor.swift */,
 				2B000010000000000000000F /* PhoneAgentWorkbenchLayout.swift */,
 				2B000010000000000000000E /* PhoneAgentCompactLayout.swift */,
 				2B000010000000000000000D /* PhoneAgentView.swift */,
@@ -249,6 +255,8 @@
 				2B0000010000000000000002 /* ClawModels.swift in Sources */,
 				2B0000010000000000000003 /* ClawStore.swift in Sources */,
 				2B0000010000000000000004 /* ContentView.swift in Sources */,
+				2B000001000000000000000E /* ClawTaskArguments.swift in Sources */,
+				2B000001000000000000000F /* ClawTaskArgumentsEditor.swift in Sources */,
 				2B000001000000000000000D /* PhoneAgentWorkbenchLayout.swift in Sources */,
 				2B000001000000000000000C /* PhoneAgentCompactLayout.swift in Sources */,
 				2B000001000000000000000B /* PhoneAgentView.swift in Sources */,

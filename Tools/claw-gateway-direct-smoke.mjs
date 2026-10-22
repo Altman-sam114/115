@@ -5,6 +5,7 @@ import fs from "node:fs/promises";
 import { createServer } from "node:http";
 import net from "node:net";
 import path from "node:path";
+import { makeFinalInputEnvelope, assertFinalInputEvidence } from "./claw-final-input-smoke-fixture.mjs";
 
 const token = "smoke-token";
 const workspace = ".build/claw-gateway-direct-smoke";
@@ -1346,7 +1347,15 @@ expect(unknownActionFailure?.stdout.trim() === "", "unknown action should not em
 expect(unknownActionFailure?.stderr.includes("unsupported_action_kind"), "unknown action should return a fixed envelope error");
 expect(!unknownActionFailure?.stderr.includes(unsupportedMarker), "unknown action error should not expose the raw kind");
 
-console.log(`Claw Gateway direct smoke passed (${dryRunEvents.length + emptyExtractionEvents.length + pathEscapeEvents.length + writeFailureEvents.length + replayEvents.length + allowlistEvents.length + pathBypassEvents.length + relativePathEvents.length + topLevelShellCommandEvents.length + topLevelCommandLineEvents.length + conflictingShellSourceEvents.length + missingShellEvents.length + desktopPolicyEvents.length + browserPolicyEvents.length + browserRedirectEvents.length + accessibilityPolicyEvents.length + blockedAgentLoopEvents.length + partialAgentLoopEvents.length + requestedSubsetEvents.length + unsupportedAgentLoopEvents.length + emptyRequestAgentLoopEvents.length + continuationParentEvents.length + continuationChildEvents.length + continuationReplayEvents.length + continuationRecoveryEvents.length + mismatchParentEvents.length + unsupportedHandlerEvents.length} events)`);
+const finalInputMarker = `never-execute-preview-${crypto.randomUUID()}`;
+const finalInputEnvelope = makeFinalInputEnvelope(envelope, finalInputMarker);
+const finalInputEvents = await runEmitEvents({
+  CLAW_GATEWAY_TOKEN: token, CLAW_WORKSPACE: `${workspace}-final-input`,
+  CLAW_ALLOW_DESKTOP_CONTROL: "0", CLAW_ALLOW_WINDOW_METADATA: "0",
+}, finalInputEnvelope);
+await assertFinalInputEvidence(finalInputEvents, finalInputEnvelope, finalInputMarker, "direct final input");
+
+console.log(`Claw Gateway direct smoke passed (${dryRunEvents.length + emptyExtractionEvents.length + pathEscapeEvents.length + writeFailureEvents.length + replayEvents.length + allowlistEvents.length + pathBypassEvents.length + relativePathEvents.length + topLevelShellCommandEvents.length + topLevelCommandLineEvents.length + conflictingShellSourceEvents.length + missingShellEvents.length + desktopPolicyEvents.length + browserPolicyEvents.length + browserRedirectEvents.length + accessibilityPolicyEvents.length + blockedAgentLoopEvents.length + partialAgentLoopEvents.length + requestedSubsetEvents.length + unsupportedAgentLoopEvents.length + emptyRequestAgentLoopEvents.length + continuationParentEvents.length + continuationChildEvents.length + continuationReplayEvents.length + continuationRecoveryEvents.length + mismatchParentEvents.length + unsupportedHandlerEvents.length + finalInputEvents.length} events)`);
 
 async function runEmitEvents(env, input = envelope) {
   const inputPath = `/private/tmp/claw-gateway-direct-smoke-${crypto.randomUUID()}.json`;

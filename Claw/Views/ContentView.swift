@@ -418,6 +418,7 @@ struct PhoneAgentReviewColumn: View {
     @EnvironmentObject private var store: ClawStore
     @Binding var reviewFocus: ClawMissionRunReviewFocus?
     @Binding var presentation: ClawWorkspacePresentationState
+    @Binding var taskArgumentEditor: ClawTaskArgumentEditorContext?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -430,7 +431,7 @@ struct PhoneAgentReviewColumn: View {
                 switch presentation.selectedDetail {
                 case .plan:
                     PhoneAgentPlanPanel()
-                    ClawMobileBridgePanel(showsEnvelope: $presentation.showsEnvelope)
+                    ClawMobileBridgePanel(showsEnvelope: $presentation.showsEnvelope, taskArgumentEditor: $taskArgumentEditor)
                 case .review:
                     ClawMissionReviewDetailDockView(
                         reviewFocus: $reviewFocus,
@@ -771,6 +772,7 @@ struct ClawMissionRunPanel: View {
     @EnvironmentObject private var store: ClawStore
     @Binding var reviewFocus: ClawMissionRunReviewFocus?
     @Binding var continuationEditor: ClawContinuationEditorInputState
+    @Binding var taskArgumentEditor: ClawTaskArgumentEditorContext?
 
     var body: some View {
         let summary = store.missionRunSummary
@@ -839,6 +841,27 @@ struct ClawMissionRunPanel: View {
             ) { action in
                 if let focus = ClawMissionRunSmartOperatorActionDispatcher.perform(action, in: store) {
                     reviewFocus = focus
+                }
+            }
+
+            if let task = store.clawMobileTasks.first,
+               task.id == summary.taskID, task.continuationLineage == nil,
+               task.status != .sent, let issue = ClawTaskArguments.issue(in: task) {
+                Label("真实发送前需处理：\(issue.message)", systemImage: "pencil.circle")
+                    .font(.footnote.bold())
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let action = task.actions.first(where: {
+                    ClawTaskArguments.isEditable($0.kind) && ClawTaskArguments.issue(in: $0) != nil
+                }) {
+                    let context = ClawTaskArgumentEditorContext(task: task, action: action)
+                    Button("填写下一项最终参数", systemImage: "square.and.pencil") {
+                        taskArgumentEditor = context
+                    }
+                    .frame(minHeight: 44)
+                    .buttonStyle(SecondaryActionButtonStyle())
+                    .disabled(!store.canEditTaskArguments(context))
+                    .accessibilityHint("只打开参数编辑器，应用后仍需重新审批，不会发送任务")
                 }
             }
 
@@ -4727,6 +4750,7 @@ struct PhoneAgentPlanPanel: View {
 struct ClawMobileBridgePanel: View {
     @EnvironmentObject private var store: ClawStore
     @Binding var showsEnvelope: Bool
+    @Binding var taskArgumentEditor: ClawTaskArgumentEditorContext?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -4793,6 +4817,10 @@ struct ClawMobileBridgePanel: View {
                 }
             }
             .panelCard()
+
+            if let task = store.clawMobileTasks.first, task.continuationLineage == nil {
+                ClawTaskArgumentsList(task: task, editor: $taskArgumentEditor)
+            }
 
             if store.clawMobileTasks.isEmpty {
                 Text("当前没有 Claw 电脑任务。")
@@ -8055,7 +8083,7 @@ struct SecondaryActionButtonStyle: ButtonStyle {
     }
 }
 
-private extension View {
+extension View {
     func panelCard() -> some View {
         self
             .padding(14)

@@ -12,7 +12,7 @@ permissions:
 
 env:
   CI_POLICY_VERSION: v0.4
-  PRODUCT_ITERATION: v0.83
+  PRODUCT_ITERATION: v0.84
   PROJECT_NAME: Claw
   XCODE_PROJECT: Claw.xcodeproj
   XCODE_SCHEME: Claw
@@ -78,6 +78,7 @@ jobs:
             node --check Tools/claw-gateway-server.mjs
             node --check Tools/claw-gateway-direct-smoke.mjs
             node --check Tools/claw-gateway-smoke.mjs
+            node --check Tools/claw-final-input-smoke-fixture.mjs
           } 2>&1 | tee "$RESULT_DIR/node-check.log"
 
       - name: Swift logic smoke

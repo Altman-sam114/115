@@ -1,5 +1,13 @@
 # 测试规范
 
+## v0.84 最终参数与普通审批
+
+云端新增 10 项 XCTest（预期双设备各 135 项）：七种可编辑 kind 的固定参数/安全常量、未知 key/错误文案不回显、UTF-8/路径/URL 边界、未应用和非法输入零任务/快照副作用、只改一个 action/撤销审批、同步和 async 缺参数真实发送零 transport/session/event、编辑后须新审批且 wire 精确一致/单次发送、连接及 runtime token revision 撤销、旧任务/状态/continuation 拒绝、Mission 缺参数不误报派发，以及原英文 scope 意图不依赖假本机 handler。废除旧 placeholder/pwd/自动桌面正文与提交键断言，替换为显式缺输入和远端路由断言；旧终态、取消、部分证据、continuation 等回归保留。
+
+LogicSmoke 补缺输入零派发 -> typed Apply -> 待重新审批 -> 精确 wire/只发一次的实际 Store 路径。已有连接 preflight 夹具必须显式提供最终参数，不能用业务参数缺口绕过 v0.82 preflight 断言。Swift Gateway fixture self-test 检查文件缺正文与 desktop inputPreview 不作执行源。
+
+Direct/WebSocket 共用 `Tools/claw-final-input-smoke-fixture.mjs`：缺文件 path/text、错误类型、空正文、缺桌面输入均为固定脱敏失败且无业务副作用；keys-only 桌面 dry-run 的 pasteTextPreview 为空、不得来自 inputPreview；随后合法文件内容精确落盘，不生成默认文件名或缺参数业务文件。新增模块纳入云端 node --check，保留全部原 smoke、平台 Release/XCTest、14 项结果包与非白屏闸门。本地仅 diff/YAML/plist 和文本复核，禁止编译和运行测试。这些 fake/云端测试不替代真实模型、键盘/VoiceOver、窗口缩放、授权桌面 E2E 或签名分发。
+
 ## v0.83 按需工作台与未应用输入
 
 云端 XCTest 新增固定详情顺序/ID/title/icon、默认计划区/高级和 envelope 收起、44pt/固定导航 hint；导航及 899/900/1200pt/辅助大字体策略变化后保留父级 state，不改变 task/session/event/approval/receipt/frozen/request/health/probe/readiness/checkpoint。结果来源覆盖无 session、模拟、Live 无 ack/有 ack 和未知 channel；不从当前发送设置推断，不回显任意 channel，不把 ack 当动作成功。

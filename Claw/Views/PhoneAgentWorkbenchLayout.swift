@@ -5,6 +5,7 @@ struct PhoneAgentWorkbenchLayout: View {
     @Binding var reviewFocus: ClawMissionRunReviewFocus?
     @Binding var presentation: ClawWorkspacePresentationState
     @Binding var continuationEditor: ClawContinuationEditorInputState
+    @Binding var taskArgumentEditor: ClawTaskArgumentEditorContext?
 
     var body: some View {
         GeometryReader { proxy in
@@ -14,7 +15,10 @@ struct PhoneAgentWorkbenchLayout: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
                         PhoneAgentCommandPanel(examples: examples) { presentation.selectedDetail = $0 }
-                        ClawMissionRunPanel(reviewFocus: $reviewFocus, continuationEditor: $continuationEditor)
+                        ClawMissionRunPanel(
+                            reviewFocus: $reviewFocus, continuationEditor: $continuationEditor,
+                            taskArgumentEditor: $taskArgumentEditor
+                        )
                     }
                     .padding(.vertical, 16)
                     .padding(.leading, 16)
@@ -26,7 +30,10 @@ struct PhoneAgentWorkbenchLayout: View {
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
-                        PhoneAgentReviewColumn(reviewFocus: $reviewFocus, presentation: $presentation)
+                        PhoneAgentReviewColumn(
+                            reviewFocus: $reviewFocus, presentation: $presentation,
+                            taskArgumentEditor: $taskArgumentEditor
+                        )
                     }
                     .padding(.vertical, 16)
                     .padding(.trailing, 16)
