@@ -1,5 +1,13 @@
 # 测试规范
 
+## v0.83 按需工作台与未应用输入
+
+云端 XCTest 新增固定详情顺序/ID/title/icon、默认计划区/高级和 envelope 收起、44pt/固定导航 hint；导航及 899/900/1200pt/辅助大字体策略变化后保留父级 state，不改变 task/session/event/approval/receipt/frozen/request/health/probe/readiness/checkpoint。结果来源覆盖无 session、模拟、Live 无 ack/有 ack 和未知 channel；不从当前发送设置推断，不回显任意 channel，不把 ack 当动作成功。
+
+续接 editor 覆盖文件/提取两种未应用输入在布局重建后保留、Store 参数显式刷新、draft/父 task/session/kind 改变重绑、缺失/矛盾 scope 和 unavailable 清空、旧 Apply/不可编辑拒绝，以及持有真实测试 receipt 的父任务/审批/证据/快照不变。新 state 不 Codable、不进协议/持久化/日志；原 typed validator、审批/冻结、receipt 和 v0.82 全量断言保留。LogicSmoke 覆盖同一纯 presentation/state 核心路径。
+
+本地仅静态检查；云端仍须 iOS/Catalyst Release、双设备 XCTest、LogicSmoke、fixture/Gateway、CI policy v0.4 实际非白屏截图与最新 artifact C 复判。纯 state 测试及首屏截图不是实际窗口缩放、键盘、VoiceOver、分屏或真实桌面 E2E 的替代证据，不得把这些未运行项判为通过。
+
 v0.79 云端 XCTest transport recorder 必须核对未审批零调用、已审批 wire task.status=sent、task ID/actions 一致、重复发送/重新审批后的调用数/session/events/request 不变。Mission live 开始必须等待审批，审批后只发送一次并完成当前循环，替换任务后旧 Mission 不得批准新任务。Mock transport 按 ordinary sent / continuation readyToSend 拒绝不匹配状态。LogicSmoke 复核 sent 不能重新审批创建会话；保留全部 continuation 与双平台/Gateway 云端回归。
 v0.80 云端 XCTest 必须核对模拟 session 仍可重试，live session 即使切换 dispatch mode 也拒绝 simulator retry，拒绝前后 session/events/artifacts/approval 不变；保留 v0.79 与双平台/Gateway 回归。
 

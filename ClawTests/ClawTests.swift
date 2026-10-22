@@ -4,6 +4,191 @@ import Foundation
 
 @MainActor
 final class ClawTests: XCTestCase {
+    func testWorkspaceDetailNavigationContract() {
+        XCTAssertEqual(ClawWorkspaceDetailSection.allCases, [.plan, .review, .events, .connection])
+        XCTAssertEqual(Set(ClawWorkspaceDetailSection.allCases.map(\.id)).count, 4)
+        XCTAssertEqual(Set(ClawWorkspaceDetailSection.allCases.map(\.title)).count, 4)
+        XCTAssertTrue(ClawWorkspaceDetailSection.allCases.allSatisfy { !$0.icon.isEmpty })
+        let state = ClawWorkspacePresentationState()
+        XCTAssertEqual(state.selectedDetail, .plan)
+        XCTAssertFalse(state.showsAdvancedReviews)
+        XCTAssertFalse(state.showsEnvelope)
+        XCTAssertGreaterThanOrEqual(ClawWorkspacePresentationContract.minimumHitArea, 44)
+        XCTAssertTrue(ClawWorkspacePresentationContract.navigationHint.contains("不发送"))
+        XCTAssertTrue(ClawWorkspacePresentationContract.advancedHint.contains("不改变任务"))
+    }
+
+    func testWorkspaceResultSourceUsesSessionFactsInsteadOfCurrentDispatchSetting() {
+        XCTAssertEqual(ClawWorkspaceResultSource.resolve(channel: nil, hasGatewayAck: true), .noSession)
+        let simulated = "iOS Controller -> \(ClawGatewayDispatchMode.simulatedEventStream.title)"
+        let live = "iOS Controller -> \(ClawGatewayDispatchMode.liveGateway.title)"
+        XCTAssertEqual(ClawWorkspaceResultSource.resolve(channel: simulated, hasGatewayAck: false), .simulated)
+        XCTAssertEqual(ClawWorkspaceResultSource.resolve(channel: simulated, hasGatewayAck: true), .simulated)
+        XCTAssertEqual(ClawWorkspaceResultSource.resolve(channel: live, hasGatewayAck: false), .liveUnconfirmed)
+        XCTAssertEqual(ClawWorkspaceResultSource.resolve(channel: live, hasGatewayAck: true), .liveEvents)
+        let unknown = ClawWorkspaceResultSource.resolve(channel: "unknown channel with user input", hasGatewayAck: true)
+        XCTAssertEqual(unknown, .unknown)
+        XCTAssertFalse(unknown.title.contains("user input"))
+    }
+
+    func testWorkspacePresentationStateDoesNotMutateMissionOrAuthorization() {
+        let checkpoint = ClawInMemoryMissionRunCheckpointStore()
+        let store = ClawStore(autoScanLocalArtifacts: false, checkpointStore: checkpoint)
+        store.startAutonomousComputerTakeover()
+        let before = probeSideEffectSnapshot(store, reviewFocus: nil)
+        let saved = checkpoint.saveCount
+        let request = store.lastGatewayLiveRequest
+        let probe = store.gatewayTransportProbeSummary
+        let readiness = store.gatewayReadinessSummary
+        var state = ClawWorkspacePresentationState()
+        for section in ClawWorkspaceDetailSection.allCases {
+            state.selectedDetail = section
+            state.showsAdvancedReviews = true
+            state.showsEnvelope = true
+            let retained = state
+            for width in [320.0, 899, 900, 1200, .nan, .infinity] {
+                for accessibility in [false, true] {
+                    _ = ClawWorkspaceLayout.usesReviewColumn(width: width, accessibilitySize: accessibility)
+                    XCTAssertTrue(state == retained)
+                }
+            }
+        }
+        state.revealReview()
+        XCTAssertEqual(state.selectedDetail, .review)
+        XCTAssertTrue(state.showsAdvancedReviews && state.showsEnvelope)
+        XCTAssertTrue(probeSideEffectSnapshot(store, reviewFocus: nil) == before)
+        XCTAssertEqual(checkpoint.saveCount, saved)
+        XCTAssertTrue(store.lastGatewayLiveRequest == request)
+        XCTAssertTrue(store.gatewayTransportProbeSummary == probe)
+        XCTAssertTrue(store.gatewayReadinessSummary == readiness)
+    }
+
+    func testContinuationEditorUnappliedInputsSurviveLayoutChangesAndStoreRefresh() {
+        for isFile in [false, true] {
+            var summary = makeWorkspaceEditorSummary(isFile: isFile)
+            var editor = ClawContinuationEditorInputState()
+            editor.synchronize(with: summary)
+            XCTAssertTrue(editor.isBound(to: summary))
+            XCTAssertTrue(editor.canApply(rendered: summary, current: summary))
+            if isFile {
+                editor.fileWritePath = "claw-output/unapplied.txt"
+                editor.fileWriteText = "unapplied local input"
+            } else {
+                editor.extractionGoal = "unapplied extraction goal"
+                editor.extractionOutputPath = "claw-output/unapplied.json"
+            }
+            let retained = editor
+            for width in [899.0, 900, 1200, 320] {
+                _ = ClawWorkspaceLayout.usesReviewColumn(width: width, accessibilitySize: false)
+                editor.synchronize(with: summary)
+                XCTAssertTrue(editor == retained)
+            }
+            if isFile {
+                summary.fileArguments.writeText = "new applied Store input"
+            } else {
+                summary.extractionArguments.extractionGoal = "new applied Store goal"
+            }
+            editor.synchronize(with: summary, replacingInputs: true)
+            XCTAssertTrue(editor != retained)
+            XCTAssertTrue(editor.fileWriteText == (isFile ? summary.fileArguments.writeText : ""))
+            XCTAssertTrue(editor.extractionGoal == (isFile ? "" : summary.extractionArguments.extractionGoal))
+        }
+    }
+
+    func testContinuationEditorRejectsStaleScopeAndClearsUnavailableInputs() {
+        let rendered = makeWorkspaceEditorSummary(isFile: true)
+        for changedField in 0..<4 {
+            var editor = ClawContinuationEditorInputState()
+            editor.synchronize(with: rendered)
+            editor.fileWriteText = "unapplied input for the previous scope"
+            var current = rendered
+            switch changedField {
+            case 0: current.draftID = UUID()
+            case 1: current.sourceTaskID = UUID()
+            case 2: current.sourceSessionID = UUID()
+            default: current.sourceSessionID = nil
+            }
+            XCTAssertFalse(editor.isBound(to: current))
+            XCTAssertFalse(editor.canApply(rendered: rendered, current: current))
+            editor.synchronize(with: current)
+            XCTAssertFalse(editor.canApply(rendered: rendered, current: current))
+            XCTAssertFalse(editor.fileWriteText.contains("previous scope"))
+        }
+        var editor = ClawContinuationEditorInputState()
+        editor.synchronize(with: rendered)
+        var locked = rendered
+        locked.fileArguments.isEditable = false
+        XCTAssertFalse(editor.canApply(rendered: locked, current: locked))
+        editor.synchronize(with: .unavailable)
+        XCTAssertTrue(editor == ClawContinuationEditorInputState())
+        XCTAssertFalse(editor.isBound(to: rendered))
+        XCTAssertFalse(editor.canApply(rendered: rendered, current: rendered))
+    }
+
+    func testContinuationEditorRebindsKindWithoutLeakingOtherFields() {
+        var summary = makeWorkspaceEditorSummary(isFile: true)
+        var editor = ClawContinuationEditorInputState()
+        editor.synchronize(with: summary)
+        editor.fileWriteText = "previous file input"
+        summary.fileArguments = .unavailable
+        summary.extractionArguments = ClawContinuationExtractionArgumentsPresentationSummary(
+            extractionGoal: "current extraction", outputPath: "claw-output/current.json",
+            validationMessage: nil, isValid: true, isEditable: true, isVisible: true
+        )
+        XCTAssertFalse(editor.isBound(to: summary))
+        editor.synchronize(with: summary)
+        XCTAssertTrue(editor.fileWritePath.isEmpty && editor.fileWriteText.isEmpty)
+        XCTAssertTrue(editor.extractionGoal == summary.extractionArguments.extractionGoal)
+        XCTAssertTrue(editor.canApply(rendered: summary, current: summary))
+        summary.fileArguments = makeWorkspaceEditorSummary(isFile: true).fileArguments
+        editor.synchronize(with: summary)
+        XCTAssertTrue(editor == ClawContinuationEditorInputState())
+        XCTAssertFalse(editor.canApply(rendered: summary, current: summary))
+    }
+
+    func testWorkspacePendingEditorCannotMutateTrustedContinuationBeforeExplicitApply() throws {
+        let store = try makeTrustedContinuationProbeStore()
+        let summary = store.missionRunSummary.continuationDraft
+        let before = probeSideEffectSnapshot(store, reviewFocus: nil)
+        let checkpoint = store.missionRunCheckpointPresentationSummary
+        var editor = ClawContinuationEditorInputState()
+        editor.synchronize(with: summary)
+        XCTAssertTrue(editor.isBound(to: summary))
+        editor.extractionGoal = "local unsubmitted edit"
+        editor.extractionOutputPath = "claw-output/local-unsubmitted.json"
+        var presentation = ClawWorkspacePresentationState()
+        presentation.showsEnvelope = true
+        presentation.showsAdvancedReviews = true
+        for section in ClawWorkspaceDetailSection.allCases {
+            presentation.selectedDetail = section
+            presentation.revealReview()
+            editor.synchronize(with: summary)
+        }
+        XCTAssertTrue(editor.extractionGoal == "local unsubmitted edit")
+        XCTAssertTrue(probeSideEffectSnapshot(store, reviewFocus: nil) == before)
+        XCTAssertTrue(store.missionRunCheckpointPresentationSummary == checkpoint)
+    }
+
+    private func makeWorkspaceEditorSummary(isFile: Bool) -> ClawContinuationDraftPresentationSummary {
+        var summary = ClawContinuationDraftPresentationSummary.unavailable
+        summary.isVisible = true
+        summary.draftID = UUID()
+        summary.sourceTaskID = UUID()
+        summary.sourceSessionID = UUID()
+        if isFile {
+            summary.fileArguments = ClawContinuationFileArgumentsPresentationSummary(
+                writePath: "claw-output/initial.txt", writeText: "initial applied input",
+                validationMessage: nil, isValid: true, isEditable: true, isVisible: true
+            )
+        } else {
+            summary.extractionArguments = ClawContinuationExtractionArgumentsPresentationSummary(
+                extractionGoal: "initial applied goal", outputPath: "claw-output/initial.json",
+                validationMessage: nil, isValid: true, isEditable: true, isVisible: true
+            )
+        }
+        return summary
+    }
+
     func testWorkbenchAdaptsToActualWindowAndAccessibilitySize() {
         for width in [320.0, 600, 834, 899, -1, .nan, .infinity] {
             XCTAssertFalse(ClawWorkspaceLayout.usesReviewColumn(width: width, accessibilitySize: false))

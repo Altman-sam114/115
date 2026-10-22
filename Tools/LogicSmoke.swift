@@ -68,6 +68,56 @@ enum LogicSmoke {
         }
 
         let store = ClawStore(autoScanLocalArtifacts: false)
+        do {
+            let tasks = store.clawMobileTasks
+            let sessions = store.clawGatewaySessions
+            let events = store.gatewayEvents
+            let envelope = store.lastClawMobileEnvelope
+            let checkpoint = store.missionRunCheckpointPresentationSummary
+            var presentation = ClawWorkspacePresentationState()
+            expect(presentation.selectedDetail == .plan, "workspace must default to plan and approval")
+            expect(!presentation.showsAdvancedReviews && !presentation.showsEnvelope, "advanced diagnostics and envelope must start closed")
+            expect(ClawWorkspaceDetailSection.allCases == [.plan, .review, .events, .connection], "workspace detail order must be stable")
+            expect(Set(ClawWorkspaceDetailSection.allCases.map(\.id)).count == 4, "workspace detail IDs must be unique")
+            expect(ClawWorkspacePresentationContract.minimumHitArea >= 44, "workspace selectors need 44pt controls")
+            expect(ClawWorkspaceResultSource.resolve(channel: nil, hasGatewayAck: true) == .noSession, "ack without a scoped session cannot claim a result source")
+            expect(ClawWorkspaceResultSource.resolve(channel: "iOS Controller -> \(ClawGatewayDispatchMode.simulatedEventStream.title)", hasGatewayAck: true) == .simulated, "simulated session facts cannot become live after a setting change")
+            expect(ClawWorkspaceResultSource.resolve(channel: "iOS Controller -> \(ClawGatewayDispatchMode.liveGateway.title)", hasGatewayAck: false) == .liveUnconfirmed, "live preparation is not a confirmed desktop result")
+            presentation.showsAdvancedReviews = true
+            presentation.showsEnvelope = true
+            for section in ClawWorkspaceDetailSection.allCases { presentation.selectedDetail = section }
+            presentation.revealReview()
+            expect(presentation.selectedDetail == .review && presentation.showsAdvancedReviews && presentation.showsEnvelope, "focus navigation must retain explicit disclosures")
+
+            var summary = ClawContinuationDraftPresentationSummary.unavailable
+            summary.isVisible = true
+            summary.draftID = UUID()
+            summary.sourceTaskID = UUID()
+            summary.sourceSessionID = UUID()
+            summary.fileArguments = ClawContinuationFileArgumentsPresentationSummary(
+                writePath: "claw-output/initial.txt", writeText: "initial input",
+                validationMessage: nil, isValid: true, isEditable: true, isVisible: true
+            )
+            var editor = ClawContinuationEditorInputState()
+            editor.synchronize(with: summary)
+            editor.fileWriteText = "unapplied local input"
+            let retained = editor
+            for width in [899.0, 900, 1200] {
+                _ = ClawWorkspaceLayout.usesReviewColumn(width: width, accessibilitySize: false)
+                editor.synchronize(with: summary)
+                expect(editor == retained, "layout rebuild must retain unapplied editor input")
+            }
+            expect(editor.canApply(rendered: summary, current: summary), "bound fresh editor can use the existing typed Store API")
+            var changed = summary
+            changed.sourceSessionID = UUID()
+            expect(!editor.isBound(to: changed) && !editor.canApply(rendered: summary, current: changed), "stale editor cannot target a different parent session")
+            editor.synchronize(with: changed)
+            expect(editor.fileWriteText == summary.fileArguments.writeText, "new editor scope must discard old unapplied input")
+            editor.synchronize(with: .unavailable)
+            expect(editor == ClawContinuationEditorInputState(), "unavailable editor must clear local form input")
+            expect(store.clawMobileTasks == tasks && store.clawGatewaySessions == sessions && store.gatewayEvents == events && store.lastClawMobileEnvelope == envelope, "workspace presentation must not dispatch or mutate business state")
+            expect(store.missionRunCheckpointPresentationSummary == checkpoint, "workspace navigation must not persist task state")
+        }
         expect(!ClawWorkspaceLayout.usesReviewColumn(width: 834, accessibilitySize: false), "narrow iPad window must keep a readable single column")
         expect(ClawWorkspaceLayout.usesReviewColumn(width: 1200, accessibilitySize: false), "wide window should expose the review column")
         expect(!ClawWorkspaceLayout.usesReviewColumn(width: 1200, accessibilitySize: true), "accessibility text must retain a single column")

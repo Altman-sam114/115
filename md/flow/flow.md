@@ -1,5 +1,11 @@
 # 项目核心流程文档
 
+## v0.83 任务主路径与按需复核
+
+PhoneAgentView 持有本机详情/展开 state 和仅进程内的续接 editor input -> 按实际宽度选择 compact/workbench -> 两者复用 Command、Mission 概况与四个详情区。Mission 始终保留唯一 Smart Rail、阶段/审批/风险/结果、简洁健康条、失败说明和当前续接编辑；“证据复核”显示 scoped focus/优先项/详细 rows，高级 metadata projector 只在显式展开时构建。计划/任务审批、会话/日志、连接/权限分区显示，envelope 原文默认收起。
+
+未应用编辑在重排后按同一 draft/父 task/session/kind 保留；新 scope 先隐藏旧字段再同步，Store 参数变化刷新本地字段。Apply 必须同时满足 editor scope、rendered/current summary 和 editable，再进入原 typed Store API；局部导航、同步和高级展开不自动 queue/approve/freeze/send。状态不持久化，不含 receipt，不进入 envelope、checkpoint、日志或 artifact。结果徽标只映射匹配 session 的固定 channel 与 scoped ack，当前发送设置另列，不把模拟结果或未确认 Live 误标成真实执行成功。旧 v0.69/v0.72 入口位置由本节替代，业务 dispatcher 和网络边界不变。
+
 云端启动验收：本轮 Debug app 安装/launch -> 最多 15 次实际 simctl 帧 -> 固定 Claw/Mission Run 内容就绪校验 -> 最终 PNG + 固定 readiness JSON -> manifest/JUnit/最终失败闸门 -> C 阶段打开实际截图。只保留最后帧，帧间 2 秒，不打印 OCR 原文；白屏/状态栏/仅导航栏/超时/读取错误均不通过。此链路仅 CI policy v0.4，不触发产品任务、Gateway 或真实电脑动作。
 
 v0.82 将真实 Gateway 与模拟结果彻底分开：同步 live 准备和 async live 发送在 preflight 失败时不调用 transport，显示“未发送，配置待修正”；throw、无有效终态 EOF 和取消只收口当前 session，保留真实部分结果/证据，结果未确认，不模拟执行、不自动重发，也不承诺撤销远端副作用。首个已接受的 task/session 终态不可被尾随错误、重复终态或迟帧改写。异步入口不临时修改用户模式；task/session 与配置/模式 revision 防止旧任务改写新 Mission。显式模拟与模拟 retry 独立保留。生产 WebSocket 在原始 wire 身份校验后绑定本次连接的远端 session，再映射到本地 session；错误 task、切换远端 session 或不匹配 offer 均不入库，收到任何桌面 payload 后不再自动重发。合法 continuation 保留远端 parentSessionID；重连诊断只用固定代码，不写 raw error。

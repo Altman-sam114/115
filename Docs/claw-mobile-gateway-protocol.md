@@ -4,6 +4,10 @@
 
 ## Mac / iPad 客户端边界
 
+v0.83 只重构客户端展示：两种布局共用按需详情 selector，主动作和续接编辑保留在 Mission 概况；复核 dock 只负责 scoped 证据与高级诊断，不重复可执行主动作。健康条保留状态/失败及原有本地 focus 同步，完整 probe/readiness/checkpoint 放到连接区，仍只在用户显式点击时联网。高级诊断和 envelope 默认收起，不改变任何数据编码或派发。
+
+父 View 的详情/展开 state 和非 Codable 续接 editor input state 仅进程内存在；重排保留未应用输入，新 draft/parent task/session/editor kind 会重绑或清空，旧输入不能显示在错误 scope，也不能由旧 Apply 按钮写入新草稿。应用前比较渲染/当前 summary，之后仍走既有 typed validator、审批/冻结/receipt 闸门。该输入 state 不进入 Gateway、checkpoint、摘要、日志或 artifact。结果来源仅映射固定 session channel 和 scoped ack；无会话/未知 channel fail closed，不回显任意 channel，当前发送设置不重标已有结果。
+
 v0.78 的 Mac Catalyst 与 iPad 共用 planner、bridge、审批与 reducer，不新增 schema/action/artifact。侧栏与键盘只切换本地目的页，布局只重排并保留 scoped focus；运行于 Mac 不代表已获得桌面操作权限，真实动作仍发生于授权 Gateway。
 
 云端客户端启动证据使用独立 CI policy v0.4：检查真实 PNG 中 Claw/Mission Run 内容就绪，最多 15 帧等待，只留最终帧及固定 policy/outcome/attempt 的小 JSON。OCR 原文不写入日志、metadata、envelope 或 artifact；此 JSON 是 CI 结果文件，不是 Gateway artifact/action/schema。C 阶段仍需实际看图，不能将白屏、状态栏或 PNG 文件存在判成客户端可用。
@@ -170,7 +174,7 @@ v0.33 起，Mission Run 可从当前有效聚焦项、复核优先队列、Artif
 
 v0.34 起，regular iPad/mac 工作台会把 Mission Run 聚焦状态提升为左右栏共享，并在右侧顶部显示 Mission Review Detail Dock。Dock 通过 `reviewDetailDockSummary(focusedOn:)` 描述当前是无证据、全量详情、单项 detail 聚焦、状态级聚焦回退还是过期聚焦回退；实际详情 row 仍复用既有 metadata-only 安全摘要。Dock 只改变本地聚焦或清除聚焦，不执行 Gateway 动作，不审批、不发送、不重试、不自动继续；不写入 envelope，不回传 Gateway，不读取 artifact `reference` 或 Gateway `file://` payload。
 
-v0.69 起，regular Dock 在上述 metadata-only 详情之前就地复用 `primaryActionTitle`、`primaryActionIcon`、`primaryActionKind` 和 `isPrimaryActionEnabled`，并通过共享 presentation dispatcher 调用既有 `ClawStore` 主动作闸门。regular 左栏不再显示第二个可执行主动作，compact iPhone 保持原单栏入口。dispatcher 接收按钮渲染时的 summary，并在调用 Store 前同时校验 command、task/session/sessionTask、mission scope、phase、primary title/icon/kind 和 enabled 状态均仍与当前 summary 匹配；旧 summary、旧 scope、stale action 或 disabled action 均 fail closed。`.waitForGateway` 与 `.inspectBlocked` 不执行任何 Store 方法。该控件只触发现有启动、手机审批后继续或复核后重试流程，不新增 envelope、event、artifact 或 Gateway 能力，不改变 continuation receipt、freeze/send、workspace、allowlist 或 live preflight 合同。app/test 的 `TARGETED_DEVICE_FAMILY=1,2` 只扩大 iPad 工程覆盖；这不代表存在原生 macOS target。
+v0.69 曾将 regular 主动作放入 Dock；v0.83 统一移到 compact/regular 的共享 Mission 概况，Dock 不再重复。既有 dispatcher 接收按钮渲染时的 summary，在调用 Store 前同时校验 command、task/session/sessionTask、mission scope、phase、primary title/icon/kind 和 enabled 状态；旧 summary、旧 scope、stale 或 disabled 均 fail closed，`.waitForGateway` 与 `.inspectBlocked` 不调用 Store。布局变化不新增 envelope/event/artifact/权限，不改变 continuation receipt、freeze/send、workspace、allowlist 或 live preflight 合同。
 
 v0.35 起，Mission Run 可从 Artifact 证据索引、复核态势摘要、下一步复核行动、复核优先队列和当前有效聚焦项派生 Mission Review Trail。Trail 用固定四步短路径展示证据覆盖、metadata 状态、最高优先复核和下一步复核；在 compact Mission Run 和 regular iPad/mac 右侧 Dock 中复用同一摘要。Trail 按钮只聚焦已有 detail 或队列项，不执行 Gateway 动作，不审批、不发送、不重试、不自动继续；不写入 envelope，不回传 Gateway，不读取 artifact `reference`、`auditTrail` 原文或 Gateway `file://` payload。
 

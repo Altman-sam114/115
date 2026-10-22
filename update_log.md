@@ -14,7 +14,7 @@
 ## 当前状态
 
 - 项目方向：OpenClaw 式电脑接管智能体，iPhone 作为控制台，桌面 Claw Gateway 作为执行端。
-- 最后完整通过的历史基线：`0b9746292f4b67afac09ea36d7df50eb3297d061` / run `38342562083` attempt `1`。v0.82 main `7583e9a1a7df7117a6068a8cc8e28c4eaa075275` / run `39801453526` attempt `1` 自动化通过，但实际 iPad 截图白屏，C 阶段整体退回；现追加 CI policy v0.4 内容就绪闸门，新 run 待验收，不进入 v0.83。以下 v0.72 SHA/run 均为历史锚点，不代表当前 latest main。
+- 最后完整通过的基线：`0a8d9c463651d3daf8436635388c9c36c69352aa` / run `39805029958` attempt `1`，CI policy v0.4、14 项检查、双设备各 118 项 XCTest、Release/Gateway/validator、结果包身份与实际非白屏截图已由单实例 C 阶段复判通过。v0.83 主路径/按需复核/未应用输入保留现待新 main 提交和云端验收；以下失败与 v0.72 SHA/run 仅为历史锚点。
 - 当前 schema：`claw.computer.control.v1`。
 - 当前核心闭环：用户自然语言任务 -> `PhoneAgentPlanner` -> `ClawMobileTask` -> `ClawMobileEnvelope` -> 模拟事件流或带有界重连/ping 可观测性和进程内 task replay guard 的 WebSocket Gateway -> `ClawGatewayEvent` -> session reducer -> Mission Run / Approval Fast Lane 审批快车道 / Control Snapshot 控制态势快照 / Operator Strip / Loop 继续态势 / Mac Agent Readiness Board 就绪看板 / Mac Gateway Action Preflight Matrix 动作预检矩阵 / Mac Agent Evidence Coverage Map 证据覆盖图 / Mac Agent Next Step Deck 下一步候选卡组 / Mac Agent Run Timeline 执行时间线 / Mac Agent Continuation Gate 继续闸门 / Mac Agent Review Radar 复核雷达 / Mac Agent Handoff Brief 人工交接简报 / Focus Context 聚焦上下文 / Review Detail Dock / Review Trail 复核路径 / Approval Queue 审批队列 / Payload Safety Ledger 载荷安全账本 / Artifact 证据索引 / 复核态势摘要 / 复核优先队列 / 复核聚焦详情 / Live Gateway 连接健康 / Artifact metadata 复核摘要 / 文件变更安全复核摘要 / Shell 命令安全复核摘要 / 提取完整性复核摘要 / 浏览器控制计划和策略诊断复核摘要 / 草稿最终提交安全和桌面策略诊断复核摘要 / Gateway 能力复核摘要 / Accessibility 信号质量复核摘要 / Replay Guard 复核摘要 / AgentTrace handoff 复核 UI / iPad 多栏工作台展示和审批。v0.66 工作区实现进一步加入父 safe decision -> 短时单次 receipt -> 显式 draft/queue/approve/freeze/send -> 全新 child selected action + `runAgentLoop` 的受限跨 task 续接；v0.71 在同一闸门上加入 `extractData` 的 goal/outputPath typed editor，固定 schema/source/completeness 与 exact-key/byte/path 校验；v0.72 在同一 presentation/store 边界加入固定优先级 Smart Operator Action Rail，历史 v0.72 `origin/main` commit `bcf87c8c50f70d3d4157ec41a83333e62cd1ecdc` 已由 run `32631022162` attempt `1` 的 Agent C artifact 复判通过。
 - 当前 Smart Operator Action Rail：从既有 continuation/primary/resume/review metadata 按固定优先级派生单一用户显式入口；compact 与 regular 共享 summary/view/dispatcher，stale 或 scope mismatch 返回 disabled/none，不新增 Gateway action 或协议字段。历史 v0.72 `origin/main` commit `bcf87c8c50f70d3d4157ec41a83333e62cd1ecdc` 对应 run `32631022162` attempt `1`，artifact `claw-ci-v0.2-main-bcf87c8c50f7-run32631022162-attempt1` 已由 Agent C 复判通过。
@@ -23,6 +23,16 @@
 - 当前主要遗留：v0.66 完整负向/action/六种 kind/UI 对称测试矩阵、v0.67 最新云端 artifact 验收与 `manageFiles` 编辑器完整 LogicSmoke/负向覆盖、完整 macOS Accessibility bridge、Playwright/browser-use 兼容控制器、跨重启/跨进程多轮状态、live Gateway 后台保活/真实心跳协议/配对、完整 artifact 内容复核体验。
 
 ## 历史记录
+
+### v0.83 / Mac 与 iPad 主路径、按需复核和未应用输入保留
+日期：2026-10-22
+
+- 前置 C 阶段完成 `0a8d9c463651d3daf8436635388c9c36c69352aa` / run `39805029958` attempt `1` 的 `claw-ci-v0.82-main-0a8d9c463651-run39805029958-attempt1` 复判：14 项零失败 JUnit、两平台 Release、iPhone/iPad 各 118 项 XCTest、LogicSmoke/fixture/Gateway/validator、四个 xcresult、两份就绪 JSON 和实际 PNG 一致。iPad 第 2 帧才就绪，已实际看图；1,916,885 bytes / 解压 4.1 MiB，不再把旧白屏截图或自动化绿灯当成当前 UI 证据。
+- compact/workbench 共用父级详情/展开 state，按“计划与审批、证据复核、会话与事件、连接与权限”显示；Mission 保留唯一 Smart Rail、风险审批/结果计数、简洁健康/失败和续接编辑。高级 metadata projector 显式展开才构建，所有既有安全组件保留；envelope 默认收起。规划器明确标为规则预览，不冒充已接入模型。
+- 结果来源从匹配 task/session 的固定 channel 和 scoped ack 派生，不跟随当前发送设置变化，不回显任意 channel，也不把 Live 事件等同真实动作成功。现有 probe/readiness 本地 focus 同步保留，不新增隐式网络或任务动作。
+- 修复续接子 View 重建丢失未应用输入：父级持有非 Codable、仅进程内的 editor input，按 draft/父 task/session/kind 绑定；重排保留，新 scope/不可用重绑或清空，旧字段不外显，Apply 精确匹配渲染/当前 summary 和 editable 后仍走原 typed Store validator。输入不进入 checkpoint、协议、日志或 artifact，不自动审批或发送。
+- 新增 7 项 XCTest 和 LogicSmoke presentation/editor/source 回归，保留全部旧断言；同步 README、协议、flow/flowchart、test、release readiness、prompt 索引与版本化方案，workflow 只更新 PRODUCT_ITERATION。用户签名/xcuserdata/旧 prompt 保留；aitrans 只读参考，无依赖或权重复制。
+- 本地仅必要非编译静态检查；本轮 Swift/UI/业务测试等待新 main run 和实际 artifact 看图复判，未声称通过。真实模型、最终 typed 参数、桌面 E2E、配对/TLS、真机交互和签名分发仍未完成。
 
 ### v0.82 / 云端启动截图非白屏闸门
 日期：2026-10-22

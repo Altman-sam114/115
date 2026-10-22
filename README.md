@@ -1,5 +1,11 @@
 # Claw iOS Controller Prototype
 
+## 当前工作台（v0.83）
+
+Mac Catalyst / iPad / iPhone 共用“输入、Mission 概况、按需详情”：主动作、风险/审批/结果计数、失败说明和续接编辑保持可见；详情按“计划与审批、证据复核、会话与事件、连接与权限”切换。高级 metadata 诊断及 envelope 默认收起，原有审计组件仍可显式查看，不再默认在左右栏重复铺开。详情、展开状态和未应用的续接输入由父 View 持有，重排不覆盖输入；新草稿/父 scope 会重新绑定，旧 Apply 按钮不能改写新草稿。临时输入不进入 checkpoint、envelope、日志或 artifact，只有显式“应用参数”仍走原 typed Store API。
+
+当前规划器仍是规则预览，界面明确标注未接入推理模型。结果来源依据匹配 task/session 的固定 channel 和 Gateway ack 显示，不从当前发送设置反推；Live 事件已接收不等于真实动作成功。本文后续 v0.69/v0.72 等入口位置为历史说明，v0.83 起单一 Smart Rail 位于共享 Mission 概况，复核 dock 不再重复主动作。协议、审批、receipt、allowlist 和真实桌面权限不变，尚不是发布候选版本。
+
 云端启动截图采用 CI policy v0.4：实际 iPhone/iPad 帧必须通过 Claw + Mission Run 内容就绪检查，再生成小型 readiness JSON；最多 15 帧、帧间 2 秒，仅保留最后一张，失败使整轮失败。OCR 原文不写日志或结果包。结果包复判仍必须打开真实 PNG，截图文件存在不等于界面可用；该检查不改变 App/Gateway 协议，也不替代真实设备交互验收。
 
 v0.82 将真实 Gateway 与模拟结果彻底分开：同步 live 准备和 async live 发送在 preflight 失败时不调用 transport，显示“未发送，配置待修正”；throw、无有效终态 EOF 和取消只收口当前 session，保留真实部分结果/证据，结果未确认，不模拟执行、不自动重发，也不承诺撤销远端副作用。首个已接受的 task/session 终态不可被尾随错误、重复终态或迟帧改写。异步入口不临时修改用户模式；task/session 与配置/模式 revision 防止旧任务改写新 Mission。显式模拟与模拟 retry 独立保留。生产 WebSocket 在原始 wire 身份校验后绑定本次连接的远端 session，再映射到本地 session；错误 task、切换远端 session 或不匹配 offer 均不入库，收到任何桌面 payload 后不再自动重发。合法 continuation 保留远端 parentSessionID；重连诊断只用固定代码，不写 raw error。

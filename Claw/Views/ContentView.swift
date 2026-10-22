@@ -415,25 +415,38 @@ struct AutomationTargetRow: View {
 }
 
 struct PhoneAgentReviewColumn: View {
+    @EnvironmentObject private var store: ClawStore
     @Binding var reviewFocus: ClawMissionRunReviewFocus?
+    @Binding var presentation: ClawWorkspacePresentationState
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            PhoneAgentReviewSection(title: "Mission 复核详情", icon: "sidebar.right") {
-                ClawMissionReviewDetailDockView(reviewFocus: $reviewFocus)
-            }
-            PhoneAgentReviewSection(title: "计划复核", icon: "checklist") {
-                PhoneAgentPlanPanel()
-            }
-            PhoneAgentReviewSection(title: "Gateway 任务", icon: "display.and.arrow.down") {
-                ClawMobileBridgePanel()
-            }
-            PhoneAgentReviewSection(title: "会话与事件", icon: "waveform.path.ecg.rectangle.fill") {
-                ClawGatewaySessionPanel()
-            }
-            PhoneAgentReviewSection(title: "权限与日志", icon: "lock.rectangle.stack.fill") {
-                PhoneAgentPermissionMatrix()
-                PhoneAgentExecutionPanel()
+            PhoneAgentDetailSelector(selection: $presentation.selectedDetail)
+
+            PhoneAgentReviewSection(
+                title: presentation.selectedDetail.title,
+                icon: presentation.selectedDetail.icon
+            ) {
+                switch presentation.selectedDetail {
+                case .plan:
+                    PhoneAgentPlanPanel()
+                    ClawMobileBridgePanel(showsEnvelope: $presentation.showsEnvelope)
+                case .review:
+                    ClawMissionReviewDetailDockView(
+                        reviewFocus: $reviewFocus,
+                        showsAdvancedReviews: $presentation.showsAdvancedReviews
+                    )
+                case .events:
+                    ClawGatewaySessionPanel()
+                    PhoneAgentExecutionPanel()
+                case .connection:
+                    ClawMissionRunLiveGatewayHealthStripView(
+                        strip: store.missionRunLiveGatewayHealthStrip,
+                        reviewFocus: reviewFocus
+                    )
+                    ClawGatewayPairingResumeView(showsResumeAction: false)
+                    PhoneAgentPermissionMatrix()
+                }
             }
         }
     }
@@ -456,6 +469,7 @@ struct PhoneAgentReviewSection<Content: View>: View {
 struct PhoneAgentCommandPanel: View {
     @EnvironmentObject private var store: ClawStore
     let examples: [String]
+    let onSelectDetail: (ClawWorkspaceDetailSection) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -467,17 +481,22 @@ struct PhoneAgentCommandPanel: View {
                     .foregroundStyle(.red)
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("OpenClaw 式电脑接管")
-                        .font(.system(size: 20, weight: .heavy))
-                    Text("手机审批，桌面网关执行")
-                        .font(.system(size: 13, weight: .semibold))
+                    Text("Claw 工作台")
+                        .font(.title3.bold())
+                    Text("本机准备与审批，电脑网关执行")
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
             }
 
             Text(store.phoneAgentBoundaryText)
-                .font(.system(size: 12))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Label("规则规划预览，尚未接入推理模型", systemImage: "info.circle")
+                .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -489,17 +508,19 @@ struct PhoneAgentCommandPanel: View {
             HStack(spacing: 10) {
                 Button {
                     store.generatePhoneAgentPlan()
+                    onSelectDetail(.plan)
                 } label: {
-                    Label("生成计划", systemImage: "list.bullet.rectangle.portrait.fill")
-                        .frame(maxWidth: .infinity)
+                    Label("预览规则计划", systemImage: "list.bullet.rectangle.portrait.fill")
+                        .frame(maxWidth: .infinity, minHeight: 44)
                 }
                 .buttonStyle(PrimaryActionButtonStyle())
 
                 Button {
                     store.simulatePhoneAgentExecution()
+                    onSelectDetail(.events)
                 } label: {
-                    Label("模拟执行", systemImage: "play.fill")
-                        .frame(maxWidth: .infinity)
+                    Label("查看演练", systemImage: "play.fill")
+                        .frame(maxWidth: .infinity, minHeight: 44)
                 }
                 .buttonStyle(SecondaryActionButtonStyle())
             }
@@ -509,12 +530,13 @@ struct PhoneAgentCommandPanel: View {
                     ForEach(examples, id: \.self) { example in
                         Button {
                             store.usePhoneAgentExample(example)
+                            onSelectDetail(.plan)
                         } label: {
                             Text(example)
-                                .font(.system(size: 12, weight: .semibold))
+                                .font(.caption.bold())
                                 .lineLimit(1)
+                                .frame(minHeight: 44)
                                 .padding(.horizontal, 10)
-                                .padding(.vertical, 8)
                                 .background(Color(.secondarySystemBackground), in: Capsule())
                         }
                         .buttonStyle(.plain)
@@ -748,32 +770,16 @@ struct ClawMissionRunSmartOperatorActionRailView: View {
 struct ClawMissionRunPanel: View {
     @EnvironmentObject private var store: ClawStore
     @Binding var reviewFocus: ClawMissionRunReviewFocus?
+    @Binding var continuationEditor: ClawContinuationEditorInputState
 
     var body: some View {
         let summary = store.missionRunSummary
-        let activeFocusedReviewKind = summary.activeReviewFocus(from: reviewFocus)
-        let artifactEvidenceIndex = summary.artifactEvidenceIndex(focusedOn: activeFocusedReviewKind)
-        let reviewReadinessSummary = summary.reviewReadinessSummary(focusedOn: activeFocusedReviewKind)
-        let nextReviewAction = summary.nextReviewAction(focusedOn: activeFocusedReviewKind)
-        let liveGatewayHealthStrip = store.missionRunLiveGatewayHealthStrip
-        let controlSnapshot = summary.controlSnapshot(focusedOn: activeFocusedReviewKind, liveHealth: liveGatewayHealthStrip)
-        let loopContinuation = summary.loopContinuationSummary(focusedOn: activeFocusedReviewKind)
-        let macAgentReadiness = summary.macAgentReadinessBoard(focusedOn: activeFocusedReviewKind)
-        let macAgentPolicyDiagnostics = summary.macAgentPolicyDiagnosticsBoard(focusedOn: activeFocusedReviewKind)
-        let operatorStrip = summary.operatorStrip(focusedOn: activeFocusedReviewKind, liveHealth: liveGatewayHealthStrip, policyBoard: macAgentPolicyDiagnostics)
-        let actionPreflightMatrix = summary.macGatewayActionPreflightMatrix(focusedOn: activeFocusedReviewKind)
-        let evidenceCoverageMap = summary.macAgentEvidenceCoverageMap(focusedOn: activeFocusedReviewKind)
-        let nextStepDeck = summary.macAgentNextStepDeck(focusedOn: activeFocusedReviewKind)
-        let runTimeline = summary.macAgentRunTimeline(focusedOn: activeFocusedReviewKind)
-        let continuationGate = summary.macAgentContinuationGate(focusedOn: activeFocusedReviewKind)
-        let reviewRadar = summary.macAgentReviewRadar(focusedOn: activeFocusedReviewKind)
-        let handoffBrief = summary.macAgentHandoffBrief(focusedOn: activeFocusedReviewKind)
-        let agentTraceHandoffPack = summary.agentTraceHandoffPack(focusedOn: activeFocusedReviewKind)
-        let focusContext = summary.focusContextSummary(focusedOn: reviewFocus)
-        let evidenceTrail = summary.evidenceTrailSummary(focusedOn: activeFocusedReviewKind)
-        let approvalQueue = summary.approvalQueueSummary(focusedOn: activeFocusedReviewKind)
-        let approvalFastLane = summary.approvalFastLane(focusedOn: activeFocusedReviewKind)
-        let payloadSafetyLedger = summary.payloadSafetyLedger(focusedOn: activeFocusedReviewKind)
+        let focusedKind = summary.activeReviewFocus(from: reviewFocus)
+        let nextReview = summary.nextReviewAction(focusedOn: focusedKind)
+        let health = store.missionRunLiveGatewayHealthStrip
+        let loop = summary.loopContinuationSummary(focusedOn: focusedKind)
+        let session = store.clawGatewaySessions.first { $0.id == summary.sessionID && $0.taskID == summary.taskID }
+        let source = ClawWorkspaceResultSource.resolve(channel: session?.channel, hasGatewayAck: health.hasGatewayAck)
         VStack(alignment: .leading, spacing: 14) {
             SectionHeader(title: "Mission Run", icon: "flag.checkered")
 
@@ -789,7 +795,7 @@ struct ClawMissionRunPanel: View {
                         .font(.headline)
                         .lineLimit(2)
                         .minimumScaleFactor(0.82)
-                    Text("手机审批，桌面 Gateway 执行")
+                    Text("本机审批，授权 Gateway 执行")
                         .font(.subheadline.bold())
                         .foregroundStyle(.secondary)
                 }
@@ -797,15 +803,21 @@ struct ClawMissionRunPanel: View {
                 Spacer(minLength: 0)
             }
 
-            HStack(spacing: 8) {
-                PhoneAgentTag(text: summary.phaseTitle, icon: summary.phaseIcon, tint: phaseTint(for: summary))
-                PhoneAgentTag(
-                    text: summary.requiresUserApproval ? "需手机确认" : "安全路径",
-                    icon: summary.requiresUserApproval ? "person.crop.circle.badge.exclamationmark.fill" : "shield.checkered",
-                    tint: summary.requiresUserApproval ? .orange : .green
-                )
-                PhoneAgentTag(text: store.gatewayDispatchMode.title, icon: "switch.2", tint: .blue)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    PhoneAgentTag(text: summary.phaseTitle, icon: summary.phaseIcon, tint: phaseTint(for: summary))
+                    PhoneAgentTag(
+                        text: summary.requiresUserApproval ? "需用户确认" : "无待审批项",
+                        icon: summary.requiresUserApproval ? "person.crop.circle.badge.exclamationmark.fill" : "shield.checkered",
+                        tint: summary.requiresUserApproval ? .orange : .secondary
+                    )
+                    PhoneAgentTag(text: source.title, icon: source.icon, tint: .blue)
+                }
             }
+
+            Text("发送设置：\(store.gatewayDispatchMode.title)；不改变已有结果来源")
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
             ClawMissionStageTrack(stages: summary.stageTrack)
 
@@ -822,16 +834,6 @@ struct ClawMissionRunPanel: View {
                     .tint(phaseTint(for: summary))
             }
 
-            ClawMissionRunControlSnapshotView(
-                snapshot: controlSnapshot,
-                onFocusReviewKind: focusReviewKind
-            )
-
-            ClawMissionRunLiveGatewayHealthStripView(
-                strip: liveGatewayHealthStrip,
-                reviewFocus: reviewFocus
-            )
-
             ClawMissionRunSmartOperatorActionRailView(
                 summary: store.missionRunSmartOperatorActionSummary
             ) { action in
@@ -840,72 +842,19 @@ struct ClawMissionRunPanel: View {
                 }
             }
 
-            ClawGatewayPairingResumeView(showsResumeAction: false)
-
-            ClawMissionRunOperatorStripView(
-                strip: operatorStrip,
-                onFocusReviewKind: focusReviewKind
+            ClawMissionRunLiveGatewayHealthStripView(
+                strip: health, reviewFocus: reviewFocus, showsDiagnostics: false
             )
 
-            ClawMissionRunLoopContinuationBriefView(
-                summary: loopContinuation,
-                onFocusReviewKind: focusReviewKind
-            )
+            if loop.isReviewable {
+                ClawMissionRunLoopContinuationBriefView(summary: loop, onFocusReviewKind: focusReviewKind)
+            }
 
             ClawMissionRunContinuationDraftView(
                 summary: summary.continuationDraft,
                 onAction: performContinuationDraftAction,
-                showsAction: false
-            )
-
-            ClawMissionMacAgentReadinessBoardView(
-                board: macAgentReadiness,
-                onFocusReviewKind: focusReviewKind
-            )
-
-            ClawMissionMacAgentPolicyDiagnosticsBoardView(
-                board: macAgentPolicyDiagnostics,
-                onFocusReviewKind: focusReviewKind
-            )
-
-            ClawMissionMacGatewayActionPreflightMatrixView(
-                matrix: actionPreflightMatrix,
-                onFocusReviewKind: focusReviewKind
-            )
-
-            ClawMissionMacAgentEvidenceCoverageMapView(
-                map: evidenceCoverageMap,
-                onFocusReviewKind: focusReviewKind
-            )
-
-            ClawMissionMacAgentNextStepDeckView(
-                deck: nextStepDeck,
-                onFocusReviewKind: focusReviewKind
-            )
-
-            ClawMissionMacAgentRunTimelineView(
-                timeline: runTimeline,
-                onFocusReviewKind: focusReviewKind
-            )
-
-            ClawMissionMacAgentContinuationGateView(
-                gate: continuationGate,
-                onFocusReviewKind: focusReviewKind
-            )
-
-            ClawMissionMacAgentReviewRadarView(
-                radar: reviewRadar,
-                onFocusReviewKind: focusReviewKind
-            )
-
-            ClawMissionMacAgentHandoffBriefView(
-                brief: handoffBrief,
-                onFocusReviewKind: focusReviewKind
-            )
-
-            ClawMissionAgentTraceHandoffPackView(
-                pack: agentTraceHandoffPack,
-                onFocusReviewKind: focusReviewKind
+                showsAction: false,
+                editor: $continuationEditor
             )
 
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
@@ -936,59 +885,14 @@ struct ClawMissionRunPanel: View {
                 }
             }
 
-            ClawMissionArtifactEvidenceIndexView(
-                index: artifactEvidenceIndex,
-                onFocusReviewKind: focusReviewKind
-            )
-
-            ClawMissionPayloadSafetyLedgerView(
-                ledger: payloadSafetyLedger,
-                onFocusReviewKind: focusReviewKind
-            )
-
-            ClawMissionReviewTrailView(
-                trail: evidenceTrail,
-                onFocusReviewKind: focusReviewKind
-            )
-
-            ClawMissionApprovalQueueView(
-                summary: approvalQueue,
-                fastLane: approvalFastLane,
-                onFocusReviewKind: focusReviewKind
-            )
-
-            ClawMissionReviewReadinessSummaryView(
-                summary: reviewReadinessSummary,
-                onFocusReviewKind: focusReviewKind
-            )
-
-            ClawMissionNextReviewActionView(
-                action: nextReviewAction,
-                onFocusReviewKind: focusReviewKind
-            )
-
-            if summary.reviewPriorityQueue.isEmpty == false {
-                ClawMissionReviewPriorityQueueView(
-                    items: Array(summary.reviewPriorityQueue.prefix(5)),
-                    selectedReviewKind: activeFocusedReviewKind,
-                    onSelectReviewKind: focusReviewKind,
-                    onClearFocus: clearFocusedReviewKind
-                )
+            if nextReview.isReviewable {
+                ClawMissionNextReviewActionView(action: nextReview, onFocusReviewKind: focusReviewKind)
             }
-
-            ClawMissionRunFocusContextView(
-                summary: focusContext,
-                onFocusReviewKind: focusReviewKind,
-                onClearFocus: clearFocusedReviewKind
-            )
-
-            ClawMissionDetailReviewRows(summary: summary, focusedReviewKind: activeFocusedReviewKind)
 
             Text(summary.statusLine)
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-
         }
         .panelCard()
     }
@@ -1052,241 +956,91 @@ struct ClawMissionRunPanel: View {
 struct ClawMissionReviewDetailDockView: View {
     @EnvironmentObject private var store: ClawStore
     @Binding var reviewFocus: ClawMissionRunReviewFocus?
+    @Binding var showsAdvancedReviews: Bool
 
     var body: some View {
         let summary = store.missionRunSummary
-        let activeFocusedReviewKind = summary.activeReviewFocus(from: reviewFocus)
+        let focusedKind = summary.activeReviewFocus(from: reviewFocus)
         let dock = summary.reviewDetailDockSummary(focusedOn: reviewFocus)
-        let focusContext = summary.focusContextSummary(focusedOn: reviewFocus)
-        let liveGatewayHealthStrip = store.missionRunLiveGatewayHealthStrip
-        let controlSnapshot = summary.controlSnapshot(focusedOn: activeFocusedReviewKind, liveHealth: liveGatewayHealthStrip)
-        let evidenceTrail = summary.evidenceTrailSummary(focusedOn: activeFocusedReviewKind)
-        let macAgentReadiness = summary.macAgentReadinessBoard(focusedOn: activeFocusedReviewKind)
-        let macAgentPolicyDiagnostics = summary.macAgentPolicyDiagnosticsBoard(focusedOn: activeFocusedReviewKind)
-        let actionPreflightMatrix = summary.macGatewayActionPreflightMatrix(focusedOn: activeFocusedReviewKind)
-        let evidenceCoverageMap = summary.macAgentEvidenceCoverageMap(focusedOn: activeFocusedReviewKind)
-        let nextStepDeck = summary.macAgentNextStepDeck(focusedOn: activeFocusedReviewKind)
-        let runTimeline = summary.macAgentRunTimeline(focusedOn: activeFocusedReviewKind)
-        let continuationGate = summary.macAgentContinuationGate(focusedOn: activeFocusedReviewKind)
-        let reviewRadar = summary.macAgentReviewRadar(focusedOn: activeFocusedReviewKind)
-        let handoffBrief = summary.macAgentHandoffBrief(focusedOn: activeFocusedReviewKind)
-        let agentTraceHandoffPack = summary.agentTraceHandoffPack(focusedOn: activeFocusedReviewKind)
-        let approvalQueue = summary.approvalQueueSummary(focusedOn: activeFocusedReviewKind)
-        let approvalFastLane = summary.approvalFastLane(focusedOn: activeFocusedReviewKind)
-        let payloadSafetyLedger = summary.payloadSafetyLedger(focusedOn: activeFocusedReviewKind)
-
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Label(dock.title, systemImage: dock.icon)
-                    .font(.headline)
-                    .foregroundStyle(tint(for: dock))
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Spacer(minLength: 0)
-
-                if let activeReviewTitle = dock.activeReviewTitle {
-                    PhoneAgentTag(text: activeReviewTitle, icon: "scope", tint: tint(for: dock))
-                }
-            }
+            Label(dock.title, systemImage: dock.icon)
+                .font(.headline)
+                .foregroundStyle(dock.hasStaleFocus ? Color.orange : Color.primary)
+                .fixedSize(horizontal: false, vertical: true)
 
             Text(dock.status)
                 .font(.subheadline.bold())
-                .foregroundStyle(.primary)
                 .fixedSize(horizontal: false, vertical: true)
-
             Text(dock.guidance)
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            ClawMissionRunSmartOperatorActionRailView(
-                summary: store.missionRunSmartOperatorActionSummary
-            ) { action in
-                if let focus = ClawMissionRunSmartOperatorActionDispatcher.perform(action, in: store) {
-                    reviewFocus = focus
-                }
-            }
-
-            HStack(spacing: 8) {
-                PhoneAgentTag(
-                    text: dock.showsFocusedDetailOnly ? "单项详情" : "全量详情",
-                    icon: dock.showsFocusedDetailOnly ? "scope" : "rectangle.stack.fill",
-                    tint: dock.showsFocusedDetailOnly ? .purple : .blue
-                )
-                PhoneAgentTag(
-                    text: "\(dock.detailReviewKinds.count) 类",
-                    icon: "doc.text.magnifyingglass",
-                    tint: .purple
-                )
-                if dock.hasStaleFocus {
-                    PhoneAgentTag(text: "聚焦已更新", icon: "arrow.triangle.2.circlepath", tint: .orange)
-                }
-            }
-
-            ClawMissionRunControlSnapshotView(
-                snapshot: controlSnapshot,
-                onFocusReviewKind: focusReviewKind
+            ClawMissionRunFocusContextView(
+                summary: summary.focusContextSummary(focusedOn: reviewFocus),
+                onFocusReviewKind: focusReviewKind,
+                onClearFocus: clearFocusedReviewKind
             )
-
-            ClawMissionRunLiveGatewayHealthStripView(
-                strip: liveGatewayHealthStrip,
-                reviewFocus: reviewFocus
-            )
-
-            ClawGatewayPairingResumeView(showsResumeAction: false)
 
             if dock.isReviewable {
-                ClawMissionMacAgentReadinessBoardView(
-                    board: macAgentReadiness,
-                    onFocusReviewKind: focusReviewKind
-                )
-
-                ClawMissionMacAgentPolicyDiagnosticsBoardView(
-                    board: macAgentPolicyDiagnostics,
-                    onFocusReviewKind: focusReviewKind
-                )
-
-                ClawMissionMacGatewayActionPreflightMatrixView(
-                    matrix: actionPreflightMatrix,
-                    onFocusReviewKind: focusReviewKind
-                )
-
-                ClawMissionMacAgentEvidenceCoverageMapView(
-                    map: evidenceCoverageMap,
-                    onFocusReviewKind: focusReviewKind
-                )
-
-                ClawMissionMacAgentNextStepDeckView(
-                    deck: nextStepDeck,
-                    onFocusReviewKind: focusReviewKind
-                )
-
-                ClawMissionMacAgentRunTimelineView(
-                    timeline: runTimeline,
-                    onFocusReviewKind: focusReviewKind
-                )
-
-                ClawMissionMacAgentContinuationGateView(
-                    gate: continuationGate,
-                    onFocusReviewKind: focusReviewKind
-                )
-
-                ClawMissionRunContinuationDraftView(
-                    summary: summary.continuationDraft,
-                    onAction: performContinuationDraftAction,
-                    showsAction: false
-                )
-
-                ClawMissionMacAgentReviewRadarView(
-                    radar: reviewRadar,
-                    onFocusReviewKind: focusReviewKind
-                )
-
-                ClawMissionMacAgentHandoffBriefView(
-                    brief: handoffBrief,
-                    onFocusReviewKind: focusReviewKind
-                )
-
-                ClawMissionAgentTraceHandoffPackView(
-                    pack: agentTraceHandoffPack,
-                    onFocusReviewKind: focusReviewKind
-                )
-
-                ClawMissionReviewTrailView(
-                    trail: evidenceTrail,
-                    onFocusReviewKind: focusReviewKind
-                )
-
-                ClawMissionPayloadSafetyLedgerView(
-                    ledger: payloadSafetyLedger,
-                    onFocusReviewKind: focusReviewKind
-                )
-
                 ClawMissionApprovalQueueView(
-                    summary: approvalQueue,
-                    fastLane: approvalFastLane,
+                    summary: summary.approvalQueueSummary(focusedOn: focusedKind),
+                    fastLane: summary.approvalFastLane(focusedOn: focusedKind),
                     onFocusReviewKind: focusReviewKind
                 )
-
-                ClawMissionRunFocusContextView(
-                    summary: focusContext,
-                    onFocusReviewKind: focusReviewKind,
-                    onClearFocus: clearFocusedReviewKind
+                ClawMissionNextReviewActionView(
+                    action: summary.nextReviewAction(focusedOn: focusedKind),
+                    onFocusReviewKind: focusReviewKind
                 )
-
-                if dock.detailReviewKinds.isEmpty {
-                    Label("尚无详细复核 row；请先发送任务生成 Gateway 证据。", systemImage: "tray")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    ClawMissionDetailReviewRows(
-                        summary: summary,
-                        focusedReviewKind: activeFocusedReviewKind
+                if !summary.reviewPriorityQueue.isEmpty {
+                    ClawMissionReviewPriorityQueueView(
+                        items: Array(summary.reviewPriorityQueue.prefix(5)),
+                        selectedReviewKind: focusedKind,
+                        onSelectReviewKind: focusReviewKind,
+                        onClearFocus: clearFocusedReviewKind
                     )
                 }
+                ClawMissionArtifactEvidenceIndexView(
+                    index: summary.artifactEvidenceIndex(focusedOn: focusedKind),
+                    onFocusReviewKind: focusReviewKind
+                )
+                ClawMissionDetailReviewRows(summary: summary, focusedReviewKind: focusedKind)
             } else {
                 Label("发送任务后会在这里显示 metadata-only 的安全摘要。", systemImage: "tray")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+
+            DisclosureGroup(isExpanded: $showsAdvancedReviews) {
+                if showsAdvancedReviews {
+                    ClawMissionAdvancedReviewView(
+                        summary: summary,
+                        focusedReviewKind: focusedKind,
+                        liveHealth: store.missionRunLiveGatewayHealthStrip,
+                        onFocusReviewKind: focusReviewKind
+                    )
+                }
+            } label: {
+                Label("高级安全与证据诊断", systemImage: "slider.horizontal.3")
+                    .font(.subheadline.bold())
+                    .frame(minHeight: CGFloat(ClawWorkspacePresentationContract.minimumHitArea))
+            }
+            .accessibilityHint(ClawWorkspacePresentationContract.advancedHint)
+            .accessibilityIdentifier("workspace.review.advanced")
         }
         .panelCard()
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(accessibilitySummary(for: dock))
+        .accessibilityLabel("Mission 复核详情，\(dock.status)")
     }
 
     private func focusReviewKind(_ reviewKind: String) {
-        guard let scopeID = store.missionRunSummary.missionScopeID else {
-            return
-        }
+        guard let scopeID = store.missionRunSummary.missionScopeID else { return }
         reviewFocus = ClawMissionRunReviewFocus(scopeID: scopeID, reviewKind: reviewKind)
     }
 
     private func clearFocusedReviewKind() {
         reviewFocus = nil
-    }
-
-    private func performContinuationDraftAction(_ summary: ClawContinuationDraftPresentationSummary) {
-        switch summary.actionKind {
-        case .prepare:
-            guard let taskID = summary.sourceTaskID, let sessionID = summary.sourceSessionID else { return }
-            store.prepareContinuationDraft(sourceTaskID: taskID, sourceSessionID: sessionID)
-        case .queue:
-            guard let draftID = summary.draftID else { return }
-            store.queueContinuationDraft(id: draftID)
-        case .approve:
-            guard let taskID = summary.childTaskID else { return }
-            store.approveTask(id: taskID)
-        case .send:
-            guard let taskID = summary.childTaskID else { return }
-            Task {
-                await store.sendTaskOverLiveGateway(id: taskID)
-            }
-        case nil:
-            break
-        }
-    }
-
-    private func accessibilitySummary(for dock: ClawMissionRunReviewDetailDockSummary) -> String {
-        if let activeReviewTitle = dock.activeReviewTitle {
-            return "Mission 复核详情，当前聚焦 \(activeReviewTitle)，\(dock.status)"
-        }
-        return "Mission 复核详情，\(dock.status)"
-    }
-
-    private func tint(for dock: ClawMissionRunReviewDetailDockSummary) -> Color {
-        if dock.isReviewable == false {
-            return .secondary
-        }
-        if dock.hasStaleFocus {
-            return .orange
-        }
-        if dock.showsFocusedDetailOnly {
-            return .purple
-        }
-        return .blue
     }
 }
 
@@ -1695,180 +1449,165 @@ struct ClawMissionRunContinuationDraftView: View {
     let summary: ClawContinuationDraftPresentationSummary
     let onAction: (ClawContinuationDraftPresentationSummary) -> Void
     var showsAction: Bool = true
-    @State private var fileWritePath = ""
-    @State private var fileWriteText = ""
-    @State private var extractionGoal = ""
-    @State private var extractionOutputPath = ""
+    @Binding var editor: ClawContinuationEditorInputState
 
     var body: some View {
-        if summary.isVisible {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Label(summary.title, systemImage: summary.icon)
-                        .font(.subheadline.bold())
-                        .foregroundStyle(tint)
+        Group {
+            if summary.isVisible {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Label(summary.title, systemImage: summary.icon)
+                            .font(.subheadline.bold())
+                            .foregroundStyle(tint)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                        if let state = summary.state {
+                            PhoneAgentTag(text: stateTitle(state), icon: stateIcon(state), tint: tint)
+                        }
+                    }
+
+                    Text(summary.status)
+                        .font(.footnote.bold())
                         .fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 0)
-                    if let state = summary.state {
-                        PhoneAgentTag(text: stateTitle(state), icon: stateIcon(state), tint: tint)
+
+                    Text(summary.guidance)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if let selectedActionTitle = summary.selectedActionTitle {
+                        PhoneAgentTag(text: selectedActionTitle, icon: "arrow.forward.circle.fill", tint: tint)
                     }
-                }
 
-                Text(summary.status)
-                    .font(.footnote.bold())
-                    .fixedSize(horizontal: false, vertical: true)
+                    if summary.fileArguments.isVisible, editor.isBound(to: summary) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label("文件参数", systemImage: "folder.badge.gearshape")
+                                .font(.footnote.bold())
+                                .foregroundStyle(tint)
 
-                Text(summary.guidance)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                            TextField("workspace 相对路径", text: $editor.fileWritePath)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(minHeight: 44)
+                                .disabled(summary.fileArguments.isEditable == false)
+                                .accessibilityLabel("workspace 相对路径")
+                                .accessibilityHint("只允许填写 workspace 内的相对路径")
 
-                if let selectedActionTitle = summary.selectedActionTitle {
-                    PhoneAgentTag(text: selectedActionTitle, icon: "arrow.forward.circle.fill", tint: tint)
-                }
+                            TextEditor(text: $editor.fileWriteText)
+                                .frame(minHeight: 120, maxHeight: 180)
+                                .padding(6)
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .stroke(.secondary.opacity(0.25), lineWidth: 1)
+                                }
+                                .disabled(summary.fileArguments.isEditable == false)
+                                .accessibilityLabel("文件正文")
+                                .accessibilityHint("只更新结构化文件参数，不会自动加入队列、审批或发送")
 
-                if summary.fileArguments.isVisible {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("文件参数", systemImage: "folder.badge.gearshape")
+                            Button("应用文件参数", systemImage: "checkmark.circle", action: applyFileArguments)
                             .font(.footnote.bold())
-                            .foregroundStyle(tint)
-
-                        TextField("workspace 相对路径", text: $fileWritePath)
-                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .buttonStyle(SecondaryActionButtonStyle())
                             .disabled(summary.fileArguments.isEditable == false)
-                            .accessibilityLabel("workspace 相对路径")
-                            .accessibilityHint("只允许填写 workspace 内的相对路径")
+                            .accessibilityHint("只校验并更新当前草稿，不会自动加入队列、审批或发送")
 
-                        TextEditor(text: $fileWriteText)
-                            .frame(minHeight: 120, maxHeight: 180)
-                            .padding(6)
-                            .overlay {
-                                RoundedRectangle(cornerRadius: 6)
-                                    .stroke(.secondary.opacity(0.25), lineWidth: 1)
+                            if let validationMessage = summary.fileArguments.validationMessage {
+                                Text(validationMessage)
+                                    .font(.caption)
+                                    .foregroundStyle(.orange)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
-                            .disabled(summary.fileArguments.isEditable == false)
-                            .accessibilityLabel("文件正文")
-                            .accessibilityHint("只更新结构化文件参数，不会自动加入队列、审批或发送")
+                        }
+                        .padding(8)
+                        .background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+                    } else if summary.extractionArguments.isVisible, editor.isBound(to: summary) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label("提取参数", systemImage: "tablecells.badge.ellipsis")
+                                .font(.footnote.bold())
+                                .foregroundStyle(tint)
 
-                        Button("应用文件参数", systemImage: "checkmark.circle") {
-                            _ = store.updateContinuationFileArguments(
-                                writePath: fileWritePath,
-                                writeText: fileWriteText
+                            TextField("提取目标", text: $editor.extractionGoal, axis: .vertical)
+                                .lineLimit(3...6)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(minHeight: 44)
+                                .disabled(summary.extractionArguments.isEditable == false)
+                                .accessibilityLabel("结构化数据提取目标")
+                                .accessibilityHint("只填写提取目标，不会自动加入队列、审批或发送")
+
+                            TextField("workspace 相对输出路径", text: $editor.extractionOutputPath)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(minHeight: 44)
+                                .disabled(summary.extractionArguments.isEditable == false)
+                                .accessibilityLabel("结构化数据 workspace 相对输出路径")
+                                .accessibilityHint("只允许填写 workspace 内的相对路径，不会自动加入队列、审批或发送")
+
+                            Button(
+                                "应用提取参数",
+                                systemImage: "checkmark.circle",
+                                action: applyExtractionArguments
                             )
-                        }
-                        .font(.footnote.bold())
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .buttonStyle(SecondaryActionButtonStyle())
-                        .disabled(summary.fileArguments.isEditable == false)
-                        .accessibilityHint("只校验并更新当前草稿，不会自动加入队列、审批或发送")
-
-                        if let validationMessage = summary.fileArguments.validationMessage {
-                            Text(validationMessage)
-                                .font(.caption)
-                                .foregroundStyle(.orange)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                    .padding(8)
-                    .background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
-                } else if summary.extractionArguments.isVisible {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("提取参数", systemImage: "tablecells.badge.ellipsis")
                             .font(.footnote.bold())
-                            .foregroundStyle(tint)
-
-                        TextField("提取目标", text: $extractionGoal, axis: .vertical)
-                            .lineLimit(3...6)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(minHeight: 44)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .buttonStyle(SecondaryActionButtonStyle())
                             .disabled(summary.extractionArguments.isEditable == false)
-                            .accessibilityLabel("结构化数据提取目标")
-                            .accessibilityHint("只填写提取目标，不会自动加入队列、审批或发送")
+                            .accessibilityHint("只校验并更新结构化提取参数，不会自动加入队列、审批或发送")
+                            .accessibilityInputLabels(["应用提取参数", "更新提取参数"])
 
-                        TextField("workspace 相对输出路径", text: $extractionOutputPath)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(minHeight: 44)
-                            .disabled(summary.extractionArguments.isEditable == false)
-                            .accessibilityLabel("结构化数据 workspace 相对输出路径")
-                            .accessibilityHint("只允许填写 workspace 内的相对路径，不会自动加入队列、审批或发送")
+                            if let validationMessage = summary.extractionArguments.validationMessage {
+                                Text(validationMessage)
+                                    .font(.caption)
+                                    .foregroundStyle(.orange)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        .padding(8)
+                        .background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+                    }
 
-                        Button(
-                            "应用提取参数",
-                            systemImage: "checkmark.circle",
-                            action: applyExtractionArguments
-                        )
+                    if showsAction, let actionTitle = summary.actionTitle {
+                        Button(actionTitle, systemImage: actionIcon) {
+                            onAction(summary)
+                        }
                         .font(.footnote.bold())
                         .frame(maxWidth: .infinity, minHeight: 44)
                         .buttonStyle(SecondaryActionButtonStyle())
-                        .disabled(summary.extractionArguments.isEditable == false)
-                        .accessibilityHint("只校验并更新结构化提取参数，不会自动加入队列、审批或发送")
-                        .accessibilityInputLabels(["应用提取参数", "更新提取参数"])
-
-                        if let validationMessage = summary.extractionArguments.validationMessage {
-                            Text(validationMessage)
-                                .font(.caption)
-                                .foregroundStyle(.orange)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
+                        .disabled(summary.canPerformAction == false)
+                        .opacity(summary.canPerformAction ? 1 : 0.55)
+                        .accessibilityHint("只执行当前草稿步骤；不会自动审批、自动发送或复用父任务授权")
+                        .accessibilityInputLabels([actionTitle, "可信续接草稿"])
                     }
-                    .padding(8)
-                    .background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
                 }
-
-                if showsAction, let actionTitle = summary.actionTitle {
-                    Button(actionTitle, systemImage: actionIcon) {
-                        onAction(summary)
-                    }
-                    .font(.footnote.bold())
-                    .frame(maxWidth: .infinity, minHeight: 44)
-                    .buttonStyle(SecondaryActionButtonStyle())
-                    .disabled(summary.canPerformAction == false)
-                    .opacity(summary.canPerformAction ? 1 : 0.55)
-                    .accessibilityHint("只执行当前草稿步骤；不会自动审批、自动发送或复用父任务授权")
-                    .accessibilityInputLabels([actionTitle, "可信续接草稿"])
+                .padding(10)
+                .background(tint.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(tint.opacity(0.16), lineWidth: 1)
                 }
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("可信多轮续接，\(summary.status)")
             }
-            .padding(10)
-            .background(tint.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
-            .overlay {
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(tint.opacity(0.16), lineWidth: 1)
-            }
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel("可信多轮续接，\(summary.status)")
-            .onAppear {
-                syncEditors()
-            }
-            .onChange(of: summary.draftID) { _, _ in
-                syncEditors()
-            }
-            .onChange(of: summary.fileArguments) { _, _ in
-                syncEditors()
-            }
-            .onChange(of: summary.extractionArguments) { _, _ in
-                syncEditors()
-            }
+        }
+        .onAppear {
+            editor.synchronize(with: summary)
+        }
+        .onChange(of: summary) { previous, current in
+            editor.synchronize(
+                with: current,
+                replacingInputs: previous.fileArguments != current.fileArguments ||
+                    previous.extractionArguments != current.extractionArguments
+            )
         }
     }
 
-    private func syncEditors() {
-        fileWritePath = ""
-        fileWriteText = ""
-        extractionGoal = ""
-        extractionOutputPath = ""
-        if summary.fileArguments.isVisible {
-            fileWritePath = summary.fileArguments.writePath
-            fileWriteText = summary.fileArguments.writeText
-        } else if summary.extractionArguments.isVisible {
-            extractionGoal = summary.extractionArguments.extractionGoal
-            extractionOutputPath = summary.extractionArguments.outputPath
-        }
+    private func applyFileArguments() {
+        guard editor.canApply(rendered: summary, current: store.missionRunSummary.continuationDraft) else { return }
+        _ = store.updateContinuationFileArguments(writePath: editor.fileWritePath, writeText: editor.fileWriteText)
     }
 
     private func applyExtractionArguments() {
+        guard editor.canApply(rendered: summary, current: store.missionRunSummary.continuationDraft) else { return }
         _ = store.updateContinuationExtractionArguments(
-            extractionGoal: extractionGoal,
-            outputPath: extractionOutputPath
+            extractionGoal: editor.extractionGoal,
+            outputPath: editor.extractionOutputPath
         )
     }
 
@@ -4987,6 +4726,7 @@ struct PhoneAgentPlanPanel: View {
 
 struct ClawMobileBridgePanel: View {
     @EnvironmentObject private var store: ClawStore
+    @Binding var showsEnvelope: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -5069,12 +4809,23 @@ struct ClawMobileBridgePanel: View {
                 }
             }
 
-            Text(store.lastClawMobileEnvelope)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(12)
-                .background(.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            DisclosureGroup(isExpanded: $showsEnvelope) {
+                if showsEnvelope {
+                    Text(store.lastClawMobileEnvelope)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                        .background(.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .textSelection(.enabled)
+                }
+            } label: {
+                Label("结构化 envelope（含任务内容）", systemImage: "curlybraces")
+                    .font(.subheadline.bold())
+                    .frame(minHeight: CGFloat(ClawWorkspacePresentationContract.minimumHitArea))
+            }
+            .accessibilityHint("只展示当前任务参数供人工查看，不审批、不冻结，也不发送任务")
+
         }
     }
 
@@ -5195,6 +4946,7 @@ struct ClawMissionRunLiveGatewayHealthStripView: View {
     @EnvironmentObject private var store: ClawStore
     let strip: ClawMissionRunLiveGatewayHealthStrip
     let reviewFocus: ClawMissionRunReviewFocus?
+    var showsDiagnostics = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -5217,69 +4969,71 @@ struct ClawMissionRunLiveGatewayHealthStripView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            let probe = store.gatewayTransportProbeSummary(for: reviewFocus)
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Label(probe.title, systemImage: probe.icon)
-                        .font(.footnote.bold())
-                        .foregroundStyle(probeTint(probe))
+            if showsDiagnostics {
+                let probe = store.gatewayTransportProbeSummary(for: reviewFocus)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Label(probe.title, systemImage: probe.icon)
+                            .font(.footnote.bold())
+                            .foregroundStyle(probeTint(probe))
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                        if let latency = probe.latencyMilliseconds {
+                            PhoneAgentTag(text: "\(latency) ms", icon: "timer", tint: .blue)
+                        }
+                    }
+
+                    Text(probe.status)
+                        .font(.caption.bold())
                         .fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 0)
-                    if let latency = probe.latencyMilliseconds {
-                        PhoneAgentTag(text: "\(latency) ms", icon: "timer", tint: .blue)
-                    }
-                }
+                    Text(probe.guidance)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
 
-                Text(probe.status)
-                    .font(.caption.bold())
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(probe.guidance)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Button(
-                    ClawGatewayTransportProbePresentationContract.actionTitle,
-                    systemImage: ClawGatewayTransportProbePresentationContract.actionIcon
-                ) {
-                    Task {
-                        _ = await store.probeLiveGatewayTransport(reviewFocus: reviewFocus)
+                    Button(
+                        ClawGatewayTransportProbePresentationContract.actionTitle,
+                        systemImage: ClawGatewayTransportProbePresentationContract.actionIcon
+                    ) {
+                        Task {
+                            _ = await store.probeLiveGatewayTransport(reviewFocus: reviewFocus)
+                        }
                     }
+                    .frame(
+                        maxWidth: .infinity,
+                        minHeight: CGFloat(ClawGatewayTransportProbePresentationContract.minimumHitArea)
+                    )
+                    .buttonStyle(SecondaryActionButtonStyle())
+                    .disabled(probe.canProbe == false || probe.isInFlight)
+                    .opacity(probe.canProbe && probe.isInFlight == false ? 1 : 0.55)
+                    .accessibilityLabel(ClawGatewayTransportProbePresentationContract.actionTitle)
+                    .accessibilityHint(ClawGatewayTransportProbePresentationContract.voiceOverHint)
                 }
-                .frame(
-                    maxWidth: .infinity,
-                    minHeight: CGFloat(ClawGatewayTransportProbePresentationContract.minimumHitArea)
+                .padding(.top, 4)
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("Live Gateway transport 探测，\(probe.status)")
+
+                ClawMissionRunGatewayReadinessView(reviewFocus: reviewFocus)
+
+                ClawMissionRunCheckpointView(
+                    summary: store.missionRunCheckpointPresentationSummary
                 )
-                .buttonStyle(SecondaryActionButtonStyle())
-                .disabled(probe.canProbe == false || probe.isInFlight)
-                .opacity(probe.canProbe && probe.isInFlight == false ? 1 : 0.55)
-                .accessibilityLabel(ClawGatewayTransportProbePresentationContract.actionTitle)
-                .accessibilityHint(ClawGatewayTransportProbePresentationContract.voiceOverHint)
-            }
-            .padding(.top, 4)
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel("Live Gateway transport 探测，\(probe.status)")
 
-            ClawMissionRunGatewayReadinessView(reviewFocus: reviewFocus)
-
-            ClawMissionRunCheckpointView(
-                summary: store.missionRunCheckpointPresentationSummary
-            )
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    ForEach(Array(strip.checklist.enumerated()), id: \.offset) { _, item in
-                        PhoneAgentTag(text: item, icon: "circle.fill", tint: tint)
-                    }
-                    PhoneAgentTag(text: "\(strip.eventCount) 事件", icon: "number", tint: .purple)
-                    if strip.transportAttemptCount > 0 {
-                        PhoneAgentTag(text: "attempt \(strip.transportAttemptCount)", icon: "arrow.triangle.2.circlepath", tint: .blue)
-                    }
-                    if strip.reconnectCount > 0 {
-                        PhoneAgentTag(text: "reconnect \(strip.reconnectCount)", icon: "arrow.clockwise.circle.fill", tint: .orange)
-                    }
-                    if let ping = strip.lastPingSucceeded {
-                        PhoneAgentTag(text: ping ? "ping ok" : "ping failed", icon: ping ? "waveform.circle.fill" : "waveform.path.ecg", tint: ping ? .green : .orange)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(Array(strip.checklist.enumerated()), id: \.offset) { _, item in
+                            PhoneAgentTag(text: item, icon: "circle.fill", tint: tint)
+                        }
+                        PhoneAgentTag(text: "\(strip.eventCount) 事件", icon: "number", tint: .purple)
+                        if strip.transportAttemptCount > 0 {
+                            PhoneAgentTag(text: "attempt \(strip.transportAttemptCount)", icon: "arrow.triangle.2.circlepath", tint: .blue)
+                        }
+                        if strip.reconnectCount > 0 {
+                            PhoneAgentTag(text: "reconnect \(strip.reconnectCount)", icon: "arrow.clockwise.circle.fill", tint: .orange)
+                        }
+                        if let ping = strip.lastPingSucceeded {
+                            PhoneAgentTag(text: ping ? "ping ok" : "ping failed", icon: ping ? "waveform.circle.fill" : "waveform.path.ecg", tint: ping ? .green : .orange)
+                        }
                     }
                 }
             }

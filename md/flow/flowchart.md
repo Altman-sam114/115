@@ -1,6 +1,25 @@
 # 项目流程图
 
 ```mermaid
+flowchart TD
+  Parent["PhoneAgentView\n详情/展开/未应用输入的父级 state"] --> Layout{"实际宽度 + 大字体"}
+  Layout --> Compact["compact 单栏"]
+  Layout --> Wide["workbench 双栏"]
+  Compact --> Shared["共享输入 + Mission 概况\n唯一 Smart Rail / 审批风险 / 失败 / 续接编辑"]
+  Wide --> Shared
+  Shared --> Detail{"用户选择详情"}
+  Detail --> Plan["计划与审批\n显式任务操作 / envelope 默认收起"]
+  Detail --> Review["证据复核\nscoped focus / 优先项 / 详细 rows"]
+  Detail --> Events["会话与事件 / 演练日志"]
+  Detail --> Connection["连接与权限\n显式 probe / readiness / checkpoint"]
+  Review --> Advanced["用户展开高级诊断\n才构建既有 metadata 看板"]
+  Parent --> Editor["重排保留未应用输入\n新 scope 重绑 / 旧字段不外显"]
+  Editor --> Apply{"用户 Apply\n绑定 + 当前 summary + editable?"}
+  Apply -->|是| Store["原 typed Store validator\n不自动审批或发送"]
+  Apply -->|否| Reject["拒绝旧按钮\n无业务副作用"]
+```
+
+```mermaid
 flowchart LR
   Launch["云端本轮 app launch"] --> Capture["实际模拟器截图\n最多 15 帧 / 帧间 2 秒 / 仅留最后帧"]
   Capture --> Ready{"Claw + Mission Run\n正文就绪?"}

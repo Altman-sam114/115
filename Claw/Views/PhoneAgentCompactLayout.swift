@@ -3,23 +3,17 @@ import SwiftUI
 struct PhoneAgentCompactLayout: View {
     let examples: [String]
     @Binding var reviewFocus: ClawMissionRunReviewFocus?
+    @Binding var presentation: ClawWorkspacePresentationState
+    @Binding var continuationEditor: ClawContinuationEditorInputState
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                PhoneAgentCommandPanel(examples: examples)
+                PhoneAgentCommandPanel(examples: examples) { presentation.selectedDetail = $0 }
 
-                ClawMissionRunPanel(reviewFocus: $reviewFocus)
+                ClawMissionRunPanel(reviewFocus: $reviewFocus, continuationEditor: $continuationEditor)
 
-                PhoneAgentPlanPanel()
-
-                ClawMobileBridgePanel()
-
-                ClawGatewaySessionPanel()
-
-                PhoneAgentPermissionMatrix()
-
-                PhoneAgentExecutionPanel()
+                PhoneAgentReviewColumn(reviewFocus: $reviewFocus, presentation: $presentation)
             }
             .padding(16)
         }
