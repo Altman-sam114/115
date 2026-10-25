@@ -1,5 +1,9 @@
 # Claw iOS Controller Prototype
 
+## 云端签名专项修复（v0.86，2026-10-25）
+
+在人工再次要求修复云端后，恢复 v0.86 的 CI 专项，不先增加新业务版本。此前 run `39857874008` 因测试宿主 `Taskgated Invalid Signature` 失败，不能以 Release/smoke 成功替代。云端 Debug 现在由 Xcode 原生 ad-hoc 签名：iOS Keychain entitlement 进入 Xcode 模拟器包装，宿主保留 macOS 调试 entitlement，移除手工重签。严格签名及两类 entitlement 分离检查通过才生成 `simulator-signing.json` 与 ready marker；iPad 复用同一测试产物。生产团队、Release 签名、全部 165 项 XCTest 和非白屏截图门槛不变。修复须最新 main 的 artifact 证明，不是生产分发签名或发布完成。
+
 ## 安全连接与未保存草稿（v0.86）
 
 Mac Catalyst、iPad、iPhone 共用“连接与模型”的网关配置。输入地址与 Token 后，必须显式“保存到本机 Keychain”；两者以一条版本化记录原子更新，解锁时可读、仅本设备、不 iCloud 同步，不写 UserDefaults/普通文件或明文 fallback。保存失败保留原已应用连接，草稿不会成为运行时配置。没有保存过的设备从空配置开始，不再默认指向硬编码私网主机。

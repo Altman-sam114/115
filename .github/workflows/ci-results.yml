@@ -223,41 +223,55 @@ jobs:
             )"
             echo "Using iPhone simulator $simulator_udid."
             xcrun simctl bootstatus "$simulator_udid" -b
-            # Build once, then sign only the disposable simulator host for real Keychain tests.
+            # Xcode separates simulated iOS entitlements from the macOS host signature.
+            [[ "$GITHUB_ACTIONS" == true && "$RUNNER_OS" == macOS ]]
             /usr/bin/xcodebuild \
               -project "$XCODE_PROJECT" \
               -scheme "$XCODE_SCHEME" \
               -configuration Debug \
               -destination "platform=iOS Simulator,id=$simulator_udid" \
               -derivedDataPath .derivedData-tests \
-              CODE_SIGNING_ALLOWED=NO \
+              CODE_SIGNING_ALLOWED=YES \
+              CODE_SIGNING_REQUIRED=YES \
+              CODE_SIGN_STYLE=Manual \
+              CODE_SIGN_IDENTITY=- \
+              DEVELOPMENT_TEAM= \
+              CODE_SIGN_ENTITLEMENTS=Tools/ci-simulator-keychain.entitlements \
               ENABLE_DEBUG_DYLIB=NO \
               build-for-testing
             test_host=.derivedData-tests/Build/Products/Debug-iphonesimulator/Claw.app
-            [[ "$GITHUB_ACTIONS" == true && "$RUNNER_OS" == macOS ]]
             [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$test_host/Info.plist")" == com.claw.prototype ]]
-            # Nested code is signed inside-out; root-level debug libraries are not covered by --deep signing.
-            while IFS= read -r -d '' library; do
-              /usr/bin/codesign --force --sign - "$library"
-              /usr/bin/codesign --verify --strict "$library"
-            done < <(find "$test_host" -type f -name '*.dylib' -print0)
-            while IFS= read -r -d '' test_bundle; do
-              /usr/bin/codesign --force --sign - "$test_bundle"
-            done < <(find "$test_host" -depth -type d -name '*.xctest' -print0)
-            /usr/bin/codesign --force --sign - \
-              --entitlements Tools/ci-simulator-keychain.entitlements \
-              --generate-entitlement-der "$test_host"
             /usr/bin/codesign --verify --deep --strict "$test_host"
-            /usr/bin/codesign -d --entitlements :- "$test_host" 2>/dev/null | python3 -c '
-            import plistlib, sys
-            entitlements = plistlib.loads(sys.stdin.buffer.read())
-            expected = "CLAWCITEST.com.claw.prototype"
-            assert entitlements.get("application-identifier") == expected
-            assert entitlements.get("keychain-access-groups") == [expected]
-            assert entitlements.get("get-task-allow") is True
-            print("Disposable cloud simulator host has the isolated CI Keychain entitlement.")
-            '
-            printf '%s\n' 'simulator-keychain-host-v1' > .derivedData-tests/.ci-simulator-keychain-ready
+            python3 - <<'PY'
+          import json, os, plistlib, subprocess
+          from pathlib import Path
+
+          host = Path(".derivedData-tests/Build/Products/Debug-iphonesimulator/Claw.app")
+          sealed = plistlib.loads(subprocess.check_output(
+              ["/usr/bin/codesign", "-d", "--entitlements", ":-", str(host)], stderr=subprocess.DEVNULL
+          ))
+          candidates = list(Path(".derivedData-tests/Build/Intermediates.noindex").rglob("Claw.app-Simulated.xcent"))
+          assert len(candidates) == 1, "Missing or ambiguous Xcode simulated entitlements"
+          simulated = plistlib.loads(candidates[0].read_bytes())
+          expected = "CLAWCITEST.com.claw.prototype"
+          assert simulated.get("application-identifier") == expected
+          assert simulated.get("keychain-access-groups") == [expected]
+          assert simulated.get("get-task-allow") is True
+          assert sealed.get("com.apple.security.get-task-allow") is True
+          assert not {"application-identifier", "keychain-access-groups", "get-task-allow"}.intersection(sealed), "Device entitlements must not be sealed into the macOS simulator host signature"
+          report = {
+              "policy": "xcode-native-simulator-keychain-v1",
+              "outcome": "success",
+              "xcodeManagedSignature": True,
+              "hostSignatureVerified": True,
+              "hostDebuggable": True,
+              "simulatedKeychainGroupVerified": True,
+              "deviceEntitlementsInHostSignature": False,
+          }
+          (Path(os.environ["RESULT_DIR"]) / "simulator-signing.json").write_text(json.dumps(report, indent=2) + "\n")
+          print("Verified Xcode-native simulator signature and isolated simulated Keychain entitlements.")
+          PY
+            printf '%s\n' 'xcode-native-simulator-keychain-v1' > .derivedData-tests/.ci-simulator-keychain-ready
             /usr/bin/xcodebuild \
               -project "$XCODE_PROJECT" \
               -scheme "$XCODE_SCHEME" \
@@ -286,7 +300,8 @@ jobs:
           {
             # A failed test build cannot supply a runnable iPad test host.
             if [[ ! -x .derivedData-tests/Build/Products/Debug-iphonesimulator/Claw.app/Claw ||
-                  ! -f .derivedData-tests/.ci-simulator-keychain-ready ]]; then
+                  ! -f .derivedData-tests/.ci-simulator-keychain-ready ||
+                  "$(cat .derivedData-tests/.ci-simulator-keychain-ready)" != xcode-native-simulator-keychain-v1 ]]; then
               echo "iPad validation blocked: the shared simulator test host executable or verified CI Keychain signature is missing. See xctest.log."
               exit 1
             fi
@@ -390,7 +405,7 @@ jobs:
           for outcome_key, required in [
               ("CATALYST_BUILD_OUTCOME", ["mac-catalyst-build.log", "MacCatalyst.xcresult"]),
               ("IPAD_XCTEST_OUTCOME", ["ipad-xctest.log", "ClawIPadTests.xcresult", "ipad-workspace.png", "ipad-workspace.json"]),
-              ("XCTEST_OUTCOME", ["iphone-workspace.png", "iphone-workspace.json"]),
+              ("XCTEST_OUTCOME", ["iphone-workspace.png", "iphone-workspace.json", "simulator-signing.json"]),
           ]:
               if os.environ[outcome_key] == "success":
                   missing_platform_artifacts.extend(name for name in required if not (result_dir / name).exists())
@@ -452,6 +467,7 @@ jobs:
               "workspaceScreenshots": ["ci-results/iphone-workspace.png", "ci-results/ipad-workspace.png"],
               "workspaceScreenshotEvidence": ["ci-results/iphone-workspace.json", "ci-results/ipad-workspace.json"],
               "workspaceScreenshotValidationPolicy": "claw-mission-ocr-v1",
+              "simulatorSigningEvidence": "ci-results/simulator-signing.json",
               "testOutcome": aggregate({"swift-logic-smoke", "swift-gateway-fixture", "gateway-direct-smoke", "gateway-websocket-smoke", "model-planning-smoke", "xctest", "xctest-artifacts", "ipad-xctest", "platform-artifacts", "workspace-screenshot-check"}),
               "projectSpecificReports": [
                   "ci-results/swift-logic-smoke.log",
@@ -464,6 +480,7 @@ jobs:
                   "ci-results/ipad-xctest.log",
                   "ci-results/node-check.log",
                   "ci-results/workspace-screenshot-check.log",
+                  "ci-results/simulator-signing.json",
               ],
               "artifactName": os.environ["ARTIFACT_NAME"],
               "checks": [

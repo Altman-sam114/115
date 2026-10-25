@@ -1,5 +1,7 @@
 # Prompt 目录
 
+2026-10-25 人工恢复 v0.86 云端签名专项，见同版本提示词末节：以 Xcode 原生 ad-hoc 和 simulated entitlement 分离替代手工宿主重签，产出 simulator-signing.json/policy marker，保留完整测试/截图和生产签名边界；最新 main artifact 通过前不推进 v0.87。
+
 v0.86 见 `v0（核心智能能力）/v0.86（安全连接保存与草稿隔离）.md`：以前轮 v0.85 `edab5a9` / run `39841407261` 完整 artifact、各 150 项测试和实际看图通过为基线，补单条 Keychain 原子连接保存与重启只读恢复、共享安全 origin/header、dirty 全入口零调用和旧授权失效；不开子 Agent、不本地编译，不把 Keychain 当配对或发布完成。首次 run `39849006621` 失败，提示词追加 Keychain 宿主 entitlement、原地址 CR/LF 和旧 receipt 复活的同版本修复；不删断言、不提前推进。第二次 run `39854053390` 因 CI 管道 plist/宿主启动失败退回，追加仅 CI 的签名包装和 ready 闸门，不伪称业务用例已执行。
 
 v0.85 见 `v0（核心智能能力）/v0.85（自托管模型规划主路径）.md`：以前轮 v0.84 `263d021` / run `39829293264` 完整通过为基线，新增显式 Gateway -> 同机 Ollama 推理、受严格校验的 typed 计划和既有审批主路径；不下载模型，不自动执行，不冒充真实模型质量验收。单实例串行阶段、只云端编译，保留用户配置及 aitrans 只读边界。

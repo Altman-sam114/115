@@ -1,5 +1,9 @@
 # 项目核心流程文档
 
+## v0.86 云端原生签名修复（2026-10-25）
+
+用户重新要求修复后恢复专项：cloud-only Debug build-for-testing -> Xcode 原生 ad-hoc 签名（空 team、Manual、identity `-`）-> 校验宿主 native signature、macOS 调试 entitlement 与 Xcode 模拟 iOS/Keychain entitlement 分离 -> 小型 simulator-signing.json + policy ready marker -> 双设备复用产物 test-without-building -> 实际随机 test service Keychain 测试和非白屏启动证据 -> 最新 main artifact 复判。移除手工将 iOS entitlement 封入宿主签名的路径；不改生产签名、业务协议或 165 项断言，不需要 Apple 证书。此前失败与停止结论保留为历史；新 artifact 通过前不得推进下一版本。
+
 ## v0.86 安全连接保存与草稿隔离
 
 App 启动 -> 注入生产 Keychain adapter -> 读取一条 endpoint/token record -> 严格版本/shape/duplicate key/16 KiB/地址/header 校验 -> 仅应用本机连接；缺失从空配置开始，损坏/不可用固定提示，不联网、不恢复任务/审批/receipt、不写 checkpoint 或明文 fallback。默认测试/preview 的 no-op 不读真实 Keychain。

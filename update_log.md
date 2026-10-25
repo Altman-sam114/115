@@ -14,6 +14,7 @@
 ## 当前状态
 
 - 项目方向：OpenClaw 式电脑接管智能体，iPhone 作为控制台，桌面 Claw Gateway 作为执行端。
+- 当前轮次（2026-10-25）：用户再次明确要求修复云端，恢复 v0.86 原生模拟器签名专项。此前 `0178e98b65587d67f0335d8f14d92c091fda8d07` / run `39857874008` attempt `1` 因重复 `CODESIGNING / Taskgated Invalid Signature` 已停止；本次以 Xcode 原生 ad-hoc 与 simulated entitlement 分离替代手工重签，待新 main 的完整云端 artifact，不提前推进 v0.87。总目标未完成。
 - 最后完整通过的基线：v0.85 `edab5a9a6feb6598e9122122fe549951f02c1d6b` / run `39841407261` attempt `1`，artifact `claw-ci-v0.85-main-edab5a9a6feb-run39841407261-attempt1` 已下载并由单实例 C 复判通过：15 项检查、双设备各 150 项 XCTest、Release/LogicSmoke/fixture/Gateway/生产 HTTP client 与 21 个模型 fixture 请求，四个 xcresult Info/root 数据完整，实际打开两张非白屏 PNG，与 iPhone 第 1 帧/iPad 第 2 帧 readiness JSON 一致（1,973,076 bytes / 解压 4.7 MiB）。本机无 xcresulttool，未独立解码二进制；Catalyst runner Metal 路径警告保留。v0.86 待新 main 云端验收，不以旧证据替代。
 - 当前 schema：`claw.computer.control.v1`。
 - 当前核心闭环：用户自然语言任务 -> `PhoneAgentPlanner` -> `ClawMobileTask` -> `ClawMobileEnvelope` -> 模拟事件流或带有界重连/ping 可观测性和进程内 task replay guard 的 WebSocket Gateway -> `ClawGatewayEvent` -> session reducer -> Mission Run / Approval Fast Lane 审批快车道 / Control Snapshot 控制态势快照 / Operator Strip / Loop 继续态势 / Mac Agent Readiness Board 就绪看板 / Mac Gateway Action Preflight Matrix 动作预检矩阵 / Mac Agent Evidence Coverage Map 证据覆盖图 / Mac Agent Next Step Deck 下一步候选卡组 / Mac Agent Run Timeline 执行时间线 / Mac Agent Continuation Gate 继续闸门 / Mac Agent Review Radar 复核雷达 / Mac Agent Handoff Brief 人工交接简报 / Focus Context 聚焦上下文 / Review Detail Dock / Review Trail 复核路径 / Approval Queue 审批队列 / Payload Safety Ledger 载荷安全账本 / Artifact 证据索引 / 复核态势摘要 / 复核优先队列 / 复核聚焦详情 / Live Gateway 连接健康 / Artifact metadata 复核摘要 / 文件变更安全复核摘要 / Shell 命令安全复核摘要 / 提取完整性复核摘要 / 浏览器控制计划和策略诊断复核摘要 / 草稿最终提交安全和桌面策略诊断复核摘要 / Gateway 能力复核摘要 / Accessibility 信号质量复核摘要 / Replay Guard 复核摘要 / AgentTrace handoff 复核 UI / iPad 多栏工作台展示和审批。v0.66 工作区实现进一步加入父 safe decision -> 短时单次 receipt -> 显式 draft/queue/approve/freeze/send -> 全新 child selected action + `runAgentLoop` 的受限跨 task 续接；v0.71 在同一闸门上加入 `extractData` 的 goal/outputPath typed editor，固定 schema/source/completeness 与 exact-key/byte/path 校验；v0.72 在同一 presentation/store 边界加入固定优先级 Smart Operator Action Rail，历史 v0.72 `origin/main` commit `bcf87c8c50f70d3d4157ec41a83333e62cd1ecdc` 已由 run `32631022162` attempt `1` 的 Agent C artifact 复判通过。
@@ -23,6 +24,24 @@
 - 当前主要遗留：v0.66 完整负向/action/六种 kind/UI 对称测试矩阵、v0.67 最新云端 artifact 验收与 `manageFiles` 编辑器完整 LogicSmoke/负向覆盖、完整 macOS Accessibility bridge、Playwright/browser-use 兼容控制器、跨重启/跨进程多轮状态、live Gateway 后台保活/真实心跳协议/配对、完整 artifact 内容复核体验。
 
 ## 历史记录
+
+### v0.86 / 人工恢复与云端原生模拟器签名
+日期：2026-10-25
+
+- 再次读取入口文档并核对 main/origin/main 与最新 run，操作账号确认 Altman-sam114；用户重申继续修云端且不开子 Agent，仍由单实例串行 A/B/C/X，不冒充独立审查。
+- 只修 CI：Debug build-for-testing 由 Xcode 原生 ad-hoc 管理签名，空 team / Manual / identity `-`，将既有隔离 CI entitlement 交给 Xcode。删除手工重签内层与宿主；验证 native strict/deep 签名、Xcode 唯一 simulated entitlement 与 macOS 宿主调试 entitlement 分离，全部通过才写小型 simulator-signing.json 和 policy ready marker。iPad 复用同一产物；成功测试缺报告时打包失败，manifest 引用。
+- 业务代码、165 项 XCTest 断言、双设备/Release/smoke/实际截图门槛不变，不改生产工程或用户签名、不需要证书；保留此前失败证据与未提交记录为历史，aitrans 只读。README/协议/flow/flowchart/test/release-readiness/prompt 同步。
+- 本地只做 git/diff、YAML/plist 与文本静态复核。最新 main commit/run/artifact 待提交后产生，未预写通过；真实模型质量、授权桌面 E2E、Mac/iPad 交互、锁屏及分发仍未验收。
+
+### v0.86 / 第三次 C 退回与重复签名阻塞审计
+日期：2026-10-23
+
+- 本轮不开子 Agent，仅对已有 main 最新 run 做只读 C 阶段复判；`gh auth status` 与 `gh api user` 确认操作账号为 `Altman-sam114`，`git fetch origin main` 后 HEAD 与 origin/main 均为 `0178e98b65587d67f0335d8f14d92c091fda8d07`。不新增业务版本，不宣称发布完成。
+- 精确 artifact `claw-ci-v0.86-main-0178e98b6558-run39857874008-attempt1` 总计 98,225,586 bytes，未整包下载。按 ZIP range 选择 manifest/JUnit/摘要、全部主日志、四份 xcresult Info/root、必要测试摘要/诊断目录与一份实际 crash；累计传输 2,703,607 bytes（含多次读取中央目录），缓存 4,180 KiB。manifest 的 main/SHA/run/attempt/name 与 JUnit、日志一致：14 项中 XCTest/iPad 两项失败，Release iOS/Catalyst、LogicSmoke、fixture、Gateway 与模型协议 smoke 通过不能替代整轮通过。
+- 云端 Debug build-for-testing 与手工签名校验成功，但双设备随后均在宿主启动阶段被拒绝；没有执行 165 项测试，也没有实际 PNG/就绪 JSON。只读使用本机 `xcresulttool get object/export object --legacy` 解码已下载的结果数据，不编译、不运行 App 或模拟器，不以本机输出替代云端业务结果。
+- 最新云端实际 `Claw-2026-10-22-214015.ips` 明确为 `SIGKILL (Code Signature Invalid)`、`termination.namespace=CODESIGNING`、`indicator=Taskgated Invalid Signature`。为确认停止条件，仅另取前一 run `39854053390` / `287518ca1193f7bd5ff3c9530daff785ef056466` 的必要身份/日志/root 与实际 `Claw-2026-10-22-212211.ips`（389,523 bytes 传输、292 KiB 缓存）；其 iPad crash 完全相同。前一 run 的 iPhone plist 管道错误仍是另一个问题，不改写历史；最新 iPad 只核对启动拒绝日志/root，未另行解码其 crash。相邻两次 run 的宿主签名拒绝现已有直接证据，不再仅归因 debug dylib 包装。
+- X 判断：C 不通过，已触发 AGENTS 的连续同因 CI 失败停止条件。停止新的实现、CI 重试和 main push，保留全部 Keychain/安全断言和结果包门槛；待人工确认后，可优先审计 Xcode 原生 simulator ad-hoc 签名及 simulated entitlement 生成，替代当前手工将 iOS entitlement 直接重签宿主的路径。该替代路径尚未实施或验证，不能称已修复，亦不要求/擅用用户生产签名证书。
+- 本轮只更新验收日志与发布准备清单，未提交/推送，以免文档提交再次触发已停止的 CI。用户 DEVELOPMENT_TEAM、xcuserdata 和五份旧 prompt 保留；aitrans 未修改。证据缓存位于 `/private/tmp/claw-c-review-39857874008/` 与 `/private/tmp/claw-c-review-39854053390/`，未经人工确认不清理。未运行本地 build/XCTest/smoke/node --check；真实模型质量、桌面 E2E、Mac/iPad 交互、锁屏与分发签名仍缺。
 
 ### v0.86 / 安全连接保存与草稿隔离
 日期：2026-10-22

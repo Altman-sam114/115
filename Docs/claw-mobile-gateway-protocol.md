@@ -1,5 +1,9 @@
 # Claw Computer-Control Gateway 协议草案
 
+## v0.86 云端宿主签名边界（2026-10-25）
+
+本次仅修 CI，不改变 wire schema、action、artifact 或执行授权。云端 Debug 使用 Xcode 原生 ad-hoc 签名与模拟器 entitlement 包装，固定测试 Keychain group 仍只用于一次性 runner。iOS entitlement 不手工封入 macOS 宿主签名；验证两类 entitlement 分离和 native signature 后生成 CI 专用 `simulator-signing.json`/ready marker。该 JSON 是 CI 证据，不是 Gateway artifact。双设备实际 Keychain XCTest、全部 smoke、Release 和截图仍必须通过；不代表用户生产证书、配对、锁屏或分发访问已验收。
+
 ## v0.86 客户端连接身份与本机凭据
 
 wire schema/action/artifact/readiness/planning 合同不变。生产客户端将 endpoint/token 作为一条版本化 Keychain record 保存（固定 service/account、WhenUnlockedThisDeviceOnly、非 synchronizable）；不进入 envelope、checkpoint、普通文件、日志或 metadata。默认测试/preview store 是 no-op；真实 Keychain 测试仅使用随机 test service。启动只恢复连接配置，不创建任务、会话、事件或 artifact，不恢复审批/receipt，不隐式联网。
