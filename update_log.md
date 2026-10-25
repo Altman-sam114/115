@@ -28,6 +28,7 @@
 ### v0.86 / 人工恢复与云端原生模拟器签名
 日期：2026-10-25
 
+- 原生首轮 C 退回：`788cab09d3b80c51facec1a2c94e7d48c0b95e79` / run `40164836441` attempt `1`，artifact `claw-ci-v0.86-main-788cab09d3b8-run40164836441-attempt1` 完整下载 91,953 bytes / 缓存 504 KiB。manifest/JUnit/摘要/实际日志身份一致，14 项中 XCTest/iPad 两项失败。Debug native build/strict-deep 签名和 simulated 三项断言成功，但新增 sealed macOS 调试权限假设错误；Xcode 包装日志明确 native xcent 为 `{}`。未启动宿主/执行 165 项/截图，无新 Taskgated crash。依实际合同改为 sealed 与 Xcode native xcent 精确相等、保留 simulated 调试与 Keychain/分离/全部业务断言，报告改 nativeEntitlementsMatch/simulatedDebuggable；新 main 全量重验前不推进版本。
 - 再次读取入口文档并核对 main/origin/main 与最新 run，操作账号确认 Altman-sam114；用户重申继续修云端且不开子 Agent，仍由单实例串行 A/B/C/X，不冒充独立审查。
 - 只修 CI：Debug build-for-testing 由 Xcode 原生 ad-hoc 管理签名，空 team / Manual / identity `-`，将既有隔离 CI entitlement 交给 Xcode。删除手工重签内层与宿主；验证 native strict/deep 签名、Xcode 唯一 simulated entitlement 与 macOS 宿主调试 entitlement 分离，全部通过才写小型 simulator-signing.json 和 policy ready marker。iPad 复用同一产物；成功测试缺报告时打包失败，manifest 引用。
 - 业务代码、165 项 XCTest 断言、双设备/Release/smoke/实际截图门槛不变，不改生产工程或用户签名、不需要证书；保留此前失败证据与未提交记录为历史，aitrans 只读。README/协议/flow/flowchart/test/release-readiness/prompt 同步。

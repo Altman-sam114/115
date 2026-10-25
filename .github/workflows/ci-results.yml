@@ -253,18 +253,20 @@ jobs:
           candidates = list(Path(".derivedData-tests/Build/Intermediates.noindex").rglob("Claw.app-Simulated.xcent"))
           assert len(candidates) == 1, "Missing or ambiguous Xcode simulated entitlements"
           simulated = plistlib.loads(candidates[0].read_bytes())
+          native = plistlib.loads(candidates[0].with_name("Claw.app.xcent").read_bytes())
           expected = "CLAWCITEST.com.claw.prototype"
           assert simulated.get("application-identifier") == expected
           assert simulated.get("keychain-access-groups") == [expected]
           assert simulated.get("get-task-allow") is True
-          assert sealed.get("com.apple.security.get-task-allow") is True
+          assert isinstance(native, dict) and sealed == native, "Host signature must exactly match Xcode native entitlements"
           assert not {"application-identifier", "keychain-access-groups", "get-task-allow"}.intersection(sealed), "Device entitlements must not be sealed into the macOS simulator host signature"
           report = {
               "policy": "xcode-native-simulator-keychain-v1",
               "outcome": "success",
               "xcodeManagedSignature": True,
               "hostSignatureVerified": True,
-              "hostDebuggable": True,
+              "nativeEntitlementsMatch": True,
+              "simulatedDebuggable": True,
               "simulatedKeychainGroupVerified": True,
               "deviceEntitlementsInHostSignature": False,
           }
@@ -404,7 +406,7 @@ jobs:
           missing_platform_artifacts = []
           for outcome_key, required in [
               ("CATALYST_BUILD_OUTCOME", ["mac-catalyst-build.log", "MacCatalyst.xcresult"]),
-              ("IPAD_XCTEST_OUTCOME", ["ipad-xctest.log", "ClawIPadTests.xcresult", "ipad-workspace.png", "ipad-workspace.json"]),
+              ("IPAD_XCTEST_OUTCOME", ["ipad-xctest.log", "ClawIPadTests.xcresult", "ipad-workspace.png", "ipad-workspace.json", "simulator-signing.json"]),
               ("XCTEST_OUTCOME", ["iphone-workspace.png", "iphone-workspace.json", "simulator-signing.json"]),
           ]:
               if os.environ[outcome_key] == "success":
@@ -424,6 +426,21 @@ jobs:
                       valid = False
                   if not valid:
                       missing_platform_artifacts.append(name + " (invalid readiness evidence)")
+          if "success" in [os.environ["XCTEST_OUTCOME"], os.environ["IPAD_XCTEST_OUTCOME"]]:
+              try:
+                  signing = json.loads((result_dir / "simulator-signing.json").read_text(encoding="utf-8"))
+                  flags = {"xcodeManagedSignature", "hostSignatureVerified", "nativeEntitlementsMatch", "simulatedDebuggable", "simulatedKeychainGroupVerified"}
+                  valid = (
+                      set(signing) == flags | {"policy", "outcome", "deviceEntitlementsInHostSignature"}
+                      and signing["policy"] == "xcode-native-simulator-keychain-v1"
+                      and signing["outcome"] == "success"
+                      and all(signing[key] is True for key in flags)
+                      and signing["deviceEntitlementsInHostSignature"] is False
+                  )
+              except (ValueError, TypeError, OSError):
+                  valid = False
+              if not valid:
+                  missing_platform_artifacts.append("simulator-signing.json (invalid native signing evidence)")
           checks.append(("platform-artifacts", "failure" if missing_platform_artifacts else "success", ", ".join(missing_platform_artifacts) or "ci-results"))
 
           def aggregate(names):

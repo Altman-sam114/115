@@ -2,7 +2,9 @@
 
 ## v0.86 云端原生模拟器签名修复（2026-10-25）
 
-人工恢复后仍在同版本修复，不减少各 165 项测试或任何检查。Debug build-for-testing 必须由 Xcode 原生 ad-hoc 签名（仅命令行空 team、Manual、identity `-`），不再用 codesign 手工注入 iOS entitlement；既有 CI plist 作为 CODE_SIGN_ENTITLEMENTS 输入。检查 strict/deep native signature、唯一 Xcode Claw.app-Simulated.xcent 中的隔离 application-identifier/group/get-task-allow、宿主 com.apple.security.get-task-allow 和 iOS entitlement 不在 macOS 签名中；全部通过才生成小型 simulator-signing.json/policy marker。成功 XCTest 缺少报告时打包失败，manifest 引用其路径。iPad 复用同一已核验 Debug 产物，真实随机 test service Keychain 的 create/update/reopen/protection/delete/损坏拒绝断言保留。旧手工签名说明是历史失败方案，由本节替代。
+人工恢复后仍在同版本修复，不减少各 165 项测试或任何检查。Debug build-for-testing 必须由 Xcode 原生 ad-hoc 签名（仅命令行空 team、Manual、identity `-`），不再用 codesign 手工注入 iOS entitlement；既有 CI plist 作为 CODE_SIGN_ENTITLEMENTS 输入。检查 strict/deep native signature、唯一 Xcode Claw.app-Simulated.xcent 中的隔离 application-identifier/group/get-task-allow、宿主 sealed 与 Xcode Claw.app.xcent 精确相等及 iOS entitlement 不在 macOS 签名中；native xcent 允许空字典，不要求额外 macOS 调试权限。全部通过才生成小型 simulator-signing.json/policy marker。成功 XCTest 缺少报告时打包失败，manifest 引用其路径。iPad 复用同一已核验 Debug 产物，真实随机 test service Keychain 的 create/update/reopen/protection/delete/损坏拒绝断言保留。旧手工签名说明是历史失败方案，由本节替代。
+
+原生首轮 run `40164836441` 的精确 artifact 已完整复判：91,953 bytes / 504 KiB、14 项中两项失败；Debug native 签名与 simulated 三项检查成功，但错误的 sealed macOS 调试权限断言在 XCTest 前失败。不能说宿主启动/165 项/截图已通过。修正为与 Xcode 生成 native xcent 完全相等，不删业务断言、不增加额外宿主权限，仍须新 main 全量重验。
 
 验收必须最新 main 的完整矩阵、实际日志、四个 xcresult、native signing JSON 与两张实际非白屏 PNG/readiness；仅 codesign 验证成功不等于测试宿主可启动。生产工程/团队/Release 不变，不访问用户证书/生产 Keychain；本地仅非编译静态检查，云端才编译、运行测试及模拟器。
 

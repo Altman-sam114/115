@@ -1,6 +1,6 @@
 # 项目流程图
 
-云端 simulator 测试（2026-10-25 修复）：Xcode 原生 ad-hoc build-for-testing 一次 -> 校验 native signature、宿主 macOS 调试 entitlement 与 Xcode simulated iOS/Keychain entitlement 分离 -> simulator-signing.json + policy ready marker -> 双设备 test-without-building；不再手工重签宿主，缺少可执行体或正确 marker 时 iPad 提前失败，不绕过真实 Keychain 用例。此为 CI 打包边界，不是生产签名/发布。
+云端 simulator 测试（2026-10-25 修复）：Xcode 原生 ad-hoc build-for-testing 一次 -> 校验 native signature 与 Xcode native xcent 精确相等（可为空）、simulated iOS/Keychain/调试 entitlement 与宿主签名分离 -> simulator-signing.json + policy ready marker -> 双设备 test-without-building；不再手工重签宿主，缺少可执行体或正确 marker 时 iPad 提前失败，不绕过真实 Keychain 用例。此为 CI 打包边界，不是生产签名/发布。
 
 v0.86 连接保存与隔离：Keychain 只恢复连接，不恢复任务；生产连接统一 WSS/精确 loopback WS，无 credentials/query/fragment。测试默认 no-op，不读真实 Keychain。
 

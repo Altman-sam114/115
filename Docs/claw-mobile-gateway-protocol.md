@@ -2,7 +2,7 @@
 
 ## v0.86 云端宿主签名边界（2026-10-25）
 
-本次仅修 CI，不改变 wire schema、action、artifact 或执行授权。云端 Debug 使用 Xcode 原生 ad-hoc 签名与模拟器 entitlement 包装，固定测试 Keychain group 仍只用于一次性 runner。iOS entitlement 不手工封入 macOS 宿主签名；验证两类 entitlement 分离和 native signature 后生成 CI 专用 `simulator-signing.json`/ready marker。该 JSON 是 CI 证据，不是 Gateway artifact。双设备实际 Keychain XCTest、全部 smoke、Release 和截图仍必须通过；不代表用户生产证书、配对、锁屏或分发访问已验收。
+本次仅修 CI，不改变 wire schema、action、artifact 或执行授权。云端 Debug 使用 Xcode 原生 ad-hoc 签名与模拟器 entitlement 包装，固定测试 Keychain group 仍只用于一次性 runner。iOS entitlement 不手工封入 macOS 宿主签名；验证两类 entitlement 分离、native signature 与 Xcode 生成 `.xcent` 完全相等后生成 CI 专用 `simulator-signing.json`/ready marker。原生字典可为空，不强加 macOS 调试权限；调试权限在 simulated xcent 验证。该 JSON 是 CI 证据，不是 Gateway artifact。双设备实际 Keychain XCTest、全部 smoke、Release 和截图仍必须通过；不代表用户生产证书、配对、锁屏或分发访问已验收。
 
 ## v0.86 客户端连接身份与本机凭据
 

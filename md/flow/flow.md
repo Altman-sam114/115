@@ -2,7 +2,7 @@
 
 ## v0.86 云端原生签名修复（2026-10-25）
 
-用户重新要求修复后恢复专项：cloud-only Debug build-for-testing -> Xcode 原生 ad-hoc 签名（空 team、Manual、identity `-`）-> 校验宿主 native signature、macOS 调试 entitlement 与 Xcode 模拟 iOS/Keychain entitlement 分离 -> 小型 simulator-signing.json + policy ready marker -> 双设备复用产物 test-without-building -> 实际随机 test service Keychain 测试和非白屏启动证据 -> 最新 main artifact 复判。移除手工将 iOS entitlement 封入宿主签名的路径；不改生产签名、业务协议或 165 项断言，不需要 Apple 证书。此前失败与停止结论保留为历史；新 artifact 通过前不得推进下一版本。
+用户重新要求修复后恢复专项：cloud-only Debug build-for-testing -> Xcode 原生 ad-hoc 签名（空 team、Manual、identity `-`）-> 校验宿主 native signature 与 Xcode native xcent 精确相等（允许空字典），并与 Xcode 模拟 iOS/Keychain/调试 entitlement 分离 -> 小型 simulator-signing.json + policy ready marker -> 双设备复用产物 test-without-building -> 实际随机 test service Keychain 测试和非白屏启动证据 -> 最新 main artifact 复判。移除手工将 iOS entitlement 封入宿主签名的路径；不改生产签名、业务协议或 165 项断言，不需要 Apple 证书。首轮原生 run `40164836441` 只因过强的 native 调试权限假设在测试前被拦截，已依据实际包装日志校正，未发生新的 Taskgated crash，也未执行业务测试；新 artifact 通过前不得推进下一版本。
 
 ## v0.86 安全连接保存与草稿隔离
 

@@ -4,6 +4,8 @@
 
 ## 当前轮次
 
+原生首轮 `788cab09d3b80c51facec1a2c94e7d48c0b95e79` / run `40164836441` attempt `1` C 退回：完整 artifact `claw-ci-v0.86-main-788cab09d3b8-run40164836441-attempt1` 为 91,953 bytes / 504 KiB，manifest/JUnit/日志一致、14 项中两项失败。Debug build/native signature/simulated 三项断言通过，但脚本错误要求 native macOS 调试权限，实际 Xcode native xcent 是空字典，故在 XCTest 前中止；没有新的 Taskgated crash，也未执行测试/截图。改为 sealed 与生成的 native xcent 精确相等（可为空），保留全部权限分离和实际 Keychain 断言，待新 main 全量重验。
+
 2026-10-25 人工再次明确要求修复云端，已恢复 v0.86 签名专项。以 Xcode 原生 ad-hoc build-for-testing 和 simulated entitlement 分离替代手工重签，严格验证后产出 `simulator-signing.json` 与 policy ready marker；保留各 165 项 XCTest、完整 smoke、双平台 Release/截图，生产签名和用户 team 不改。新 main 云端 artifact 尚待产生，不能称修复通过或进入新业务版本。以下停止点为恢复前的历史证据。
 
 当前停止点：v0.86 最新 `0178e98b65587d67f0335d8f14d92c091fda8d07` / run `39857874008` attempt `1` 已完成单实例 C 阶段失败复判，artifact 为 `claw-ci-v0.86-main-0178e98b6558-run39857874008-attempt1`。manifest/JUnit/摘要/实际日志一致，14 项中 XCTest/iPad 两项失败；iOS/Catalyst Release 及其他 smoke 通过，但双设备测试宿主未启动，165 项用例与截图均未执行。只选择性下载必要证据（累计约 2.70 MB，含多次中央目录读取），未下载 98.23 MB 全包。
