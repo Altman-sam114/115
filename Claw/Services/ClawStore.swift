@@ -678,9 +678,14 @@ final class ClawStore: ObservableObject {
     @Published private(set) var modelPlanningUsage: ClawModelPlanningUsage?
     @Published private(set) var phoneAgentExecutionLog: String
     @Published private(set) var clawGatewayProfile: ClawGatewayProfile
-    @Published private(set) var clawMobileTasks: [ClawMobileTask]
+    @Published private(set) var clawMobileTasks: [ClawMobileTask] {
+        didSet { reconcileArtifactPreview() }
+    }
     @Published private(set) var lastClawMobileEnvelope: String
-    @Published private(set) var clawGatewaySessions: [ClawGatewaySession]
+    @Published private(set) var clawGatewaySessions: [ClawGatewaySession] {
+        didSet { reconcileArtifactPreview() }
+    }
+    @Published private(set) var artifactPreviewState: ClawArtifactPreviewState = .idle
     @Published private(set) var lastGatewayEvent: String
     @Published var gatewayDispatchMode: ClawGatewayDispatchMode {
         didSet { advanceLiveGatewayPresentationGeneration() }
@@ -733,6 +738,8 @@ final class ClawStore: ObservableObject {
     private var modelPlanningTask: Task<Data, Error>?
     private var modelPlanningGeneration = 0
     private var modelPlanningCommandRevision = 0
+    private var artifactPreviewTask: Task<Data, Error>?
+    private var artifactPreviewGeneration = 0
     private var acceptedModelPlanID: UUID?
     private var acceptedModelPlanProfile: String?
     private var acceptedModelPlanCommandRevision: Int?
@@ -2870,6 +2877,7 @@ final class ClawStore: ObservableObject {
     }
 
     private func invalidateGatewayConfigurationAuthorization() {
+        clearArtifactPreview()
         invalidateModelPlanning()
         ordinaryTaskApprovals.removeAll()
         continuationReceipts.removeAll()
@@ -3004,6 +3012,79 @@ final class ClawStore: ObservableObject {
             String(gatewayEvents.count), autonomousLoop.phase.rawValue, autonomousLoop.taskID?.uuidString ?? "none",
             continuationAuthorizationFingerprint()
         ].joined(separator: "|"))
+    }
+
+    var availableArtifactPreviews: [ClawArtifactPreviewSelection] {
+        let resolution = missionRunResolution
+        guard gatewayConfigurationIsReady, let task = resolution.task, let session = resolution.session,
+              session.taskID == task.id, session.channel == "iOS Controller -> Live Gateway",
+              !simulatedGatewaySessionIDs.contains(session.id),
+              liveGatewaySessionGenerations[session.id] == liveGatewayPresentationGeneration,
+              let request = resolution.liveRequest, request.canAttemptLive, request.sessionID == session.id,
+              request.endpoint == clawGatewayProfile.endpoint, request.tokenFingerprint == clawGatewayProfile.tokenFingerprint else { return [] }
+        let artifacts = session.allArtifacts
+        let counts = Dictionary(grouping: artifacts, by: \.id).mapValues(\.count)
+        let binding = ClawContinuationContract.sha256("\(liveGatewayPresentationGeneration)|\(canonicalProfileDigest(clawGatewayProfile))")
+        return artifacts.suffix(64).filter { artifact in
+            ClawArtifactPreviewSelection.supports(artifact.kind) && counts[artifact.id] == 1
+        }.map { ClawArtifactPreviewSelection(taskID: task.id, sessionID: session.id, artifact: $0, binding: binding) }
+    }
+
+    func artifactPreviewState(for selection: ClawArtifactPreviewSelection) -> ClawArtifactPreviewState {
+        guard availableArtifactPreviews.contains(selection) else { return .failed(selection, .stale) }
+        return artifactPreviewState.selection == selection ? artifactPreviewState : .idle
+    }
+
+    func requestArtifactPreview<T: ClawArtifactPreviewTransport>(
+        _ selection: ClawArtifactPreviewSelection, transport: T = URLSessionClawArtifactPreviewTransport()
+    ) async {
+        guard artifactPreviewTask == nil else { return }
+        guard availableArtifactPreviews.contains(selection) else {
+            artifactPreviewState = .failed(selection, .stale)
+            return
+        }
+        clearArtifactPreview()
+        let generation = artifactPreviewGeneration
+        let request = ClawArtifactPreviewRequest(taskID: selection.taskID, artifactID: selection.artifact.id)
+        do {
+            let wire = try ClawArtifactPreviewWireRequest.make(request, profile: clawGatewayProfile, token: appliedGatewayToken)
+            artifactPreviewState = .loading(selection)
+            let task = Task { try await transport.response(for: wire) }
+            artifactPreviewTask = task
+            defer { if artifactPreviewGeneration == generation { artifactPreviewTask = nil } }
+            let data = try await withTaskCancellationHandler {
+                try await task.value
+            } onCancel: { task.cancel() }
+            try Task.checkCancellation()
+            guard !task.isCancelled, artifactPreviewGeneration == generation else { return }
+            guard availableArtifactPreviews.contains(selection) else {
+                clearArtifactPreview()
+                return
+            }
+            artifactPreviewState = .ready(selection, try ClawArtifactPreviewContent.decode(data, request: request, kind: selection.artifact.kind))
+        } catch {
+            guard artifactPreviewGeneration == generation else { return }
+            guard availableArtifactPreviews.contains(selection) else {
+                clearArtifactPreview()
+                return
+            }
+            let cancelled = Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled
+            artifactPreviewState = .failed(selection, cancelled ? .cancelled : (error as? ClawArtifactPreviewError) ?? .transport)
+        }
+    }
+
+    func clearArtifactPreview(matching selection: ClawArtifactPreviewSelection? = nil) {
+        if let selection, artifactPreviewState.selection != selection { return }
+        artifactPreviewGeneration &+= 1
+        artifactPreviewTask?.cancel()
+        artifactPreviewTask = nil
+        artifactPreviewState = .idle
+    }
+
+    private func reconcileArtifactPreview() {
+        if let selection = artifactPreviewState.selection, !availableArtifactPreviews.contains(selection) {
+            clearArtifactPreview()
+        }
     }
 
     func startAutonomousComputerTakeover(maxIterations: Int = 3) {
@@ -3754,6 +3835,7 @@ final class ClawStore: ObservableObject {
     }
 
     private func advanceLiveGatewayPresentationGeneration() {
+        clearArtifactPreview()
         if let sessionID = gatewayConnectionSessionID,
            liveGatewaySessionGenerations[sessionID] == liveGatewayPresentationGeneration,
            let session = clawGatewaySessions.first(where: { $0.id == sessionID }) {

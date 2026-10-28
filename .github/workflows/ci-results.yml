@@ -12,7 +12,7 @@ permissions:
 
 env:
   CI_POLICY_VERSION: v0.4
-  PRODUCT_ITERATION: v0.86
+  PRODUCT_ITERATION: v0.87
   PROJECT_NAME: Claw
   XCODE_PROJECT: Claw.xcodeproj
   XCODE_SCHEME: Claw
@@ -81,6 +81,8 @@ jobs:
             node --check Tools/claw-final-input-smoke-fixture.mjs
             node --check Tools/claw-model-planner.mjs
             node --check Tools/claw-model-planner-smoke.mjs
+            node --check Tools/claw-artifact-preview.mjs
+            node --check Tools/claw-artifact-preview-smoke.mjs
           } 2>&1 | tee "$RESULT_DIR/node-check.log"
 
       - name: Swift logic smoke
@@ -96,7 +98,7 @@ jobs:
               -swift-version 6 \
               -sdk "$sdk_path" \
               -module-cache-path .build/SwiftModuleCache \
-              Claw/Core/*.swift Claw/Services/ClawStore.swift Claw/Services/ClawModelPlanningTransport.swift Claw/Services/ClawGatewayKeychainStore.swift Tools/LogicSmoke.swift \
+              Claw/Core/*.swift Claw/Services/ClawStore.swift Claw/Services/ClawModelPlanningTransport.swift Claw/Services/ClawArtifactPreviewTransport.swift Claw/Services/ClawGatewayKeychainStore.swift Tools/LogicSmoke.swift \
               -o .build/claw-logic-smoke
             .build/claw-logic-smoke
           } 2>&1 | tee "$RESULT_DIR/swift-logic-smoke.log"
@@ -135,6 +137,15 @@ jobs:
         run: |
           set -euo pipefail
           node Tools/claw-model-planner-smoke.mjs 2>&1 | tee "$RESULT_DIR/model-planning-smoke.log"
+
+      - name: Authenticated artifact preview smoke
+        id: artifact_preview_smoke
+        continue-on-error: true
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          set -euo pipefail
+          node Tools/claw-artifact-preview-smoke.mjs 2>&1 | tee "$RESULT_DIR/artifact-preview-smoke.log"
 
       - name: Gateway WebSocket smoke
         id: gateway_websocket_smoke
@@ -357,6 +368,7 @@ jobs:
           GATEWAY_DIRECT_OUTCOME: ${{ steps.gateway_direct_smoke.outcome }}
           GATEWAY_WEBSOCKET_OUTCOME: ${{ steps.gateway_websocket_smoke.outcome }}
           MODEL_PLANNING_OUTCOME: ${{ steps.model_planning_smoke.outcome }}
+          ARTIFACT_PREVIEW_OUTCOME: ${{ steps.artifact_preview_smoke.outcome }}
           XCODE_BUILD_OUTCOME: ${{ steps.xcode_build.outcome }}
           XCTEST_OUTCOME: ${{ steps.xctest.outcome }}
           CATALYST_BUILD_OUTCOME: ${{ steps.catalyst_build.outcome }}
@@ -382,6 +394,7 @@ jobs:
               ("gateway-direct-smoke", os.environ["GATEWAY_DIRECT_OUTCOME"], "ci-results/gateway-direct-smoke.log"),
               ("gateway-websocket-smoke", os.environ["GATEWAY_WEBSOCKET_OUTCOME"], "ci-results/gateway-websocket-smoke.log"),
               ("model-planning-smoke", os.environ["MODEL_PLANNING_OUTCOME"], "ci-results/model-planning-smoke.log"),
+              ("artifact-preview-smoke", os.environ["ARTIFACT_PREVIEW_OUTCOME"], "ci-results/artifact-preview-smoke.log"),
               ("xcodebuild", os.environ["XCODE_BUILD_OUTCOME"], "ci-results/xcodebuild.log"),
               ("xctest", os.environ["XCTEST_OUTCOME"], "ci-results/xctest.log"),
               ("mac-catalyst-release", os.environ["CATALYST_BUILD_OUTCOME"], "ci-results/mac-catalyst-build.log"),
@@ -485,13 +498,14 @@ jobs:
               "workspaceScreenshotEvidence": ["ci-results/iphone-workspace.json", "ci-results/ipad-workspace.json"],
               "workspaceScreenshotValidationPolicy": "claw-mission-ocr-v1",
               "simulatorSigningEvidence": "ci-results/simulator-signing.json",
-              "testOutcome": aggregate({"swift-logic-smoke", "swift-gateway-fixture", "gateway-direct-smoke", "gateway-websocket-smoke", "model-planning-smoke", "xctest", "xctest-artifacts", "ipad-xctest", "platform-artifacts", "workspace-screenshot-check"}),
+              "testOutcome": aggregate({"swift-logic-smoke", "swift-gateway-fixture", "gateway-direct-smoke", "gateway-websocket-smoke", "model-planning-smoke", "artifact-preview-smoke", "xctest", "xctest-artifacts", "ipad-xctest", "platform-artifacts", "workspace-screenshot-check"}),
               "projectSpecificReports": [
                   "ci-results/swift-logic-smoke.log",
                   "ci-results/swift-gateway-fixture.log",
                   "ci-results/gateway-direct-smoke.log",
                   "ci-results/gateway-websocket-smoke.log",
                   "ci-results/model-planning-smoke.log",
+                  "ci-results/artifact-preview-smoke.log",
                   "ci-results/xctest.log",
                   "ci-results/mac-catalyst-build.log",
                   "ci-results/ipad-xctest.log",
@@ -579,6 +593,7 @@ jobs:
           GATEWAY_DIRECT_OUTCOME: ${{ steps.gateway_direct_smoke.outcome }}
           GATEWAY_WEBSOCKET_OUTCOME: ${{ steps.gateway_websocket_smoke.outcome }}
           MODEL_PLANNING_OUTCOME: ${{ steps.model_planning_smoke.outcome }}
+          ARTIFACT_PREVIEW_OUTCOME: ${{ steps.artifact_preview_smoke.outcome }}
           XCODE_BUILD_OUTCOME: ${{ steps.xcode_build.outcome }}
           XCTEST_OUTCOME: ${{ steps.xctest.outcome }}
           CATALYST_BUILD_OUTCOME: ${{ steps.catalyst_build.outcome }}
@@ -599,6 +614,7 @@ jobs:
               "gateway-direct-smoke": os.environ["GATEWAY_DIRECT_OUTCOME"],
               "gateway-websocket-smoke": os.environ["GATEWAY_WEBSOCKET_OUTCOME"],
               "model-planning-smoke": os.environ["MODEL_PLANNING_OUTCOME"],
+              "artifact-preview-smoke": os.environ["ARTIFACT_PREVIEW_OUTCOME"],
               "xcodebuild": os.environ["XCODE_BUILD_OUTCOME"],
               "xctest": os.environ["XCTEST_OUTCOME"],
               "mac-catalyst-release": os.environ["CATALYST_BUILD_OUTCOME"],

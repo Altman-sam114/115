@@ -402,6 +402,7 @@ struct PhoneAgentReviewColumn: View {
     @Binding var reviewFocus: ClawMissionRunReviewFocus?
     @Binding var presentation: ClawWorkspacePresentationState
     @Binding var taskArgumentEditor: ClawTaskArgumentEditorContext?
+    @Binding var artifactPreviewSelection: ClawArtifactPreviewSelection?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -416,6 +417,7 @@ struct PhoneAgentReviewColumn: View {
                     PhoneAgentPlanPanel()
                     ClawMobileBridgePanel(showsEnvelope: $presentation.showsEnvelope, taskArgumentEditor: $taskArgumentEditor)
                 case .review:
+                    ClawArtifactPreviewList(selection: $artifactPreviewSelection)
                     ClawMissionReviewDetailDockView(
                         reviewFocus: $reviewFocus,
                         showsAdvancedReviews: $presentation.showsAdvancedReviews

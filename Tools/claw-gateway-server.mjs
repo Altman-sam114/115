@@ -8,6 +8,7 @@ import path from "node:path";
 import readline from "node:readline";
 import { spawn } from "node:child_process";
 import { handleModelPlanning } from "./claw-model-planner.mjs";
+import { ArtifactPreviewRegistry, handleArtifactPreview } from "./claw-artifact-preview.mjs";
 
 const DEFAULT_PORT = 18789;
 const SCHEMA_VERSION = "claw.computer.control.v1";
@@ -181,6 +182,7 @@ const options = {
   taskReplayCacheLimit: TASK_REPLAY_CACHE_LIMIT,
   continuationReceiptCache: new Map(),
   continuationReceiptCacheLimit: CONTINUATION_RECEIPT_CACHE_LIMIT,
+  artifactPreviewRegistry: new ArtifactPreviewRegistry(),
 };
 
 if (process.argv.includes("--emit-events-stream")) {
@@ -225,6 +227,15 @@ if (process.argv.includes("--emit-events")) {
 }
 
 const server = http.createServer(async (request, response) => {
+  if (request.url === "/claw/artifacts/preview") {
+    await handleArtifactPreview(request, response, {
+      authorize: () => assertAuthorized(request, { ...options, requireToken: true }),
+      parseJSON: (text) => parseStrictJSONText(text).value,
+      registry: options.artifactPreviewRegistry,
+    });
+    if (options.once) server.close();
+    return;
+  }
   if (request.url === "/claw/planning") {
     await handleModelPlanning(request, response, {
       authorize: () => assertAuthorized(request, { ...options, requireToken: true }),
@@ -920,6 +931,7 @@ async function buildGatewayEvents(envelope, config, sessionID = crypto.randomUUI
   ];
   const sessionConfig = {
     ...config,
+    taskID: task.id,
     sessionWorkspace,
     sessionContext,
     allowedActionKinds: [...new Set(envelope.gateway?.allowedActionKinds || [])],
@@ -5234,6 +5246,7 @@ async function writeArtifact(kind, title, payload, redacted, config, metadata = 
   if (metadata && Object.keys(metadata).length > 0) {
     artifact.metadata = metadata;
   }
+  config.artifactPreviewRegistry?.register(config.taskID, artifact, data);
   config.sessionContext?.artifacts?.push({ ...artifact, payload });
   rememberArtifact(kind, payload, config.sessionContext, metadata);
   return artifact;

@@ -1,5 +1,15 @@
 # Claw Computer-Control Gateway 协议草案
 
+## v0.87 显式文本 artifact 读取控制面
+
+不改变 `claw.computer.control.v1` action/artifact schema。新增独立 `claw.gateway.artifact-preview.v1` HTTP POST `/claw/artifacts/preview`，必须配置并校验 `Authorization: Bearer <runtime token>`，`Content-Type: application/json`、`X-Claw-Control-Plane: claw.gateway.artifact-preview.v1`，禁止 task schema header。不配置 token、未认证、错误方法/header/JSON/UTF-8/duplicate escaped key/未知字段均固定脱敏拒绝；不返回 CORS 许可，响应 no-store/nosniff，客户端不跟随 redirect、无 cookie/cache。
+
+请求恰好五个字段：`controlPlane`、`kind=previewRequest`、`requestNonce`（8...128 ASCII base64url）、`taskID`、`artifactID`（UUID）。不接收 session/file path/URL/reference。客户端 local session 只作本机 scope 绑定；服务端以已注册 artifact UUID + task UUID 精确绑定，不依赖可伪造文件引用。成功响应恰好包含 `controlPlane`、`kind=previewResponse`、same nonce/taskID/artifactID、`artifactKind`、`mediaType=text/plain; charset=utf-8`、`content`、实际 UTF-8 `byteCount`、`effects={computerActions:false,taskDispatched:false}`。客户端同时校验 kind、实际字节数与布尔类型；不接受数字代替 false 或 Bool 代替计数。
+
+Gateway `writeArtifact` 成功后只为 fileDiff/commandOutput/browserTrace/messageDraft 注册实际序列化文本；immutable string、32 KiB/项、最多 64 项、10 分钟 TTL，惰性过期/最旧淘汰，进程重启丢弃。超限、NUL、其他 kind 不注册、不截断；原 writer 省略的敏感正文不恢复。读取没有磁盘 IO，不解析 reference，不运行 handler/replay/receipt/task pipeline，不新增业务 event/artifact，也不修改文件或审批。错误响应恰好为 controlPlane/kind=previewError/errorCode；错误码为 preview_unauthorized(401)、preview_invalid_request(400)、preview_payload_too_large(413)、preview_not_available(404)，未知/错 task/过期/淘汰统一 404。
+
+HTTP request 最多 1024 bytes、3 秒读取时限；Swift response 最大 262144 bytes（允许 32 KiB 文本 JSON 转义），5/8 秒 request/resource timeout、单次且无自动 retry。Store 仅允许 clean 当前连接、当前 Live task/session 和唯一精确 artifact；连接 revision/模式或 task/session/artifact 变更、关闭、取消后，旧请求不能回填新页面。结果仅本次内存 plain Text，支持用户手动复制，不自动喂模型、持久化或回填 metadata/checkpoint/日志。既有 metadata-only 复核器仍不读取 payload。此控制面不赋予 iOS/iPadOS 跨 App 权限，也不代表 pairing、真实桌面操作成功或最终提交授权。
+
 ## v0.86 云端宿主签名边界（2026-10-25）
 
 本次仅修 CI，不改变 wire schema、action、artifact 或执行授权。云端 Debug 使用 Xcode 原生 ad-hoc 签名与模拟器 entitlement 包装，固定测试 Keychain group 仍只用于一次性 runner。iOS entitlement 不手工封入 macOS 宿主签名；验证两类 entitlement 分离、native signature 与 Xcode 生成 `.xcent` 完全相等后生成 CI 专用 `simulator-signing.json`/ready marker。原生字典可为空，不强加 macOS 调试权限；调试权限在 simulated xcent 验证。该 JSON 是 CI 证据，不是 Gateway artifact。双设备实际 Keychain XCTest、全部 smoke、Release 和截图仍必须通过；不代表用户生产证书、配对、锁屏或分发访问已验收。

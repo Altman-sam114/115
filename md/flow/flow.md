@@ -1,5 +1,13 @@
 # 项目核心流程文档
 
+## v0.87 按需结果读取
+
+Gateway 已批准动作 -> workspace writer 成功 -> 四种受支持文本 artifact 的不可变内存快照（task/artifact 绑定、32 KiB/64 项/10 分钟）-> 正常 event 返回 artifact。客户端当前 Live Mission -> 用户「证据复核」选择结果 -> 父级 sheet（布局重排保留选择）-> 另行点击读取 -> 已保存 clean profile + 当前 task/session/唯一 artifact/revision guard -> header-only token 的独立 HTTP 控制面 -> strict 身份/容量/effects 校验 -> 原生 plain Text。关闭/离开前台/配置或模式/任务变化取消并清内容，旧响应丢弃；不修改执行、审批、receipt、checkpoint 或健康状态。
+
+读取只访问已注册内存，不接受 path/reference/URL，不读磁盘；未知/过期/超限均不可用，不截断、不 fallback。原 writer 省略的内容不补回，fileDiff 仍是原变更清单而非文件全文；audit/trace/Accessibility/图片不开放。metadata 复核索引语义不变，内容不自动交给模型、不渲染 HTML/Markdown、不自动执行。
+
+v0.86 基线已由 `0360175966eb99f32d9506a17e24ef57a1f3a0c5` / run `40166272414` attempt `1` 的完整 artifact 复判通过：15 项、双设备各 165 项、真实 Keychain/原生签名/实际非白屏图；本机只读解码云端 xcresult。下方失败记录为历史，v0.87 须新的 main artifact，不预写通过。
+
 ## v0.86 云端原生签名修复（2026-10-25）
 
 用户重新要求修复后恢复专项：cloud-only Debug build-for-testing -> Xcode 原生 ad-hoc 签名（空 team、Manual、identity `-`）-> 校验宿主 native signature 与 Xcode native xcent 精确相等（允许空字典），并与 Xcode 模拟 iOS/Keychain/调试 entitlement 分离 -> 小型 simulator-signing.json + policy ready marker -> 双设备复用产物 test-without-building -> 实际随机 test service Keychain 测试和非白屏启动证据 -> 最新 main artifact 复判。移除手工将 iOS entitlement 封入宿主签名的路径；不改生产签名、业务协议或 165 项断言，不需要 Apple 证书。首轮原生 run `40164836441` 只因过强的 native 调试权限假设在测试前被拦截，已依据实际包装日志校正，未发生新的 Taskgated crash，也未执行业务测试；新 artifact 通过前不得推进下一版本。

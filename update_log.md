@@ -14,8 +14,8 @@
 ## 当前状态
 
 - 项目方向：OpenClaw 式电脑接管智能体，iPhone 作为控制台，桌面 Claw Gateway 作为执行端。
-- 当前轮次（2026-10-25）：用户再次明确要求修复云端，恢复 v0.86 原生模拟器签名专项。此前 `0178e98b65587d67f0335d8f14d92c091fda8d07` / run `39857874008` attempt `1` 因重复 `CODESIGNING / Taskgated Invalid Signature` 已停止；本次以 Xcode 原生 ad-hoc 与 simulated entitlement 分离替代手工重签，待新 main 的完整云端 artifact，不提前推进 v0.87。总目标未完成。
-- 最后完整通过的基线：v0.85 `edab5a9a6feb6598e9122122fe549951f02c1d6b` / run `39841407261` attempt `1`，artifact `claw-ci-v0.85-main-edab5a9a6feb-run39841407261-attempt1` 已下载并由单实例 C 复判通过：15 项检查、双设备各 150 项 XCTest、Release/LogicSmoke/fixture/Gateway/生产 HTTP client 与 21 个模型 fixture 请求，四个 xcresult Info/root 数据完整，实际打开两张非白屏 PNG，与 iPhone 第 1 帧/iPad 第 2 帧 readiness JSON 一致（1,973,076 bytes / 解压 4.7 MiB）。本机无 xcresulttool，未独立解码二进制；Catalyst runner Metal 路径警告保留。v0.86 待新 main 云端验收，不以旧证据替代。
+- 当前轮次（2026-10-28）：v0.86 原生签名专项已完整通过；v0.87 实现显式认证文本 artifact 预览，待新 main 完整云端结果包。仍由单实例串行 A/B/C/X，不开子 Agent；总目标未完成，不宣称发布候选。
+- 最后完整通过基线：v0.86 `0360175966eb99f32d9506a17e24ef57a1f3a0c5` / run `40166272414` attempt `1`，artifact `claw-ci-v0.86-main-0360175966eb-run40166272414-attempt1` 已完整下载并复判通过（2,001,465 bytes / 4.9 MiB）：manifest/JUnit/实际日志 15 项全通过、iPhone/iPad 各 165 项，真实隔离 Keychain、native signing JSON、双平台 Release/LogicSmoke/fixture/Gateway/生产模型 HTTP 与 21 请求通过；四份 xcresult 完整，本机只读 xcresulttool summary 独立确认各 165 项零失败/跳过，两张实际 PNG 已打开且均第 1 帧就绪。Catalyst runner Metal 路径警告保留；不以 CI 成功代替真实模型质量/桌面 E2E/分发。
 - 当前 schema：`claw.computer.control.v1`。
 - 当前核心闭环：用户自然语言任务 -> `PhoneAgentPlanner` -> `ClawMobileTask` -> `ClawMobileEnvelope` -> 模拟事件流或带有界重连/ping 可观测性和进程内 task replay guard 的 WebSocket Gateway -> `ClawGatewayEvent` -> session reducer -> Mission Run / Approval Fast Lane 审批快车道 / Control Snapshot 控制态势快照 / Operator Strip / Loop 继续态势 / Mac Agent Readiness Board 就绪看板 / Mac Gateway Action Preflight Matrix 动作预检矩阵 / Mac Agent Evidence Coverage Map 证据覆盖图 / Mac Agent Next Step Deck 下一步候选卡组 / Mac Agent Run Timeline 执行时间线 / Mac Agent Continuation Gate 继续闸门 / Mac Agent Review Radar 复核雷达 / Mac Agent Handoff Brief 人工交接简报 / Focus Context 聚焦上下文 / Review Detail Dock / Review Trail 复核路径 / Approval Queue 审批队列 / Payload Safety Ledger 载荷安全账本 / Artifact 证据索引 / 复核态势摘要 / 复核优先队列 / 复核聚焦详情 / Live Gateway 连接健康 / Artifact metadata 复核摘要 / 文件变更安全复核摘要 / Shell 命令安全复核摘要 / 提取完整性复核摘要 / 浏览器控制计划和策略诊断复核摘要 / 草稿最终提交安全和桌面策略诊断复核摘要 / Gateway 能力复核摘要 / Accessibility 信号质量复核摘要 / Replay Guard 复核摘要 / AgentTrace handoff 复核 UI / iPad 多栏工作台展示和审批。v0.66 工作区实现进一步加入父 safe decision -> 短时单次 receipt -> 显式 draft/queue/approve/freeze/send -> 全新 child selected action + `runAgentLoop` 的受限跨 task 续接；v0.71 在同一闸门上加入 `extractData` 的 goal/outputPath typed editor，固定 schema/source/completeness 与 exact-key/byte/path 校验；v0.72 在同一 presentation/store 边界加入固定优先级 Smart Operator Action Rail，历史 v0.72 `origin/main` commit `bcf87c8c50f70d3d4157ec41a83333e62cd1ecdc` 已由 run `32631022162` attempt `1` 的 Agent C artifact 复判通过。
 - 当前 Smart Operator Action Rail：从既有 continuation/primary/resume/review metadata 按固定优先级派生单一用户显式入口；compact 与 regular 共享 summary/view/dispatcher，stale 或 scope mismatch 返回 disabled/none，不新增 Gateway action 或协议字段。历史 v0.72 `origin/main` commit `bcf87c8c50f70d3d4157ec41a83333e62cd1ecdc` 对应 run `32631022162` attempt `1`，artifact `claw-ci-v0.2-main-bcf87c8c50f7-run32631022162-attempt1` 已由 Agent C 复判通过。
@@ -24,6 +24,22 @@
 - 当前主要遗留：v0.66 完整负向/action/六种 kind/UI 对称测试矩阵、v0.67 最新云端 artifact 验收与 `manageFiles` 编辑器完整 LogicSmoke/负向覆盖、完整 macOS Accessibility bridge、Playwright/browser-use 兼容控制器、跨重启/跨进程多轮状态、live Gateway 后台保活/真实心跳协议/配对、完整 artifact 内容复核体验。
 
 ## 历史记录
+
+### v0.87 / 受控执行结果文本预览
+日期：2026-10-28
+
+- 前置 C 已完整验收最新 v0.86 `0360175` / run `40166272414`，原生签名/真实隔离 Keychain 与双设备各 165 项通过，签名专项收口；完整证据见当前状态。不开子 Agent，继续单实例串行方案/实现/云端复判。
+- 新独立认证 HTTP 结果控制面，不改 action/artifact wire；Gateway 写入成功后仅注册四类不可变文本快照，32 KiB/项、64 项、10 分钟。读取只接收 task/artifact/nonce，不接收任意路径或 reference、不重新读磁盘；错身份/过期/超限固定失败，不截断、无业务执行副作用。
+- Mac/iPad/iPhone 共用父级结果 sheet，显式选择后另点击读取；生产 transport header-only token、ephemeral/无 redirect/cookie/cache、容量/超时/取消。Store clean profile/current Live task-session/唯一 artifact/revision guard，关闭/前台退出/配置模式任务变化清理内容，旧响应丢弃。仅原生纯文本，可手动复制，不写 checkpoint/event/metadata/日志，不自动提供模型或审批/执行。原 writer 已省略的正文不恢复，fileDiff 不等于文件内容。
+- 新增 10 项 XCTest（预期各 175 项）、LogicSmoke 与实际 Gateway writer/HTTP/生产 Swift transport smoke；CI 增加独立 outcome/log，预期 16 项，保留原全部测试/双平台/原生签名/真实截图门槛。代码、协议、README、flow/flowchart、test、release-readiness 与 prompt 同步。
+- 本地仅非编译静态检查；新 SHA/run/artifact 待提交产生，不预写通过。用户签名/xcuserdata/旧 prompt 保留，aitrans 只读参考 bounded attachment 原则且未修改。真实模型质量、授权桌面 E2E、结果 sheet 实际交互、锁屏和分发仍未验收。
+
+### v0.86 / 原生签名最终完整通过
+日期：2026-10-28
+
+- C 阶段完整下载 `claw-ci-v0.86-main-0360175966eb-run40166272414-attempt1`（2,001,465 bytes / 4.9 MiB），对应 main `0360175966eb99f32d9506a17e24ef57a1f3a0c5` / run `40166272414` attempt `1`。Altman-sam114 身份、manifest/JUnit/摘要/实际日志一致，15 项成功；双平台 Release、各 165 项 XCTest、LogicSmoke、fixture、Gateway 双 smoke 和 21 个模型 fixture 请求均通过。
+- native signing JSON 确认 Xcode 原生签名、native xcent 精确一致、simulated 调试/隔离 Keychain 与宿主签名分离；实际随机 namespace Keychain 用例通过。四份 xcresult 下载完整，本机仅用 xcresulttool 静态读取两份 test summary，各 165 passed/0 failed/0 skipped；未运行本地构建、测试或模拟器。
+- 实际打开 iPhone/iPad PNG 均非白屏，JSON 均 attempt=1，与截图/日志一致。保留 Catalyst runner Metal 路径警告，不宣称零警告。缓存 `/private/tmp/claw-c-review-40166272414/` 未清理；签名与云端基础问题不再阻塞后续小轮次，但真实模型/桌面/交互/签名发布仍缺。
 
 ### v0.86 / 人工恢复与云端原生模拟器签名
 日期：2026-10-25

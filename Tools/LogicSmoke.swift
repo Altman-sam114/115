@@ -4,6 +4,34 @@ import Foundation
 enum LogicSmoke {
     @MainActor
     static func main() async {
+        if CommandLine.arguments.contains("--artifact-preview-http-smoke") {
+            let env = ProcessInfo.processInfo.environment
+            guard let endpoint = env["CLAW_PREVIEW_SMOKE_ENDPOINT"], let token = env["CLAW_PREVIEW_SMOKE_TOKEN"],
+                  let taskID = env["CLAW_PREVIEW_SMOKE_TASK"].flatMap(UUID.init(uuidString:)),
+                  let artifactID = env["CLAW_PREVIEW_SMOKE_ARTIFACT"].flatMap(UUID.init(uuidString:)) else {
+                print("Artifact preview HTTP fixture configuration missing")
+                exit(1)
+            }
+            do {
+                let store = ClawStore(autoScanLocalArtifacts: false)
+                store.setGateway(url: endpoint, token: token)
+                let request = ClawArtifactPreviewRequest(taskID: taskID, artifactID: artifactID)
+                let wire = try ClawArtifactPreviewWireRequest.make(request, profile: store.clawGatewayProfile, token: token)
+                let data = try await URLSessionClawArtifactPreviewTransport().response(for: wire)
+                let content = try ClawArtifactPreviewContent.decode(data, request: request, kind: .commandOutput)
+                guard content.text.contains("stdout:"), content.text.contains("exitCode=0"),
+                      !content.text.contains("changed-on-disk"), content.byteCount == content.text.utf8.count,
+                      store.clawMobileTasks.isEmpty, store.clawGatewaySessions.isEmpty, store.gatewayEvents.isEmpty else {
+                    print("Artifact preview production HTTP client contract failed")
+                    exit(1)
+                }
+                print("Claw artifact preview production HTTP client smoke passed")
+            } catch {
+                print("Artifact preview production HTTP client failed with fixed diagnostic")
+                exit(1)
+            }
+            return
+        }
         if CommandLine.arguments.contains("--planning-http-smoke") {
             let environment = ProcessInfo.processInfo.environment
             guard let endpoint = environment["CLAW_PLANNING_SMOKE_ENDPOINT"], let token = environment["CLAW_PLANNING_SMOKE_TOKEN"] else {
@@ -44,6 +72,25 @@ enum LogicSmoke {
             if condition() == false {
                 failures.append(message)
             }
+        }
+
+        do {
+            let request = ClawArtifactPreviewRequest(taskID: UUID(), artifactID: UUID())
+            let text = "Untrusted <script>never execute</script> result"
+            var root: [String: Any] = ["controlPlane": ClawArtifactPreviewRequest.controlPlane, "kind": "previewResponse",
+                "requestNonce": request.nonce, "taskID": request.taskID.uuidString, "artifactID": request.artifactID.uuidString,
+                "artifactKind": "commandOutput", "mediaType": "text/plain; charset=utf-8", "content": text, "byteCount": text.utf8.count,
+                "effects": ["computerActions": false, "taskDispatched": false]]
+            let content = try ClawArtifactPreviewContent.decode(JSONSerialization.data(withJSONObject: root), request: request, kind: .commandOutput)
+            expect(content.text == text, "preview must preserve plain text without interpreting it")
+            root["taskID"] = UUID().uuidString
+            expect((try? ClawArtifactPreviewContent.decode(JSONSerialization.data(withJSONObject: root), request: request, kind: .commandOutput)) == nil,
+                   "preview must reject another task's response")
+            let empty = ClawStore(autoScanLocalArtifacts: false)
+            expect(empty.availableArtifactPreviews.isEmpty && empty.artifactPreviewState == .idle, "fresh store must not request or restore result content")
+            expect(!ClawArtifactPreviewSelection.supports(.auditLog) && !ClawArtifactPreviewSelection.supports(.screenshot), "protected artifacts are not text previews")
+        } catch {
+            failures.append("artifact preview strict content contract failed")
         }
 
         do {

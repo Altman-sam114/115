@@ -6,6 +6,7 @@ struct PhoneAgentWorkbenchLayout: View {
     @Binding var presentation: ClawWorkspacePresentationState
     @Binding var continuationEditor: ClawContinuationEditorInputState
     @Binding var taskArgumentEditor: ClawTaskArgumentEditorContext?
+    @Binding var artifactPreviewSelection: ClawArtifactPreviewSelection?
 
     var body: some View {
         GeometryReader { proxy in
@@ -32,7 +33,7 @@ struct PhoneAgentWorkbenchLayout: View {
                     VStack(alignment: .leading, spacing: 16) {
                         PhoneAgentReviewColumn(
                             reviewFocus: $reviewFocus, presentation: $presentation,
-                            taskArgumentEditor: $taskArgumentEditor
+                            taskArgumentEditor: $taskArgumentEditor, artifactPreviewSelection: $artifactPreviewSelection
                         )
                     }
                     .padding(.vertical, 16)

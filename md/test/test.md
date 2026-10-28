@@ -1,5 +1,13 @@
 # 测试规范
 
+## v0.87 文本结果预览矩阵
+
+新增 `ClawArtifactPreviewTests.swift` 10 项，双设备预期各 175 项：四类 allowlist、nonce/exact shape/duplicate escaped key、task/artifact/kind/media/effects 和 Bool/number 区分、UTF-8/32 KiB/NUL/262144-byte response bounds、固定 HTTP 路径/header-only token/不安全 origin、模拟/空配置/伪造选择零调用、成功/失败的任务/session/event/loop/envelope/receipt/checkpoint 无变更、重复单调用、关闭与取消、忽略取消的旧响应隔离、连接编辑切回不可复活、任务/模式变化清内容。fake 有界等待/释放，异步先求值再断言，不读生产 Keychain。
+
+cloud-only `node Tools/claw-artifact-preview-smoke.mjs` 覆盖 registry 精确 TTL/64 项淘汰/四类保护/32 KiB/不可变、实际认证 Gateway WebSocket 受控 pwd -> writer -> HTTP 返回精确原始快照、修改落盘 artifact 后仍读内存、未知/错 task/路径/reference 注入/duplicate key/header/auth/方法/超限拒绝，所有 preview 前后 workspace 每个文件 SHA 不变。复用已编译 LogicSmoke `--artifact-preview-http-smoke` 运行生产 Swift HTTP transport 和严格解码；不下载模型/数据，不打印内容、token 或 UUID。LogicSmoke 主入口另回归 plain text/错身份/protected kind/启动零恢复。
+
+workflow 将新 smoke/syntax/transport 编译纳入 manifest、JUnit、testOutcome、最终 gate，成功预计 16 项；保留 iOS/Catalyst Release、原生签名报告、四个 xcresult 和实际双设备非白屏 PNG/JSON。v0.86 run `40166272414` 已通过各 165 项（本机只读 xcresulttool summary 确认零失败/跳过），但不替代 v0.87。仅用 fake/启动截图不能声称真实结果 sheet 键盘/VoiceOver/分屏/前后台交互已验收；本地仍禁止任何编译、smoke 或模拟器，仅 git/diff/plist/YAML/文本静态检查。
+
 ## v0.86 云端原生模拟器签名修复（2026-10-25）
 
 人工恢复后仍在同版本修复，不减少各 165 项测试或任何检查。Debug build-for-testing 必须由 Xcode 原生 ad-hoc 签名（仅命令行空 team、Manual、identity `-`），不再用 codesign 手工注入 iOS entitlement；既有 CI plist 作为 CODE_SIGN_ENTITLEMENTS 输入。检查 strict/deep native signature、唯一 Xcode Claw.app-Simulated.xcent 中的隔离 application-identifier/group/get-task-allow、宿主 sealed 与 Xcode Claw.app.xcent 精确相等及 iOS entitlement 不在 macOS 签名中；native xcent 允许空字典，不要求额外 macOS 调试权限。全部通过才生成小型 simulator-signing.json/policy marker。成功 XCTest 缺少报告时打包失败，manifest 引用其路径。iPad 复用同一已核验 Debug 产物，真实随机 test service Keychain 的 create/update/reopen/protection/delete/损坏拒绝断言保留。旧手工签名说明是历史失败方案，由本节替代。

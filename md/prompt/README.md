@@ -1,5 +1,9 @@
 # Prompt 目录
 
+## v0.87 当前单实例轮次
+
+- [v0.87 受控执行结果文本预览](v0（核心智能能力）/v0.87（受控执行结果文本预览）.md)：前置 v0.86 已由精确 run `40166272414` 完整复判；本轮增加认证、限定 task/artifact 的有界文本快照与 Mac/iPad 共享按需读取，待新 main artifact，不预写通过。不开子 Agent，单实例串行保留 A/B/C/X 阶段。
+
 2026-10-25 人工恢复 v0.86 云端签名专项，见同版本提示词末节：以 Xcode 原生 ad-hoc 和 simulated entitlement 分离替代手工宿主重签，产出 simulator-signing.json/policy marker，保留完整测试/截图和生产签名边界；最新 main artifact 通过前不推进 v0.87。
 
 原生首轮 run `40164836441` 构建成功，但错误的宿主 macOS 调试权限断言在测试前退回；同版本改为 sealed 与 Xcode native xcent 精确相等（可为空），保持所有 simulated/实际业务断言，不虚报已执行 XCTest。

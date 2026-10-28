@@ -1,5 +1,28 @@
 # 项目流程图
 
+## v0.87 文本结果读取
+
+```mermaid
+flowchart TD
+  Writer[Gateway writer 成功] --> Kind{四类文本且不超 32 KiB?}
+  Kind -->|是| Registry[不可变内存快照 task + artifact
+64 项 / 10 分钟 / 重启丢失]
+  Kind -->|否| Unavailable[不注册 不截断 不读取磁盘兜底]
+  Event[当前 Live Mission 的 artifact] --> Select[用户选择结果 打开父级 sheet]
+  Select --> Click[用户另行点击读取]
+  Click --> Scope{clean profile / 当前 task-session / 唯一 artifact / revision?}
+  Scope -->|否| Stale[拒绝或丢弃旧响应 清内容]
+  Scope -->|是| HTTP[独立认证 HTTP POST
+仅 IDs + nonce 无 path/reference/URL]
+  HTTP --> Registry
+  Registry --> Validate[严格 nonce / IDs / kind / bytes / effects=false]
+  Validate --> Text[内存 plain Text 手动复核
+不渲染 不持久化 不喂模型 不执行]
+  Close[关闭 / 离开前台 / 连接模式任务变化] --> Stale
+```
+
+v0.86 原生签名专项已由 run `40166272414` 的完整结果包和实际图通过；下方早期失败方案仅保留历史语境。
+
 云端 simulator 测试（2026-10-25 修复）：Xcode 原生 ad-hoc build-for-testing 一次 -> 校验 native signature 与 Xcode native xcent 精确相等（可为空）、simulated iOS/Keychain/调试 entitlement 与宿主签名分离 -> simulator-signing.json + policy ready marker -> 双设备 test-without-building；不再手工重签宿主，缺少可执行体或正确 marker 时 iPad 提前失败，不绕过真实 Keychain 用例。此为 CI 打包边界，不是生产签名/发布。
 
 v0.86 连接保存与隔离：Keychain 只恢复连接，不恢复任务；生产连接统一 WSS/精确 loopback WS，无 credentials/query/fragment。测试默认 no-op，不读真实 Keychain。

@@ -1,8 +1,18 @@
 # Claw iOS Controller Prototype
 
-## 云端签名专项修复（v0.86，2026-10-25）
+## 受控文本结果预览（v0.87）
 
-在人工再次要求修复云端后，恢复 v0.86 的 CI 专项，不先增加新业务版本。此前 run `39857874008` 因测试宿主 `Taskgated Invalid Signature` 失败，不能以 Release/smoke 成功替代。云端 Debug 现在由 Xcode 原生 ad-hoc 签名：iOS Keychain/调试 entitlement 进入 Xcode 模拟器包装，宿主签名必须与 Xcode 生成的 native `.xcent` 完全一致（可为空），移除手工重签。严格签名及两类 entitlement 分离检查通过才生成 `simulator-signing.json` 与 ready marker；iPad 复用同一测试产物。生产团队、Release 签名、全部 165 项 XCTest 和非白屏截图门槛不变。首轮原生构建成功，但 run `40164836441` 因错误要求 native 调试 entitlement 而在测试前退回，已按实际 Xcode 包装合同修正，仍须最新 main 的 artifact 证明；不是生产分发签名或发布完成。
+Mac Catalyst、iPad 与 iPhone 的「证据复核」共用「读取本轮文本结果」：先选择当前 Live Mission 的结果，再显式点击读取。只显示 Gateway 实际写入成功时保留的 `fileDiff`、`commandOutput`、`browserTrace`、`messageDraft` 文本快照；原 writer 已省略的正文不会补回，文件变更清单不等于文件正文。演练结果不能读取为真实内容，metadata 索引仍保持只读摘要。
+
+独立认证 POST `/claw/artifacts/preview` 只接收 task/artifact ID 和 nonce，不接收 path、URL 或 reference。Gateway 只保留最近 64 个、每个最多 32 KiB、10 分钟的不可变内存快照；超限/过期/重启后不可用，不截断、不重新读取磁盘、不自动重试。即使普通 Gateway token 配置为 optional，此接口也必须配置并验证 token；远端仍须可信 HTTPS/WSS。
+
+结果可能含敏感信息或不可信指令，仅用原生纯文本展示，可手动选择复制，不渲染 HTML/Markdown/可执行链接，不自动交给模型。关闭、离开前台、任务/连接/发送模式变更清除本机预览并取消旧读取；不写文件、UserDefaults、checkpoint、event、metadata 或日志，不审批/发送/继续任务。auditLog、agentTrace、Accessibility 和图片不在本轮开放范围，`isRedacted` 也不是所有内容已脱敏的保证。
+
+v0.86 已完成精确云端 artifact 复判：`0360175966eb99f32d9506a17e24ef57a1f3a0c5` / run `40166272414` attempt `1`，15 项检查、iPhone/iPad 各 165 项 XCTest、真实隔离 Keychain、原生签名报告与两张实际非白屏图通过；v0.87 仍待新 main 云端结果。完整桌面 E2E、真实模型质量、Mac/iPad 实际交互和分发仍未验收，不能称发布候选。
+
+## 云端签名专项修复历史（v0.86，2026-10-25）
+
+在人工再次要求修复云端后，恢复 v0.86 的 CI 专项，不先增加新业务版本。此前 run `39857874008` 因测试宿主 `Taskgated Invalid Signature` 失败，不能以 Release/smoke 成功替代。云端 Debug 现在由 Xcode 原生 ad-hoc 签名：iOS Keychain/调试 entitlement 进入 Xcode 模拟器包装，宿主签名必须与 Xcode 生成的 native `.xcent` 完全一致（可为空），移除手工重签。严格签名及两类 entitlement 分离检查通过才生成 `simulator-signing.json` 与 ready marker；iPad 复用同一测试产物。生产团队、Release 签名、全部 165 项 XCTest 和非白屏截图门槛不变。首轮原生构建成功，但 run `40164836441` 因错误要求 native 调试 entitlement 而在测试前退回，已按实际 Xcode 包装合同修正，run `40166272414` 的完整 artifact 已证明各 165 项测试及截图通过；不是生产分发签名或发布完成。
 
 ## 安全连接与未保存草稿（v0.86）
 
@@ -14,9 +24,9 @@ Mac Catalyst、iPad、iPhone 共用“连接与模型”的网关配置。输入
 
 只要连接表单与当前已应用的完整 pair 不同，所有真实入口拒绝调用 transport，普通/续接发送在创建 session 前停止；不会把新 Token 发往旧地址，也不只用短指纹判等。编辑切回、保存或重读不恢复旧审批、模型计划或冻结续接授权，必须重新复核。`setGateway` 是不持久化的内部应用/测试入口，生产 UI 只走验证后的存储 API；测试默认 no-op，不访问生产 Keychain。
 
-v0.85 基线 `edab5a9a6feb6598e9122122fe549951f02c1d6b` / run `39841407261` attempt `1` 已完成 artifact 复判：15 项检查、双设备各 150 项测试、实际两张非白屏截图及 21 个模型协议 fixture 请求通过。v0.86 代码与新增测试仍须新 main 云端结果包复判；Keychain 不等于配对/设备信任，未完成真实模型、授权桌面 E2E、实机锁屏和签名分发验收。
+v0.85 基线 `edab5a9a6feb6598e9122122fe549951f02c1d6b` / run `39841407261` attempt `1` 已完成 artifact 复判：15 项检查、双设备各 150 项测试、实际两张非白屏截图及 21 个模型协议 fixture 请求通过。v0.86 代码与新增测试现已由 run `40166272414` 完整复判通过；Keychain 不等于配对/设备信任，未完成真实模型、授权桌面 E2E、实机锁屏和签名分发验收。
 
-v0.86 首次云端结果已退回同版本修复（run `39849006621`）：原地址 CR/LF 必须在 trim 前拒绝，连接编辑必须同时撤销旧 receipt，不能改回同值再审批。云端真实 Keychain 测试宿主仅作一次性 ad-hoc entitlement 签名，Release/工程/用户签名保持不变；不跳过失败断言，不把临时测试签名当作可分发 App。最新修复仍待完整云端 artifact，详见发布准备清单。
+v0.86 首次云端结果已退回同版本修复（run `39849006621`）：原地址 CR/LF 必须在 trim 前拒绝，连接编辑必须同时撤销旧 receipt，不能改回同值再审批。云端真实 Keychain 测试宿主仅作一次性 ad-hoc entitlement 签名，Release/工程/用户签名保持不变；不跳过失败断言，不把临时测试签名当作可分发 App。该历史修复后来由 Xcode 原生签名路径替代，最新成功证据见本文件 v0.87 节与发布准备清单。
 
 v0.86 第二次 run `39854053390` 仍退回：runner Python 3.15 的管道 plist 读取失败，iPhone 未执行测试，iPad 宿主随后启动失败，不能称修复已通过。CI 追加 bytes plist 读取、临时 simulator 内层代码签名/单执行体构建与签名 ready 闸门；失败不跳过真实 Keychain 或减少测试，生产签名不变。
 

@@ -1,11 +1,14 @@
 import SwiftUI
 
 struct PhoneAgentView: View {
+    @EnvironmentObject private var store: ClawStore
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Binding var reviewFocus: ClawMissionRunReviewFocus?
     @State private var presentation = ClawWorkspacePresentationState()
     @State private var continuationEditor = ClawContinuationEditorInputState()
     @State private var taskArgumentEditor: ClawTaskArgumentEditorContext?
+    @State private var artifactPreviewSelection: ClawArtifactPreviewSelection?
 
     private let examples = [
         "接管我的电脑，打开浏览器搜索竞品信息，整理成表格后发到 Slack",
@@ -22,13 +25,13 @@ struct PhoneAgentView: View {
                 PhoneAgentWorkbenchLayout(
                     examples: examples, reviewFocus: $reviewFocus,
                     presentation: $presentation, continuationEditor: $continuationEditor,
-                    taskArgumentEditor: $taskArgumentEditor
+                    taskArgumentEditor: $taskArgumentEditor, artifactPreviewSelection: $artifactPreviewSelection
                 )
             } else {
                 PhoneAgentCompactLayout(
                     examples: examples, reviewFocus: $reviewFocus,
                     presentation: $presentation, continuationEditor: $continuationEditor,
-                    taskArgumentEditor: $taskArgumentEditor
+                    taskArgumentEditor: $taskArgumentEditor, artifactPreviewSelection: $artifactPreviewSelection
                 )
             }
         }
@@ -37,6 +40,15 @@ struct PhoneAgentView: View {
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $taskArgumentEditor) { context in
             ClawTaskArgumentsEditor(context: context)
+        }
+        .sheet(item: $artifactPreviewSelection, onDismiss: { store.clearArtifactPreview() }) { selection in
+            ClawArtifactPreviewView(selection: selection)
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active {
+                artifactPreviewSelection = nil
+                store.clearArtifactPreview()
+            }
         }
         .onChange(of: reviewFocus) { _, focus in
             if focus != nil { presentation.revealReview() }

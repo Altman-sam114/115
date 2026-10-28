@@ -6,6 +6,7 @@ struct PhoneAgentCompactLayout: View {
     @Binding var presentation: ClawWorkspacePresentationState
     @Binding var continuationEditor: ClawContinuationEditorInputState
     @Binding var taskArgumentEditor: ClawTaskArgumentEditorContext?
+    @Binding var artifactPreviewSelection: ClawArtifactPreviewSelection?
 
     var body: some View {
         ScrollView {
@@ -19,7 +20,7 @@ struct PhoneAgentCompactLayout: View {
 
                 PhoneAgentReviewColumn(
                     reviewFocus: $reviewFocus, presentation: $presentation,
-                    taskArgumentEditor: $taskArgumentEditor
+                    taskArgumentEditor: $taskArgumentEditor, artifactPreviewSelection: $artifactPreviewSelection
                 )
             }
             .padding(16)
