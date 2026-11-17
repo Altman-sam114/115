@@ -378,3 +378,9 @@ grep -R -n -E "法律|法务|合同|诉讼|律师|法院|legal|lawyer|court|laws
 - 最终回复必须写清楚每条测试命令和结果、云端 run 状态、结果包是否已下载复判。
 
 v0.81 云端日志须无 `Invalid Configuration` 或 `No symbol named` 图标警告，并保留全量平台回归。
+
+## v0.88 自动工作台选测（替代历史固定全套要求）
+
+`Tools/select-ci-scope.py` 按整个 push before..HEAD 选择 full/workspace。仅显式列出的工作台布局/输入/导航/MainTab/WorkspaceLayout 展示文件可选 workspace；Store、schema、协议、Gateway、模型、工程、测试、CI、未知/空/手动范围一律 full。选择器在云端先自测，不提供未实现的任意模块或手动 profile 参数。
+
+workspace 选择 git diff/plutil、iOS/Catalyst Release、双设备各 9 项固定 workspace XCTest 与实际启动截图；跳过 Gateway/model/Swift fixture/LogicSmoke。ci-selection.json 保留原因与改动范围，manifest 标记 selected/skipReason，JUnit 用 skipped，不能当作通过。门槛仅允许事先未选的项 skipped；选中项必须 success。云端解码实际 xcresult 摘要入包，workspace 必须恰为 9 passed/0 failed/0 skipped，full 必须正数 passed 且零失败/跳过。首次更改 CI 门槛/工程时 full；展示提交需另外实际验收 workspace 分支。

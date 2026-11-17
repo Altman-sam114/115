@@ -3161,3 +3161,15 @@
 - run 40624695706 attempt 1 的实际日志定位到 preview fixture 未携带 token 指纹；Gateway 正确以 token_fingerprint_mismatch 阻断，无法进入 sessionCompleted。历史 artifact 已过期，日志不替代新结果包验收。
 - Tools/claw-artifact-preview-smoke.mjs 补充短 SHA-256 指纹，增加缺失/错误指纹的 actionFailed、无 artifact、无 workspace 文件检查，并精确核对 pwd 为当前 session 目录。生产 Gateway 认证/审批/执行策略不变。
 - 本机仅 git diff --check / diff 静态复核通过；新 main 云端结果待核对，work.md 保存恢复入口。未进行本地编译或业务测试；既有用户文档/签名配置改动保留且不随本轮提交。
+
+### v0.87 精确云端验收（2026-11-17）
+
+- main SHA 6150c8c28bc8bd3201e0dda3642863cf88505bb7；run 44074605185 attempt 1，artifact claw-ci-v0.87-main-6150c8c28bc8-run44074605185-attempt1（2,028,174 bytes），缓存 /private/tmp/claw-review-44074605185。
+- manifest/JUnit/summary/主日志 16 项一致通过；iOS 与 Catalyst Release build 成功、preview 生产 Swift HTTP 路径通过，双平台各 175 项零失败/零跳过。只读 xcresulttool summary 复核一致；两张 PNG 已实际打开、ready attempt=2，native signing JSON 通过。
+- 本机仅静态检查和云端结果只读分析，没有本地编译/运行。默认 xcrun 无 xcresulttool，改用 /Applications/Xcode.app/Contents/Developer/usr/bin/xcresulttool 解码成功。Catalyst Metal 搜索路径 warning 为 runner 既有问题；不等于真实桌面/模型质量或分发验收，总目标继续。
+
+## v0.88 工作台任务入口与云端选测（2026-11-17）
+
+- 将命令面板拆出 ContentView，AI 规划作为主入口；连接未就绪时打开可直接保存配置的按需引导。规则预览/演练收进更多菜单，来源始终可见；⌘Return 仅规划，大字体按钮纵向排列。明确 Mac Gateway 执行权限和 iPad localhost/沙盒边界，参考 aitrans 引导方式但未修改参考项目。
+- 保守自动 full/workspace 选测、整个 push 范围、云端选择器自测；manifest/JUnit 明确 selected/skipped，实际 xcresult 摘要检查正数测试/零失败零跳过，workspace 固定 9 项。未知、共享合同和 CI/工程变更仍 full；不削弱业务断言。
+- 静态 git diff --check、workflow YAML 解析和 Xcode project plutil lint 通过；本轮因改变所有 CI 汇总/门槛及工程引用，需要 full 云端验证，结果待运行。真实模型质量、桌面 E2E、Mac 实际窗口/分发仍未验收。既有文档、DEVELOPMENT_TEAM、xcuserdata 改动不混入提交。

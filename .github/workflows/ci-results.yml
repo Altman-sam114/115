@@ -12,7 +12,7 @@ permissions:
 
 env:
   CI_POLICY_VERSION: v0.4
-  PRODUCT_ITERATION: v0.87
+  PRODUCT_ITERATION: v0.88
   PROJECT_NAME: Claw
   XCODE_PROJECT: Claw.xcodeproj
   XCODE_SCHEME: Claw
@@ -45,6 +45,22 @@ jobs:
           echo "branch_slug=$branch_slug" >> "$GITHUB_OUTPUT"
           echo "artifact_name=$artifact_name" >> "$GITHUB_OUTPUT"
 
+      - name: Select validation scope
+        id: scope
+        shell: bash
+        env:
+          CHANGE_BASE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          # Inspect the entire push, including multiple commits. Unknown/manual ranges stay full.
+          scope_base=unknown
+          if [[ "$CHANGE_BASE" =~ ^[0-9a-f]{40}$ && "$CHANGE_BASE" != 0000000000000000000000000000000000000000 ]]; then
+            if git cat-file -e "$CHANGE_BASE^{commit}" 2>/dev/null || git fetch --no-tags --depth=1 origin "$CHANGE_BASE"; then
+              scope_base="$CHANGE_BASE"
+            fi
+          fi
+          python3 Tools/select-ci-scope.py --base "$scope_base" 2>&1 | tee "$RESULT_DIR/ci-selection.log"
+
       - name: Git diff whitespace check
         id: diff_check
         continue-on-error: true
@@ -70,6 +86,7 @@ jobs:
 
       - name: Gateway JavaScript syntax check
         id: node_check
+        if: steps.scope.outputs.profile == 'full'
         continue-on-error: true
         shell: bash
         run: |
@@ -87,6 +104,7 @@ jobs:
 
       - name: Swift logic smoke
         id: swift_logic_smoke
+        if: steps.scope.outputs.profile == 'full'
         continue-on-error: true
         shell: bash
         run: |
@@ -105,6 +123,7 @@ jobs:
 
       - name: Gateway direct smoke
         id: gateway_direct_smoke
+        if: steps.scope.outputs.profile == 'full'
         continue-on-error: true
         shell: bash
         run: |
@@ -113,6 +132,7 @@ jobs:
 
       - name: Swift Gateway event fixture
         id: swift_gateway_fixture
+        if: steps.scope.outputs.profile == 'full'
         continue-on-error: true
         shell: bash
         run: |
@@ -131,6 +151,7 @@ jobs:
 
       - name: Self-hosted model planning smoke
         id: model_planning_smoke
+        if: steps.scope.outputs.profile == 'full'
         continue-on-error: true
         timeout-minutes: 3
         shell: bash
@@ -140,6 +161,7 @@ jobs:
 
       - name: Authenticated artifact preview smoke
         id: artifact_preview_smoke
+        if: steps.scope.outputs.profile == 'full'
         continue-on-error: true
         timeout-minutes: 2
         shell: bash
@@ -149,6 +171,7 @@ jobs:
 
       - name: Gateway WebSocket smoke
         id: gateway_websocket_smoke
+        if: steps.scope.outputs.profile == 'full'
         continue-on-error: true
         shell: bash
         run: |
@@ -285,12 +308,17 @@ jobs:
           print("Verified Xcode-native simulator signature and isolated simulated Keychain entitlements.")
           PY
             printf '%s\n' 'xcode-native-simulator-keychain-v1' > .derivedData-tests/.ci-simulator-keychain-ready
+            test_selection=()
+            while IFS= read -r test_identifier; do
+              [[ -z "$test_identifier" ]] || test_selection+=("$test_identifier")
+            done < "$RESULT_DIR/workspace-tests.txt"
             /usr/bin/xcodebuild \
               -project "$XCODE_PROJECT" \
               -scheme "$XCODE_SCHEME" \
               -configuration Debug \
               -destination "platform=iOS Simulator,id=$simulator_udid" \
               -derivedDataPath .derivedData-tests \
+              "${test_selection[@]}" \
               -resultBundlePath "$RESULT_DIR/ClawTests.xcresult" \
               -parallel-testing-enabled NO \
               -test-timeouts-enabled YES \
@@ -336,12 +364,17 @@ jobs:
             )"
             echo "Using iPad simulator $simulator_udid."
             xcrun simctl bootstatus "$simulator_udid" -b
+            test_selection=()
+            while IFS= read -r test_identifier; do
+              [[ -z "$test_identifier" ]] || test_selection+=("$test_identifier")
+            done < "$RESULT_DIR/workspace-tests.txt"
             /usr/bin/xcodebuild \
               -project "$XCODE_PROJECT" \
               -scheme "$XCODE_SCHEME" \
               -configuration Debug \
               -destination "platform=iOS Simulator,id=$simulator_udid" \
               -derivedDataPath .derivedData-tests \
+              "${test_selection[@]}" \
               -resultBundlePath "$RESULT_DIR/ClawIPadTests.xcresult" \
               -parallel-testing-enabled NO \
               -test-timeouts-enabled YES \
@@ -379,6 +412,7 @@ jobs:
           import datetime
           import json
           import os
+          import subprocess
           from pathlib import Path
           from xml.sax.saxutils import escape
 
@@ -402,6 +436,20 @@ jobs:
               ("workspace-screenshot-check", os.environ["WORKSPACE_SCREENSHOT_CHECK_OUTCOME"], "ci-results/workspace-screenshot-check.log"),
           ]
 
+          selection = json.loads((result_dir / "ci-selection.json").read_text())
+          import runpy
+          scope_policy = runpy.run_path("Tools/select-ci-scope.py")
+          expected = scope_policy["FULL_CHECKS"] if selection["profile"] == "full" else scope_policy["WORKSPACE_CHECKS"]
+          assert selection["profile"] in {"full", "workspace"}
+          assert selection["selectedChecks"] == sorted(expected)
+          assert selection["skippedChecks"] == sorted(scope_policy["FULL_CHECKS"] - expected)
+          assert selection["commitSha"] == os.environ["GITHUB_SHA"]
+          assert selection["runId"] == os.environ["GITHUB_RUN_ID"]
+          assert selection["runAttempt"] == os.environ["GITHUB_RUN_ATTEMPT"]
+          assert {name for name, _, _ in checks} == scope_policy["FULL_CHECKS"]
+          def check_passed(name, outcome):
+              return outcome == ("success" if name in expected or name not in scope_policy["FULL_CHECKS"] else "skipped")
+
           xctest_log = result_dir / "xctest.log"
           xctest_result_bundle = result_dir / "ClawTests.xcresult"
           missing_xctest_artifacts = []
@@ -415,6 +463,21 @@ jobs:
                   "failure" if missing_xctest_artifacts else "success",
                   "ci-results/xctest.log; ci-results/ClawTests.xcresult",
               ))
+
+          # Decode actual cloud xcresult summaries. Zero-test or skipped-only runs never pass.
+          for outcome_key, bundle, summary_name in [
+              ("XCTEST_OUTCOME", "ClawTests.xcresult", "iphone-test-summary.json"),
+              ("IPAD_XCTEST_OUTCOME", "ClawIPadTests.xcresult", "ipad-test-summary.json"),
+          ]:
+              if os.environ[outcome_key] == "success":
+                  summary = json.loads(subprocess.check_output([
+                      "xcrun", "xcresulttool", "get", "test-results", "summary", "--path", str(result_dir / bundle),
+                  ]))
+                  (result_dir / summary_name).write_text(json.dumps(summary, indent=2) + "\n")
+                  assert summary["result"] == "Passed" and summary["failedTests"] == 0 and summary["skippedTests"] == 0
+                  expected_count = len(scope_policy["WORKSPACE_TESTS"]) if selection["profile"] == "workspace" else None
+                  assert summary["passedTests"] == expected_count if expected_count else summary["passedTests"] > 0
+                  assert summary["totalTestCount"] == summary["passedTests"]
 
           missing_platform_artifacts = []
           for outcome_key, required in [
@@ -457,11 +520,12 @@ jobs:
           checks.append(("platform-artifacts", "failure" if missing_platform_artifacts else "success", ", ".join(missing_platform_artifacts) or "ci-results"))
 
           def aggregate(names):
-              selected = [outcome for name, outcome, _ in checks if name in names]
+              selected = [outcome for name, outcome, _ in checks if name in names and (name in expected or name not in scope_policy["FULL_CHECKS"])]
               return "success" if selected and all(outcome == "success" for outcome in selected) else "failure"
 
           manifest = {
               "version": os.environ["PRODUCT_ITERATION"],
+              "validationSelection": selection,
               "ciPolicyVersion": os.environ["CI_POLICY_VERSION"],
               "branch": os.environ["GITHUB_REF_NAME"],
               "commitSha": os.environ["GITHUB_SHA"],
@@ -515,7 +579,9 @@ jobs:
               ],
               "artifactName": os.environ["ARTIFACT_NAME"],
               "checks": [
-                  {"name": name, "outcome": outcome, "logPath": log_path}
+                  {"name": name, "outcome": outcome, "logPath": log_path,
+                   "selected": name in expected or name not in scope_policy["FULL_CHECKS"],
+                   "skipReason": "Presentation-only change; no execution contract edits." if name not in expected and name in scope_policy["FULL_CHECKS"] else None}
                   for name, outcome, log_path in checks
               ],
           }
@@ -525,7 +591,7 @@ jobs:
               encoding="utf-8",
           )
 
-          failures = [(name, outcome, log_path) for name, outcome, log_path in checks if outcome != "success"]
+          failures = [(name, outcome, log_path) for name, outcome, log_path in checks if not check_passed(name, outcome)]
           lines = [
               "# CI Failure Summary",
               "",
@@ -544,12 +610,14 @@ jobs:
               lines.append("Failing checks:")
               lines.extend(f"- {name}: {outcome}; see {log_path}" for name, outcome, log_path in failures)
           else:
-              lines.append("All CI checks passed.")
+              lines.append("All selected CI checks passed; unselected checks are explicitly skipped.")
           (result_dir / "ci-failure-summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
           testcases = []
           for name, outcome, log_path in checks:
-              if outcome == "success":
+              if name not in expected and name in scope_policy["FULL_CHECKS"] and outcome == "skipped":
+                  testcases.append(f'    <testcase classname="ClawCI" name="{escape(name)}"><skipped message="Not selected: presentation-only change" /></testcase>')
+              elif outcome == "success":
                   testcases.append(f'    <testcase classname="ClawCI" name="{escape(name)}" />')
               else:
                   testcases.append(
@@ -559,7 +627,7 @@ jobs:
                   )
           junit = [
               '<?xml version="1.0" encoding="UTF-8"?>',
-              f'<testsuite name="Claw CI Results" tests="{len(checks)}" failures="{len(failures)}">',
+              f'<testsuite name="Claw CI Results" tests="{len(checks)}" failures="{len(failures)}" skipped="{sum(name not in expected and outcome == "skipped" for name, outcome, _ in checks)}">',
               *testcases,
               '</testsuite>',
               '',
@@ -622,10 +690,23 @@ jobs:
               "package-results": os.environ["PACKAGE_RESULTS_OUTCOME"],
               "workspace-screenshot-check": os.environ["WORKSPACE_SCREENSHOT_CHECK_OUTCOME"],
           }
-          failed = {name: outcome for name, outcome in outcomes.items() if outcome != "success"}
+          import json, runpy
+          from pathlib import Path
+          selection = json.loads((Path(os.environ["RESULT_DIR"]) / "ci-selection.json").read_text())
+          policy = runpy.run_path("Tools/select-ci-scope.py")
+          assert selection["profile"] in {"full", "workspace"}
+          expected = policy["FULL_CHECKS"] if selection["profile"] == "full" else policy["WORKSPACE_CHECKS"]
+          assert selection["selectedChecks"] == sorted(expected)
+          assert selection["skippedChecks"] == sorted(policy["FULL_CHECKS"] - expected)
+          assert selection["commitSha"] == os.environ["GITHUB_SHA"]
+          assert selection["runId"] == os.environ["GITHUB_RUN_ID"]
+          assert selection["runAttempt"] == os.environ["GITHUB_RUN_ATTEMPT"]
+          assert set(outcomes) == policy["FULL_CHECKS"] | {"package-results"}
+          failed = {name: outcome for name, outcome in outcomes.items()
+                    if outcome != ("success" if name in expected or name == "package-results" else "skipped")}
           if failed:
               for name, outcome in failed.items():
                   print(f"{name}: {outcome}")
               sys.exit(1)
-          print("All CI checks passed.")
+          print("All selected CI checks passed; unselected checks are explicitly skipped.")
           PY

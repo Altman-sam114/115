@@ -418,3 +418,19 @@ flowchart TD
 ```
 
 v0.81：能力图标 -> 系统兼容 SF Symbol -> Mac/iPad 无效 symbol 警告为 0。
+
+## v0.88 输入入口
+
+```mermaid
+flowchart LR
+  Goal[用户输入目标] --> Button[AI 制定计划 / Command Return]
+  Button --> Ready{连接已保存且有效?}
+  Ready -->|否| Guide[连接与系统权限引导]
+  Guide --> Save[共享配置组件显式保存]
+  Save --> Goal
+  Ready -->|是| Plan[既有模型规划请求]
+  Plan --> Review[计划和参数复核]
+  Review --> Approval[既有审批与显式发送]
+```
+
+引导与保存不联网、不派发任务；规则和演练是独立菜单项，不能伪装成模型或真实执行。

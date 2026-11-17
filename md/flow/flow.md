@@ -495,3 +495,7 @@ child task/action/session ID 全部新建，actions 必须恰好是 selected act
 - CI manifest 的 commitSha/runId/runAttempt 必须对应 Agent C 正在验收的 `origin/main` 最新 run。
 
 v0.81 平台图标使用系统兼容的 SF Symbol，避免 Catalyst/iPad 启动日志产生 Invalid Configuration。
+
+## v0.88 工作台输入与连接引导
+
+PhoneAgentCommandPanel 独立于 ContentView -> 输入目标 -> 已保存有效连接时显式请求既有模型规划；未就绪时仅打开连接引导 -> 共享 ClawGatewayConfigurationView 保存配置 -> 用户关闭引导后再显式请求。规则预览/演练留在更多菜单，来源标签始终可见，⌘Return 只触发规划；所有实际任务仍走既有参数确认/审批/发送路径。
