@@ -4,6 +4,7 @@ struct PhoneAgentCommandPanel: View {
     @EnvironmentObject private var store: ClawStore
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var guide: SetupGuide?
+    @FocusState private var commandIsFocused: Bool
     let examples: [String]
     let onSelectDetail: (ClawWorkspaceDetailSection) -> Void
 
@@ -20,6 +21,7 @@ struct PhoneAgentCommandPanel: View {
         VStack(alignment: .leading, spacing: 12) {
             Label("Claw 工作台", systemImage: "display.and.arrow.down")
                 .font(.title3.bold())
+                .accessibilityAddTraits(.isHeader)
             Text("告诉 AI 你的目标，先看计划，再批准电脑执行。")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -29,6 +31,7 @@ struct PhoneAgentCommandPanel: View {
                 .padding(12)
                 .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
                 .privacySensitive()
+                .focused($commandIsFocused)
                 .accessibilityLabel("任务目标")
                 .accessibilityHint("只编辑本次任务；不会自动发送或执行")
                 .accessibilityIdentifier("workspace.command.input")
@@ -95,20 +98,24 @@ struct PhoneAgentCommandPanel: View {
                         Button(example) {
                             store.usePhoneAgentExample(example)
                             onSelectDetail(.plan)
+                            commandIsFocused = true
                         }
                     }
                 } label: {
                     Label("示例任务", systemImage: "lightbulb")
                         .frame(maxWidth: .infinity, minHeight: 44)
                 }
-                .accessibilityHint("只填入示例文字，不向电脑发送任务")
+                .accessibilityHint("只填入示例文字并聚焦输入框，便于继续修改，不向电脑发送任务")
+                .accessibilityIdentifier("workspace.command.examples")
 
                 Menu {
+                    Button("编辑任务目标", systemImage: "pencil") { commandIsFocused = true }
+                        .keyboardShortcut("l", modifiers: .command)
                     Button("预览规则计划", systemImage: "list.bullet.rectangle") {
                         store.generatePhoneAgentPlan()
                         onSelectDetail(.plan)
                     }
-                    Button("查看演练", systemImage: "play.circle") {
+                    Button("查看演练（模拟）", systemImage: "play.circle") {
                         store.simulatePhoneAgentExecution()
                         onSelectDetail(.events)
                     }
@@ -154,6 +161,7 @@ private struct ClawConnectionSetupGuide: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("完成") { dismiss() }
+                        .keyboardShortcut(.cancelAction)
                 }
             }
         }
@@ -162,7 +170,9 @@ private struct ClawConnectionSetupGuide: View {
 
     private func guideStep(_ title: String, icon: String, text: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label(title, systemImage: icon).font(.headline)
+            Label(title, systemImage: icon)
+                .font(.headline)
+                .accessibilityAddTraits(.isHeader)
             Text(text)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)

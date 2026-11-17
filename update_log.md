@@ -3173,3 +3173,9 @@
 - 将命令面板拆出 ContentView，AI 规划作为主入口；连接未就绪时打开可直接保存配置的按需引导。规则预览/演练收进更多菜单，来源始终可见；⌘Return 仅规划，大字体按钮纵向排列。明确 Mac Gateway 执行权限和 iPad localhost/沙盒边界，参考 aitrans 引导方式但未修改参考项目。
 - 保守自动 full/workspace 选测、整个 push 范围、云端选择器自测；manifest/JUnit 明确 selected/skipped，实际 xcresult 摘要检查正数测试/零失败零跳过，workspace 固定 9 项。未知、共享合同和 CI/工程变更仍 full；不削弱业务断言。
 - 静态 git diff --check、workflow YAML 解析和 Xcode project plutil lint 通过；本轮因改变所有 CI 汇总/门槛及工程引用，需要 full 云端验证，结果待运行。真实模型质量、桌面 E2E、Mac 实际窗口/分发仍未验收。既有文档、DEVELOPMENT_TEAM、xcuserdata 改动不混入提交。
+
+### v0.88 full 验收及键盘完善（2026-11-17）
+
+- e85694d7332a50e9a5193aca71cfbd75de7edcb9 / main / run 44077364459 attempt 1，artifact claw-ci-v0.88-main-e85694d7332a-run44077364459-attempt1（1,989,048 bytes），缓存 /private/tmp/claw-review-44077364459。选择器正确选择 full，manifest/JUnit/日志/云端实际测试摘要一致：16 项通过、双设备各 175 passed/0 failed/0 skipped；原生签名与两张实际打开的 PNG 正常（ready 2/1）。
+- 云端慢主要在模拟器迁移/启动：iPad boot 约 6 分钟，test-without-building 到宿主日志再约 6 分钟，实际 XCTest 12.5 秒。不能据此把业务测试或新界面代码当成瓶颈；后续设备生命周期优化需独立云端证据。
+- UI-only 补充输入聚焦/⌘L、示例后继续编辑、Esc 关闭引导、VoiceOver 标题和演练模拟标识，并记录 WorkBuddy 官方参考来源。git diff --check 通过；将使用此真实展示提交验收 workspace 分支，尚未预写成功。未运行本地编译/业务测试，真实键盘/VoiceOver 交互和生产模型/桌面/分发仍待专项。

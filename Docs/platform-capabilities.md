@@ -38,3 +38,7 @@ Mac Catalyst App 当前也是控制台，不是已经内置完整 Gateway 的原
 现有模型 HTTP smoke 使用小型本机服务夹具验证真实网络与合同，不证明真实模型推理质量。模拟、dry-run、收到 Live 事件、真实动作成功和人工验收应分别记录。生产签名和分发需要用户实际账号/证书及渠道选择，不能伪造。
 
 当前计划见 [work.md](../work.md)，发布门槛见 [release-readiness.md](release-readiness.md)，验证制度见 [test.md](../md/test/test.md)。
+
+## WorkBuddy 公开资料参考
+
+2026-11-17 只读核对[腾讯云官方产品页](https://cloud.tencent.com/product/workbuddy)。其公开描述重点为自然语言任务、拆解规划、工具执行、自我校验、授权目录内文件操作及可验收结果；也介绍云端托管任务。Claw 借鉴“任务到交付”的交互顺序，持续执行交给 Mac/self-hosted Gateway，不能把 iPad 后台在线等同于云端托管。官方多 Agent 能力不改变本项目本轮“不使用子 agent”的约束；本次未安装、登录或调用 WorkBuddy，也未把宣传文字当作其实际效果验证。
