@@ -25,6 +25,42 @@ enum LogicSmoke {
                     print("Artifact preview production HTTP client contract failed")
                     exit(1)
                 }
+                let selection = ClawArtifactPreviewSelection(
+                    taskID: taskID, sessionID: UUID(),
+                    artifact: ClawGatewayArtifact(id: artifactID, kind: .commandOutput, title: "Selected result",
+                        reference: "file:///must-not-be-opened-by-planning", isRedacted: true),
+                    binding: "production-http-fixture"
+                )
+                let evidence = try ClawModelPlanningEvidence(selection: selection, content: content)
+                let planningRequest = try ClawModelPlanningRequest(
+                    command: "Review this explicitly selected result and propose a safe next step", evidence: evidence
+                )
+                let planningWire = try ClawModelPlanningWireRequest.make(
+                    planningRequest, profile: store.clawGatewayProfile, token: token
+                )
+                let requestBody = try ClawPlanningJSON.object(planningWire.body, maxBytes: 1024)
+                guard Set(requestBody.keys) == ["controlPlane", "kind", "requestNonce", "command", "evidence"],
+                      let evidenceBody = requestBody["evidence"] as? [String: Any],
+                      Set(evidenceBody.keys) == ["taskID", "artifactID", "contentSHA256"],
+                      (evidenceBody["taskID"] as? String).flatMap(UUID.init(uuidString:)) == taskID,
+                      (evidenceBody["artifactID"] as? String).flatMap(UUID.init(uuidString:)) == artifactID,
+                      evidenceBody["contentSHA256"] as? String == String(ClawContinuationContract.sha256(content.text).dropFirst("sha256:".count)),
+                      !String(decoding: planningWire.body, as: UTF8.self).contains(content.text),
+                      !String(decoding: planningWire.body, as: UTF8.self).contains(token),
+                      !String(decoding: planningWire.body, as: UTF8.self).contains(selection.artifact.reference) else {
+                    print("Evidence planning production HTTP request contract failed")
+                    exit(1)
+                }
+                let planningData = try await URLSessionClawModelPlanningTransport().response(for: planningWire)
+                let planned = try ClawModelPlanningResponse.decode(planningData, nonce: planningRequest.nonce)
+                guard planned.proposal.actions.count == 1, planned.proposal.actions.first?.kind == .observeScreen,
+                      planned.usage.inputTokens == 7, planned.usage.outputTokens == 11,
+                      store.clawMobileTasks.isEmpty, store.clawGatewaySessions.isEmpty, store.gatewayEvents.isEmpty,
+                      store.lastGatewayLiveRequest == nil else {
+                    print("Evidence planning production HTTP response contract failed")
+                    exit(1)
+                }
+                print("Claw evidence planning production HTTP client smoke passed")
                 print("Claw artifact preview production HTTP client smoke passed")
             } catch {
                 print("Artifact preview production HTTP client failed with fixed diagnostic")

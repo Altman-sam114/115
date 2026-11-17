@@ -46,8 +46,9 @@ struct PhoneAgentCommandPanel: View {
             Button {
                 if store.gatewayConfigurationIsReady {
                     Task {
-                        await store.requestModelPlan()
-                        if store.modelPlanningPhase == .ready { onSelectDetail(.plan) }
+                        if let planID = await store.requestModelPlan(), store.phoneAgentPlan.id == planID {
+                            onSelectDetail(.plan)
+                        }
                     }
                 } else {
                     guide = .connection

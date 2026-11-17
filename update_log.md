@@ -3179,3 +3179,17 @@
 - e85694d7332a50e9a5193aca71cfbd75de7edcb9 / main / run 44077364459 attempt 1，artifact claw-ci-v0.88-main-e85694d7332a-run44077364459-attempt1（1,989,048 bytes），缓存 /private/tmp/claw-review-44077364459。选择器正确选择 full，manifest/JUnit/日志/云端实际测试摘要一致：16 项通过、双设备各 175 passed/0 failed/0 skipped；原生签名与两张实际打开的 PNG 正常（ready 2/1）。
 - 云端慢主要在模拟器迁移/启动：iPad boot 约 6 分钟，test-without-building 到宿主日志再约 6 分钟，实际 XCTest 12.5 秒。不能据此把业务测试或新界面代码当成瓶颈；后续设备生命周期优化需独立云端证据。
 - UI-only 补充输入聚焦/⌘L、示例后继续编辑、Esc 关闭引导、VoiceOver 标题和演练模拟标识，并记录 WorkBuddy 官方参考来源。git diff --check 通过；将使用此真实展示提交验收 workspace 分支，尚未预写成功。未运行本地编译/业务测试，真实键盘/VoiceOver 交互和生产模型/桌面/分发仍待专项。
+
+### v0.88 workspace 精确验收（2026-11-17）
+
+- 最新 origin/main SHA 818246d865e4d56ab8c9dbe2bce2c2b1b7239cd4；run 44082644085 attempt 1，artifact claw-ci-v0.88-main-818246d865e4-run44082644085-attempt1（1,442,383 bytes），缓存 /private/tmp/claw-review-44082644085。
+- 实际 ci-selection.json 正确覆盖本次整个 push，选择 workspace；manifest/JUnit/summary/实际日志一致为 9 项 selected success、7 项明确 skipped（不计成功）。iOS/Catalyst Release build 成功，双设备各 9 passed/0 failed/0 skipped；云端导出摘要与本机只读 xcresulttool 解码一致，native signing 全部正确；两张实际 PNG 已打开，ready 均 attempt=2，未见白屏或主要内容截断。
+- 本地 git diff --check、先前 YAML 解析/plutil/工程 ID 唯一性/文档路径静态检查通过；没有本地编译或业务测试。Gateway/model/fixture/LogicSmoke 在此纯展示提交未选；它们的 full 基线为 e85694d / run 44077364459 attempt 1（16 项、各 175 tests），不冒充最新 SHA 的全套结果。
+- v0.88 切片收口。真实键盘/VoiceOver/分屏交互、授权桌面 E2E、真实模型推理质量、生产签名分发未验收；Catalyst runner Metal 搜索路径 warning 保留。全程未开子 agent、未修改只读 aitrans。最终证据日志/工作台仅本地更新，不为纯文档触发业务 CI；已有用户流程与工程签名改动继续保留。
+
+## v0.89 显式证据驱动规划（2026-11-17）
+
+- 用户已读取的当前Live文本结果，可明确交给已配置电脑模型制定下一步计划；客户端仅传ID与SHA256，Gateway只从既有不可变注册表解析1..8192字节完整快照。未知/过期/超限/摘要不符固定409且不推理，不接受客户端正文/路径，不读磁盘或自动执行。
+- Store绑定已读selection与generation；关闭/重读/配置/任务变化取消并拒绝迟到响应；普通规划不受无关清理影响。成功返回本次planID，修复UI旧请求误领替代计划的并发归属问题；保留逐项参数复核/审批。
+- 按用户2026-11-17最新要求启用3个并行子代理，分别实现Node合同、Swift XCTest、生产HTTP集成，主代理负责Core/Store/UI/文档和整体验收；交叉核对补强了请求归属、provider入口计数、日志脱敏。未修改只读aitrans。
+- 新增11项XCTest预计186；Node负向矩阵、真实writer→生产Swift双HTTP→模型stub闭环、无新增workspace字节和固定诊断。当前仅静态检查，云端待新SHA；真实模型质量、Mac/iPad实际交互、桌面E2E和分发仍未验收。

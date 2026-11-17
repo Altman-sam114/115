@@ -384,3 +384,9 @@ v0.81 云端日志须无 `Invalid Configuration` 或 `No symbol named` 图标警
 `Tools/select-ci-scope.py` 按整个 push before..HEAD 选择 full/workspace。仅显式列出的工作台布局/输入/导航/MainTab/WorkspaceLayout 展示文件可选 workspace；Store、schema、协议、Gateway、模型、工程、测试、CI、未知/空/手动范围一律 full。选择器在云端先自测，不提供未实现的任意模块或手动 profile 参数。
 
 workspace 选择 git diff/plutil、iOS/Catalyst Release、双设备各 9 项固定 workspace XCTest 与实际启动截图；跳过 Gateway/model/Swift fixture/LogicSmoke。ci-selection.json 保留原因与改动范围，manifest 标记 selected/skipReason，JUnit 用 skipped，不能当作通过。门槛仅允许事先未选的项 skipped；选中项必须 success。云端解码实际 xcresult 摘要入包，workspace 必须恰为 9 passed/0 failed/0 skipped，full 必须正数 passed 且零失败/跳过。首次更改 CI 门槛/工程时 full；展示提交需另外实际验收 workspace 分支。
+
+## v0.89 证据规划回归
+
+本轮共享 Store/Swift 请求和 Gateway 模型控制面/快照注册表相交，选择 full：保留旧模型规划、preview、Gateway direct/WebSocket、Swift fixture/LogicSmoke，以及 iOS/Catalyst 编译和双设备 XCTest/实际启动图，检查没有改变既有审批/执行副作用边界。
+
+新增11项 XCTest，预计总186；覆盖独立已知 SHA256向量、UTF8/类型预算、未读/伪造/重复身份/dirty/模拟/超限零transport、成功不改任务/审批/checkpoint、旧响应不覆盖或冒领新计划。Node矩阵覆盖4种快照、身份/摘要/字节/TTL/淘汰、非法引用不推理、固定角色隔离；preview smoke使用真实writer→生产Swift preview/planning HTTP→内存快照→本机模型stub，并核对磁盘变更不被重新读取、模型入口总次数与两端日志脱敏、workspace字节不变。stub仅证明合同和真实I/O，不证明真实模型推理质量或授权桌面E2E。

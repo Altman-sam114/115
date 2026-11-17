@@ -434,3 +434,24 @@ flowchart LR
 ```
 
 引导与保存不联网、不派发任务；规则和演练是独立菜单项，不能伪装成模型或真实执行。
+
+## v0.89 结果驱动的下一步规划
+
+```mermaid
+flowchart TD
+  Read[显式读取当前 Live 结果] --> Choose[用户编辑目标并选择将此结果用于 AI 规划]
+  Choose --> Client{当前唯一 selection + 已读快照 + 8 KiB?}
+  Client -->|否| Stop[固定诊断 / 不推理 / 无执行副作用]
+  Client -->|是| Reference[只发送 task/artifact ID 与 SHA256]
+  Reference --> Registry{内存 writer 快照 / 身份 / 摘要 / TTL / 8 KiB}
+  Registry -->|否| Stop
+  Registry -->|是| Model[固定 system + 不可信证据 user JSON]
+  Model --> Proposal[原 typed proposal 与 effects 校验]
+  Proposal --> Bound{本次请求及 scope 仍有效?}
+  Bound -->|否| Discard[丢弃迟到响应]
+  Bound -->|是| Plan[返回本次接受的计划 ID]
+  Plan --> Review[用户查看计划 / 逐项参数确认 / 审批 / 显式发送]
+  Close[关闭 / 重读 / 配置或任务变化] --> Discard
+```
+
+Gateway证据解析路径不读取磁盘、不自动执行；普通无证据规划不因无关preview清理而取消。

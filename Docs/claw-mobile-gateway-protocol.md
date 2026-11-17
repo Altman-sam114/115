@@ -677,3 +677,15 @@ v0.76 readiness 修复不改变上述 wire schema 或 Gateway route。客户端 
 v0.80：Gateway live transport 失败不会被本机 simulator retry 冒充成功。Store 只对进程内登记的 simulated session 暴露重试入口；真实失败需重新审批并发送新任务，原始 session、事件和 artifact 保持可审计。
 
 v0.81 客户端能力图标不影响 Gateway schema；平台显示使用系统兼容符号。
+
+## v0.89 用户选择结果后的模型规划
+
+不新增 computer-control action/artifact，也不改变响应或审批 schema。`claw.gateway.planning.v1` 的既有 POST `/claw/planning` 请求仍接受四字段 `controlPlane/kind/requestNonce/command`；现在另可包含一个可选 `evidence`，其 shape 恰为 `{taskID: UUID, artifactID: UUID, contentSHA256: 64位小写十六进制 SHA-256}`。不接受 client content/path/reference/sessionID 或额外字段。保持 runtime token 仅 header、no-store、secure origin、strict JSON/UTF-8/duplicate-key、32 KiB request/65 KiB client response 和固定两项 false effects；旧客户端的无证据请求兼容，旧 Gateway 不支持扩展时明确失败，不自动降级丢弃证据。
+
+客户端必须已显式读取当前 clean Live Mission 的唯一 artifact，selection 的 task/session/artifact/profile binding 与 ready state 完整相符；只为 fileDiff/commandOutput/browserTrace/messageDraft 的 1..8192 UTF-8 bytes 完整正文生成摘要。预览上限仍为32 KiB，8193..32768字节结果仍可读但不能用于本轮模型输入，不截断。请求不含正文、客户端文件路径或 reference；本地 ID/摘要不进入 checkpoint、授权或任务 envelope。
+
+Gateway 仅从现有不可变 ArtifactPreviewRegistry 取同 task/artifact 的 writer 快照，独立校验支持kind、真实字节数、SHA-256 和 8 KiB预算。未知、TTL过期、淘汰、空、超限或摘要不符统一 HTTP409 `planning_evidence_unavailable`；引用结构非法为400 `planning_invalid_request`。所有拒绝只返回固定 planningError shape，不联系模型、不读磁盘、不派发任务、不创建 workspace/event/artifact、不消费receipt或改变审批。
+
+有证据时，模型 user message 是 JSON `{command, evidence:{kind,content}}`；无证据时保留原 command 文本。固定 system message 将证据定义为不可信数据，不能改变工具/权限/审批合同；服务端依据已验证的 evidence 选择固定模式说明，无证据 command 即使长得像 JSON 也仅作目标原文，不冒充注册表证据。不会额外向模型附带 token、task/artifact ID、摘要或客户端reference；正文自身可能含路径或敏感信息，必须由用户明确选择后才交给其配置的电脑模型。此隔离不声称已证明真实模型防提示注入。
+
+编辑目标、连接/模式/任务变化使旧请求失效；关闭/重新读取预览或离开前台时取消该证据规划等待，迟到响应丢弃；普通无证据规划不受无关清理影响。仅本次真正接受的响应返回 planID，界面不能用全局 ready 冒领其他请求结果。成功后可关闭预览并查看计划，但仍须独立生成任务、逐项确认参数、审批和显式发送；成功规划不构成动作授权。客户端停止等待不承诺撤销已开始的远端推理。

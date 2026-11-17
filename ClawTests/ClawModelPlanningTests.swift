@@ -295,6 +295,80 @@ final class ClawModelPlanningTests: XCTestCase {
         }
     }
 
+    func testPlanningEvidenceReferenceBindsSnapshotWithoutEncodingContentOrPaths() throws {
+        let artifact = ClawGatewayArtifact(kind: .commandOutput, title: "Private result title",
+            reference: "file:///never-forward-this-path", isRedacted: false)
+        let selection = ClawArtifactPreviewSelection(taskID: UUID(), sessionID: UUID(), artifact: artifact, binding: "current-profile")
+        let evidence = try ClawModelPlanningEvidence(selection: selection, content: .init(text: "abc", byteCount: 3))
+        XCTAssertEqual(evidence.taskID, selection.taskID)
+        XCTAssertEqual(evidence.artifactID, artifact.id)
+        XCTAssertEqual(evidence.contentSHA256, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+        let request = try ClawModelPlanningRequest(command: "Summarize the selected result", nonce: "evidence_nonce_123", evidence: evidence)
+        let data = try request.encodedData()
+        let root = try ClawPlanningJSON.object(data, maxBytes: 32768)
+        XCTAssertEqual(Set(root.keys), ["controlPlane", "kind", "requestNonce", "command", "evidence"])
+        let reference = try XCTUnwrap(root["evidence"] as? [String: String])
+        XCTAssertEqual(Set(reference.keys), ["taskID", "artifactID", "contentSHA256"])
+        XCTAssertEqual(reference["taskID"].flatMap(UUID.init(uuidString:)), selection.taskID)
+        XCTAssertEqual(reference["artifactID"].flatMap(UUID.init(uuidString:)), artifact.id)
+        XCTAssertEqual(reference["contentSHA256"], evidence.contentSHA256)
+        let raw = String(decoding: data, as: UTF8.self)
+        for forbidden in [artifact.reference, artifact.title, selection.sessionID.uuidString, selection.binding] {
+            XCTAssertFalse(raw.contains(forbidden))
+        }
+        let plain = try ClawPlanningJSON.object(ClawModelPlanningRequest(command: "No evidence").encodedData(), maxBytes: 32768)
+        XCTAssertEqual(Set(plain.keys), ["controlPlane", "kind", "requestNonce", "command"])
+    }
+
+    func testPlanningEvidenceRejectsInvalidSnapshotsAndUsesUTF8Boundaries() throws {
+        let selection = ClawArtifactPreviewSelection(taskID: UUID(), sessionID: UUID(),
+            artifact: .init(kind: .browserTrace, title: "Result", reference: "file:///not-read", isRedacted: false), binding: "profile")
+        let boundary = String(repeating: "中", count: 2730) + "ab"
+        XCTAssertEqual(boundary.utf8.count, 8192)
+        XCTAssertNoThrow(try ClawModelPlanningEvidence(selection: selection, content: .init(text: boundary, byteCount: 8192)))
+        for content in [ClawArtifactPreviewContent(text: "", byteCount: 0),
+                        .init(text: boundary + "x", byteCount: 8193),
+                        .init(text: String(repeating: "中", count: 2731), byteCount: 8193),
+                        .init(text: "bad\0text", byteCount: 8),
+                        .init(text: "abc", byteCount: 2)] {
+            XCTAssertThrowsError(try ClawModelPlanningEvidence(selection: selection, content: content)) {
+                XCTAssertEqual($0 as? ClawModelPlanningError, .evidenceUnavailable)
+            }
+        }
+        for kind in [ClawGatewayArtifactKind.auditLog, .agentTrace, .screenshot, .accessibilityTree] {
+            var artifact = selection.artifact
+            artifact.kind = kind
+            let protected = ClawArtifactPreviewSelection(taskID: selection.taskID, sessionID: selection.sessionID,
+                artifact: artifact, binding: selection.binding)
+            XCTAssertThrowsError(try ClawModelPlanningEvidence(selection: protected, content: .init(text: "abc", byteCount: 3)))
+        }
+    }
+
+    func testUnavailableEvidenceErrorDoesNotExposeResponsePayload() throws {
+        let data = try JSONSerialization.data(withJSONObject: ["controlPlane": ClawModelPlanningRequest.controlPlane,
+            "kind": "planningError", "errorCode": "planning_evidence_unavailable"])
+        XCTAssertThrowsError(try ClawModelPlanningResponse.decode(data, nonce: "evidence_nonce_123")) {
+            XCTAssertEqual($0 as? ClawModelPlanningError, .evidenceUnavailable)
+        }
+        XCTAssertFalse(ClawModelPlanningError.evidenceUnavailable.message.contains("file://"))
+    }
+
+    func testClearingUnrelatedPreviewDoesNotCancelPlainModelPlanning() async {
+        let store = makeStore()
+        let held = PlanningRecorder(held: true, ignoresCancellation: true)
+        let operation = Task { await store.requestModelPlan(transport: held) }
+        let started = await waitFor(held)
+        XCTAssertTrue(started)
+        store.clearArtifactPreview()
+        XCTAssertEqual(store.modelPlanningPhase, .requesting)
+        await held.release()
+        let acceptedID = await operation.value
+        XCTAssertEqual(acceptedID, store.phoneAgentPlan.id)
+        XCTAssertEqual(store.modelPlanningPhase, .ready)
+        XCTAssertEqual(store.phoneAgentPlan.source, .configuredModel)
+        XCTAssertTrue(store.clawMobileTasks.isEmpty && store.clawGatewaySessions.isEmpty && store.gatewayEvents.isEmpty)
+    }
+
     private func makeStore(checkpointStore: any ClawMissionRunCheckpointStore = ClawNoopMissionRunCheckpointStore()) -> ClawStore {
         let store = ClawStore(autoScanLocalArtifacts: false, checkpointStore: checkpointStore)
         store.setGateway(url: "ws://127.0.0.1:18789", token: "planning-secret")

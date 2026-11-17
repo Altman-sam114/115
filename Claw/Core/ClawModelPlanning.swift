@@ -7,7 +7,7 @@ enum ClawPlanSource: Equatable, Sendable {
 }
 
 enum ClawModelPlanningError: String, Error, Equatable, Sendable {
-    case configuration, invalidInput, invalidResponse, transport, timeout, capacity
+    case configuration, invalidInput, invalidResponse, transport, timeout, capacity, evidenceUnavailable
     var message: String {
         switch self {
         case .configuration: "请保存有效 Gateway 地址和凭据，并在桌面配置本机 Ollama 与模型。"
@@ -16,6 +16,7 @@ enum ClawModelPlanningError: String, Error, Equatable, Sendable {
         case .transport: "模型规划请求失败；不会自动重试或切换到模拟结果。"
         case .timeout: "模型规划超时；不会自动重试，远端计算可能尚未停止。"
         case .capacity: "桌面模型正在处理其他规划，请稍后显式重试。"
+        case .evidenceUnavailable: "这份结果尚未读取、已变化或超过 8 KiB，请重新读取合适的结果；不会截断或改用其他内容。"
         }
     }
 }
@@ -42,12 +43,36 @@ struct ClawModelPlanningUsage: Equatable, Sendable {
     }
 }
 
+/// A reference to exactly the snapshot the user read; raw content never enters this request.
+struct ClawModelPlanningEvidence: Equatable, Sendable {
+    static let maxBytes = 8_192
+    let taskID: UUID
+    let artifactID: UUID
+    let contentSHA256: String
+
+    init(selection: ClawArtifactPreviewSelection, content: ClawArtifactPreviewContent) throws {
+        guard ClawArtifactPreviewSelection.supports(selection.artifact.kind),
+              (1...Self.maxBytes).contains(content.text.utf8.count),
+              content.byteCount == content.text.utf8.count, !content.text.contains("\0") else {
+            throw ClawModelPlanningError.evidenceUnavailable
+        }
+        taskID = selection.taskID
+        artifactID = selection.artifact.id
+        contentSHA256 = String(ClawContinuationContract.sha256(content.text).dropFirst("sha256:".count))
+    }
+
+    var fields: [String: String] {
+        ["taskID": taskID.uuidString, "artifactID": artifactID.uuidString, "contentSHA256": contentSHA256]
+    }
+}
+
 struct ClawModelPlanningRequest: Sendable {
     static let controlPlane = "claw.gateway.planning.v1"
     let command: String
     let nonce: String
+    let evidence: ClawModelPlanningEvidence?
 
-    init(command: String, nonce: String = UUID().uuidString.lowercased()) throws {
+    init(command: String, nonce: String = UUID().uuidString.lowercased(), evidence: ClawModelPlanningEvidence? = nil) throws {
         let command = command.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !command.isEmpty, command.utf8.count <= 4_096, !command.contains("\0"),
               (8...128).contains(nonce.utf8.count), nonce.utf8.allSatisfy({
@@ -55,12 +80,15 @@ struct ClawModelPlanningRequest: Sendable {
               }) else { throw ClawModelPlanningError.invalidInput }
         self.command = command
         self.nonce = nonce
+        self.evidence = evidence
     }
 
     func encodedData() throws -> Data {
-        try JSONSerialization.data(withJSONObject: [
+        var fields: [String: Any] = [
             "controlPlane": Self.controlPlane, "kind": "planningRequest", "requestNonce": nonce, "command": command
-        ], options: [.sortedKeys])
+        ]
+        if let evidence { fields["evidence"] = evidence.fields }
+        return try JSONSerialization.data(withJSONObject: fields, options: [.sortedKeys])
     }
 }
 
@@ -166,6 +194,7 @@ struct ClawModelPlanningResponse: Sendable {
             case "planning_not_configured", "planning_unauthorized": throw ClawModelPlanningError.configuration
             case "planning_timeout": throw ClawModelPlanningError.timeout
             case "planning_capacity": throw ClawModelPlanningError.capacity
+            case "planning_evidence_unavailable": throw ClawModelPlanningError.evidenceUnavailable
             default: throw ClawModelPlanningError.invalidResponse
             }
         }

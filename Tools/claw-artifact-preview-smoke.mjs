@@ -38,6 +38,33 @@ const boundary = { id: crypto.randomUUID(), kind: "commandOutput" };
 registry.register(taskID, boundary, "x".repeat(32768));
 expect(registry.find(taskID, boundary.id)?.byteCount === 32768, "maximum complete snapshot must be retained");
 
+// A bounded local model fixture proves the real planning HTTP route consumes the
+// immutable writer snapshot. It never downloads weights or executes tools.
+const modelRequests = [];
+let modelHits = 0;
+const provider = http.createServer(async (request, response) => {
+  modelHits += 1;
+  try {
+    const chunks = [];
+    let bytes = 0;
+    for await (const chunk of request) {
+      bytes += chunk.length;
+      if (bytes > 32768) throw new Error("fixture_request_capacity");
+      chunks.push(chunk);
+    }
+    modelRequests.push({ path: request.url, headers: request.headers, body: JSON.parse(Buffer.concat(chunks)) });
+    response.writeHead(200, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ done: true, done_reason: "stop", message: { role: "assistant",
+      content: JSON.stringify({ summary: "Review selected evidence before any further action", actions: [
+        { kind: "observeScreen", goal: "Observe the authorized desktop for the next reviewed step", inputs: {} },
+      ] }) }, prompt_eval_count: 7, eval_count: 11 }));
+  } catch {
+    response.writeHead(500, { "Content-Type": "application/json" });
+    response.end('{"error":"fixture_invalid_request"}');
+  }
+});
+await new Promise((resolve) => provider.listen(0, "127.0.0.1", resolve));
+
 const finder = net.createServer();
 await new Promise((resolve) => finder.listen(0, "127.0.0.1", resolve));
 const port = finder.address().port;
@@ -48,6 +75,8 @@ const gateway = spawn(process.execPath, ["Tools/claw-gateway-server.mjs"], { env
   CLAW_WORKSPACE: workspace, CLAW_ALLOW_SHELL: "1", CLAW_SHELL_ALLOWLIST: "pwd", CLAW_ALLOW_BROWSER_NETWORK: "0",
   CLAW_ALLOW_BROWSER_CONTROL: "0", CLAW_ALLOW_SCREEN_CAPTURE: "0", CLAW_ALLOW_DESKTOP_CONTROL: "0",
   CLAW_ALLOW_WINDOW_METADATA: "0", CLAW_ALLOW_ACCESSIBILITY_OBSERVE: "0",
+  CLAW_PLANNER_ENDPOINT: `http://127.0.0.1:${provider.address().port}/api/chat`,
+  CLAW_PLANNER_MODEL: "fixture-only:no-weights", CLAW_PLANNER_TIMEOUT_MS: "3000",
 }, stdio: ["ignore", "pipe", "pipe"] });
 gateway.stdout.on("data", (data) => { output += data; });
 gateway.stderr.on("data", (data) => { output += data; });
@@ -100,6 +129,7 @@ try {
   const stored = events.flatMap((event) => event.artifacts || []).find((item) => item.kind === "commandOutput");
   expect(stored, "real writer must produce command output");
   const initial = await fs.readFile(new URL(stored.reference), "utf8");
+  const contentDigest = crypto.createHash("sha256").update(initial).digest("hex");
   const sessionWorkspace = path.join(workspace, "sessions", connected.sessionID);
   expect(initial.includes(`stdout:\n${sessionWorkspace}\n`) && initial.includes("exitCode=0"), "fixture must inspect only its isolated session workspace");
   const successBody = body(stored.id);
@@ -144,11 +174,49 @@ try {
   const code = await new Promise((resolve, reject) => { client.once("error", reject); client.once("close", resolve); });
   clearTimeout(clientTimer);
   expect(code === 0 && clientOutput.includes("Claw artifact preview production HTTP client smoke passed"), "production Swift HTTP transport must read the writer snapshot");
+  expect(clientOutput.includes("Claw evidence planning production HTTP client smoke passed"), "production Swift planning HTTP transport must consume the selected snapshot");
+  expect(modelHits === 1 && modelRequests.length === 1 && modelRequests[0].path === "/api/chat", "selected evidence must contact the configured model exactly once, including malformed attempts");
+  const modelRequest = modelRequests[0];
+  const messages = modelRequest.body.messages;
+  expect(messages.length === 2 && messages[0].role === "system" && messages[1].role === "user", "evidence cannot add roles or alter the system contract");
+  const modelInput = JSON.parse(messages[1].content);
+  expect(Object.keys(modelInput).sort().join(",") === "command,evidence"
+    && Object.keys(modelInput.evidence).sort().join(",") === "content,kind"
+    && modelInput.command === "Review this explicitly selected result and propose a safe next step"
+    && modelInput.evidence.kind === "commandOutput" && modelInput.evidence.content === initial,
+  "the model must receive the exact original writer snapshot, never the replaced disk content");
+  expect(!messages[0].content.includes(initial) && !JSON.stringify(modelRequest).includes(token)
+    && !JSON.stringify(modelRequest).includes(stored.id) && !JSON.stringify(modelRequest).includes(taskID)
+    && !JSON.stringify(modelRequest).includes(stored.reference)
+    && !JSON.stringify(modelRequest).includes(contentDigest)
+    && !modelRequest.headers.authorization, "model input must exclude credentials and evidence identity/digest");
+  for (const evidence of [
+    { taskID: crypto.randomUUID(), artifactID: stored.id, contentSHA256: contentDigest },
+    { taskID, artifactID: stored.id, contentSHA256: "0".repeat(64) },
+    { taskID, artifactID: protectedArtifact.id, contentSHA256: contentDigest },
+  ]) {
+    const priorHits = modelHits;
+    const response = await fetch(`http://127.0.0.1:${port}/claw/planning`, { method: "POST", headers: {
+      "Content-Type": "application/json", "X-Claw-Control-Plane": "claw.gateway.planning.v1", Authorization: `Bearer ${token}`,
+    }, body: JSON.stringify({ controlPlane: "claw.gateway.planning.v1", kind: "planningRequest",
+      requestNonce: crypto.randomBytes(16).toString("hex"), command: "Review this result", evidence }),
+    signal: AbortSignal.timeout(5000), redirect: "manual" });
+    const result = await response.json();
+    expect(response.status === 409 && result.errorCode === "planning_evidence_unavailable"
+      && Object.keys(result).sort().join(",") === "controlPlane,errorCode,kind", "unavailable evidence must fail with fixed diagnostics");
+    expect(modelHits === priorHits, "each unavailable evidence request must leave total provider attempts unchanged");
+  }
+  expect(modelHits === 1 && modelRequests.length === 1, "invalid evidence must never reach the model or trigger fallback planning");
   expect(JSON.stringify(await tree(workspace)) === before, "all preview calls must leave every workspace byte unchanged");
-  expect(!output.includes(token) && !output.includes(marker) && !output.includes(stored.id) && !clientOutput.includes(token), "logs must not leak identity/content/credentials");
-  console.log("Claw artifact preview smoke passed (bounded registry, authenticated writer snapshot, immutable/no file reads, production Swift HTTP client, no preview execution effects)");
+  for (const privateValue of [token, marker, stored.id, taskID, contentDigest, sessionWorkspace, stored.reference,
+    initial, JSON.stringify(initial).slice(1, -1)]) {
+    expect(!output.includes(privateValue) && !clientOutput.includes(privateValue), "logs must not leak identity/content/credentials, including raw or JSON-escaped snapshot bytes");
+  }
+  console.log("Claw artifact preview smoke passed (bounded registry, authenticated writer snapshot, immutable/no file reads, production Swift preview and evidence planning HTTP clients, fixed unavailable evidence, no execution effects)");
 } finally {
   gateway.kill();
+  provider.closeAllConnections();
+  await new Promise((resolve) => provider.close(resolve));
 }
 
 function dispatch(envelope) {

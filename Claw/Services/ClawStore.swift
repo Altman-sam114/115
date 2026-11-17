@@ -736,6 +736,7 @@ final class ClawStore: ObservableObject {
     private var missionRunCheckpoint: ClawMissionRunCheckpoint?
     private var lastMissionRunCheckpointAttempt: ClawMissionRunCheckpoint?
     private var modelPlanningTask: Task<Data, Error>?
+    private var modelPlanningUsesArtifactPreview = false
     private var modelPlanningGeneration = 0
     private var modelPlanningCommandRevision = 0
     private var artifactPreviewTask: Task<Data, Error>?
@@ -2922,19 +2923,25 @@ final class ClawStore: ObservableObject {
         lastClawMobileEnvelope = "Claw 电脑接管计划已更新，可生成 computer-control envelope。"
     }
 
-    func requestModelPlan<T: ClawModelPlanningTransport>(transport: T = URLSessionClawModelPlanningTransport()) async {
-        guard modelPlanningTask == nil else { return }
+    @discardableResult
+    func requestModelPlan<T: ClawModelPlanningTransport>(
+        evidenceSelection: ClawArtifactPreviewSelection? = nil,
+        transport: T = URLSessionClawModelPlanningTransport()
+    ) async -> UUID? {
+        guard modelPlanningTask == nil else { return nil }
         let request: ClawModelPlanningRequest
         let wire: ClawModelPlanningWireRequest
+        let previewGeneration = artifactPreviewGeneration
         do {
-            request = try ClawModelPlanningRequest(command: phoneAgentCommand)
             guard gatewayConfigurationIsReady else {
                 throw ClawModelPlanningError.configuration
             }
+            let evidence = try evidenceSelection.map { try planningEvidence(for: $0) }
+            request = try ClawModelPlanningRequest(command: phoneAgentCommand, evidence: evidence)
             wire = try ClawModelPlanningWireRequest.make(request, profile: clawGatewayProfile, token: gatewayToken)
         } catch {
             modelPlanningPhase = .failed((error as? ClawModelPlanningError) ?? .configuration)
-            return
+            return nil
         }
         modelPlanningGeneration &+= 1
         let generation = modelPlanningGeneration
@@ -2944,18 +2951,25 @@ final class ClawStore: ObservableObject {
         acceptedModelPlanID = nil
         acceptedModelPlanProfile = nil
         acceptedModelPlanCommandRevision = nil
+        modelPlanningUsesArtifactPreview = evidenceSelection != nil
         let task = Task { try await transport.response(for: wire) }
         modelPlanningTask = task
-        defer { if modelPlanningGeneration == generation { modelPlanningTask = nil } }
+        defer {
+            if modelPlanningGeneration == generation {
+                modelPlanningTask = nil
+                modelPlanningUsesArtifactPreview = false
+            }
+        }
         do {
             let data = try await withTaskCancellationHandler {
                 try await task.value
             } onCancel: { task.cancel() }
             try Task.checkCancellation()
-            guard !task.isCancelled, modelPlanningGeneration == generation else { return }
-            guard modelPlanningBinding() == binding else {
+            guard !task.isCancelled, modelPlanningGeneration == generation else { return nil }
+            guard modelPlanningBinding() == binding,
+                  planningEvidenceIsCurrent(evidenceSelection, generation: previewGeneration) else {
                 modelPlanningPhase = .stale
-                return
+                return nil
             }
             let response = try ClawModelPlanningResponse.decode(data, nonce: request.nonce)
             phoneAgentPlan = response.proposal.plan(command: request.command)
@@ -2965,15 +2979,17 @@ final class ClawStore: ObservableObject {
             modelPlanningUsage = response.usage
             modelPlanningPhase = .ready
             phoneAgentExecutionLog = "自托管模型计划已校验，尚未生成、审批或发送电脑任务。"
+            return phoneAgentPlan.id
         } catch {
-            guard modelPlanningGeneration == generation else { return }
+            guard modelPlanningGeneration == generation else { return nil }
             if Task.isCancelled || task.isCancelled || error is CancellationError {
                 modelPlanningPhase = .cancelled
-            } else if modelPlanningBinding() != binding {
+            } else if modelPlanningBinding() != binding || !planningEvidenceIsCurrent(evidenceSelection, generation: previewGeneration) {
                 modelPlanningPhase = .stale
             } else {
                 modelPlanningPhase = .failed((error as? ClawModelPlanningError) ?? .transport)
             }
+            return nil
         }
     }
 
@@ -2987,6 +3003,7 @@ final class ClawStore: ObservableObject {
         modelPlanningGeneration &+= 1
         modelPlanningTask?.cancel()
         modelPlanningTask = nil
+        modelPlanningUsesArtifactPreview = false
         acceptedModelPlanID = nil
         acceptedModelPlanProfile = nil
         acceptedModelPlanCommandRevision = nil
@@ -3028,6 +3045,26 @@ final class ClawStore: ObservableObject {
         return artifacts.suffix(64).filter { artifact in
             ClawArtifactPreviewSelection.supports(artifact.kind) && counts[artifact.id] == 1
         }.map { ClawArtifactPreviewSelection(taskID: task.id, sessionID: session.id, artifact: $0, binding: binding) }
+    }
+
+    func canPlan(using selection: ClawArtifactPreviewSelection) -> Bool {
+        (try? planningEvidence(for: selection)) != nil
+    }
+
+    func isPlanning(using selection: ClawArtifactPreviewSelection) -> Bool {
+        modelPlanningTask != nil && modelPlanningUsesArtifactPreview && canPlan(using: selection)
+    }
+
+    private func planningEvidence(for selection: ClawArtifactPreviewSelection) throws -> ClawModelPlanningEvidence {
+        guard gatewayConfigurationIsReady, availableArtifactPreviews.contains(selection),
+              case .ready(let current, let content) = artifactPreviewState,
+              current == selection else { throw ClawModelPlanningError.evidenceUnavailable }
+        return try ClawModelPlanningEvidence(selection: selection, content: content)
+    }
+
+    private func planningEvidenceIsCurrent(_ selection: ClawArtifactPreviewSelection?, generation: Int) -> Bool {
+        guard let selection else { return true }
+        return artifactPreviewGeneration == generation && canPlan(using: selection)
     }
 
     func artifactPreviewState(for selection: ClawArtifactPreviewSelection) -> ClawArtifactPreviewState {
@@ -3075,6 +3112,7 @@ final class ClawStore: ObservableObject {
 
     func clearArtifactPreview(matching selection: ClawArtifactPreviewSelection? = nil) {
         if let selection, artifactPreviewState.selection != selection { return }
+        if modelPlanningUsesArtifactPreview { cancelModelPlanning() }
         artifactPreviewGeneration &+= 1
         artifactPreviewTask?.cancel()
         artifactPreviewTask = nil

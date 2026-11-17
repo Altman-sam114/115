@@ -240,6 +240,7 @@ const server = http.createServer(async (request, response) => {
     await handleModelPlanning(request, response, {
       authorize: () => assertAuthorized(request, { ...options, requireToken: true }),
       parseJSON: (text) => parseStrictJSONText(text).value,
+      registry: options.artifactPreviewRegistry,
     });
     if (options.once) server.close();
     return;

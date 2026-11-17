@@ -42,7 +42,7 @@ struct PhoneAgentView: View {
             ClawTaskArgumentsEditor(context: context)
         }
         .sheet(item: $artifactPreviewSelection, onDismiss: { store.clearArtifactPreview() }) { selection in
-            ClawArtifactPreviewView(selection: selection)
+            ClawArtifactPreviewView(selection: selection) { presentation.selectedDetail = .plan }
         }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active {

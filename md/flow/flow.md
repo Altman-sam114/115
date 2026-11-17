@@ -499,3 +499,9 @@ v0.81 平台图标使用系统兼容的 SF Symbol，避免 Catalyst/iPad 启动�
 ## v0.88 工作台输入与连接引导
 
 PhoneAgentCommandPanel 独立于 ContentView -> 输入目标 -> 已保存有效连接时显式请求既有模型规划；未就绪时仅打开连接引导 -> 共享 ClawGatewayConfigurationView 保存配置 -> 用户关闭引导后再显式请求。规则预览/演练留在更多菜单，来源标签始终可见，⌘Return 只触发规划；所有实际任务仍走既有参数确认/审批/发送路径。
+
+## v0.89 显式证据规划
+
+用户读取当前 Live 文本结果 -> 修改下一步目标 -> 显式选择交给模型 -> Store 校验 clean/Live/唯一当前selection/ready/1..8192 UTF8 bytes -> 仅 ID+SHA256 引用 -> Gateway 既有内存注册表查同task/artifact完整不可变快照 -> 独立身份/摘要/TTL/字节校验 -> fixed system + user JSON{command,evidence:{kind,content}} -> 原 typed proposal/effects 校验 -> 仅本次接受的planID -> 用户查看计划 -> 既有参数确认/审批/发送。
+
+非法/过期/超限不联系模型、不fallback、不读取文件或派发任务。取消/关闭/重读/任务和配置变化使旧响应失效，普通规划与无关preview清理隔离。规划成功后关闭预览保留已接受计划，但不自动生成或审批任务。详细合同见协议 v0.89。

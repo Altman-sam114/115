@@ -1,49 +1,49 @@
 # 当前任务工作台
 
-状态：v0.87 / v0.88 full 已验收；当前 v0.88 键盘/无障碍补充与 workspace 分支验收中，总目标进行中。
+状态：总目标 active；v0.87/v0.88 已收口。当前 v0.89 有界证据规划已完成方案核对，开始实现；用户本轮明确授权持续多开子代理。
 
 ## 目标与验收
 
-- 目标：Mac/iPad 主输入聚焦 AI 计划、提供真实平台权限引导；拆分 ContentView 命令面板；建立可审计 workspace 选测。
-- 非目标：不更改执行/审批合同，不新增 action/artifact，不声称真实模型或桌面 E2E 已完成；不改 aitrans、不开子 agent、仅云端编译。
-- 验收：iOS/Catalyst Release、相关 workspace XCTest、双平台启动截图、manifest/JUnit 中 selected/skipped 与失败门槛一致；未知范围回退 full。
+- 目标：用户明确选择一份已读取的 Live 文本结果后，让已配置的电脑模型依据该结果制定下一步计划，推进真实结果→AI 规划→人工复核闭环。
+- 非目标：不自动上传结果、不读任意路径、不自动执行或审批、不新增 action/artifact、不下载模型权重、不本地编译、不改 aitrans。
+- 并行策略：按用户最新要求，3个子代理分别负责后端、Swift回归、生产HTTP集成，主代理统一客户端和验收。
+- 验收：客户端仅当前 clean/live/唯一 selection/已读快照可请求；Gateway 从内存注册表核对身份+digest，有界 8 KiB，不截断，过期/超限/伪造必须拒绝且不联系模型；固定模型 system contract 与 typed proposal/审批保留；关闭预览或 scope 变化使在途结果失效。同步协议、flow 与直接负向回归，并用新精确 SHA 云端结果包验收。
+- 风险：提示词隔离不等于已证明防提示注入；本轮模型 stub 合同不能证明真实模型质量。生产签名/桌面 E2E/实际键盘和 VoiceOver 仍须专项。
 
-## 基线与编辑记录
+## 基线与本轮编辑记录
 
-- main / 6150c8c28bc8bd3201e0dda3642863cf88505bb7，与 origin/main 一致。
-- 既有用户改动仍为流程文档、workflow paths-ignore、工程 DEVELOPMENT_TEAM/xcuserdata、历史文档；保留且只暂存本轮 hunks。
-- 本轮预计：ContentView、独立 PhoneAgentCommandPanel、project.pbxproj（只加文件引用）、ci-results.yml（只选测）、Tools/select-ci-scope.py、md/test/test.md（仅本轮选测段落）、Docs/platform-capabilities.md、update_log.md（仅本轮追加）、work.md。
+- main / origin/main = 818246d865e4d56ab8c9dbe2bce2c2b1b7239cd4。
+- 已验收最新展示范围：run 44082644085 attempt 1 / claw-ci-v0.88-main-818246d865e4-run44082644085-attempt1，1,442,383 bytes。selection/manifest/JUnit/logs 一致为 9 selected success + 7 explicit skipped，双设备各 9 passed/0 failed/0 skipped；xcresult 只读解码一致，原生签名和双 PNG 实际复核，ready 均 2。缓存 /private/tmp/claw-review-44082644085。
+- full 基线 e85694d / run 44077364459 attempt 1 / claw-ci-v0.88-main-e85694d7332a-run44077364459-attempt1，1,989,048 bytes；16 项和双设备各 175 passed/0 failed/0 skipped，实际看图与签名通过。详情在 update_log.md。
+- 用户遗留：AGENTS/README/flow/test/protocol/release/log/prompt 流程维护、workflow paths-ignore、DEVELOPMENT_TEAM、xcuserdata、历史未跟踪文档；不提交这些旧改动，不 stash/覆盖/回滚。
+- 本会话收尾文档的本地新增：本文件、update_log.md 的本日结论与当前状态、Docs/release-readiness.md 的本日更新。尚未提交/推送，避免纯文档触发远端现有业务 CI（paths-ignore 为用户未提交改动）。下一轮暂存只取本轮 hunks。
+- v0.89 预计编辑：ClawModelPlanning.swift、ClawStore.swift、ClawArtifactPreviewView.swift、PhoneAgentView.swift、PhoneAgentCommandPanel.swift（导航/计划ID归属）、claw-model-planner.mjs、Gateway 的 planning registry 注入、直接相关 Swift/Node 测试与协议/flow/日志；如需修改其他文件先记录原因。
 
 ## 计划与进度
 
-- [x] v0.87 修复与验收：6150c8c / run 44074605185 attempt 1 / claw-ci-v0.87-main-6150c8c28bc8-run44074605185-attempt1，2,028,174 bytes；manifest/JUnit/实际日志 16 项通过，双设备各 175 passed/0 failed/0 skipped，xcresulttool 只读解码一致，双 PNG 实际打开，ready attempt=2，native signing 正确。Metal runner 搜索路径 warning 保留。
-- [x] 增加自动 workspace/full；whole-push 范围、未知回 full、云端自测、显式 skipped、实际 xcresult 摘要计数门槛。首次 CI/工程修改自动 full，因所有门槛/汇总均受影响，全部检查相关。
-- [x] 命令面板独立文件；AI 主入口/⌘Return、菜单内规则与演练、大字体 AnyLayout；按需引导含共享连接配置和平台权限说明。
-- [x] git diff --check / YAML / plutil 与 pbx ID 唯一检查通过；仅暂存本轮 hunks（排除 paths-ignore、DEVELOPMENT_TEAM 与既有流程重写）。
-- [x] e85694d 已通过 Altman-sam114 commit/push main；首次 full（CI/工程改动需验证所有门槛），后续纯展示切片验证 workspace 分支。
-- [x] e85694d full：run 44077364459 attempt 1 / claw-ci-v0.88-main-e85694d7332a-run44077364459-attempt1（1,989,048 bytes）；manifest/JUnit/selection/log/实际 summaries 一致，16 项通过、各 175 passed/0 failed/0 skipped，签名证据通过、两张 PNG 实际打开，ready iPhone=2/iPad=1。
-- [x] 定位慢因：iPad boot 6 分钟、test-without-building 到宿主启动约 6 分钟，实际测试 12.5 秒；与业务用例执行区分，不通过减断言制造提速。
-- [x] 本次新增输入焦点（示例后继续编辑、⌘L）、Esc 关闭引导、无障碍标题和模拟标识；只改已列明展示文件与本轮文档。
-- [ ] main push 纯展示补充，验证 workspace 自动选择和双设备各 9 项、显式 skipped。
-- [ ] 本轮精确结果包核对、实际看图、日志收口。
+- [x] 识别当前模型只有 command 输入、已有 preview 内存快照和身份/scope 保护；对照真实源码拟定方案。
+- [x] 已重读规范/状态/源码，fetch 后 main 与 origin/main 同步；Altman-sam114 active。当前新增并行：后端三文件、Swift XCTest 两文件、生产 HTTP fixture 两文件；主代理负责 Core/Store/UI/文档。各代理不提交/不本地业务测试，根代理统一验收。
+- [x] 定义可选 evidence 引用（task/artifact ID + SHA-256，不带原始正文/任意 path），保持无 evidence 请求兼容。
+- [x] Gateway 用既有 ArtifactPreviewRegistry 查不可变快照、校验 digest/8 KiB，模型仅接收 command + 不可信 evidence 内容，不接收凭据/路径/原始身份；错误只固定诊断。
+- [x] Store 仅接受当前已读 Live selection，捕获 preview generation；取消/关闭/任务/配置变化丢弃在途结果，保留已有参数复核和审批。
+- [x] UI 提供明确的“把此结果交给电脑模型制定下一步计划”动作，保留内容不自动交给模型的边界；反馈超限/过期/等待/失败/取消。
+- [x] 子代理完成后端矩阵、11 个新增 XCTest（预期186）、生产 Swift HTTP→Gateway writer snapshot→模型 stub 正负链路；只读交叉复核发现 UI 旧请求冒领替代计划ID和普通规划进度误归属风险，已改本次planID返回与isPlanning(using:)归属；模型固定模式区分普通目标原文和注册快照，避免JSON外观冒充已选证据。补断言；根代理另发现客户端strict JSON错误被误映射422，已修为400并新增原始JSON/UTF8/413与provider422回归，预计29个模型夹具请求。未削弱安全门槛。
+- [x] 已同步协议/flow/测试说明；git diff --check 与 workflow YAML 解析通过；只暂存本轮 hunks，保留用户原 paths-ignore/签名与流程维护。
+- [ ] main 精确提交/云端验证→结果包/截图复核，失败追加修复。
 
 ## 验证与证据
 
-- baseline：git diff --check、YAML 解析、工程 plutil lint、本地链接和 diff 范围核对。
-- direct：workspace profile 选择器云端自测；iOS/Catalyst build；工作台导航、窗口/大字体与编辑状态的选中 XCTest；双平台真实启动截图。
-- optional：不跑 Gateway/model/Swift fixture，未修改它们或执行合同；若改动超出 allowlist 选择器必须 full。
-- 本机禁止编译、smoke、fixture、node syntax、模拟器；只读解码下载的 xcresult 不启动测试。
-- e85694d full 已验收，见上；当前 UI-only 补充 commit/run/artifact 待提交。
+- baseline：git diff --check；修改配置时才 YAML/plutil/对象 ID；文档路径/diff 核对。
+- direct：Swift request/Store scope/cancel/evidence input tests、Node registry digest/身份/容量/过期/错误不联系模型、生产 Swift HTTP→Gateway→模型 stub；受影响目标 iOS/Catalyst、双设备 XCTest/preview UI 启动。
+- optional：涉及共享 Store/模型控制面/Gateway 注册表与 Swift/Node HTTP 合同，保守 selector 会 full；需在实现时按真实 diff 再核对关联范围。不以旧结果替代新 SHA。
+- 未运行：v0.89 未实现故无新测试；始终禁本地 build/XCTest/Swift/Gateway smoke/fixture/node syntax/模拟器。
+- 账号：上一轮每次 push 前 gh auth status 均为 Altman-sam114 active；下一次远端操作前重新核对。
+- 云端慢证据：v0.88 full 的 iPad boot 数据迁移约 6 分钟，宿主首启再约 6 分钟，实际测试仅 12.5 秒；不要无证据归因于业务代码或删除断言。后续可单独改进云端模拟器生命周期。
 
 ## 恢复入口
 
-- 当前：v0.88 full 已验收，UI-only 键盘/无障碍补充需 workspace 结果包；读取 work.md 和真实 diff 后继续。
-- 下一步：选测与 UI；通过后推进有界证据输入与真实模型多轮计划切片。
-- 发布遗留：真实模型质量、桌面 E2E、签名/分发/隐私、Mac/iPad 人工交互；详见 Docs/platform-capabilities.md。
-
-## 下一智能能力的方案核对（尚未实现）
-
-- 已确认当前模型只收到 command；用户可先读取 Live artifact，但内容不会交给模型。
-- 候选采用用户显式选择单份已读结果，客户端只发送 task/artifact ID 与 SHA-256，Gateway 从既有内存快照注册表解析，不接收文件路径，不读磁盘、不允许客户端伪造内容。限制 8 KiB、不截断；过期/超限/身份或 digest 不匹配直接拒绝且不联系模型。
-- 模型输入将任务与不可信证据分开；保留固定 system contract/typed proposal/人工参数复核/审批。关闭预览或 scope 变化时丢弃在途结果；不能把提示词隔离宣称成已证明防提示注入。
-- 需新增 Swift/Node 请求负向矩阵、生产 HTTP 路径与无副作用证据，并同步协议/flow；当前 v0.88 完整验收后才实现。
+- 从上述 v0.89 第 2 项开始，尚无业务实现，不要把方案当作已完成功能。
+- 可复用 ClawArtifactPreviewSelection/Content、availableArtifactPreviews、artifactPreviewGeneration、ArtifactPreviewRegistry。
+- HTTP model transport 当前允许 409、不允许 404；证据不可用建议固定 409。handleModelPlanning 当前只接受四个字段，加入 evidence 时保持 exact shape 和 duplicate-key/size 检查。
+- 只读参考已查 aitrans 的 ModelSetupGuideView.swift；WorkBuddy 腾讯官方页 https://cloud.tencent.com/product/workbuddy 已读，结论见 Docs/platform-capabilities.md；未安装、登录或调用其服务。
+- 总目标仍 active；真实模型质量/桌面 E2E、Mac/iPad 人工交互、生产签名与分发尚未验收，不能宣布发布级完成。
