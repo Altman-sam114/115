@@ -79,16 +79,29 @@ try {
   expect(missing.status === 404 && missing.result.errorCode === "preview_not_available", "unknown IDs must not create tasks or files");
   expect((await tree(workspace)).length === 0, "preview-only calls must not create a workspace");
   const envelope = { schemaVersion: "claw.computer.control.v1", sourceApp: "Cloud preview fixture", auditRequired: true,
-    gateway: { allowedActionKinds: ["runShellCommand"], requiresApprovalForSensitiveData: true, auditEnabled: true },
+    gateway: { tokenFingerprint: `sha256:${crypto.createHash("sha256").update(token).digest("hex").slice(0, 12)}`,
+      allowedActionKinds: ["runShellCommand"], requiresApprovalForSensitiveData: true, auditEnabled: true },
     task: { id: taskID, status: "sent", command: marker, actions: [{ id: crypto.randomUUID(), kind: "runShellCommand", title: "Inspect workspace",
       target: "workspace", instruction: marker, inputPreview: marker, sourceSurface: "clawGateway", handlesSensitiveData: true,
       approval: "gatewayApproval", toolArguments: { shellCommand: "pwd", cwdPolicy: "workspaceOnly" } }] } };
+  for (const fingerprint of [undefined, "sha256:000000000000"]) {
+    const rejected = structuredClone(envelope);
+    rejected.gateway.tokenFingerprint = fingerprint;
+    const rejectedEvents = await dispatch(rejected);
+    expect(rejectedEvents.length === 1 && rejectedEvents[0].kind === "actionFailed"
+      && rejectedEvents[0].summary === "gateway error: token_fingerprint_mismatch"
+      && rejectedEvents[0].artifacts.length === 0, "missing or wrong fingerprint must fail before execution");
+    expect((await tree(workspace)).length === 0, "rejected fingerprint must not create workspace files");
+  }
   const events = await dispatch(envelope);
+  const connected = events.find((event) => event.kind === "gatewayConnected");
+  expect(connected?.taskID === taskID, "authenticated fixture must reach its own task pipeline");
   expect(events.some((event) => event.kind === "sessionCompleted"), "approved cloud fixture must complete");
   const stored = events.flatMap((event) => event.artifacts || []).find((item) => item.kind === "commandOutput");
   expect(stored, "real writer must produce command output");
   const initial = await fs.readFile(new URL(stored.reference), "utf8");
-  expect(initial.includes(`stdout:\n${workspace}`) && initial.includes("exitCode=0"), "fixture must inspect only its isolated workspace");
+  const sessionWorkspace = path.join(workspace, "sessions", connected.sessionID);
+  expect(initial.includes(`stdout:\n${sessionWorkspace}\n`) && initial.includes("exitCode=0"), "fixture must inspect only its isolated session workspace");
   const successBody = body(stored.id);
   const success = await send(successBody);
   expect(success.status === 200 && success.result.content === initial && success.result.byteCount === Buffer.byteLength(initial), "HTTP must return exact writer bytes");

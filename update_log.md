@@ -3155,3 +3155,9 @@
 ## v0.81 平台图标兼容性（2026-09-27）
 
 修复云端 iPad 启动日志中的 `folder.badge.gearshape.fill` 无效 SF Symbol，统一为 `folder.fill`，并纳入平台日志验收。
+
+## v0.87 云端预览夹具认证修复（2026-11-17）
+
+- run 40624695706 attempt 1 的实际日志定位到 preview fixture 未携带 token 指纹；Gateway 正确以 token_fingerprint_mismatch 阻断，无法进入 sessionCompleted。历史 artifact 已过期，日志不替代新结果包验收。
+- Tools/claw-artifact-preview-smoke.mjs 补充短 SHA-256 指纹，增加缺失/错误指纹的 actionFailed、无 artifact、无 workspace 文件检查，并精确核对 pwd 为当前 session 目录。生产 Gateway 认证/审批/执行策略不变。
+- 本机仅 git diff --check / diff 静态复核通过；新 main 云端结果待核对，work.md 保存恢复入口。未进行本地编译或业务测试；既有用户文档/签名配置改动保留且不随本轮提交。
